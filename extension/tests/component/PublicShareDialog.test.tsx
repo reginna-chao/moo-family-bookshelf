@@ -11,6 +11,34 @@ import {
   BLANK_TITLE_MESSAGE,
 } from "@/dialog/publicShareMessages";
 
+/**
+ * PublicShareDialog: form-control classes, modal focus management, debounce / copy-flag behaviour,
+ * and refused writes.
+ *
+ * Readiness: `findByLabelText` alone is not a readiness signal — DOM presence != effects flushed. It
+ * waits with the act environment disabled and ends on a bare `setTimeout(0)`, so React may still owe
+ * the passive effect that publishes the active shelfId, and a write fired in that window is silently
+ * dropped by the hook's shelfId guard; only `act` guarantees pending effects flush on exit.
+ * renderSettledDialog awaits real microtasks, so call it BEFORE any `vi.useFakeTimers()`.
+ *
+ * ExpiresSelect class contract: the form controls follow the app-wide fixed-height standard via the
+ * shadow-scoped `.moo-public-share__*` classes in styles.css — `__input` is the shared input chrome
+ * (40px desktop height), `__input--mobile` the 32px mobile height, `__select` the desktop select
+ * (inherits the 40px input chrome, adds the chevron + `padding-right: 2.25rem`), `__select--mobile`
+ * the select's 32px mobile height. jsdom does not apply stylesheet rules, so the class list, not
+ * computed heights, is the observable contract — including the select-vs-mobile distinction and the
+ * "sibling title input keeps the base input chrome" intent.
+ *
+ * FE-5 behaviour preservation: the title write moved from a hand-rolled `titleTimerRef` setTimeout to
+ * `useDebouncedCallback`, and the "已複製" flag from a `useState` + setTimeout to `useTimedFlag`; the
+ * mounted behaviour (debounce the write; show the flag for its window) must be unchanged. These tests
+ * exercise the "active shelf" view, which the class-contract suite does not reach.
+ *
+ * Refused writes: copy is asserted through the production builders in `@/dialog/publicShareMessages`
+ * (literals pinned in `tests/unit/dialog/publicShareMessages.test.ts`), except the one
+ * production-literal assertion marked in that block.
+ */
+
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: vi.fn(() => false),
 }));
@@ -60,45 +88,22 @@ function renderDialog(
   );
 }
 
-/**
- * Render, then settle the initial load — and hand back the 標題 input.
- *
- * `findByLabelText` alone is not a readiness signal: DOM presence != effects
- * flushed. It waits with the act environment disabled and ends on a bare
- * `setTimeout(0)`, so React may still owe the passive effect that publishes the
- * active shelfId; a write fired in that window is silently dropped by the
- * hook's shelfId guard. Only `act` guarantees pending effects flush on exit.
- * Call it BEFORE any `vi.useFakeTimers()` — it awaits real microtasks.
- */
+/** Render, settle the initial load inside `act`, and return the 標題 input. Call BEFORE any
+ *  `vi.useFakeTimers()`. See the file header, "Readiness". */
 async function renderSettledDialog(apiClient: ApiClient): Promise<HTMLElement> {
   await act(async () => {
     renderDialog(apiClient);
   });
-  // getBy, not findBy: a load that failed to settle must fail loudly right here.
-  // The 標題 label exists in the create view too, so pin the ACTIVE view — a
-  // caller passing `{ shelves: [] }` must fail here, not silently drive the
-  // create form.
+  // getBy, not findBy: an unsettled load must fail loudly here. 標題 also exists in the create view, so
+  // pin the ACTIVE view — `{ shelves: [] }` must fail here, not silently drive the create form.
   expect(
     screen.getByRole("button", { name: "關閉公開分享" }),
   ).toBeInTheDocument();
   return screen.getByLabelText("標題");
 }
 
-/**
- * The form controls follow the app-wide fixed-height standard, applied via the
- * shadow-scoped `.moo-public-share__*` classes in styles.css:
- *
- * - `.moo-public-share__input`  — shared input chrome (40px desktop height)
- * - `.moo-public-share__input--mobile`  — 32px mobile height
- * - `.moo-public-share__select` — desktop select: inherits the 40px input chrome,
- *                                  adds the chevron + `padding-right: 2.25rem`
- * - `.moo-public-share__select--mobile` — 32px mobile height for the select
- *
- * jsdom does not apply stylesheet rules, so the observable contract is the class
- * list, not computed heights. The select-vs-mobile distinction and the
- * "sibling title input keeps the base input chrome" intent are asserted via the
- * class contract below.
- */
+/** The `.moo-public-share__*` fixed-height classes are the contract (jsdom applies no stylesheet).
+ *  See the file header, "ExpiresSelect class contract". */
 describe("PublicShareDialog · ExpiresSelect class contract", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);
@@ -179,12 +184,8 @@ describe("PublicShareDialog · ExpiresSelect class contract", () => {
   });
 });
 
-/**
- * The dialog is a modal: it renders after the trigger in DOM order, so without
- * explicit focus management Tab would walk the shelf controls behind it. On mount
- * it captures the opener from the (shadow-aware) root's `activeElement`, moves
- * focus into its own container, and hands focus back to the opener on unmount.
- */
+/** A modal after its trigger in DOM order: it captures the opener from the (shadow-aware) root's
+ *  `activeElement`, moves focus inside on mount, and hands it back to the opener on unmount. */
 describe("PublicShareDialog · modal focus management", () => {
   let opener: HTMLButtonElement;
 
@@ -253,9 +254,8 @@ describe("PublicShareDialog · modal focus management", () => {
       host.remove();
     });
 
-    // `document.activeElement` is retargeted to the shadow host here, so reading
-    // it instead of `getRootNode().activeElement` would capture the host as the
-    // opener and focus would never return to the 公開分享 button.
+    // `document.activeElement` is retargeted to the shadow host here; reading it instead of
+    // `getRootNode().activeElement` would capture the host, and focus would never return to 公開分享.
     it("captures the shadow-DOM opener and restores focus to it on unmount", async () => {
       expect(shadowRoot.activeElement).toBe(shadowOpener);
 
@@ -277,14 +277,8 @@ describe("PublicShareDialog · modal focus management", () => {
   });
 });
 
-/**
- * Behavior-preservation for the FE-5 refactor: the title write moved from a
- * hand-rolled `titleTimerRef` setTimeout to `useDebouncedCallback`, and the
- * "已複製" flag moved from a `useState` + setTimeout to `useTimedFlag`. The
- * mounted-component behavior (debounce the write; show the flag for its window)
- * must be unchanged. These tests exercise the "active shelf" view, which the
- * class-contract suite above does not reach.
- */
+/** FE-5 refactor: debounce and 已複製 flag moved to `useDebouncedCallback` / `useTimedFlag` with no
+ *  behaviour change. See the file header, "FE-5 behaviour preservation". */
 describe("PublicShareDialog · debounce + copy-flag behavior (FE-5)", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);
@@ -357,9 +351,8 @@ describe("PublicShareDialog · debounce + copy-flag behavior (FE-5)", () => {
     expect(screen.queryByText("已複製")).not.toBeInTheDocument();
   });
 
-  // Active-shelf actions are the only place in this dialog that uses the
-  // secondary/destructive button variants; pin their shared bases so the
-  // refactor cannot silently drop them.
+  // Active-shelf actions are the dialog's only secondary/destructive button variants; pin their shared
+  // bases so the refactor cannot silently drop them.
   it.each([
     { name: "重設網址", modifier: "moo-button--ghost" },
     { name: "關閉公開分享", modifier: "moo-button--outline-danger" },
@@ -385,15 +378,8 @@ function createDeferred<T>() {
   return { promise, resolve: (value: T) => settle(value) };
 }
 
-/**
- * Fail-open fix: a refused write must never advance the UI past what the server
- * confirmed, and its reason must reach the user in 繁體中文.
- *
- * Copy is asserted through the production builders in
- * `@/dialog/publicShareMessages` (whose literals are pinned in
- * `tests/unit/dialog/publicShareMessages.test.ts`), except the one
- * production-literal assertion marked below.
- */
+/** Fail-open fix: a refused write never advances the UI past what the server confirmed, and its reason
+ *  reaches the user in 繁體中文. See the file header, "Refused writes". */
 describe("PublicShareDialog · refused writes never advance the UI", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);

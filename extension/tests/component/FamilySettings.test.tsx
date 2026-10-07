@@ -24,16 +24,58 @@ import {
   DISPLAY_NAME_KEY,
 } from "@/constants";
 
+/**
+ * FamilySettings: display name, members, sync code / invite, leaving, the un-kick entry, and the
+ * family endpoint-switch confirmation.
+ *
+ * QR stub: FamilySettings mounts InviteQrCode, which does a real `await import("qrcode")` plus a PNG
+ * encode on every mount (its effect keys on [inviteUrl] — src/dialog/InviteQrCode.tsx). Nothing here
+ * asserts on QR output, so the encoder is stubbed instead of paying module resolution + encoding ~60
+ * times per file run, a cost that lands inside every readiness barrier. Shape mirrors
+ * tests/component/QrCodeLink.test.tsx.
+ *
+ * Self-leave outcomes: a retried, half-failed self-leave gets 404 MEMBER_NOT_FOUND once the Worker
+ * has finished the cleanup — a completed leave; keeping the local family would let silent recovery
+ * re-join it. 404 FAMILY_NOT_FOUND is the same outcome: a sole-owner dissolve that half-failed after
+ * deleting the family record answers it on every retry, and keeping the local family would strand the
+ * user on a family that no longer exists. The opposite case (a real refusal renders its error and
+ * does NOT call onLeave) is pinned by "shows the localized back-off copy when leaving is rate limited".
+ *
+ * Un-kick entry: a removal writes a 6-hour server-side block on rejoining, so the owner gets an entry
+ * to lift it right where the removal happened. It is owner-only (the endpoint refuses anyone else)
+ * and must outlive a failed member refresh, because by then the removal — and the block — already
+ * happened. After the block is lifted the member can rejoin and be removed again; the backend then
+ * writes a new tombstone and the notice card must return to idle, handing the 「解除移除限制」 entry
+ * back to the owner — a card stuck on the previous success copy would make the owner believe the
+ * second block is lifted too.
+ *
+ * Endpoint switch: the family record's `apiEndpoint` is chosen by the family OWNER and pushed to every
+ * member, so adopting it silently would let the owner redirect another member's auth token and full
+ * book list (unshared books included) to a host of their choosing; the Settings tab asks first (the
+ * security contract lives in src/dialog/useEndpointSwitch.ts). The mock client is STATEFUL like the
+ * real ApiClient: `setEndpoint` moves what `getEndpoint` reports, through the production validator so
+ * the stored value is canonical — useEndpointSwitch re-reads `getEndpoint()` after a successful switch
+ * to decide what the sync code advertises, so a frozen getter would hide exactly the drift the
+ * "sync code follows the adopted endpoint" block exists to catch; `opts.setEndpoint` overrides the
+ * whole behaviour (a client refusing the target) and then nothing moves. Whether the panel appears is
+ * a THREE-deep effect conjunction: the members fetch (FamilyDataProvider → membersState "ready"),
+ * useEndpointSwitch's declined-marker storage read, and the effect joining the two into `pending`.
+ * `findByTestId` is no barrier for that — it polls with the act environment disabled and ends on a bare
+ * `setTimeout(0)`, so a node missing at poll time says nothing about whether React owes the commit,
+ * and under CPU contention the chain outlives the 1s budget. Only `act` guarantees pending effects
+ * flushed on exit. The sync code's `@host` must describe the endpoint THIS device ADOPTED, never the
+ * record's advertised value: it is what the member hands to the next person (and re-scans onto their
+ * own phone), and building it from the record would make a member who DECLINED a switch still
+ * distribute the refused endpoint — the invitee lands on the untrusted host while the decliner never
+ * does, so the refusal would protect only the person who made it.
+ */
+
 // Remove-confirm question + shared rejoin-wait note, rendered in one element.
 // Literal pin: tests/component/MemberList.test.tsx → "rejoin-wait note".
 const REMOVE_CONFIRM_TEXT = `確定要移除此成員？${REJOIN_WAIT_NOTE}`;
 
-// FamilySettings mounts InviteQrCode, which does a real `await import("qrcode")`
-// plus a PNG encode on every mount (its effect keys on [inviteUrl], so it reruns
-// per mount / invite-URL change — src/dialog/InviteQrCode.tsx). Nothing in
-// this file asserts on QR output, so stub the encoder instead of paying module
-// resolution + encoding ~60 times per file run — that cost lands inside every
-// readiness barrier below. Shape mirrors tests/component/QrCodeLink.test.tsx.
+// InviteQrCode imports and encodes a real QR on every mount; nothing here asserts on it, so stub the
+// encoder (mirrors QrCodeLink.test.tsx). See the file header, "QR stub".
 vi.mock("qrcode", () => ({
   default: {
     toDataURL: vi.fn().mockResolvedValue("data:image/png;base64,stub"),
@@ -71,11 +113,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       .fn()
       .mockResolvedValue({ data: { familyId: "fam-123", members: [] } }),
     deleteAccount: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    // Default endpoint + a family record with no apiEndpoint = nothing to
-    // confirm, so useEndpointSwitch stays silent and the endpoint-switch panel
-    // does not render into tests that are about something else. Tests that
-    // exercise the panel override this pair explicitly (see "family endpoint
-    // switch confirmation").
+    // Default endpoint + no family apiEndpoint = nothing to confirm, so the endpoint-switch panel stays
+    // out of unrelated tests; "family endpoint switch confirmation" overrides this pair.
     getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
     setEndpoint: vi.fn(),
     updateFamilyEndpoint: vi
@@ -111,12 +150,8 @@ function renderFamilySettings(props: Partial<FamilySettingsProps> = {}) {
   );
 }
 
-/**
- * Stub `chrome.storage.local.get` so every read resolves with the display name
- * plus whatever `extra` entries the test needs (e.g. a recorded endpoint-switch
- * refusal). Returning the same record for any key set is enough here: callers
- * pick the keys they asked for out of it.
- */
+/** Stub `chrome.storage.local.get` to resolve the display name plus any `extra` entries (e.g. a recorded
+ *  endpoint-switch refusal) for every key set — callers pick the keys they asked for. */
 function mockStorageGet(extra: Record<string, unknown> = {}) {
   vi.mocked(chrome.storage.local.get).mockImplementation(
     (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -276,9 +311,8 @@ describe("FamilySettings", () => {
 
     expect(screen.getByText("複製同步碼")).toBeInTheDocument();
 
-    // Wait for async member fetch to complete to avoid act() warning.
-    // "小明" appears in both the display-name editor and the member list, so
-    // use getAllByText.
+    // Wait for the member fetch to avoid an act() warning; "小明" is in both the display-name editor
+    // and the member list, hence getAllByText.
     await waitFor(() => {
       expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     });
@@ -538,17 +572,8 @@ describe("FamilySettings", () => {
     });
   });
 
-  /**
-   * A retried, half-failed self-leave: the Worker finishes the cleanup and
-   * answers 404 MEMBER_NOT_FOUND. That is a completed leave — keeping the
-   * local family would let silent recovery re-join it. 404 FAMILY_NOT_FOUND
-   * is the same outcome: a sole-owner dissolve that half-failed after
-   * deleting the family record answers it on every retry, and keeping the
-   * local family would strand the user on a family that no longer exists.
-   * The opposite case (a real refusal renders its error and does NOT call
-   * onLeave) is pinned by "shows the localized back-off copy when leaving is
-   * rate limited" below.
-   */
+  /** A 404 MEMBER_NOT_FOUND / FAMILY_NOT_FOUND on a retried self-leave is a completed leave, so the local
+   *  family must go. See the file header, "Self-leave outcomes". */
   it.each([
     ["MEMBER_NOT_FOUND", "目標使用者不是家庭成員"],
     ["FAMILY_NOT_FOUND", "Family not found"],
@@ -628,12 +653,8 @@ describe("FamilySettings", () => {
     });
   });
 
-  /**
-   * A removal writes a 6-hour server-side block on rejoining, so the owner gets
-   * an entry to lift it again right where the removal happened. It is owner-only
-   * (the endpoint refuses anyone else) and must outlive a failed member refresh,
-   * because by then the removal — and the block — already happened.
-   */
+  /** A removal writes a 6-hour rejoin block; the owner-only entry to lift it must outlive a failed member
+   *  refresh. See the file header, "Un-kick entry". */
   describe("un-kick entry after a removal", () => {
     const SELF_ID = "user-abc12345";
     const REMOVED_ID = "user-def67890";
@@ -655,12 +676,8 @@ describe("FamilySettings", () => {
       };
     }
 
-    /**
-     * `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the
-     * real clock can put two removals of the same member in the same
-     * millisecond. Pin it so the second-removal regression below actually
-     * exercises the remount instead of passing or failing on timing luck.
-     */
+    /** `removedAt` makes the notice's `key` unique PER REMOVAL, and the real clock can put two removals in
+     *  one millisecond: pinned so the second-removal case exercises the remount, not timing luck. */
     let restoreClock: (() => void) | null = null;
 
     afterEach(() => {
@@ -679,13 +696,8 @@ describe("FamilySettings", () => {
       };
     }
 
-    /**
-     * Confirm the removal of 大明 (the first non-self member in the list).
-     * The confirm click is wrapped in `act` so the whole chain it kicks off —
-     * removal → report to the parent → member/bookshelf refresh — has settled
-     * before the caller asserts; `waitFor` alone can pass on an intermediate
-     * render (the confirm dialog also hides the 移除 buttons).
-     */
+    /** Confirm removing 大明 (first non-self member). `act` lets removal → parent report → refresh settle
+     *  before asserting; `waitFor` alone can pass on an intermediate render (the confirm hides 移除). */
     async function removeSecondMember() {
       await waitFor(() => {
         expect(screen.getAllByText("移除").length).toBeGreaterThan(0);
@@ -758,11 +770,8 @@ describe("FamilySettings", () => {
       });
     });
 
-    /**
-     * 解除限制後對方可以重新加入，也可能再被移除一次——這時後端寫了一個新的
-     * tombstone，通知卡必須回到 idle 把「解除移除限制」入口交還給管理者。若卡片
-     * 停在上一次的成功文案，管理者會以為第二次的限制也已經解除。
-     */
+    /** A rejoined member removed again gets a new tombstone; the card must return to idle and hand back
+     *  「解除移除限制」. See the file header, "Un-kick entry". */
     it("returns the entry to idle when the same member is removed again", async () => {
       const clock = controlClock(1_700_000_000_000);
       const apiClient = createMockApiClient({
@@ -1176,13 +1185,8 @@ describe("FamilySettings", () => {
       });
     });
 
-    /**
-     * The Worker rate-limits `DELETE /api/family/:id/member/:uid` (429
-     * RATE_LIMITED, optional `retryAfter`). Its `message` is English, so the
-     * leave path renders the localized back-off copy instead — asserted against
-     * the production builder, whose literals are pinned in
-     * tests/unit/dialog/verificationMessages.test.ts.
-     */
+    /** The Worker rate-limits `DELETE /api/family/:id/member/:uid` (429 RATE_LIMITED, optional `retryAfter`)
+     *  with English text, so leave renders the production builder's copy (pinned in verificationMessages.test.ts). */
     it("shows the localized back-off copy when leaving is rate limited", async () => {
       const apiClient = createMockApiClient({
         leaveFamily: vi.fn().mockResolvedValue({
@@ -1367,13 +1371,8 @@ describe("FamilySettings", () => {
     });
   });
 
-  /**
-   * The family record's `apiEndpoint` is chosen by the family OWNER and pushed
-   * to every member, so adopting it silently would let the owner redirect
-   * another member's auth token and full book list (unshared books included) to
-   * a host of their choosing. The Settings tab asks first — the security
-   * contract lives in src/dialog/useEndpointSwitch.ts.
-   */
+  /** The owner-chosen `apiEndpoint` must not be adopted silently — the Settings tab asks first
+   *  (src/dialog/useEndpointSwitch.ts). See the file header, "Endpoint switch". */
   describe("family endpoint switch confirmation", () => {
     const CURRENT_ENDPOINT = "https://current.example";
     const FAMILY_ENDPOINT = "https://family.example";
@@ -1392,20 +1391,8 @@ describe("FamilySettings", () => {
       });
     }
 
-    /**
-     * The mock client is STATEFUL, like the real `ApiClient`: `setEndpoint`
-     * moves what `getEndpoint` reports, through the production validator so the
-     * stored value is canonical.
-     *
-     * This matters because `useEndpointSwitch` re-reads `getEndpoint()` after a
-     * successful switch to decide what the sync code advertises. A frozen
-     * `getEndpoint` would keep answering with the pre-switch endpoint and hide
-     * exactly the drift the "sync code follows the adopted endpoint" block
-     * exists to catch.
-     *
-     * `opts.setEndpoint` overrides the whole behaviour (used to simulate a
-     * client that refuses the target), and then nothing moves.
-     */
+    /** STATEFUL mock: `setEndpoint` moves `getEndpoint` through the production validator; `opts.setEndpoint`
+     *  replaces that (a refusing client). See the file header, "Endpoint switch". */
     function renderWithEndpoints(opts: {
       current: string;
       family: string | null;
@@ -1427,19 +1414,8 @@ describe("FamilySettings", () => {
       return apiClient;
     }
 
-    /**
-     * Render, then settle the endpoint decision — every test below asserts on
-     * its outcome, panel or no panel.
-     *
-     * Whether the panel appears is a THREE-deep effect conjunction: the members
-     * fetch (FamilyDataProvider → membersState "ready"), useEndpointSwitch's
-     * declined-marker storage read, and the effect that joins the two into
-     * `pending`. `findByTestId` is not a barrier for that — it polls with the
-     * act environment disabled and ends on a bare `setTimeout(0)`, so a node
-     * still missing at poll time says nothing about whether React owes the
-     * commit; under CPU contention the chain simply outlives the 1s budget.
-     * Only `act` guarantees pending effects have flushed on exit.
-     */
+    /** Render, then settle the endpoint decision inside `act` — the panel is a three-deep effect chain
+     *  `findByTestId` cannot wait for. See the file header, "Endpoint switch". */
     async function renderSettledEndpoints(opts: {
       current: string;
       family: string | null;
@@ -1449,20 +1425,14 @@ describe("FamilySettings", () => {
       await act(async () => {
         apiClient = renderWithEndpoints(opts);
       });
-      // getBy, not findBy: a load that failed to settle must fail loudly right
-      // here. The member-count suffix is the production tell that membersState
-      // reached "ready" (src/dialog/FamilySettingsMembersBlock.tsx) — unlike
-      // the display name, which also renders from chrome.storage while members
-      // still load.
+      // getBy, not findBy: an unsettled load fails loudly here. The member-count suffix is the tell that
+      // membersState is "ready" (FamilySettingsMembersBlock.tsx); the display name renders from storage earlier.
       expect(screen.getByText("家庭成員 (1)")).toBeInTheDocument();
       return apiClient;
     }
 
-    /**
-     * The confirmation panel. getBy for the same reason as above: after a
-     * settled render the decision is already committed, so a fixture that
-     * should have raised the question must fail here rather than in a waiter.
-     */
+    /** The confirmation panel. getBy as above: after a settled render the decision is committed, so a
+     *  fixture that should have raised the question fails here rather than in a waiter. */
     function getEndpointSwitchPanel(): HTMLElement {
       return screen.getByTestId("endpoint-switch");
     }
@@ -1668,9 +1638,8 @@ describe("FamilySettings", () => {
       expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
 
-      // A panel that just closes reads as "switched successfully", so the
-      // refusal is stated instead — text asserted on the rendered production
-      // output (src/dialog/EndpointSwitchPanel.tsx), never a copy of it.
+      // A panel that just closes reads as "switched successfully", so the refusal is stated — asserted on
+      // the rendered production output (src/dialog/EndpointSwitchPanel.tsx), never a copy of it.
       const notice = await screen.findByTestId("endpoint-switch-error");
       expect(notice).toHaveAttribute("role", "alert");
       expect(
@@ -1722,16 +1691,8 @@ describe("FamilySettings", () => {
       warn.mockRestore();
     });
 
-    /**
-     * The sync code is what this member hands to the next person (and re-scans
-     * onto their own phone), so its `@host` must describe the endpoint THIS
-     * device has actually ADOPTED — never the family record's advertised value.
-     *
-     * Building it from the record would mean a member who DECLINED a switch
-     * still distributes the endpoint they refused: the invitee lands on the
-     * untrusted host while the decliner never does, so the refusal protects
-     * only the person who made it.
-     */
+    /** The sync code's `@host` follows the endpoint this device ADOPTED, never the record's — else a
+     *  decliner still distributes the refused host. See the file header, "Endpoint switch". */
     describe("sync code follows the adopted endpoint", () => {
       it("carries no @host while this device is on the official default", async () => {
         await renderSettledEndpoints({

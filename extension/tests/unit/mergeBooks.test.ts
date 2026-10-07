@@ -123,9 +123,8 @@ describe("mergeBooks — category", () => {
   });
 });
 
-// #234: early versions saved entries keyed by a short internal id (7–8 digits)
-// instead of the real 15-digit book id, and the saved-only rule kept them
-// forever next to the real entry the scraper writes now.
+// #234: early versions keyed saved entries by a short internal id (7–8 digits); the
+// saved-only rule kept them forever beside the real 15-digit entry scraped now.
 describe("mergeBooks — legacy short-id entries", () => {
   const REAL_ID = "210180801000101";
   const LEGACY_ID = "14563038";

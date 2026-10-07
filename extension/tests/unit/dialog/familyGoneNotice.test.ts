@@ -17,6 +17,31 @@ import {
  * The text is the ONLY explanation the user gets for a dialog that flipped
  * itself back to onboarding: without it the teardown reads as a bug rather than
  * as a state change the family owner caused.
+ *
+ * Anti-drift against the classifier, both directions:
+ *  - message → classifier: a message keyed on a code that is NOT family-gone
+ *    would be unreachable copy, because both teardown entry points run
+ *    `isFamilyGoneError` before anything is torn down. Asserted through
+ *    `isFamilyGoneError` rather than against the exported set on purpose — the
+ *    classifier is the production entry point, and the set's own doc in
+ *    `api/auth-refresh.ts` says not to membership-test it directly.
+ *  - classifier → message: `FAMILY_GONE_ERROR_CODES` is exported read-only from
+ *    `api/auth-refresh.ts` for exactly this check — a FOURTH gone code added
+ *    there and nowhere else would tear the family binding down and then explain
+ *    it with the generic fallback banner, which names no cause and no remedy. The
+ *    table is the production set itself, so that fourth code shows up as a new
+ *    failing case with no edit to this file. Not vacuous even if the set were
+ *    emptied: the three message → classifier cases assert `isFamilyGoneError` on
+ *    every message key, so an empty set fails them first.
+ *
+ * Fallback: only the codes above can arrive in practice, but an unknown one must
+ * still get an explanation rather than a blank banner (defense in depth).
+ * Casing is not normalized either — a lookalike code takes the fallback. The
+ * lookup key is `error.code` straight off the wire and a hostile or buggy
+ * self-hosted (BYO) backend is an explicit threat model, which is why the copy
+ * lives in a `Map` and not an object literal: an object literal would answer the
+ * prototype keys with something that is not a `string | undefined` (e.g.
+ * `toString` would render a function body into the banner).
  */
 
 /** [errorCode, exact user-facing copy] — the production literals. */
@@ -42,15 +67,8 @@ describe("FAMILY_GONE_NOTICE_MESSAGES", () => {
     );
   });
 
-  /**
-   * Anti-drift against the classifier, message → classifier: a message keyed on
-   * a code that is NOT family-gone would be unreachable copy, because both
-   * teardown entry points run `isFamilyGoneError` before anything is torn down.
-   *
-   * Asserted through `isFamilyGoneError` rather than against the exported set on
-   * purpose — the classifier is the production entry point, and the set's own
-   * doc in `api/auth-refresh.ts` says not to membership-test it directly.
-   */
+  // Message → classifier: every keyed code must be family-gone, or its copy is
+  // unreachable. See the header → "Anti-drift".
   it.each(MESSAGES.map(([code]) => code))(
     "keys %s, which the shared classifier agrees is family-gone",
     (code) => {
@@ -58,18 +76,8 @@ describe("FAMILY_GONE_NOTICE_MESSAGES", () => {
     },
   );
 
-  /**
-   * The reverse direction, classifier → message. `FAMILY_GONE_ERROR_CODES` is
-   * exported read-only from `api/auth-refresh.ts` for exactly this check: a
-   * FOURTH gone code added there and nowhere else would tear the family binding
-   * down and then explain it with the generic fallback banner, which names no
-   * cause and no remedy.
-   *
-   * The table is the production set itself, so that fourth code shows up here as
-   * a new failing case with no edit to this file. Not vacuous even if the set
-   * were emptied: the three cases above assert `isFamilyGoneError` on every
-   * message key, so an empty set fails them first.
-   */
+  // Classifier → message: every production gone code needs its own copy. See the
+  // header → "Anti-drift".
   it.each([...FAMILY_GONE_ERROR_CODES])(
     "covers the family-gone code %s with its own copy, not the fallback",
     (code) => {
@@ -90,11 +98,8 @@ describe("familyGoneNoticeText", () => {
     );
   });
 
-  /**
-   * Defense in depth: only the codes above can arrive in practice, but an
-   * unknown one must still get an explanation rather than a blank banner.
-   * Casing is not normalized either — a lookalike code takes the fallback.
-   */
+  // Defense in depth: an unknown (or lookalike-cased) code still gets the
+  // fallback explanation, never a blank banner.
   it.each([
     "SERVER_ERROR",
     "RATE_LIMITED",
@@ -105,13 +110,8 @@ describe("familyGoneNoticeText", () => {
     expect(familyGoneNoticeText(code)).toBe(FAMILY_GONE_NOTICE_FALLBACK);
   });
 
-  /**
-   * The lookup key is `error.code` straight off the wire and a hostile or buggy
-   * self-hosted (BYO) backend is an explicit threat model, which is why the copy
-   * lives in a `Map` and not an object literal: an object literal would answer
-   * these with something that is not a `string | undefined` (e.g. `toString`
-   * would render a function body into the banner).
-   */
+  // Wire codes must not hit inherited keys (the copy lives in a `Map`). See the
+  // header → "Fallback".
   it.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
     "falls back for the prototype key %s instead of leaking an inherited value",
     (code) => {

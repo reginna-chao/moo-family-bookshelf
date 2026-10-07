@@ -16,6 +16,39 @@ import { safeBookUrl } from "@/dialog/safeBookUrl";
  * already covered in tests/unit/readmooConfig.test.ts — this file only pins the
  * WRAPPER contract: an accepted URL comes back byte-identical, anything else
  * collapses to `""` so the caller can omit the `href` attribute entirely.
+ *
+ * The bare-scheme row is the one rejected shape that is NOT just "some other
+ * host": a scheme with no `//` parses to `https://readmoo.com/public/x` on its
+ * own, but an `<a href>` resolves it against the page it is rendered into, so in
+ * the dialog it points at the VIEWER's origin. It is named explicitly even
+ * though the delegation tripwire would also catch it, because it is the
+ * wrapper's only rejection whose input LOOKS whitelisted. Full matrix + the
+ * exploit chain: tests/unit/readmooConfig.test.ts.
+ *
+ * Delegation tripwire: the verdict must come from the shared predicate, never
+ * from a second domain list maintained here — that is the drift this wrapper
+ * exists to avoid (the Worker, the PWA and this dialog read the same list).
+ *
+ * Return-type soundness — the mirror, on the way OUT, of the non-string input
+ * rows in tests/unit/readmooConfig.test.ts. Why a return already declared
+ * `string` still needs a `typeof` assertion: the value comes off the wire, and
+ * the whitelist judges its `String()` coercion rather than the argument itself —
+ * `new URL` stringifies what it is given, and
+ * `String(["https://readmoo.com/book/210001"])` IS that element — so a
+ * one-element array is ACCEPTED, and unless the accept branch coerces too, that
+ * array leaves here wearing a `string` type tag. `readmooUrl` does get coerced
+ * at the API-client boundary today, unlike its `coverUrl` sibling (see the `Not
+ * covered here, deliberately:` block of `shared/src/api/safeText.ts`), but that
+ * is another module's decision on one of several paths into this wrapper, not a
+ * promise this one may lean on — the same reason readmooConfig.test.ts asserts
+ * both predicates on identical inputs. Nothing crashes today: callers write
+ * `href={safeBookUrl(u) || undefined}`, which is a truthiness test followed by
+ * an attribute the DOM string-coerces. One future `.startsWith()` on the result
+ * would replay the exact white screen the whitelist was just hardened against on
+ * the INPUT side — and with the declaration already promising `string`, no type
+ * error warns anyone first. Both assertions are load-bearing: `typeof` alone
+ * would also be satisfied by a "fix" that blanked accepted URLs to `""` — the
+ * opposite failure, in which every legitimate book link silently disappears.
  */
 describe("safeBookUrl", () => {
   const cases: Array<{ name: string; url: string; expected: string }> = [
@@ -45,13 +78,8 @@ describe("safeBookUrl", () => {
       expected: "",
     },
     {
-      // The one rejected shape that is NOT just "some other host": a scheme
-      // with no `//` parses to `https://readmoo.com/public/x` on its own, but
-      // an `<a href>` resolves it against the page it is rendered into, so in
-      // the dialog it points at the VIEWER's origin. Named explicitly here
-      // even though the delegation tripwire below would also catch it, because
-      // this is the wrapper's only rejection whose input LOOKS whitelisted.
-      // Full matrix + the exploit chain: tests/unit/readmooConfig.test.ts.
+      // The only rejection whose input LOOKS whitelisted (resolves to the
+      // VIEWER's origin). See the file header.
       name: "a bare scheme with no // that resolves against the rendering page",
       url: "https:readmoo.com/../../public/x#invite=moo-x",
       expected: "",
@@ -65,40 +93,16 @@ describe("safeBookUrl", () => {
     });
   }
 
-  // Delegation tripwire: the verdict must come from the shared predicate, never
-  // from a second domain list maintained here — that is the drift this wrapper
-  // exists to avoid (the Worker, the PWA and this dialog read the same list).
+  // Delegation tripwire: the verdict comes from the shared predicate, never a
+  // second domain list here. See the file header.
   it("mirrors isAllowedBookUrl rather than deciding on its own", () => {
     for (const { url } of cases) {
       expect(safeBookUrl(url)).toBe(isAllowedBookUrl(url) ? url : "");
     }
   });
 
-  /**
-   * Return-type soundness — the mirror, on the way OUT, of the non-string
-   * input rows in tests/unit/readmooConfig.test.ts.
-   *
-   * Why a return already declared `string` still needs a `typeof` assertion:
-   * the value comes off the wire, and the whitelist judges its `String()`
-   * coercion rather than the argument itself — `new URL` stringifies what it is
-   * given, and `String(["https://readmoo.com/book/210001"])` IS that element —
-   * so a one-element array is ACCEPTED, and unless the accept branch coerces
-   * too, that array leaves here wearing a `string` type tag.
-   *
-   * `readmooUrl` does get coerced at the API-client boundary today, unlike its
-   * `coverUrl` sibling (see the `Not covered here, deliberately:` block of
-   * `shared/src/api/safeText.ts`), but that is another module's decision on one
-   * of several paths into this wrapper, not a promise this one may lean on —
-   * the same reason readmooConfig.test.ts asserts both predicates on identical
-   * inputs.
-   *
-   * Nothing crashes today: callers write `href={safeBookUrl(u) || undefined}`,
-   * which is a truthiness test followed by an attribute the DOM string-coerces.
-   * One future `.startsWith()` on the result would replay the exact white
-   * screen the whitelist was just hardened against on the INPUT side — and with
-   * the declaration already promising `string`, no type error warns anyone
-   * first.
-   */
+  // An accepted one-element array must leave as a real string. See the header →
+  // "Return-type soundness".
   describe("return-type soundness", () => {
     const ALLOWED_BOOK = "https://readmoo.com/book/210001";
 
@@ -107,9 +111,8 @@ describe("safeBookUrl", () => {
       // the cast is the honest spelling of what the network hands over.
       const result = safeBookUrl([ALLOWED_BOOK] as unknown as string);
 
-      // Both assertions are load-bearing. `typeof` alone would also be
-      // satisfied by a "fix" that blanked accepted URLs to `""` — the opposite
-      // failure, in which every legitimate book link silently disappears.
+      // Both assertions are load-bearing: `typeof` alone passes a "fix" that
+      // blanks every legitimate book link to `""`.
       expect(typeof result).toBe("string");
       expect(result).toBe(ALLOWED_BOOK);
     });

@@ -13,9 +13,8 @@ import {
   chipsKey,
 } from "@/constants";
 
-// Legacy (pre-`moo:`) key forms. These are historical literals baked into the
-// migration contract — they intentionally never change. The NEW key for each is
-// asserted via the imported constant, so the test breaks if a prefix changes.
+// Legacy (pre-`moo:`) keys: historical literals that never change. NEW keys come
+// from the imported constants, so a prefix change breaks the test.
 const LEGACY_USER_ID = "userId";
 const LEGACY_AUTH_TOKEN = "authToken";
 const LEGACY_FAMILY_ID = "familyId";
@@ -120,9 +119,8 @@ describe("migrateStorageKeys", () => {
   });
 
   it("does not clobber an existing new-namespace value with a stale legacy one (retry after partial run)", async () => {
-    // Simulates: a prior partial migration left the legacy key behind, then the
-    // app wrote a FRESH value under the new key. A retry must keep the fresh
-    // new value and merely drop the stale legacy key.
+    // A partial migration left the legacy key, then a FRESH value landed under the
+    // new key: a retry keeps the fresh value and only drops the stale legacy key.
     await chrome.storage.local.set({
       [LEGACY_FAMILY_ID]: "stale-old-family",
       [FAMILY_ID_KEY]: "fresh-new-family",

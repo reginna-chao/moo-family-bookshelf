@@ -14,6 +14,37 @@ import { safeCoverUrl } from "@/dialog/safeCoverUrl";
  * tests/unit/readmooConfig.test.ts — this file only pins the WRAPPER contract:
  * an accepted URL comes back byte-identical, anything else collapses to `""`
  * so the caller renders its own empty-cover placeholder.
+ *
+ * The bare-scheme row is the one rejected shape that is NOT just "some other
+ * host": a scheme with no `//` parses to `https://cdn.readmoo.com/x.jpg` on its
+ * own, but an `<img src>` resolves it against the page it is rendered into — and
+ * the dialog is injected INTO a Readmoo page, so on render it fires an
+ * authenticated same-site GET at an attacker-chosen Readmoo path, with no click.
+ * It is named explicitly even though the delegation tripwire would also catch
+ * it, because it is the wrapper's only rejection whose input LOOKS whitelisted.
+ * Full matrix + why no CSP substitutes for it: tests/unit/readmooConfig.test.ts.
+ *
+ * Delegation tripwire: the verdict must come from the shared predicate, never
+ * from a second host list maintained here — that is the drift this wrapper
+ * exists to avoid (the Worker and the PWA CSP read the same shared list).
+ *
+ * Return-type soundness — the mirror, on the way OUT, of the non-string input
+ * rows in tests/unit/readmooConfig.test.ts. Why a return already declared
+ * `string` still needs a `typeof` assertion: `coverUrl` is deliberately excluded
+ * from the runtime text coercion at the API-client boundary (see the `Not
+ * covered here, deliberately:` block of `shared/src/api/safeText.ts`), so a
+ * hostile or merely buggy BYO backend can land a non-string in this wrapper. The
+ * whitelist then judges the `String()`-coerced value — `new URL` stringifies its
+ * argument, and `String(["https://cdn.readmoo.com/x.jpg"])` IS that element — so
+ * a one-element array is ACCEPTED, and unless the accept branch coerces too,
+ * that array leaves here wearing a `string` type tag. Nothing crashes today:
+ * every consumer either drops the result into an `<img src>`, which the DOM
+ * string-coerces, or tests it for truthiness. One future `.startsWith()` on it
+ * would replay the exact white screen the whitelist was just hardened against on
+ * the INPUT side — and with the declaration already promising `string`, no type
+ * error warns anyone first. Both assertions are load-bearing: `typeof` alone
+ * would also be satisfied by a "fix" that blanked accepted URLs to `""` — the
+ * opposite failure, in which every legitimate cover silently disappears.
  */
 describe("safeCoverUrl", () => {
   const cases: Array<{ name: string; url: string; expected: string }> = [
@@ -38,15 +69,8 @@ describe("safeCoverUrl", () => {
       expected: "",
     },
     {
-      // The one rejected shape that is NOT just "some other host": a scheme
-      // with no `//` parses to `https://cdn.readmoo.com/x.jpg` on its own, but
-      // an `<img src>` resolves it against the page it is rendered into — and
-      // the dialog is injected INTO a Readmoo page, so on render it fires an
-      // authenticated same-site GET at an attacker-chosen Readmoo path, with
-      // no click. Named explicitly even though the delegation tripwire below
-      // would also catch it, because this is the wrapper's only rejection
-      // whose input LOOKS whitelisted. Full matrix + why no CSP substitutes
-      // for it: tests/unit/readmooConfig.test.ts.
+      // The only rejection whose input LOOKS whitelisted (resolves against the
+      // rendering page). See the file header.
       name: "a bare scheme with no // that resolves against the rendering page",
       url: "https:cdn.readmoo.com/../../x.jpg",
       expected: "",
@@ -60,35 +84,16 @@ describe("safeCoverUrl", () => {
     });
   }
 
-  // Delegation tripwire: the verdict must come from the shared predicate, never
-  // from a second host list maintained here — that is the drift this wrapper
-  // exists to avoid (the Worker and the PWA CSP read the same shared list).
+  // Delegation tripwire: the verdict comes from the shared predicate, never a
+  // second host list here. See the file header.
   it("mirrors isAllowedCoverUrl rather than deciding on its own", () => {
     for (const { url } of cases) {
       expect(safeCoverUrl(url)).toBe(isAllowedCoverUrl(url) ? url : "");
     }
   });
 
-  /**
-   * Return-type soundness — the mirror, on the way OUT, of the non-string
-   * input rows in tests/unit/readmooConfig.test.ts.
-   *
-   * Why a return already declared `string` still needs a `typeof` assertion:
-   * `coverUrl` is deliberately excluded from the runtime text coercion at the
-   * API-client boundary (see the `Not covered here, deliberately:` block of
-   * `shared/src/api/safeText.ts`), so a hostile or merely buggy BYO backend can
-   * land a non-string in this wrapper. The whitelist then judges the
-   * `String()`-coerced value — `new URL` stringifies its argument, and
-   * `String(["https://cdn.readmoo.com/x.jpg"])` IS that element — so a
-   * one-element array is ACCEPTED, and unless the accept branch coerces too,
-   * that array leaves here wearing a `string` type tag.
-   *
-   * Nothing crashes today: every consumer either drops the result into an
-   * `<img src>`, which the DOM string-coerces, or tests it for truthiness. One
-   * future `.startsWith()` on it would replay the exact white screen the
-   * whitelist was just hardened against on the INPUT side — and with the
-   * declaration already promising `string`, no type error warns anyone first.
-   */
+  // An accepted one-element array must leave as a real string. See the header →
+  // "Return-type soundness".
   describe("return-type soundness", () => {
     const ALLOWED_COVER = "https://cdn.readmoo.com/x.jpg";
 
@@ -97,9 +102,8 @@ describe("safeCoverUrl", () => {
       // the cast is the honest spelling of what the network hands over.
       const result = safeCoverUrl([ALLOWED_COVER] as unknown as string);
 
-      // Both assertions are load-bearing. `typeof` alone would also be
-      // satisfied by a "fix" that blanked accepted URLs to `""` — the opposite
-      // failure, in which every legitimate cover silently disappears.
+      // Both assertions are load-bearing: `typeof` alone passes a "fix" that
+      // blanks every legitimate cover to `""`.
       expect(typeof result).toBe("string");
       expect(result).toBe(ALLOWED_COVER);
     });

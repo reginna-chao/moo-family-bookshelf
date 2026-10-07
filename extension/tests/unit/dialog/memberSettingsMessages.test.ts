@@ -15,23 +15,29 @@ import {
  *
  * The literal wait strings are NOT restated here either — they belong to
  * `rateLimitedMessage`, pinned in tests/unit/dialog/verificationMessages.test.ts.
+ *
+ * Client-synthesized auth-recovery throttle: `RECOVERY_COPY` stands in for its
+ * message — the real one is produced by `buildRateLimitMessage` in
+ * `@/api/client` and asserted by the "rate-limited recovery" suite in
+ * `tests/unit/client.test.ts`; this file only pins that whatever that builder
+ * produced reaches the user untouched, so the exact value is illustrative, not
+ * the contract. `synthesizedRecoveryError` raises it exactly as `client.ts`
+ * does: `synthesized` true, set there by an unforgeable module-private Symbol on
+ * the envelope. Only that shape earns the verbatim passthrough — the code alone
+ * does not, since any backend can put it in a response body. That is the
+ * security half of the passthrough rule: `userId`-addressed endpoints can be
+ * answered by any backend the user (or an invite's `@host` segment) points the
+ * client at, so a code alone is never authority to paint attacker-chosen text
+ * into the dialog as if it were this app's own copy. Only the client's own
+ * unforgeable marker is.
  */
 
-/**
- * Stand-in for the client-synthesized auth-recovery throttle message. The real
- * one is produced by `buildRateLimitMessage` in `@/api/client` and asserted by
- * the "rate-limited recovery" suite in `tests/unit/client.test.ts` — this file
- * only pins that whatever that builder produced reaches the user untouched, so
- * the exact value below is illustrative, not the contract.
- */
+/** Illustrative stand-in for `buildRateLimitMessage`'s output — not the contract.
+ *  See the file header. */
 const RECOVERY_COPY = "嘗試次數過多，請稍後再重新開啟書櫃（約 2 分鐘後）";
 
-/**
- * The auth-recovery throttle exactly as `client.ts` raises it: `synthesized`
- * true, set there by an unforgeable module-private Symbol on the envelope.
- * Only this shape earns the verbatim passthrough — the code alone does not,
- * since any backend can put it in a response body.
- */
+/** The throttle as `client.ts` raises it (`synthesized` true) — the only shape that
+ *  earns verbatim passthrough; the code alone does not. */
 const synthesizedRecoveryError = (message: string, retryAfter?: number) =>
   new ApiError(AUTH_REFRESH_RATE_LIMITED, message, retryAfter, true);
 
@@ -125,13 +131,8 @@ describe("memberSettingsErrorMessage", () => {
       ).toBe("儲存失敗");
     });
 
-    /**
-     * The security half of the passthrough rule: `userId`-addressed endpoints
-     * can be answered by any backend the user (or an invite's `@host` segment)
-     * points the client at, so a code alone is never authority to paint
-     * attacker-chosen text into the dialog as if it were this app's own copy.
-     * Only the client's own unforgeable marker is.
-     */
+    // The security half: a code alone never earns verbatim passthrough; only the
+    // client's own marker does. See the file header.
     it("refuses the verbatim passthrough for an unmarked AUTH_REFRESH_RATE_LIMITED error", () => {
       const hostile = new ApiError(AUTH_REFRESH_RATE_LIMITED, "任意惡意文案");
 

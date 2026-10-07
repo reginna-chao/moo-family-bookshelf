@@ -21,6 +21,50 @@ import {
 } from "@/constants";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
+/**
+ * App: the Dialog's mount gate (onboarding vs main view), tab shell, endpoint lifecycle, and the
+ * overlays App owns (family-gone notice, re-verification).
+ *
+ * Browser mocks: production reads via promise-based `browser.runtime.sendMessage(msg)` and
+ * `browser.storage.{local,sync}.get(keys)` (webextension-polyfill); the mocks resolve the
+ * response/result Promise keyed by message type / storage key — there is no Chrome callback argument.
+ * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT the
+ * `GET_FAMILY_ID` message, so familyId is seeded into BOTH storage areas, and the storage mocks are
+ * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY])` each
+ * get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
+ * reads it with a DIRECT `readStoredApiEndpoint()` and no longer sends GET_API_ENDPOINT (unreliable
+ * on Firefox's sleeping background event page; the handler is covered in
+ * tests/unit/background.test.ts).
+ *
+ * Styling contract: jsdom does not apply stylesheet rules, so wherever styling moved from inline
+ * styles to classes in styles.css, the class itself is the observable contract — `.moo-tab--active`
+ * (was an inline fontWeight:600); `.moo-tab-panel` (display:none) plus `--active` (was an inline
+ * `display` toggle); `.moo-tabs` / `.moo-tab` carry the desktop sizing (no right reserve, 12px/14px
+ * tabs) and the `--mobile` modifiers add the 40px close-icon gutter and tighter 8px/13px tabs;
+ * `.moo-app__fill` (flex-column fill) and `.moo-tab-panels` (overflow-y:auto + flex growth, replacing
+ * the old fixed max-height).
+ *
+ * Family-gone notice: a forced flip back to onboarding has to say WHY. Without the banner the dialog
+ * just resets itself in front of the user, which reads as a bug rather than as a state change their
+ * family owner caused (or a family that is gone). The copy is imported from production
+ * (`dialog/familyGoneNotice.ts`) and pinned verbatim, once, in
+ * tests/unit/dialog/familyGoneNotice.test.ts — restating a literal here would let the two drift.
+ *
+ * Re-verification overlay: a dead token that can only be recovered by re-supplying the PWA-login
+ * verification secret must NOT drop the user to onboarding (Invariant 2); App mounts useReauth and
+ * renders VerificationPrompt in a modal OVERLAY on top of the still-mounted main view. Every screen
+ * that asks for a PIN / pattern owes the user the name of the server the secret goes to; this modal
+ * is the hardest to reason about from the UI alone — unlike the onboarding challenge it can surface
+ * days after the join, with no sync code and no endpoint on screen. Its verdict comes from the
+ * endpoint the client ACTUALLY adopted, with the `verify` copy (no sync code to point at).
+ *
+ * Endpoint lifetime: the API endpoint is FAMILY-scoped — the owner picks it and every member adopts
+ * it — so it must not outlive the membership. A family-less client still pointed at the former
+ * family's server would send the next create/join there (userId, display name, the token that server
+ * issues, the whole personal book list) and bake that host into the sync code it hands out next.
+ * Being removed ends the membership exactly like leaving does.
+ */
+
 // Mock all child components
 vi.mock("@/dialog/Onboarding", () => ({
   Onboarding: ({
@@ -56,9 +100,8 @@ vi.mock("@/dialog/DialogFooter", () => ({
   DialogFooter: () => <div data-testid="dialog-footer">footer</div>,
 }));
 
-// The boot-time Readmoo account check (#271) navigates to `#/me` and waits
-// 1500ms; here it is the confirmed account, so the boot reaches the main view
-// exactly as before. The check itself: tests/component/AppAccountCheck.test.tsx.
+// The boot-time Readmoo account check (#271) navigates to `#/me` and waits 1500ms; here it is the
+// confirmed account, so boot reaches the main view. The check itself: AppAccountCheck.test.tsx.
 vi.mock("@/dialog/accountIdentityCheck", () => ({
   checkAccountIdentity: vi.fn().mockResolvedValue("match"),
   verifyAccountIdentity: vi.fn().mockResolvedValue("match"),
@@ -72,16 +115,8 @@ vi.mock("@/constants", async (importOriginal) => {
   return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
 });
 
-// Production reads via promise-based `browser.runtime.sendMessage(msg)` and
-// `browser.storage.{local,sync}.get(keys)` (webextension-polyfill). The mocks
-// resolve the response/result Promise keyed by message type / storage key —
-// there is no Chrome callback argument.
-//
-// IMPORTANT: the mount gate now resolves familyId via `readFamilyId()` (DIRECT
-// storage.sync→local read), NOT via the `GET_FAMILY_ID` message. So familyId is
-// seeded into BOTH storage areas here. The storage mocks are key-aware so
-// `readFamilyId([FAMILY_ID_KEY])` and the App's `get([USER_ID_KEY, AUTH_TOKEN_KEY])`
-// each get only the keys they ask for.
+// Promise-based browser mocks, key-aware; familyId is seeded into BOTH storage areas because the
+// mount gate reads storage directly. See the file header, "Browser mocks".
 function pickKeys(
   store: Record<string, unknown>,
   keys: unknown,
@@ -102,12 +137,8 @@ function setupChromeMessages(options: {
   familyId?: string | null;
   userId?: string | null;
   authToken?: string | null;
-  /**
-   * Accepted API endpoint. Seeded into storage.local — App boot reads it with a
-   * DIRECT `readStoredApiEndpoint()` and no longer sends GET_API_ENDPOINT (that
-   * message round-trip is unreliable on Firefox's sleeping background event
-   * page; the handler itself is covered in tests/unit/background.test.ts).
-   */
+  /** Accepted API endpoint, seeded into storage.local: boot reads it directly via
+   *  `readStoredApiEndpoint()`, never GET_API_ENDPOINT. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -143,11 +174,8 @@ function setupChromeMessages(options: {
     )) as typeof chrome.storage.sync.get);
 }
 
-/**
- * Capture the ApiClient instance App creates in its `useRef`, so a test can
- * assert on the client state App put it in (e.g. which endpoint it boots on).
- * Must be called BEFORE `render`; call `restore()` when done.
- */
+/** Capture the ApiClient App creates in its `useRef`, to assert on the client state App put it in
+ *  (e.g. its boot endpoint). Call BEFORE `render`; call `restore()` when done. */
 async function captureApiClients(): Promise<{
   instances: ApiClient[];
   restore: () => void;
@@ -386,10 +414,8 @@ describe("App", () => {
       expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
     });
 
-    // The family-shelf tab should be active (default after leave + re-join).
-    // The active-tab styling moved from an inline fontWeight:600 to the
-    // `.moo-tab--active` modifier in styles.css; jsdom does not apply stylesheet
-    // rules, so the modifier class is the observable contract.
+    // The family-shelf tab is active (default after leave + re-join); the `.moo-tab--active` class is
+    // the contract (see the file header, "Styling contract").
     const familyShelfButton = screen.getByRole("tab", { name: "家庭書櫃" });
     expect(familyShelfButton).toHaveClass("moo-tab--active");
   });
@@ -426,15 +452,8 @@ describe("App", () => {
     restore();
   });
 
-  /**
-   * A forced flip back to onboarding has to say WHY. Without the banner the
-   * dialog just resets itself in front of the user, which reads as a bug rather
-   * than as a state change their family owner caused (or a family that is gone).
-   *
-   * The copy is imported from production (`dialog/familyGoneNotice.ts`) and
-   * pinned verbatim, once, in tests/unit/dialog/familyGoneNotice.test.ts —
-   * restating a literal here would let the two drift apart silently.
-   */
+  /** A forced flip back to onboarding has to say WHY; copy imported from production and pinned once in
+   *  familyGoneNotice.test.ts. See the file header, "Family-gone notice". */
   describe("family-gone notice banner", () => {
     /** Boot into the main view, then have the client report a family teardown. */
     async function tearDownFamily(
@@ -530,12 +549,8 @@ describe("App", () => {
       restore();
     });
 
-    /**
-     * The live-client half of the endpoint restore. The storage half runs
-     * earlier, inside `clearFamilyStorageAndBroadcast` (pinned in
-     * tests/unit/api/auth-refresh.test.ts) — invoking the callback directly here
-     * deliberately skips it, so this case only speaks for the client.
-     */
+    /** The live-client half of the endpoint restore; the storage half runs in clearFamilyStorageAndBroadcast
+     *  (auth-refresh.test.ts), which calling the callback directly deliberately skips. */
     it("puts the live client back on the official default endpoint", async () => {
       const { instances, restore } = await captureApiClients();
       setupChromeMessages({
@@ -557,9 +572,8 @@ describe("App", () => {
         expect(screen.getByTestId("onboarding")).toBeInTheDocument();
       });
 
-      // Being removed ends the membership exactly like leaving does, and the
-      // endpoint is FAMILY-scoped: a family-less client still aimed at the
-      // ex-family's server would send the next create/join there.
+      // Removal ends the membership like leaving does, and the endpoint is FAMILY-scoped: a family-less
+      // client still aimed at the ex-family's server would send the next create/join there.
       expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
 
       restore();
@@ -582,9 +596,8 @@ describe("App", () => {
     await waitFor(() => {
       expect(instances[0].getEndpoint()).toBe("https://custom.workers.dev");
     });
-    // Read DIRECTLY from storage, never via the background: Firefox's sleeping
-    // event page can drop the round-trip, which silently booted a member who
-    // had accepted a custom endpoint onto the official default instead.
+    // Read DIRECTLY from storage, never via the background: Firefox's sleeping event page can drop
+    // the round-trip, which silently booted a custom-endpoint member onto the official default.
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
       type: "GET_API_ENDPOINT",
     });
@@ -611,9 +624,8 @@ describe("App", () => {
   it("boots on the default endpoint when the stored endpoint is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { instances, restore } = await captureApiClients();
-    // Plain HTTP on a public host — ApiClient.setEndpoint refuses it. A member
-    // who has a family must still reach the main view rather than be dropped
-    // into onboarding by the throw.
+    // Plain HTTP on a public host — ApiClient.setEndpoint refuses it. A member with a family must
+    // still reach the main view rather than be dropped into onboarding by the throw.
     setupChromeMessages({
       familyId: "fam-1",
       userId: "user-1",
@@ -633,17 +645,11 @@ describe("App", () => {
     warn.mockRestore();
   });
 
-  // A dead token that can only be recovered by re-supplying the PWA-login
-  // verification secret must NOT drop the user to onboarding (Invariant 2).
-  // App mounts useReauth and renders VerificationPrompt in a modal OVERLAY on
-  // top of the still-mounted main view.
+  // A dead token recoverable only by the PWA-login secret must NOT drop the user to onboarding
+  // (Invariant 2): VerificationPrompt overlays the still-mounted main view.
   describe("re-verification overlay", () => {
-    /**
-     * Boot App into the main view with a live ApiClient captured.
-     * `apiEndpoint` (optional) is seeded into storage the way an accepted
-     * endpoint switch would be, so the client adopts it through the real
-     * production path rather than a hand-set field.
-     */
+    /** Boot App into the main view with a live ApiClient captured; `apiEndpoint` (optional) is seeded
+     *  into storage like an accepted endpoint switch, so the client adopts it via the production path. */
     async function renderWithCapturedClient(apiEndpoint?: string) {
       const { instances, restore } = await captureApiClients();
 
@@ -715,16 +721,8 @@ describe("App", () => {
       restore();
     });
 
-    /**
-     * Every screen that asks for a PIN / pattern owes the user the name of the
-     * server that secret is about to be sent to. This modal is the last one that
-     * lacked it, and it is the hardest to reason about from the UI alone: unlike
-     * the onboarding challenge, it can surface days after the join, with no sync
-     * code and no endpoint anywhere on screen.
-     *
-     * The verdict comes from the endpoint the client has ACTUALLY adopted, and
-     * the copy is the `verify` variant — there is no sync code here to point at.
-     */
+    /** A PIN / pattern prompt owes the user the server's name; this modal can surface days after the
+     *  join with no endpoint on screen. See the file header, "Re-verification overlay". */
     describe("endpoint disclosure above the challenge", () => {
       /** A self-hosted family server, written the way a sync code carries it. */
       const SELF_HOSTED = "https://nas.example.com/moo/";
@@ -737,25 +735,19 @@ describe("App", () => {
 
         const note = within(modal).getByTestId("sync-code-host-note");
         expect(note).toHaveTextContent("將連線至自訂伺服器：");
-        // No sync code is on this screen, so the join lead-in's "此同步碼" would
-        // point at something that is not there. Its absence is the only thing
-        // pinning the verify copy — the join copy contains it as a substring.
+        // No sync code is on this screen, so no join lead-in "此同步碼"; its absence alone pins the verify
+        // copy — the join copy contains it as a substring.
         expect(note.textContent).not.toContain("此同步碼");
-        // The CANONICAL endpoint the client will actually call (trailing slash
-        // gone), derived from production rather than hard-coded, so a change to
-        // the normalization rules cannot leave the disclosure describing a
-        // different server from the one being talked to.
+        // The CANONICAL endpoint the client will call (trailing slash gone), derived from production so a
+        // normalization change cannot leave the disclosure naming a different server.
         expect(apiClient.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
         expect(note).toHaveTextContent(apiClient.getEndpoint());
 
         restore();
       });
 
-      /**
-       * Silence on the official Worker is the point, not an oversight: a banner
-       * on EVERY re-auth would train the user to click past the one time it
-       * means something.
-       */
+      /** Silence on the official Worker is the point: a banner on EVERY re-auth would train the user to
+       *  click past the one time it means something. */
       it("stays silent when the client is on the official default endpoint", async () => {
         const { apiClient, restore } = await renderWithCapturedClient();
 
@@ -775,12 +767,8 @@ describe("App", () => {
         restore();
       });
 
-      /**
-       * Defence in depth: `setEndpoint` validates, so a refused address cannot
-       * normally reach `getEndpoint()`. Pinned anyway — whatever put it there,
-       * the modal must warn rather than lend a refused host the legitimacy of
-       * the reassuring line.
-       */
+      /** Defence in depth: `setEndpoint` validates, so a refused address cannot normally reach
+       *  `getEndpoint()`; pinned anyway — the modal must warn, not lend it the reassuring line. */
       it("warns instead of naming an adopted endpoint the validator would refuse", async () => {
         const { apiClient, restore } = await renderWithCapturedClient();
         const endpointSpy = vi
@@ -826,10 +814,8 @@ describe("App", () => {
     });
   });
 
-  // Firefox MV3 non-persistent background event page sleeps, so
-  // browser.runtime.sendMessage round-trips fail — but browser.storage.* stays
-  // reliable. The mount gate must resolve familyId/userId from DIRECT storage
-  // and NOT fall back to onboarding just because a message rejected.
+  // Firefox MV3's event page sleeps, so sendMessage round-trips fail while browser.storage.* stays
+  // reliable: the gate must read familyId/userId from storage, not fall back to onboarding.
   describe("Firefox sleeping-background gate", () => {
     // Seed familyId/userId/authToken DIRECTLY into storage (sync + local),
     // bypassing setupChromeMessages so we control the sendMessage rejection.
@@ -889,9 +875,8 @@ describe("App", () => {
       });
     });
 
-    // The endpoint read is best-effort (safeStorageGet). A failure there must
-    // degrade to the official default, never take the whole boot read down with
-    // it — that would drop a member who HAS a family into onboarding.
+    // The endpoint read is best-effort (safeStorageGet): a failure falls back to the official default
+    // instead of failing the boot read, which would drop a member who HAS a family into onboarding.
     it("a failing endpoint read does not block the main view", async () => {
       const localStore: Record<string, unknown> = {
         [USER_ID_KEY]: "user-ff",
@@ -968,14 +953,8 @@ describe("App", () => {
     );
   });
 
-  /**
-   * The API endpoint is a FAMILY-scoped setting — the owner picks it and every
-   * member adopts it — so it must not outlive the membership. A family-less
-   * client still pointed at the former family's server would send the next
-   * create/join there (userId, display name, the token that server issues, the
-   * whole personal book list) and bake that host into the sync code it hands
-   * out next.
-   */
+  /** The API endpoint is FAMILY-scoped and must not outlive the membership.
+   *  See the file header, "Endpoint lifetime". */
   describe("handleLeaveFamily endpoint reset", () => {
     async function leaveFromCustomEndpoint() {
       const { instances, restore } = await captureApiClients();
@@ -1134,12 +1113,8 @@ describe("App", () => {
       fireEvent.click(screen.getByText("個人書櫃"));
       fireEvent.click(screen.getByText("家庭書櫃"));
 
-      // The personal-shelf panel wrapper stays mounted but hidden while inactive.
-      // The show/hide moved from an inline `display` toggle to the
-      // `.moo-tab-panel--active` modifier (base `.moo-tab-panel` is display:none
-      // in styles.css). jsdom does not apply stylesheet rules, so the observable
-      // contract is: inactive panels carry the base class WITHOUT the --active
-      // modifier, while the active family-shelf panel has --active.
+      // The personal-shelf panel stays mounted but hidden while inactive: base `.moo-tab-panel` without
+      // `--active`, while the family-shelf panel has it (see the file header, "Styling contract").
       const personalPanel = document.getElementById("panel-personal-shelf");
       expect(personalPanel).not.toBeNull();
       expect(personalPanel!).toHaveClass("moo-tab-panel");
@@ -1173,10 +1148,8 @@ describe("App", () => {
         expect(screen.getByRole("tablist")).toBeInTheDocument();
       });
 
-      // Desktop tab-row sizing (no right reserve, 12px/14px tabs) lives on the
-      // base `.moo-tabs` / `.moo-tab` classes in styles.css; the mobile overrides
-      // are `--mobile` modifiers. jsdom does not apply stylesheet rules, so the
-      // observable contract is the ABSENCE of the mobile modifiers on desktop.
+      // Desktop: the ABSENCE of the `--mobile` modifiers is the contract (see the file header,
+      // "Styling contract").
       const nav = screen.getByRole("tablist");
       expect(nav).toHaveClass("moo-tabs");
       expect(nav).not.toHaveClass("moo-tabs--mobile");
@@ -1187,9 +1160,8 @@ describe("App", () => {
     });
 
     it("reserves space for the close icon and tightens tabs on mobile", async () => {
-      // useMediaQuery caches the MediaQueryList per query at module level, so the
-      // mobile matchMedia mock must be in place before App's module graph reads it.
-      // Reset modules + dynamic-import App so the fresh cache picks up the mobile MQL.
+      // useMediaQuery caches the MediaQueryList per query at module level: reset modules and
+      // dynamic-import App so the fresh cache picks up the mobile matchMedia mock.
       vi.resetModules();
 
       const mobileMatchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -1217,10 +1189,8 @@ describe("App", () => {
         expect(screen.getByRole("tablist")).toBeInTheDocument();
       });
 
-      // Mobile adds the `--mobile` modifiers: `.moo-tabs--mobile` reserves the
-      // 40px close-icon gutter and `.moo-tab--mobile` tightens the tabs (8px/13px)
-      // in styles.css. jsdom does not apply stylesheet rules, so the observable
-      // contract is the PRESENCE of those modifiers.
+      // Mobile: the PRESENCE of `.moo-tabs--mobile` (40px close-icon gutter) and `.moo-tab--mobile`
+      // (8px/13px tabs) is the contract (see the file header, "Styling contract").
       const nav = screen.getByRole("tablist");
       expect(nav).toHaveClass("moo-tabs");
       expect(nav).toHaveClass("moo-tabs--mobile");
@@ -1232,10 +1202,8 @@ describe("App", () => {
   });
 
   describe("layout styles", () => {
-    // The flex-column fill layout moved from inline styles to the `.moo-app__fill`
-    // class and the scrolling content area to `.moo-tab-panels` in styles.css.
-    // jsdom does not apply stylesheet rules, so the class is the observable
-    // contract for these layout wrappers.
+    // Layout wrappers: `.moo-app__fill` and `.moo-tab-panels` classes are the contract (see the file
+    // header, "Styling contract").
     it("onboarding wrapper carries the flex-fill layout class", async () => {
       setupChromeMessages({ familyId: null, userId: null });
       render(<App />);
@@ -1273,9 +1241,8 @@ describe("App", () => {
         expect(screen.getByTestId("family-shelf")).toBeInTheDocument();
       });
 
-      // The scrolling container's overflow-y:auto + flex growth (replacing the old
-      // fixed max-height) live on `.moo-tab-panels` in styles.css. The panel wraps
-      // FamilyShelf, and the tab-panels container wraps the panel.
+      // The scrolling container's styles live on `.moo-tab-panels`; the panel wraps FamilyShelf, and
+      // the tab-panels container wraps the panel.
       const panelDiv = screen.getByTestId("family-shelf").parentElement!;
       const contentArea = panelDiv.parentElement!;
       expect(contentArea).toHaveClass("moo-tab-panels");

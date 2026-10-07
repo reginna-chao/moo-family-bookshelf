@@ -1,12 +1,5 @@
-/**
- * Helper utilities for interacting with the Dialog UI in E2E tests.
- *
- * The Dialog is injected by the Content Script into the page DOM.
- * - Entry button: #moo-family-bookshelf-btn
- * - Dialog container: #moo-family-bookshelf-dialog
- * - React mount point: #moo-family-bookshelf-root
- * - Backdrop: #moo-family-bookshelf-backdrop
- */
+/** E2E helpers for the Content-Script-injected Dialog: entry button, dialog container, backdrop (the
+ *  selectors below) and the React mount point `#moo-family-bookshelf-root`. */
 
 import { type Page, type Locator, expect } from "@playwright/test";
 
@@ -44,16 +37,14 @@ export async function openDialog(page: Page): Promise<Locator> {
   const dialog = page.locator(DIALOG_SELECTOR);
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
 
-  // Wait for React to mount and finish loading (past "載入中..." state).
-  // The dialog App does async chrome.runtime.sendMessage calls on mount,
-  // which may be slow in CI — wait for actual content to appear.
+  // Wait for React to mount and finish loading (past "載入中..."): App's async
+  // chrome.runtime.sendMessage calls on mount may be slow in CI.
   const root = page.locator("#moo-family-bookshelf-root");
   try {
     // First: wait for React to mount anything (including "載入中...")
     await expect(root).not.toBeEmpty({ timeout: 30_000 });
-    // Then: wait for the loading state to resolve. Uses a locator (which pierces
-    // the open shadow root) rather than document.querySelector in waitForFunction,
-    // which cannot cross the shadow boundary.
+    // Then wait for loading to resolve via a locator, which pierces the open shadow root
+    // (document.querySelector in waitForFunction cannot cross the shadow boundary).
     await expect(root).not.toContainText("載入中...", { timeout: 30_000 });
   } catch (e) {
     const rootContent = await root.innerHTML().catch(() => "(unreadable)");
@@ -186,10 +177,8 @@ export async function getSyncCode(page: Page): Promise<string> {
   return (await codeEl.textContent())?.trim() ?? "";
 }
 
-/**
- * Click the "顯示同步碼" eye button if present so the masked sync code becomes
- * readable. Safe to call even when the reveal button is absent.
- */
+/** Click the "顯示同步碼" eye button if present so the masked sync code becomes readable; safe when the
+ *  reveal button is absent. */
 async function revealSyncCode(
   dialog: ReturnType<Page["locator"]>,
 ): Promise<void> {

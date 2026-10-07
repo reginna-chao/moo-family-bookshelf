@@ -16,6 +16,265 @@ import {
   readmooAppUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
 
+/**
+ * Readmoo host / URL config in `shared/src/config/readmoo.ts`: the host and
+ * cover-domain predicates, and the two URL whitelists `isAllowedCoverUrl` /
+ * `isAllowedBookUrl` that share one file-local core.
+ *
+ * Backslash encoding: `BACKSLASH` is built from its character code so that no
+ * escaping layer — a TypeScript string literal, Prettier, a diff viewer, a
+ * reviewer's eye — can turn one into two. The single/double distinction decides
+ * the verdict in the tables (`https:\readmoo.com/x` is rejected,
+ * `https:\\readmoo.com/x` is allowed), and it is exactly the kind of detail an
+ * escaping slip inverts silently, so every generated case is also read back
+ * (`expectRunEncoding`, the escaping tripwire) and asserted on how many
+ * backslashes actually survived into it — without it, a slip anywhere between
+ * `String.fromCharCode(92)` and the final URL would quietly move a case to the
+ * other side of the boundary while the suite stayed green.
+ *
+ * `ABSOLUTE_HTTPS_PREFIX` is the canonical absolute spelling that production's
+ * fast path early-accepts. Deliberately re-stated rather than imported: it is
+ * file-local in `shared/src/config/readmoo.ts` on purpose, and this subset is the
+ * SUBJECT of the tests, not a rule they inherit.
+ *
+ * Separator-run table (`separatorRunCases`): exhaustive over the one property
+ * these shapes' verdict turns on — how many slash-ish characters follow
+ * `https:`. WHATWG treats `\` like `/` for a special scheme, so the run is
+ * counted over BOTH characters, and the boundary sits between 1 and 2:
+ *   - 0 or 1 → base-SENSITIVE. Against a same-scheme base the parser drops into
+ *     "relative" state and takes the host from the BASE, so the string means
+ *     something else in the document it is rendered into ⇒ must be rejected.
+ *   - 2 or more → base-INDEPENDENT. The host is read from the string with or
+ *     without a base ⇒ a genuine absolute Readmoo URL ⇒ must be allowed.
+ * Enumerating all 31 combinations pins WHERE that boundary is rather than
+ * sampling either side of it, and it exercises both production paths at once.
+ * `FAST_PATH_RUN_COUNT` (7) is how many runs begin `//` — 1 of length 2, 2 of
+ * length 3, 4 of length 4 — exactly the runs whose URL LITERALLY starts
+ * `https://`, so exactly the subset the fast path early-accepts without
+ * re-proving base-invariance (`///` and `//\` among them, because that test is a
+ * PREFIX test and not an "exactly two" one); they are the rows
+ * `expectAbsoluteRowsAreBaseInvariant` most needs to see. `\\`, `/\`, `\/` and
+ * `\//` miss the fast path and must still be allowed by the full base-invariance
+ * comparison behind it. A fast path that started REJECTING on a miss, or one
+ * promoted from an early-accept to the criterion, turns that second group red.
+ *
+ * `SAME_SCHEME_BASES`: the scheme must MATCH the input's — WHATWG only enters
+ * "relative" state for a same-scheme base, so a base on any other scheme could
+ * never disprove invariance. The first is the document the extension dialog is
+ * injected into; the second stands for any other viewer origin (the PWA renders
+ * the same stored values).
+ *
+ * `expectAbsoluteRowsAreBaseInvariant` pins the property the fast path rests on:
+ * a string that LITERALLY begins `https://` resolves to the same `href` with or
+ * without a base document.
+ *  - Why it needs pinning now: until the fast path existed, the core PROVED
+ *    base-invariance for every accepted string by comparing the standalone parse
+ *    against a parse with a base — a runtime that resolved some `https://` string
+ *    differently against a base would have been rejected, fail-closed, without
+ *    anyone noticing. The fast path skips that comparison for this subset, which
+ *    promotes the WHATWG guarantee from a convenience to a load-bearing
+ *    assumption: inside the subset a parser deviation is now accepted silently.
+ *    This test is what would notice.
+ *  - Driven by the caller's own rows, never a fresh whitelist, so every
+ *    `https://` row anyone adds there is covered once the expected count is
+ *    bumped. NOT automatic, deliberately: `expectedChecked` is hard-coded at each
+ *    call site, so a newly added row turns the test red until someone updates
+ *    that number — the friction is the price of the hole it closes. Unparseable
+ *    inputs are skipped, matching production: the core reaches the prefix test
+ *    only after `new URL(url)` has already succeeded.
+ *  - Callers pass BOTH their hand-written matrix and the exhaustive separator
+ *    table, because the matrix alone spells only the canonical `https://` form.
+ *    The table covers the six NON-canonical spellings the fast path also
+ *    early-accepts — `https:///…`, `https://\…`, `https:////…`, `https:///\…`,
+ *    `https://\/…` and `https://\\…` — precisely the shapes most likely to
+ *    diverge between parsers. The table's own rows cannot stand in for this:
+ *    they assert a `true` verdict against a hand-derived `expected`, so if an
+ *    engine ever made one of those forms base-SENSITIVE, the fast path would
+ *    return true anyway and the table would stay green.
+ *  - `expectedChecked` pins how many rows survived the filter. A bare "> 0" would
+ *    let the separator spread be deleted at a call site — the hand-written rows
+ *    would keep passing while the fast-path shapes went back to being uncovered.
+ *
+ * isAllowedCoverUrl: the Worker's write-time whitelist for `bookCoverUrl` on
+ * borrow-create (worker/src/routes/borrow.ts → `400 INVALID_COVER_URL`). A cover
+ * URL is rendered into an `<img src>` on every family member's screen, so an
+ * attacker-chosen host would leak each viewer's IP / UA to a third party; the
+ * whole matrix is that beacon defence. The "nested path plus query string" row
+ * (and the book matrix's hash-route row, the shape `readmooAppUrl` builds) guard
+ * the base-sensitivity check against over-blocking: it compares full `href`s, so
+ * those must survive resolution byte-for-byte (real CDN covers carry both).
+ *
+ * Base-sensitive rows (cover matrix): the four REJECTED rows share ONE attack
+ * primitive — a scheme with no `//` (the fifth is the accepted doubled-backslash
+ * boundary case). The predicate validates the STRING, but the browser resolves
+ * that same string against the document it is rendered INTO. WHATWG reads these
+ * forms through "special authority ignore slashes" state when NO base is given —
+ * host = `cdn.readmoo.com`, so the scheme / port / host checks all pass — and
+ * through "relative" state when the base carries the same scheme, where the host
+ * silently becomes the BASE's instead. On a cover the payoff needs no click and
+ * no user mistake: the dialog is injected INTO a Readmoo page, so the base is
+ * `https://next.readmoo.com/read/…` and the `<img src>` fires an authenticated
+ * same-site GET at an attacker-chosen Readmoo path the moment the card renders,
+ * carrying the viewer's Readmoo cookies; in the PWA the same string lands on the
+ * PWA's own origin instead. No CSP `img-src` catches either one, because the
+ * origin it resolves to is the rendering page's OWN — which any usable policy
+ * already allows. No other rejected row lands there: the foreign-host rows
+ * (`evilreadmoo.com`, the userinfo smuggle) are third-party by name, and the
+ * rows that spell out a first-party host (plain HTTP, a non-default port, a
+ * non-HTTP scheme, the trailing-dot FQDN) each resolve to an origin DISTINCT
+ * from the rendering page's, which a whitelist or a CSP can still name and
+ * refuse. Confirmed exploitable: each row returned TRUE until the core started
+ * comparing the standalone parse against a parse with a base. Ordinary absolute
+ * URLs resolve identically either way, so the accepted rows pin that the fix
+ * does not over-block. The "rejects … once a rendering page supplies the base"
+ * tests are the executable statement of WHY, so the rows are not mistaken for
+ * over-caution and deleted: their first two assertions are the PREMISE (they pin
+ * the parser disagreement the attack rests on, so a future engine that stopped
+ * treating the shape as base-sensitive is reported instead of quietly passing);
+ * the last is the production contract — the whitelist must refuse a string whose
+ * meaning depends on where it is rendered, because the whitelist is applied to
+ * the string and the browser is not.
+ *
+ * Doubled backslash (both matrices): the boundary companion to the
+ * single-backslash row, and the reason the predicate tests base-SENSITIVITY
+ * rather than blocking backslashes outright. WHATWG's "relative slash state"
+ * treats a `\` in a special scheme exactly like `/`, so a PAIR of them reaches
+ * "special authority ignore slashes" state and the host is read from the STRING
+ * — with or without a base. Verified identical in Node's parser and in
+ * whatwg-url (what jsdom and the browsers implement), so it really is an
+ * absolute URL in every rendering context, and accepting it is correct. Kept as
+ * an executable note so the single-backslash row is not misread as "backslashes
+ * are rejected". Rejecting this shape anyway would be a defensible extra
+ * tightening — it is just not what the base-sensitivity fix does, and this row
+ * is what would flag the change.
+ *
+ * `//`-widening tripwire (both matrices): guards the ONE widening the fast path
+ * invites — relaxing its `url.startsWith("https://")` early-accept into
+ * `url.includes("//")`, or any other "there is a `//` in here somewhere" test.
+ * The row's string DOES carry a literal `//` — in the PATH — while only ONE
+ * slash follows the scheme, so it is base-SENSITIVE and must stay rejected. The
+ * widening would early-accept it and this row alone turns red — but NOT because
+ * it is the only rejected row containing a `//`: plain HTTP, the `ftp:` scheme
+ * (cover matrix only), a non-default port, the protocol-relative form, the
+ * userinfo smuggle, the two look-alike hosts and the trailing-dot FQDN carry one
+ * too. Every one of those is refused earlier — by the parse itself, or by the
+ * scheme / port / host checks that run BEFORE the fast path is consulted. This
+ * row is the only rejected one
+ * that BOTH reaches the fast path and contains a literal `//`. The criterion is
+ * base-INVARIANCE, not the presence or absence of `//`; POSITION carries the
+ * whole argument, in both directions: `//` in the path proves nothing (this
+ * row), and the doubled-backslash row is allowed with no `//` anywhere in it.
+ * The "whose path contains a literal //" tests are the executable form, so the
+ * row cannot decay: an edit that dropped the `//` from that URL would leave the
+ * row passing while no longer guarding anything. They pin the two facts that
+ * make it a tripwire — the literal `//` is present, and the string is still NOT
+ * of the shape the fast path may early-accept — next to the parser disagreement
+ * that forces the rejection.
+ *
+ * isAllowedBookUrl: the whitelist for the per-book detail link (`readmooUrl`),
+ * which the Extension and the PWA render as a clickable `<a href>` and the
+ * Worker sanitises on both the books write paths and the family-bookshelf /
+ * public-snapshot read paths. Different trust boundary from the cover matrix: a
+ * cover is an `<img src>` that fires a request on RENDER, while a book link
+ * needs a click. That lowers the rate but not the severity — the click happens
+ * precisely when the user believes they are opening Readmoo, so an off-domain
+ * value is a phishing / arbitrary-redirect lure served under a legitimate book
+ * title, and the destination host learns the viewer's IP and User-Agent. It does
+ * not learn the referer: every render site pairs the href with `rel="noopener
+ * noreferrer"`, and `noreferrer` suppresses the Referer header outright — that
+ * attribute is load-bearing, so dropping it would widen this exposure. No CSP
+ * substitutes for the whitelist either: `img-src` governs image loads and says
+ * nothing about navigation. This is the ONLY exhaustive matrix for the rule, so
+ * it is written full even though `isAllowedCoverUrl` shares the same core today:
+ * the two are separately tightenable by design, so neither matrix may be
+ * replaced by "these two agree" — which is also why the base-sensitive rows,
+ * the doubled-backslash row and the `//` tripwire are restated in it.
+ *  - Base-sensitive book rows: WHATWG resolves them with host = `readmoo.com`
+ *    and no base (every check passes) but host = the BASE's against a
+ *    same-scheme base, so the whitelist certifies "this points at Readmoo" while
+ *    the `<a href>` points at the VIEWER's own origin. That is the observed
+ *    exploit, and it is worse than a plain off-domain phishing link: the target
+ *    is same-origin, so the viewer sees their own trusted URL bar. The reported
+ *    chain sent a PWA reader to the PWA's own `/public/x#invite=moo-x`, which the
+ *    SPA fallback answers by clearing the stored session and pre-filling the
+ *    attacker's sync code — i.e. it drives the app's OWN join flow, something no
+ *    third-party destination could do. `rel="noopener noreferrer"` is no help:
+ *    it hardens where a link LANDS, not which origin it resolves to. Confirmed
+ *    exploitable: each row returned TRUE until the core started comparing the
+ *    standalone parse against a parse with a base.
+ *  - Apex trap (anti-drift tripwire): `isReadmooHost` looks like the obvious
+ *    predicate to reuse, but its exact-match list holds only the two WEB-APP
+ *    hosts (next. / read.), while every legitimate book link lives on the APEX —
+ *    `readmooUrl` is built as `${READMOO_BOOK_BASE}${bookId}` with
+ *    `READMOO_BOOK_BASE = "https://readmoo.com/book/"`
+ *    (extension/src/content/scraper.ts:31). Rebuilding `isAllowedBookUrl` on
+ *    `isReadmooHost` would blank EVERY real book link — a total feature outage
+ *    that no hostile-URL test would catch, because all the hostile cases would
+ *    still (correctly) return false.
+ *
+ * Non-string input (both whitelists): runtime robustness against the one thing
+ * their `url: string` parameter cannot promise. The value arrives from the
+ * BACKEND, and nothing on the way narrows its type:
+ *  - Both API clients read the `{ data, error }` envelope through a bare cast
+ *    (`extension/src/api/client.ts`, `pwa/src/api/client.ts`), so the declared
+ *    shape is an assumption about the server, not a checked fact.
+ *  - The server is user-configurable. A sync code's `@host` segment points a
+ *    whole family at a self-hosted Worker, which may predate any of these checks
+ *    or be modified outright.
+ *  - `coverUrl` is DELIBERATELY excluded from the runtime text coercion that
+ *    guards its sibling fields. That exclusion is argued in docs/architecture.md
+ *    → 伺服器回傳資料的檢查, which names the non-string describe below. The
+ *    argument has TWO parts and both are load-bearing: these fields only render
+ *    into an `<img src>` attribute, which the DOM string-coerces, AND they run
+ *    through the Readmoo URL whitelist first, which guards its OWN input type.
+ *    The second part is a property of the code under test HERE, and the
+ *    non-string describe enforces it: if the whitelist ever drops that guard,
+ *    the exclusion stops being safe and these fields have to be coerced in the
+ *    text layer instead. `sanitizeBookText` accordingly coerces `readmooUrl`
+ *    but not `coverUrl`, and `sanitizeFamilyBookshelfText` does not touch it
+ *    either, so on the family-bookshelf path a non-string `coverUrl` reaches the
+ *    render layer verbatim.
+ * A JSON body whose `coverUrl` is `["https://cdn.readmoo.com/x.jpg"]` therefore
+ * arrives at `safeCoverUrl` → `isAllowedCoverUrl` (extension/src/dialog/
+ * BookCard.tsx:113 and its three twins) as an ARRAY. The DOM half of that
+ * argument still holds for such a value; the whitelist half is precisely what
+ * the rows buy, because a string method on an array throws and neither app
+ * mounts an ErrorBoundary — so a throw there is a permanent white screen rather
+ * than a blank cover. `isAllowedBookUrl` is asserted on the same inputs even
+ * though its own field IS coerced today: the two exports are separate trust
+ * boundaries over ONE file-local core, so the guard has to hold on both sides of
+ * that split, and the coercion that currently protects `readmooUrl` is a
+ * different module's decision that may change without anyone revisiting this one.
+ *  - What regressed, and why the guard looks deletable: until the fast path
+ *    landed the core only ever fed this parameter to `new URL(...)`, which
+ *    coerces its argument with `String()` — an array of one URL string parsed
+ *    fine and the base-invariance comparison answered `true`.
+ *    `url.startsWith(...)` is the FIRST string method the core has ever called on
+ *    it, and a string method on an array throws. The `typeof` guard in front of
+ *    it therefore reads like dead weight next to a `string` parameter — this
+ *    block is what turns red when someone tidies it away.
+ *  - Both assertions per row are load-bearing. `not.toThrow()` alone would also
+ *    be satisfied by a guard written as an early `return false`, which does not
+ *    crash but silently blanks every legitimate cover and book link on that path
+ *    — so each row also pins the verdict the core returned BEFORE the fast path
+ *    existed. Inputs are cast at the call site; the production signature stays
+ *    strict, and the cast is the honest spelling of what the network hands over.
+ *  - `reachingCases`: the shapes that actually REACH the string method, and so
+ *    the ones that threw. `String()` on a one-element array is that element,
+ *    recursively, so both coerce to a genuine allowed Readmoo URL while being no
+ *    string at all; every check ahead of the fast path — the parse, the scheme,
+ *    the port, the host — passes on the coerced value, which is exactly why the
+ *    input survives that far.
+ *  - `unparseableCases`: non-strings that `String()` turns into something no URL
+ *    parser accepts, so `new URL(value)` throws inside the core's own try/catch
+ *    and the fast path is never reached. They pin the fail-closed half: a
+ *    malformed field is refused, never propagated and never fatal.
+ *
+ * READMOO_COVER_DOMAINS: the PWA CSP derives `https://{d}` and `https://*.{d}`
+ * from these entries (see pwa/tests/unit/cspHeaders.test.ts), which only works
+ * while each entry is a bare registrable domain.
+ */
+
 describe("isReadmooHost", () => {
   const cases: Array<{ name: string; hostname: string; expected: boolean }> = [
     { name: "the new host", hostname: READMOO_HOST_NEXT, expected: true },
@@ -98,26 +357,15 @@ describe("isReadmooCoverHost", () => {
   }
 });
 
-/**
- * A single backslash, built from its character code so that no escaping layer —
- * a TypeScript string literal, Prettier, a diff viewer, a reviewer's eye — can
- * turn one into two. The single/double distinction decides the verdict in the
- * tables below (`https:\readmoo.com/x` is rejected, `https:\\readmoo.com/x` is
- * allowed), and it is exactly the kind of detail an escaping slip inverts
- * silently, so every generated case is also read back and asserted on how many
- * backslashes actually survived into it.
- */
+/** A single backslash, built from its character code so no escaping layer can turn
+ *  one into two. See the header → "Backslash encoding". */
 const BACKSLASH = String.fromCharCode(92);
 
 /** The scheme prefix every separator-run case is built on. */
 const HTTPS_SCHEME = "https:";
 
-/**
- * The canonical absolute spelling that production's fast path early-accepts.
- * Deliberately re-stated here rather than imported: `ABSOLUTE_HTTPS_PREFIX` is
- * file-local in `shared/src/config/readmoo.ts` on purpose, and this subset is
- * the SUBJECT of the tests below, not a rule they inherit.
- */
+/** The fast path's early-accept prefix, deliberately re-stated (it is file-local in
+ *  production and the SUBJECT of these tests). */
 const ABSOLUTE_HTTPS_PREFIX = "https://";
 
 /** Longest separator run the exhaustive table enumerates. */
@@ -126,13 +374,8 @@ const MAX_SEPARATOR_RUN = 4;
 /** 2^0 + 2^1 + 2^2 + 2^3 + 2^4 — every run up to {@link MAX_SEPARATOR_RUN}. */
 const SEPARATOR_RUN_COUNT = 31;
 
-/**
- * How many of those runs begin `//` — 1 of length 2, 2 of length 3, 4 of
- * length 4. Exactly the runs whose URL LITERALLY starts `https://`, so exactly
- * the subset production's fast path early-accepts without re-proving
- * base-invariance. That makes them the rows
- * {@link expectAbsoluteRowsAreBaseInvariant} most needs to see.
- */
+/** Runs beginning `//` (1 + 2 + 4): exactly the fast path's early-accept subset.
+ *  See the header → "Separator-run table". */
 const FAST_PATH_RUN_COUNT = 7;
 
 /** How many characters of `text` equal `char`. */
@@ -163,27 +406,8 @@ interface SeparatorRunCase {
   expected: boolean;
 }
 
-/**
- * Exhaustive table over the one property these shapes' verdict turns on: how
- * many slash-ish characters follow `https:`. WHATWG treats `\` like `/` for a
- * special scheme, so the run is counted over BOTH characters, and the boundary
- * sits between 1 and 2:
- *
- *   - 0 or 1 → base-SENSITIVE. Against a same-scheme base the parser drops into
- *     "relative" state and takes the host from the BASE, so the string means
- *     something else in the document it is rendered into ⇒ must be rejected.
- *   - 2 or more → base-INDEPENDENT. The host is read from the string with or
- *     without a base ⇒ a genuine absolute Readmoo URL ⇒ must be allowed.
- *
- * Enumerating all 31 combinations pins WHERE that boundary is rather than
- * sampling either side of it, and it exercises both production paths at once:
- * the {@link FAST_PATH_RUN_COUNT} runs beginning `//` hit the fast path's
- * early-accept — `///` and `//\` among them, because that test is a PREFIX
- * test and not an "exactly two" one — while `\\`, `/\`, `\/` and `\//` miss it
- * and must still be allowed by the full base-invariance comparison behind it.
- * A fast path that started REJECTING on a miss, or one promoted from an
- * early-accept to the criterion, turns the second group red.
- */
+/** All 31 `/`-and-`\` runs after `https:`: 0–1 → rejected, 2+ → allowed.
+ *  See the header → "Separator-run table". */
 function separatorRunCases(target: string): SeparatorRunCase[] {
   const cases: SeparatorRunCase[] = [];
   for (let length = 0; length <= MAX_SEPARATOR_RUN; length += 1) {
@@ -199,12 +423,8 @@ function separatorRunCases(target: string): SeparatorRunCase[] {
   return cases;
 }
 
-/**
- * Escaping tripwire, asserted per case: reads the separator run back off the
- * exact string that is about to be handed to the predicate. Without it, a slip
- * anywhere between `String.fromCharCode(92)` and the final URL would quietly
- * move a case to the other side of the boundary while the suite stayed green.
- */
+/** Escaping tripwire: reads the run back off the exact string handed to the
+ *  predicate. See the header → "Backslash encoding". */
 function expectRunEncoding(runCase: SeparatorRunCase, target: string): void {
   const { url, run, length } = runCase;
   expect(BACKSLASH).toHaveLength(1);
@@ -222,55 +442,15 @@ function expectRunEncoding(runCase: SeparatorRunCase, target: string): void {
   expect(countChar(url, BACKSLASH)).toBe(countChar(run, BACKSLASH));
 }
 
-/**
- * Bases the invariance property is resolved against. The scheme must MATCH the
- * input's: WHATWG only enters "relative" state for a same-scheme base, so a
- * base on any other scheme could never disprove invariance. The first is the
- * document the extension dialog is injected into; the second stands for any
- * other viewer origin (the PWA renders the same stored values).
- */
+/** Same-scheme bases for the invariance check (dialog host page, another viewer
+ *  origin). See the header → "`SAME_SCHEME_BASES`". */
 const SAME_SCHEME_BASES = [
   "https://next.readmoo.com/read/#/library",
   "https://moo.example/app/family",
 ];
 
-/**
- * The property production's fast path rests on: a string that LITERALLY begins
- * `https://` resolves to the same `href` with or without a base document.
- *
- * Why this needs pinning in CI now, and did not before. Until the fast path
- * existed, the core PROVED base-invariance for every accepted string by
- * comparing the standalone parse against a parse with a base — a runtime that
- * resolved some `https://` string differently against a base would have been
- * rejected, fail-closed, without anyone noticing the deviation. The fast path
- * skips that comparison for this subset, which promotes the WHATWG guarantee
- * from a convenience to a load-bearing assumption: inside the subset a parser
- * deviation is now accepted silently. This test is what would notice.
- *
- * Driven by the caller's own rows, never a fresh whitelist, so every `https://`
- * row anyone adds there is covered, once the expected count is bumped. NOT
- * automatic, and deliberately so: `expectedChecked` is hard-coded at each call
- * site, so a newly added row turns this test red until someone updates that
- * number — the friction described under `expectedChecked` below is the price of
- * the hole it closes. Unparseable inputs are skipped, matching production: the
- * core reaches the prefix test only after `new URL(url)` has already succeeded.
- *
- * Callers pass BOTH their hand-written matrix and the exhaustive separator
- * table, because the hand-written matrix alone spells only the canonical
- * `https://` form. The table is what covers the six NON-canonical spellings the
- * fast path also early-accepts — `https:///…`, `https://\…`, `https:////…`,
- * `https:///\…`, `https://\/…` and `https://\\…` — and those are precisely the
- * shapes most likely to diverge between parsers. The table's own rows cannot
- * stand in for this: they assert a `true` verdict against a hand-derived
- * `expected`, so if an engine ever made one of those forms base-SENSITIVE, the
- * fast path would return true anyway and the table would stay green. This is
- * the check that would not.
- *
- * `expectedChecked` pins how many rows actually survived the filter. A bare
- * "> 0" would let the separator spread be deleted at a call site — the
- * hand-written rows would keep passing while the fast-path shapes went back to
- * being uncovered, which is the exact hole this test exists to close.
- */
+/** Every row LITERALLY starting `https://` resolves identically with or without a
+ *  base; `expectedChecked` pins the row count. See the file header. */
 function expectAbsoluteRowsAreBaseInvariant(
   cases: readonly { url: string }[],
   expectedChecked: number,
@@ -295,13 +475,8 @@ function expectAbsoluteRowsAreBaseInvariant(
   expect(checked).toBeGreaterThan(0);
 }
 
-/**
- * `isAllowedCoverUrl` is the Worker's write-time whitelist for
- * `bookCoverUrl` on borrow-create (worker/src/routes/borrow.ts →
- * `400 INVALID_COVER_URL`): a cover URL is rendered into an `<img src>` on
- * every family member's screen, so an attacker-chosen host would leak each
- * viewer's IP / UA to a third party. Everything below is that beacon defence.
- */
+// The Worker's borrow-create cover whitelist (`400 INVALID_COVER_URL`): a beacon
+// defence for `<img src>`. See the header → "isAllowedCoverUrl".
 describe("isAllowedCoverUrl", () => {
   const cases: Array<{ name: string; url: string; expected: boolean }> = [
     {
@@ -315,9 +490,8 @@ describe("isAllowedCoverUrl", () => {
       expected: true,
     },
     {
-      // Guards the base-sensitivity check below against over-blocking: it
-      // compares full `href`s, so a nested path plus a query string has to
-      // survive resolution byte-for-byte. Real CDN covers carry both.
+      // Over-blocking guard: full-`href` comparison must keep a nested path plus
+      // query (real CDN covers carry both) byte-for-byte.
       name: "a nested cover path with a query string",
       url: "https://cdn.readmoo.tw/cover/aa/bb.jpg?v=3",
       expected: true,
@@ -374,36 +548,8 @@ describe("isAllowedCoverUrl", () => {
       url: "//cdn.readmoo.com/x.jpg",
       expected: false,
     },
-    /**
-     * The four REJECTED rows below share ONE attack primitive: a scheme with
-     * no `//` (the fifth is an accepted boundary case, documented in place).
-     * This predicate validates the STRING, but the browser resolves that same
-     * string against the document it is rendered INTO. WHATWG reads these
-     * forms through "special authority ignore slashes" state when NO base is
-     * given — host = `cdn.readmoo.com`, so the scheme / port / host checks
-     * above all pass — and through "relative" state when the base carries the
-     * same scheme, where the host silently becomes the BASE's instead.
-     *
-     * On a cover the payoff needs no click and no user mistake. The dialog is
-     * injected INTO a Readmoo page, so the base is
-     * `https://next.readmoo.com/read/…` and the `<img src>` fires an
-     * authenticated same-site GET at an attacker-chosen Readmoo path the
-     * moment the card renders, carrying the viewer's Readmoo cookies; in the
-     * PWA the same string lands on the PWA's own origin instead. No CSP
-     * `img-src` catches either one, because the origin it resolves to is the
-     * rendering page's OWN — which any usable policy already allows. No other
-     * rejected row in this table lands there: the foreign-host rows
-     * (`evilreadmoo.com`, the userinfo smuggle) are third-party by name, and
-     * the rows that do spell out a first-party host (plain HTTP, a non-default
-     * port, a non-HTTP scheme, the trailing-dot FQDN) each resolve to an
-     * origin DISTINCT from the rendering page's, which a whitelist or a CSP
-     * can still name and refuse.
-     *
-     * Confirmed exploitable: each row returned TRUE until the core started
-     * comparing the standalone parse against a parse with a base. Ordinary
-     * absolute URLs resolve identically either way, so the accepted rows above
-     * pin that the fix does not over-block.
-     */
+    // Four base-sensitive rows (a scheme with no `//`), confirmed exploitable; the
+    // fifth is accepted. See the header → "Base-sensitive rows (cover matrix)".
     {
       name: "a bare scheme with no // and dot-segments",
       url: "https:cdn.readmoo.com/../../x.jpg",
@@ -427,49 +573,15 @@ describe("isAllowedCoverUrl", () => {
       expected: false,
     },
     {
-      /**
-       * Boundary companion to the single-backslash row above, and the reason
-       * this predicate tests base-SENSITIVITY rather than blocking backslashes
-       * outright. WHATWG's "relative slash state" treats a `\` in a special
-       * scheme exactly like `/`, so a PAIR of them reaches "special authority
-       * ignore slashes" state and the host is read from the STRING — with or
-       * without a base. Verified identical in Node's parser and in whatwg-url
-       * (what jsdom and the browsers implement), so this really is an absolute
-       * cover URL in every rendering context, and accepting it is correct.
-       *
-       * Kept as an executable note so the single-backslash row above is not
-       * misread as "backslashes are rejected". Rejecting this shape anyway
-       * would be a defensible extra tightening — it is just not what the
-       * base-sensitivity fix does, and this row is what would flag the change.
-       */
+      // A PAIR of backslashes is absolute in every context, so it is accepted.
+      // See the header → "Doubled backslash".
       name: "a bare scheme with a doubled backslash (equivalent to //)",
       url: "https:\\\\cdn.readmoo.com/x.jpg",
       expected: true,
     },
     {
-      /**
-       * Regression tripwire for the ONE widening the production fast path
-       * invites: relaxing its `url.startsWith("https://")` early-accept into
-       * `url.includes("//")`, or any other "there is a `//` in here somewhere"
-       * test. This string DOES carry a literal `//` — in the PATH — while only
-       * ONE slash follows the scheme, so it is base-SENSITIVE and must stay
-       * rejected. The widening would early-accept it and this row alone turns
-       * red — but NOT because it is the only rejected row containing a `//`.
-       * Several others here carry one: plain HTTP, the `ftp:` scheme, a
-       * non-default port, the protocol-relative form, the userinfo smuggle,
-       * the two look-alike hosts, the trailing-dot FQDN. Every one of them is
-       * refused earlier — by the parse itself, or by the scheme / port / host
-       * checks that run BEFORE the fast path is consulted — so the widening
-       * never gets to see them. This row is the only rejected one that BOTH
-       * reaches the fast path and contains a literal `//`, which is what makes
-       * it the tripwire.
-       *
-       * The criterion is base-INVARIANCE, not the presence or absence of `//`.
-       * POSITION carries the whole argument, in both directions: `//` in the
-       * path proves nothing (this row), and `https:\\cdn.readmoo.com/x.jpg`
-       * above is allowed with no `//` anywhere in it. See the executable
-       * statement of this row further down the describe.
-       */
+      // Tripwire for widening `startsWith("https://")` into `includes("//")`: `//`
+      // only in the PATH. See the header → "`//`-widening tripwire".
       name: "a single-slash scheme whose path happens to contain //",
       url: "https:/cdn.readmoo.com//x.jpg",
       expected: false,
@@ -518,17 +630,8 @@ describe("isAllowedCoverUrl", () => {
     }
   });
 
-  /**
-   * Executable statement of WHY the four base-sensitive rows above must be
-   * rejected, rather than four bare `expected: false` entries a later reader
-   * could mistake for over-caution and delete.
-   *
-   * The first two assertions are the PREMISE — they pin the parser disagreement
-   * the attack rests on, so if a future engine ever stopped treating this shape
-   * as base-sensitive, this test says so instead of quietly passing. The last
-   * one is the production contract: whatever the parser does, the whitelist
-   * must refuse a string whose meaning depends on where it is rendered.
-   */
+  // Executable WHY for the base-sensitive rows: two PREMISE assertions, then the
+  // contract. See the header → "Base-sensitive rows (cover matrix)".
   it("rejects a cover URL that changes host once a rendering page supplies the base", () => {
     // The document the extension dialog is injected into.
     const readmooPage = "https://next.readmoo.com/read/#/library";
@@ -545,14 +648,8 @@ describe("isAllowedCoverUrl", () => {
     expect(isAllowedCoverUrl(hostile)).toBe(false);
   });
 
-  /**
-   * Executable form of the `//`-widening tripwire row above, so the row cannot
-   * decay: an edit that dropped the `//` from that URL would leave the row
-   * passing while no longer guarding anything. These assertions pin the two
-   * facts that make it a tripwire at all — the literal `//` is present, and the
-   * string is still NOT of the shape the fast path may early-accept — next to
-   * the parser disagreement that forces the rejection.
-   */
+  // Executable form of the `//` tripwire row, so it cannot decay. See the header
+  // → "`//`-widening tripwire".
   it("rejects a base-sensitive cover URL whose path contains a literal //", () => {
     const readmooPage = "https://next.readmoo.com/read/#/library";
     const hostile = "https:/cdn.readmoo.com//x.jpg";
@@ -600,28 +697,8 @@ describe("isAllowedCoverUrl", () => {
   });
 });
 
-/**
- * `isAllowedBookUrl` is the whitelist for the per-book detail link
- * (`readmooUrl`), which the Extension and the PWA render as a clickable
- * `<a href>` and the Worker sanitises on both the books write paths and the
- * family-bookshelf / public-snapshot read paths.
- *
- * Different trust boundary from the cover matrix above: a cover is an
- * `<img src>` that fires a request on RENDER, while a book link needs a click.
- * That lowers the rate but not the severity — the click happens precisely when
- * the user believes they are opening Readmoo, so an off-domain value is a
- * phishing / arbitrary-redirect lure served under a legitimate book title, and
- * the destination host learns the viewer's IP and User-Agent. It does not learn
- * the referer: every render site pairs the href with `rel="noopener
- * noreferrer"`, and `noreferrer` suppresses the Referer header outright — that
- * attribute is load-bearing, so dropping it would widen this exposure. No CSP
- * substitutes for the whitelist either: `img-src` governs image loads and says
- * nothing about navigation.
- *
- * This is the ONLY exhaustive matrix for the rule, so it is written full even
- * though `isAllowedCoverUrl` shares the same core today. The two are separately
- * tightenable by design, so neither matrix may be replaced by "these two agree".
- */
+// The per-book `<a href>` whitelist; the ONLY exhaustive matrix for it, never to be
+// replaced by "these two agree". See the header → "isAllowedBookUrl".
 describe("isAllowedBookUrl", () => {
   const cases: Array<{ name: string; url: string; expected: boolean }> = [
     {
@@ -636,9 +713,8 @@ describe("isAllowedBookUrl", () => {
       expected: true,
     },
     {
-      // Guards the base-sensitivity check below against over-blocking: it
-      // compares full `href`s, so the hash route has to survive resolution
-      // byte-for-byte. This is the shape `readmooAppUrl` builds.
+      // Over-blocking guard: the hash route `readmooAppUrl` builds must survive
+      // full-`href` comparison byte-for-byte.
       name: "a hash-route link into the web app",
       url: "https://next.readmoo.com/read/#/library",
       expected: true,
@@ -703,30 +779,8 @@ describe("isAllowedBookUrl", () => {
       url: "//readmoo.com/book/210001",
       expected: false,
     },
-    /**
-     * Same primitive as the cover matrix's base-sensitive rows — a scheme with
-     * no `//` — restated here because the two exports are separately
-     * tightenable and neither matrix may lean on "these two agree".
-     *
-     * What the string means depends on WHERE it is rendered: WHATWG resolves
-     * these forms through "special authority ignore slashes" state with no
-     * base (host = `readmoo.com`, so every check above passes) and through
-     * "relative" state against a same-scheme base (host = the BASE's). So the
-     * whitelist certifies "this points at Readmoo" while the `<a href>` in the
-     * page points at the VIEWER's own origin.
-     *
-     * That is the observed exploit, and it is worse here than a plain
-     * off-domain phishing link: the target is same-origin, so the viewer sees
-     * their own trusted URL bar. The reported chain sent a PWA reader to the
-     * PWA's own `/public/x#invite=moo-x`, which the SPA fallback answers by
-     * clearing the stored session and pre-filling the attacker's sync code —
-     * i.e. it drives the app's OWN join flow, something no third-party
-     * destination could do. `rel="noopener noreferrer"` is no help against it
-     * either: that hardens where a link LANDS, not which origin it resolves to.
-     *
-     * Confirmed exploitable: each row returned TRUE until the core started
-     * comparing the standalone parse against a parse with a base.
-     */
+    // Base-sensitive rows (same-origin `<a href>` exploit), confirmed exploitable.
+    // See the header → "isAllowedBookUrl" → "Base-sensitive book rows".
     {
       name: "a bare scheme with no // and dot-segments",
       url: "https:readmoo.com/../../public/x#invite=moo-x",
@@ -750,38 +804,15 @@ describe("isAllowedBookUrl", () => {
       expected: false,
     },
     {
-      // Boundary companion to the single-backslash row above; see the cover
-      // matrix's copy for the full reasoning. A PAIR of backslashes reaches
-      // "special authority ignore slashes" state, so the host comes from the
-      // STRING with or without a base — an absolute Readmoo link in every
-      // rendering context, hence accepted. Present so the row above is not
-      // misread as "backslashes are rejected".
+      // A PAIR of backslashes is absolute in every context, so it is accepted.
+      // See the header → "Doubled backslash".
       name: "a bare scheme with a doubled backslash (equivalent to //)",
       url: "https:\\\\readmoo.com/book/210001",
       expected: true,
     },
     {
-      /**
-       * The `//`-widening tripwire, restated for this export because the two
-       * are separately tightenable and neither matrix may lean on "these two
-       * agree". Relaxing the production fast path's
-       * `url.startsWith("https://")` early-accept into `url.includes("//")` —
-       * or any other "has a `//` somewhere" test — would early-accept this
-       * string, which carries a literal `//` in its PATH while only ONE slash
-       * follows the scheme, i.e. is base-SENSITIVE and must stay rejected.
-       *
-       * The criterion is base-INVARIANCE, not the presence or absence of `//`.
-       * POSITION decides it, in both directions: a `//` in the path proves
-       * nothing (this row), and the doubled-backslash row above is allowed
-       * while containing no `//` at all. It alone catches the widening, but
-       * NOT because it is the only rejected row carrying a `//` — plain HTTP,
-       * a non-default port, the protocol-relative form, the userinfo smuggle,
-       * the two look-alike hosts and the trailing-dot FQDN all carry one too.
-       * Each of those is refused earlier, by the parse itself or by the
-       * scheme / port / host checks that run BEFORE the fast path, so this is
-       * the only rejected row that BOTH reaches the fast path and contains a
-       * literal `//`.
-       */
+      // Tripwire for widening `startsWith("https://")` into `includes("//")`: `//`
+      // only in the PATH. See the header → "`//`-widening tripwire".
       name: "a single-slash scheme whose path happens to contain //",
       url: "https:/readmoo.com//x",
       expected: false,
@@ -825,18 +856,8 @@ describe("isAllowedBookUrl", () => {
     }
   });
 
-  /**
-   * Anti-drift tripwire for the trap this whitelist is one refactor away from:
-   * `isReadmooHost` looks like the obvious predicate to reuse, but its
-   * exact-match list holds only the two WEB-APP hosts (next. / read.), while
-   * every legitimate book link lives on the APEX — `readmooUrl` is built as
-   * `${READMOO_BOOK_BASE}${bookId}` with
-   * `READMOO_BOOK_BASE = "https://readmoo.com/book/"`
-   * (extension/src/content/scraper.ts:31). Rebuilding `isAllowedBookUrl` on
-   * `isReadmooHost` would therefore blank EVERY real book link — a total
-   * feature outage that no hostile-URL test would catch, because all the
-   * hostile cases would still (correctly) return false.
-   */
+  // Rebuilding on `isReadmooHost` (web-app hosts only) would blank every APEX book
+  // link. See the header → "isAllowedBookUrl" → "Apex trap".
   it("accepts the apex book URL that isReadmooHost rejects", () => {
     const bookUrl = "https://readmoo.com/book/210001";
 
@@ -844,18 +865,8 @@ describe("isAllowedBookUrl", () => {
     expect(isReadmooHost(new URL(bookUrl).hostname)).toBe(false);
   });
 
-  /**
-   * Executable statement of WHY the base-sensitive rows above must be rejected,
-   * reconstructing the observed exploit end to end so the rows cannot later be
-   * mistaken for over-caution and deleted.
-   *
-   * The first two assertions are the PREMISE — they pin the parser
-   * disagreement the attack rests on, so if a future engine stopped treating
-   * this shape as base-sensitive, this test says so instead of quietly
-   * passing. The third is the production contract: a string whose meaning
-   * depends on the rendering document can never be whitelisted, because the
-   * whitelist is applied to the string and the browser is not.
-   */
+  // Executable WHY, reconstructing the observed exploit: two PREMISE assertions,
+  // then the contract. See the header → "Base-sensitive rows (cover matrix)".
   it("rejects a book URL that changes origin once a rendering page supplies the base", () => {
     // Any PWA/extension page the link is rendered into; only its origin matters.
     const viewerPage = "https://moo.example/app/family";
@@ -874,14 +885,8 @@ describe("isAllowedBookUrl", () => {
     expect(isAllowedBookUrl(hostile)).toBe(false);
   });
 
-  /**
-   * Executable form of the `//`-widening tripwire row above, so the row cannot
-   * decay: an edit that dropped the `//` from that URL would leave the row
-   * passing while no longer guarding anything. These assertions pin the two
-   * facts that make it a tripwire — the literal `//` is present, and the string
-   * is still NOT of the shape the fast path may early-accept — right next to
-   * the parser disagreement that forces the rejection.
-   */
+  // Executable form of the `//` tripwire row, so it cannot decay. See the header
+  // → "`//`-widening tripwire".
   it("rejects a base-sensitive book URL whose path contains a literal //", () => {
     const viewerPage = "https://moo.example/app/family";
     const hostile = "https:/readmoo.com//x";
@@ -930,64 +935,8 @@ describe("isAllowedBookUrl", () => {
   });
 });
 
-/**
- * Runtime robustness of both whitelists against a NON-STRING argument — the
- * one thing their `url: string` parameter cannot promise.
- *
- * Why a `string` parameter still needs runtime rows. The value arrives from the
- * BACKEND, and nothing on the way narrows its type:
- *   - Both API clients read the `{ data, error }` envelope through a bare cast
- *     (`extension/src/api/client.ts`, `pwa/src/api/client.ts`), so the declared
- *     shape is an assumption about the server, not a checked fact.
- *   - The server is user-configurable. A sync code's `@host` segment points a
- *     whole family at a self-hosted Worker, which may predate any of these
- *     checks or be modified outright.
- *   - `coverUrl` is DELIBERATELY excluded from the runtime text coercion that
- *     guards its sibling fields. That exclusion is argued under the
- *     `Not covered here, deliberately:` heading of `shared/src/api/safeText.ts`
- *     — a block title rather than a line number on purpose, because the
- *     numbers this reference used to carry went stale inside a single PR. The
- *     argument there has TWO parts and both are load-bearing: these fields
- *     only render into an `<img src>` attribute, which the DOM string-coerces,
- *     AND they run through the Readmoo URL whitelist first, which guards its
- *     OWN input type. The second part is not a property of that module at all
- *     — it is a property of the code under test HERE, and this describe block
- *     is what enforces it. `safeText.ts` says so outright: if the whitelist
- *     ever drops that guard, the exclusion stops being safe and these fields
- *     have to be coerced there instead. `sanitizeBookText` accordingly coerces
- *     `readmooUrl` but not `coverUrl`, and `sanitizeFamilyBookshelfText` does
- *     not touch it either, so on the family-bookshelf path a non-string
- *     `coverUrl` reaches the render layer verbatim.
- * A JSON body whose `coverUrl` is `["https://cdn.readmoo.com/x.jpg"]` therefore
- * arrives at `safeCoverUrl` → `isAllowedCoverUrl` (extension/src/dialog/
- * BookCard.tsx:113 and its three twins) as an ARRAY. The DOM half of that
- * argument still holds for such a value; the whitelist half is precisely what
- * the rows below buy, because a string method on an array throws and neither
- * app mounts an ErrorBoundary — so a throw there is a permanent white screen
- * rather than a blank cover.
- *
- * `isAllowedBookUrl` is asserted on the same inputs even though its own field
- * IS coerced today: the two exports are separate trust boundaries over ONE
- * file-local core, so the guard has to hold on both sides of that split, and
- * the coercion that currently protects `readmooUrl` is a different module's
- * decision that may change without anyone revisiting this one.
- *
- * What regressed, and why the guard looks deletable. Until the fast path landed
- * the core only ever fed this parameter to `new URL(...)`, which coerces its
- * argument with `String()` — an array of one URL string parsed fine and the
- * base-invariance comparison answered `true`. `url.startsWith(...)` is the
- * FIRST string method the core has ever called on it, and a string method on an
- * array throws. The `typeof` guard in front of it therefore reads like dead
- * weight next to a `string` parameter — this block is what turns red when
- * someone tidies it away.
- *
- * Both assertions per row are load-bearing. `not.toThrow()` alone would also be
- * satisfied by a guard written as an early `return false`, which does not crash
- * but silently blanks every legitimate cover and book link on that path — so
- * each row also pins the verdict the core returned BEFORE the fast path
- * existed. Inputs are cast at the call site; the production signature stays
- * strict, and the cast is the honest spelling of what the network hands over.
- */
+// A non-string from the backend must neither throw (white screen) nor blank valid
+// links; both assertions per row matter. See the header → "Non-string input".
 describe("isAllowedCoverUrl / isAllowedBookUrl on non-string input", () => {
   interface NonStringCase {
     name: string;
@@ -1008,14 +957,8 @@ describe("isAllowedCoverUrl / isAllowedBookUrl on non-string input", () => {
     },
   ];
 
-  /**
-   * The shapes that actually REACH the string method, and so the ones that
-   * threw: `String()` on a one-element array is that element, recursively, so
-   * both of these coerce to a genuine allowed Readmoo URL while being no string
-   * at all. Every check ahead of the fast path — the parse, the scheme, the
-   * port, the host — passes on the coerced value, which is exactly why the
-   * input survives that far.
-   */
+  /** Arrays that `String()` turns into an allowed URL, so they REACH the string
+   *  method (the ones that threw). See the header → "Non-string input". */
   function reachingCases(allowedUrl: string): NonStringCase[] {
     return [
       {
@@ -1029,12 +972,8 @@ describe("isAllowedCoverUrl / isAllowedBookUrl on non-string input", () => {
     ];
   }
 
-  /**
-   * Non-strings that `String()` turns into something no URL parser accepts, so
-   * `new URL(value)` throws inside the core's own try/catch and the fast path
-   * is never reached. They pin the fail-closed half: a malformed field is
-   * refused, never propagated and never fatal.
-   */
+  // Non-strings no URL parser accepts: the fail-closed half (refused, never
+  // propagated, never fatal).
   const unparseableCases: NonStringCase[] = [
     { name: "a plain object", value: {} },
     { name: "a number", value: 42 },
@@ -1074,9 +1013,8 @@ describe("READMOO_COVER_DOMAINS", () => {
 
   it("holds registrable domains only, never a host pattern or a URL", () => {
     for (const domain of READMOO_COVER_DOMAINS) {
-      // The PWA CSP derives `https://{d}` and `https://*.{d}` from these
-      // entries (see pwa/tests/unit/cspHeaders.test.ts), which only works while
-      // each entry is a bare registrable domain.
+      // The PWA CSP derives `https://{d}` / `https://*.{d}` from these, so each
+      // must be a bare registrable domain (pwa/tests/unit/cspHeaders.test.ts).
       expect(domain).toMatch(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/);
       expect(domain).not.toContain("*");
       expect(domain).not.toContain("/");

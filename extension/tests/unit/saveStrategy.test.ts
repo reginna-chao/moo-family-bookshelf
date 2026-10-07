@@ -5,6 +5,29 @@ import {
 } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 
+/**
+ * Personal-shelf save strategy (`shared/src/personal/saveStrategy.ts`):
+ * `decideSaveStrategy` (PUT vs PATCH and the PATCH change list) and
+ * `applyPatchChanges`.
+ *
+ * Legacy cleanup (#234): when the server holds a book the local list no longer
+ * has, PATCH never removes a server book, so a legacy entry dropped locally is
+ * sent as an explicit unshare instead of forcing a full PUT.
+ *
+ * Promoted twins (#234 C3): a non-dirty, server-known book whose local flag
+ * differs from the load-time server flag inherited a dropped legacy entry's
+ * share; it must go out too (order: dirty, then promoted, then unshare).
+ *
+ * Flag coercion: both sides coerce through the same rule — only BoolFlag.TRUE
+ * (1) is shared, anything else (boolean `true`, missing, null) is FALSE — the
+ * same coercion the Worker's toBoolFlag applies on PUT.
+ *
+ * includePromoted gate (PWA shape): the PWA normalizes local flags by
+ * truthiness while the snapshot keeps the raw server value, so a stored boolean
+ * `true` / `"0"` reads as a local-vs-snapshot difference. Without the gate,
+ * saving any other book would share those without an opt-in.
+ */
+
 /** Minimal book factory — the function constrains `{ bookId, isShared }`. */
 const b = (bookId: string, isShared: BoolFlag = BoolFlag.FALSE) => ({
   bookId,
@@ -104,8 +127,7 @@ describe("decideSaveStrategy", () => {
   });
 
   // --- server holds a book the local list no longer has (#234 legacy cleanup) ---
-  // PATCH never removes a server book, so a legacy entry dropped locally is
-  // sent as an explicit unshare instead of forcing a full PUT.
+  // Sent as an explicit unshare, not a forced PUT. See the file header.
 
   const LEGACY_ID = "14563038";
   const REAL_ID = "210180801000101";
@@ -239,8 +261,7 @@ describe("decideSaveStrategy", () => {
   );
 
   // --- promoted twins (#234 C3) ---
-  // A non-dirty, server-known book whose local flag differs from the load-time
-  // server flag inherited a dropped legacy entry's share; it must go out too.
+  // A promoted (inherited-share) book must go out too. See the file header.
 
   it("sends dirty, then promoted, then unshare changes in that order", () => {
     const OTHER_ID = "210000000000003";
@@ -285,9 +306,8 @@ describe("decideSaveStrategy", () => {
   });
 
   it.each([
-    // Both sides coerce through the same rule: only BoolFlag.TRUE (1) is
-    // shared, anything else (boolean `true`, missing, null) is FALSE — the same
-    // coercion the Worker's toBoolFlag applies on PUT.
+    // Only BoolFlag.TRUE (1) is shared, anything else is FALSE — as the Worker's
+    // toBoolFlag does on PUT.
     { label: "boolean true on both sides", server: true, local: true },
     { label: "server true, local FALSE", server: true, local: BoolFlag.FALSE },
     {
@@ -348,10 +368,7 @@ describe("decideSaveStrategy", () => {
   );
 
   // --- includePromoted gate (PWA shape) ---
-  // The PWA normalizes local flags by truthiness while the snapshot keeps the
-  // raw server value, so a stored boolean `true` / `"0"` reads as a local-vs-
-  // snapshot difference. Without the gate, saving any other book would share
-  // those without an opt-in.
+  // Without the gate, PWA truthiness diffs would share books without an opt-in.
 
   const pwaShapeInput = () => ({
     books: [

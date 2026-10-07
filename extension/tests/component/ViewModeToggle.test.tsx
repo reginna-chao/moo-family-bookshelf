@@ -71,10 +71,8 @@ describe("ViewModeToggle", () => {
   });
 
   describe("responsive sizing", () => {
-    // The 40px (desktop) / 32px (mobile) button sizing moved from inline styles
-    // to `.moo-view-toggle__btn` + the `--mobile` modifier in styles.css. jsdom
-    // does not apply stylesheet rules, so the observable contract is the modifier
-    // class presence/absence.
+    // 40px desktop / 32px mobile sizing is `.moo-view-toggle__btn` + `--mobile` in styles.css; jsdom
+    // applies no stylesheet, so the modifier's presence/absence is the contract.
     it("renders desktop buttons without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       render(<ViewModeToggle mode="grid" onChange={vi.fn()} />);
@@ -92,10 +90,8 @@ describe("ViewModeToggle", () => {
     });
   });
 
-  // Borders / hover fill / focus ring / head-tail radii were folded into the
-  // shared `.moo-segmented__item` component class; `.moo-view-toggle__btn` now
-  // only pins the 40×40 icon box. jsdom does not apply the stylesheet, so the
-  // class list is the contract that keeps the shared base from being dropped.
+  // Borders / hover / focus ring / end radii live in the shared `.moo-segmented__item`; the toggle class
+  // only pins the 40×40 icon box. The class list (jsdom) keeps the shared base from being dropped.
   describe("shared .moo-segmented__item class contract", () => {
     it.each([
       { label: "切換為網格檢視", position: "first" },

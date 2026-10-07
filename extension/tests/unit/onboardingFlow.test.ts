@@ -1,6 +1,89 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { webcrypto } from "node:crypto";
 
+/**
+ * Onboarding flow primitives in `src/dialog/onboardingFlow.ts`: performJoin,
+ * the recovery flows, createNewFamily and restoreApiEndpoint.
+ *
+ * MEMBER_REMOVED (#270): a removed member's refused join says how long the block
+ * lasts, in the client's own copy — the server message does not carry the 6 hours.
+ *
+ * `@host` adoption: pasting an `@host` sync code IS an explicit choice of that
+ * endpoint, so the join path persists it through the same helper the Settings
+ * confirmation uses: a DIRECT storage.local write (authoritative — a sleeping
+ * Firefox background page can drop the message) plus a best-effort
+ * SET_API_ENDPOINT message. It also clears any stale "declined family endpoint"
+ * marker.
+ *
+ * An `@host` the endpoint validator refuses: a sync code's `@host` is
+ * attacker-supplied text — whoever shares the code chooses where the joiner's
+ * auth token and full book list are sent. It is adopted through `setEndpoint`,
+ * i.e. the production `validateEndpointUrl` allowlist — which now also refuses
+ * embedded credentials, so `https://real.example@evil.com` (reads as
+ * real.example, fetches evil.com) throws instead of being adopted. When it
+ * throws, the join must ABORT: no endpoint stored, no join request, no
+ * credentials persisted, and the client left on the endpoint it already trusted.
+ * `PerformJoinFailure` carries a Chinese message so the UI never surfaces the
+ * raw English `Error`. `createValidatingApiClient`'s `setEndpoint` runs the REAL
+ * validator, so these tests fail if the production allowlist ever stops
+ * rejecting these URLs. The refusal path logs the underlying reason: the
+ * user-facing copy is deliberately generic ("無效或不安全"), so without that log
+ * the reason a join was refused is unrecoverable — a self-hoster debugging "why
+ * won't my family's code work?" has nothing to go on. The `console.warn` spy
+ * silences it so the suite stays readable, and is restored after each test so no
+ * other file inherits a muted console.
+ *
+ * ENDPOINT LIFETIME, backend-refusal half: the `@host` is applied in memory (the
+ * join request has to go there) but is PERSISTED only once the backend accepts:
+ * a host whose server said "no" has proven nothing, and a persisted endpoint
+ * outlives the attempt — it would still be in force when the user gives up and
+ * presses 建立家庭, shipping the userId, the token create issues and the whole
+ * book list there. The in-memory endpoint deliberately STAYS adopted here,
+ * because a verification challenge is a continuation of the same attempt (it
+ * queries that same server for the account's method). Handing it back is the
+ * caller's job — pinned in tests/unit/useOnboardingFlow.test.ts → "handleJoin
+ * endpoint lifetime (@host adoption and rollback)".
+ *
+ * restoreApiEndpoint hands the in-memory client back to the endpoint an
+ * abandoned join attempt started from. It touches the client ONLY: performJoin
+ * persists a sync code's `@host` after the backend accepts, so an attempt that
+ * ended without a join has nothing durable to undo. It runs on error paths,
+ * where a throw would replace the failure the caller is in the middle of
+ * reporting — so a refusing setEndpoint must be swallowed and logged, never
+ * propagated.
+ *
+ * SEC-1: existing verification-enabled members hit VERIFICATION_REQUIRED on a
+ * fresh device. The three join flows must (a) forward the collected
+ * verifySecret into joinFamily's opts, and (b) the two recovery flows must
+ * surface the backend errorCode on failure so the caller can open the
+ * verification prompt instead of silently dropping to a generic error. A 429
+ * lockout body carries `error.retryAfter` (seconds); each flow must pass it
+ * through untouched — it is what lets the verification prompt show a live
+ * countdown instead of an open-ended "請稍後再試".
+ *
+ * Firefox: the background event page can be asleep, so the fire-and-forget
+ * SET_FAMILY_ID message rejects. familyId persistence must NOT depend on that
+ * message — every flow writes FAMILY_ID_KEY DIRECTLY to storage.local. These
+ * tests force chrome.runtime.sendMessage to reject and assert the direct write
+ * still happened with the expected familyId.
+ *
+ * createNewFamily refused by the backend: `createFamily` resolves the
+ * `{ data, error }` envelope through `readEnvelope`, which bare-casts
+ * `response.json()` (src/api/client.ts), and the endpoint is user-configurable
+ * (BYO backend via the sync code's `@host`), so `error.message` is `unknown` at
+ * runtime — while `CreateFamilyError`'s constructor parameter is typed `string`.
+ * That gap is load-bearing, because the thrown value is not just copy: the
+ * caller distinguishes a verification challenge from a dead end by `instanceof
+ * CreateFamilyError` plus its `code`. A message the Error constructor cannot
+ * stringify (ToString throws for an object with `toString` and `valueOf` nulled
+ * out — the exact payload from review) used to throw a TypeError from INSIDE the
+ * constructor, so no CreateFamilyError ever existed — the VERIFICATION_REQUIRED
+ * bridge was skipped and the user was dead-ended on an account that only needed
+ * a PIN. Coercing before construction is what keeps that bridge reachable.
+ * `captureThrown` hands back whatever createNewFamily threw; its trailing throw
+ * keeps a resolved call from passing vacuously.
+ */
+
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
     Object.defineProperty(globalThis, "crypto", {
@@ -410,10 +493,8 @@ describe("performJoin", () => {
     });
   });
 
-  /**
-   * #270: a removed member's refused join says how long the block lasts, in
-   * the client's own copy — the server message does not carry the 6 hours.
-   */
+  // #270: a removed member's refused join states the 6-hour block in the client's
+  // own copy (the server message does not carry it).
   it("replaces the server message with the rejoin-wait copy for MEMBER_REMOVED", async () => {
     const apiClient = createMockApiClient({
       joinFamily: vi.fn().mockResolvedValue({
@@ -460,13 +541,8 @@ describe("performJoin", () => {
     });
   });
 
-  /**
-   * Pasting an `@host` sync code IS an explicit choice of that endpoint, so the
-   * join path persists it through the same helper the Settings confirmation
-   * uses: a DIRECT storage.local write (authoritative — a sleeping Firefox
-   * background page can drop the message) plus a best-effort SET_API_ENDPOINT
-   * message. It also clears any stale "declined family endpoint" marker.
-   */
+  // An `@host` code is an explicit choice: persisted by direct write + best-effort
+  // message, declined marker cleared. See the header → "`@host` adoption".
   it("adopts, persists, and broadcasts the endpoint when decoded.apiHost is set", async () => {
     vi.mocked(decodeSyncCode).mockReturnValue({
       familyId: "fam-join-1",
@@ -521,25 +597,10 @@ describe("performJoin", () => {
     );
   });
 
-  /**
-   * A sync code's `@host` is attacker-supplied text: whoever shares the code
-   * chooses where the joiner's auth token and full book list are sent. It is
-   * adopted through `setEndpoint`, i.e. the production `validateEndpointUrl`
-   * allowlist — which now also refuses embedded credentials, so
-   * `https://real.example@evil.com` (reads as real.example, fetches evil.com)
-   * throws instead of being adopted.
-   *
-   * When it throws, the join must ABORT: no endpoint stored, no join request,
-   * no credentials persisted, and the client left on the endpoint it already
-   * trusted. `PerformJoinFailure` carries a Chinese message so the UI never
-   * surfaces the raw English `Error`.
-   */
+  // A refused `@host` ABORTS the join with nothing stored or sent. See the header
+  // → "An `@host` the endpoint validator refuses".
   describe("an @host the endpoint validator refuses", () => {
-    /**
-     * The refusal path logs the underlying reason. Silenced here so the suite
-     * stays readable, and restored after each test so no other file inherits a
-     * muted console.
-     */
+    /** The refusal path's log, silenced for readability and restored after each test. */
     let warn: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
@@ -550,10 +611,8 @@ describe("performJoin", () => {
       warn.mockRestore();
     });
 
-    /**
-     * Mock client whose `setEndpoint` runs the REAL validator, so these tests
-     * fail if the production allowlist ever stops rejecting these URLs.
-     */
+    /** Mock client whose `setEndpoint` runs the REAL validator, so these tests fail
+     *  if the production allowlist ever stops rejecting these URLs. */
     function createValidatingApiClient(): ApiClient {
       let endpoint = DEFAULT_API_ENDPOINT;
       return createMockApiClient({
@@ -640,11 +699,8 @@ describe("performJoin", () => {
       expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
     });
 
-    /**
-     * The user-facing copy is deliberately generic ("無效或不安全"), so without
-     * this log the reason a join was refused is unrecoverable — a self-hoster
-     * debugging "why won't my family's code work?" has nothing to go on.
-     */
+    // The copy is deliberately generic ("無效或不安全"), so this log is the only
+    // record of WHY a join was refused.
     it.each(refusedHosts)(
       "logs why the join was refused for %s",
       async (_label, apiHost) => {
@@ -720,20 +776,8 @@ describe("performJoin", () => {
     });
   });
 
-  /**
-   * ENDPOINT LIFETIME, backend-refusal half. The `@host` is applied in memory
-   * (the join request has to go there) but is PERSISTED only once the backend
-   * accepts: a host whose server said "no" has proven nothing, and a persisted
-   * endpoint outlives the attempt — it would still be in force when the user
-   * gives up and presses 建立家庭, shipping the userId, the token create issues
-   * and the whole book list there.
-   *
-   * The in-memory endpoint deliberately STAYS adopted here, because a
-   * verification challenge is a continuation of the same attempt (it queries
-   * that same server for the account's method). Handing it back is the caller's
-   * job — pinned in tests/unit/useOnboardingFlow.test.ts → "handleJoin endpoint
-   * lifetime (@host adoption and rollback)".
-   */
+  // A refused join persists nothing; the in-memory `@host` stays (the caller hands
+  // it back). See the header → "ENDPOINT LIFETIME, backend-refusal half".
   describe("a backend that refuses the join", () => {
     const REFUSED_HOST = "https://attacker.example";
 
@@ -819,16 +863,8 @@ describe("performJoin", () => {
   });
 });
 
-/**
- * `restoreApiEndpoint` hands the in-memory client back to the endpoint an
- * abandoned join attempt started from. It touches the client ONLY: performJoin
- * persists a sync code's `@host` after the backend accepts, so an attempt that
- * ended without a join has nothing durable to undo.
- *
- * It runs on error paths, where a throw would replace the failure the caller is
- * in the middle of reporting — so a refusing setEndpoint must be swallowed and
- * logged, never propagated.
- */
+// Client-only rollback on error paths: a refusing setEndpoint is swallowed and
+// logged, never propagated. See the header → "restoreApiEndpoint".
 describe("restoreApiEndpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -878,13 +914,8 @@ describe("restoreApiEndpoint", () => {
   });
 });
 
-/**
- * SEC-1: existing verification-enabled members hit VERIFICATION_REQUIRED on a
- * fresh device. The three join flows must (a) forward the collected verifySecret
- * into joinFamily's opts, and (b) the two recovery flows must surface the
- * backend errorCode on failure so the caller can open the verification prompt
- * instead of silently dropping to a generic error.
- */
+// SEC-1: join flows forward verifySecret; recovery flows surface errorCode.
+// See the header → "SEC-1".
 describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1018,11 +1049,8 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
     });
   });
 
-  /**
-   * A 429 lockout body carries `error.retryAfter` (seconds). Each flow must pass
-   * it through untouched — it is what lets the verification prompt show a live
-   * countdown instead of an open-ended "請稍後再試".
-   */
+  // A 429's `error.retryAfter` (seconds) passes through untouched — it drives the
+  // prompt's live countdown.
   describe("retryAfter surfacing on 429 failures", () => {
     /** joinFamily answering with a locked 429 that includes retryAfter. */
     function lockedApiClient(retryAfter?: number): ApiClient {
@@ -1119,13 +1147,8 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
   });
 });
 
-/**
- * Firefox: the background event page can be asleep, so the fire-and-forget
- * SET_FAMILY_ID message rejects. familyId persistence must NOT depend on that
- * message — every flow writes FAMILY_ID_KEY DIRECTLY to storage.local. These
- * tests force chrome.runtime.sendMessage to reject and assert the direct write
- * still happened with the expected familyId.
- */
+// Firefox: with SET_FAMILY_ID rejecting, FAMILY_ID_KEY must still be written
+// DIRECTLY to storage.local. See the header → "Firefox".
 describe("familyId persists to storage.local even when SET_FAMILY_ID message rejects (Firefox)", () => {
   // Find the local.set call whose payload includes FAMILY_ID_KEY (the credential
   // write batches USER_ID_KEY + FAMILY_ID_KEY + auth fields in a single set).
@@ -1242,22 +1265,8 @@ describe("familyId persists to storage.local even when SET_FAMILY_ID message rej
   });
 });
 
-/**
- * `createFamily` resolves the `{ data, error }` envelope through `readEnvelope`,
- * which bare-casts `response.json()` (src/api/client.ts), and the endpoint is
- * user-configurable (BYO backend via the sync code's `@host`), so
- * `error.message` is `unknown` at runtime — while `CreateFamilyError`'s
- * constructor parameter is typed `string`.
- *
- * That gap is load-bearing here, because the thrown value is not just copy: the
- * caller distinguishes a verification challenge from a dead end by
- * `instanceof CreateFamilyError` plus its `code`. A message the Error
- * constructor cannot stringify (ToString throws for an object with `toString`
- * and `valueOf` nulled out) used to throw a TypeError from INSIDE the
- * constructor, so no CreateFamilyError ever existed — the VERIFICATION_REQUIRED
- * bridge was skipped and the user was dead-ended on an account that only needed
- * a PIN. Coercing before construction is what keeps that bridge reachable.
- */
+// A hostile `error.message` must still yield a CreateFamilyError, or the
+// verification bridge is skipped. See the header → "createNewFamily refused".
 describe("createNewFamily — refused by the backend", () => {
   const FALLBACK = "建立家庭失敗，請稍後再試";
 
@@ -1292,10 +1301,8 @@ describe("createNewFamily — refused by the backend", () => {
     });
   }
 
-  /**
-   * Run createNewFamily and hand back whatever it threw. The trailing throw
-   * keeps a resolved call from passing vacuously.
-   */
+  /** Run createNewFamily and return what it threw; the trailing throw keeps a
+   *  resolved call from passing vacuously. */
   async function captureThrown(apiClient: ApiClient): Promise<unknown> {
     try {
       await createNewFamily({
@@ -1330,11 +1337,8 @@ describe("createNewFamily — refused by the backend", () => {
   );
 
   it("still throws CreateFamilyError (not TypeError) for a message that cannot be stringified", async () => {
-    // The exact payload from review: nulling both `toString` and `valueOf`
-    // makes ToPrimitive throw, so `new CreateFamilyError(message, …)` used to
-    // die inside its own constructor with a TypeError. A TypeError is not a
-    // CreateFamilyError, so the caller's instanceof check failed and the
-    // verification prompt never opened.
+    // The review payload: null `toString`/`valueOf` used to kill the constructor
+    // with a TypeError, so the verification prompt never opened.
     const thrown = await captureThrown(
       refusingApiClient({
         code: "VERIFICATION_REQUIRED",

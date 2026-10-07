@@ -2,6 +2,27 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag, type ApiClient } from "@/api/client";
 
+/**
+ * useBookSync (`src/dialog/useBookSync.ts`): mount auto-sync, manual sync and
+ * the sync results handed to the personal shelf.
+ *
+ * Auto full sync on mount: the old isOnLibrary restriction was removed — auto
+ * full sync now runs on mount irrespective of hash, since
+ * syncBooks(navigate:true) handles the navigation itself and restores the hash
+ * afterwards.
+ *
+ * Done-timer supersede: a manual sync started inside the 2s "done" window must
+ * supersede the pending done->idle timer. If that stale timer still fires,
+ * syncStatus drops to "idle" mid-sync and the sync button re-enables — the
+ * button's disabled state is the only guard against a second concurrent
+ * syncBooks().
+ *
+ * lastSyncRenamedBooks (#236 S1): the personal shelf moves an unsaved toggle
+ * from a renamed book's old id to its new one, so the rename pairs must belong
+ * to the SAME sync as `lastSyncBooks` — never a newer list with an older sync's
+ * pairs.
+ */
+
 // Mock syncBooks module
 vi.mock("@/sync/syncBooks", () => ({
   syncBooks: vi.fn(),
@@ -71,9 +92,8 @@ describe("useBookSync", () => {
 
   describe("auto-sync", () => {
     it("triggers auto-sync regardless of the current hash (no #/library gate)", async () => {
-      // The old isOnLibrary restriction was removed: auto full sync now runs on
-      // mount irrespective of hash, since syncBooks(navigate:true) handles the
-      // navigation itself and restores the hash afterwards.
+      // Auto full sync runs on mount whatever the hash: syncBooks(navigate:true)
+      // navigates and restores it itself.
       Object.defineProperty(window, "location", {
         writable: true,
         value: { hash: "#/settings" },
@@ -357,10 +377,8 @@ describe("useBookSync", () => {
     });
 
     it("stays syncing when the previous sync's done->idle reset comes due", async () => {
-      // A manual sync started inside the 2s "done" window must supersede the
-      // pending done->idle timer. If that stale timer still fires, syncStatus
-      // drops to "idle" mid-sync and the sync button re-enables — the button's
-      // disabled state is the only guard against a second concurrent syncBooks().
+      // A manual sync inside the 2s "done" window supersedes the done->idle timer.
+      // See the header → "Done-timer supersede".
       const { result } = renderHook(() => useBookSync(makeOptions()));
 
       // First manual sync completes and arms the done->idle reset.
@@ -544,9 +562,8 @@ describe("useBookSync", () => {
     });
   });
 
-  // #236 S1: the personal shelf moves an unsaved toggle from a renamed book's
-  // old id to its new one, so the rename pairs must belong to the SAME sync as
-  // `lastSyncBooks` — never a newer list with an older sync's pairs.
+  // #236 S1: the rename pairs must come from the SAME sync as `lastSyncBooks`.
+  // See the file header.
   describe("lastSyncRenamedBooks", () => {
     const bookOf = (bookId: string) => ({
       bookId,

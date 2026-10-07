@@ -417,13 +417,8 @@ describe("App account check (#271)", () => {
     });
   });
 
-  /**
-   * The check takes >= 1.5 s, so the family can be torn down (ApiClient's
-   * onFamilyRemoved) while it is in flight; its late answer must not undo that.
-   * Positive companions: "stays on the loading view until the check resolves"
-   * (a deferred boot `match` DOES reach the main view) and the main-view recheck
-   * case below (a late `mismatch` DOES show the blocking screen).
-   */
+  /** The ≥1.5 s check can outlive a family teardown (onFamilyRemoved); its late answer must not undo it.
+   *  Positive companions: "stays on the loading view until the check resolves", "a late recheck mismatch…". */
   describe("a family teardown during an in-flight check", () => {
     const GONE_CODE = "FAMILY_NOT_FOUND";
 

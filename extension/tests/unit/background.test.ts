@@ -14,14 +14,6 @@ import {
   PERSONAL_BOOKS_CACHE_KEY,
 } from "@/constants";
 
-// The background module runs migrateStorageKeys() at import time (and in
-// onInstalled/onStartup). These handler tests are not about migration — it has
-// its own suite in tests/unit/storage/migrate.test.ts — so stub it out to keep
-// its storage side effects from polluting the storage spy assertions.
-vi.mock("@/storage/migrate", () => ({
-  migrateStorageKeys: vi.fn().mockResolvedValue(undefined),
-}));
-
 /**
  * Tests for the background service worker message handlers.
  * Validates the sync+local dual-storage strategy.
@@ -30,7 +22,11 @@ vi.mock("@/storage/migrate", () => ({
  * async function that RETURNS a Promise resolving to the response object. There
  * is no Chrome `sendResponse` callback and no `return true`. These tests capture
  * the registered listener, invoke it with `(message, sender)`, and await the
- * returned Promise for the response.
+ * returned Promise for the response. The capture casts its fn to the spy's own
+ * (normalized) parameter type: the polyfill's addListener accepts the
+ * OnMessageListener union, our promise-returning MessageListener is
+ * structurally the async variant, and vitest's mockImplementation wants the
+ * spy's signature rather than the raw polyfill type.
  *
  * Storage contract: production uses promise-based `browser.storage.*` (get/set/
  * remove resolve a Promise). The mock spies are shared with `chrome.*` (see
@@ -38,11 +34,33 @@ vi.mock("@/storage/migrate", () => ({
  * promise-native polyfill types line up with production. Storage writes take a
  * single argument (no trailing callback).
  *
+ * Migration stub: the background module runs migrateStorageKeys() at import time
+ * (and in onInstalled/onStartup). These handler tests are not about migration —
+ * it has its own suite in tests/unit/storage/migrate.test.ts — so it is stubbed
+ * out to keep its storage side effects from polluting the storage spy assertions.
+ *
  * Note: message payloads (e.g. { type: "SET_FAMILY_ID", familyId }) and handler
  * response shapes (e.g. { familyId: value }) use their own field names and are
  * unrelated to storage keys. Only storage reads/writes use the `moo:`-prefixed
  * key constants.
+ *
+ * SET_API_ENDPOINT: the handler runs the SHARED `validateEndpointUrl` — the same
+ * rules the ApiClient and the Dialog's own storage write use. It used to keep a
+ * private, stricter copy, which made the background a third opinion on what a
+ * safe endpoint is: it refused the private/LAN addresses the rest of the client
+ * happily adopts, so a self-hoster's broadcast silently diverged from the
+ * authoritative local write that had already landed. Expectations are derived
+ * FROM the validator rather than hard-coded (`refusalMessageFor` takes the exact
+ * refusal from the validator's own throw, and fails loudly if `raw` is accepted,
+ * which would make a "refuses …" case silently vacuous), so the handler and the
+ * shared rules cannot drift apart while staying green.
  */
+
+// Not under test here (own suite in storage/migrate.test.ts); stubbed so its
+// storage writes stay out of the spy assertions. See the file header.
+vi.mock("@/storage/migrate", () => ({
+  migrateStorageKeys: vi.fn().mockResolvedValue(undefined),
+}));
 
 type MessageListener = (
   message: Record<string, unknown>,
@@ -51,12 +69,8 @@ type MessageListener = (
 
 let listener: MessageListener;
 
-/**
- * The exact refusal the handler surfaces for `raw` — taken from the shared
- * validator's own throw, so the assertion tracks production copy instead of
- * duplicating it. Fails loudly if `raw` is actually accepted, which would make
- * a "refuses …" case silently vacuous.
- */
+/** The validator's own refusal for `raw` (tracks production copy); throws if `raw`
+ *  is accepted, so no "refuses …" case passes vacuously. */
 function refusalMessageFor(raw: string): string {
   try {
     validateEndpointUrl(raw);
@@ -87,11 +101,8 @@ describe("background service worker", () => {
     vi.mocked(browser.storage.sync.set).mockResolvedValue();
     vi.mocked(browser.storage.sync.remove).mockResolvedValue();
 
-    // Capture the onMessage listener registered by the module. The polyfill's
-    // addListener accepts the OnMessageListener union; our promise-returning
-    // MessageListener is structurally the async variant. vitest's
-    // mockImplementation wants the spy's own (normalized) signature, so cast the
-    // capture fn to that exact parameter type rather than the raw polyfill type.
+    // Capture the module's onMessage listener; the cast targets the spy's own
+    // signature. See the header → "Messaging contract".
     const addListenerMock = vi.mocked(browser.runtime.onMessage.addListener);
     addListenerMock.mockImplementation(((fn: MessageListener) => {
       listener = fn;
@@ -266,17 +277,8 @@ describe("background service worker", () => {
     });
   });
 
-  /**
-   * The background handler runs the SHARED `validateEndpointUrl` — the same
-   * rules the ApiClient and the Dialog's own storage write use. It used to keep
-   * a private, stricter copy, which made the background a third opinion on what
-   * a safe endpoint is: it refused the private/LAN addresses the rest of the
-   * client happily adopts, so a self-hoster's broadcast silently diverged from
-   * the authoritative local write that had already landed.
-   *
-   * Expectations below are derived FROM the validator rather than hard-coded,
-   * so the handler and the shared rules cannot drift apart while staying green.
-   */
+  // The SHARED `validateEndpointUrl`, never a private copy; expectations derive
+  // from it. See the header → "SET_API_ENDPOINT".
   describe("SET_API_ENDPOINT", () => {
     it("writes apiEndpoint to local storage only", async () => {
       const response = await sendMessage({

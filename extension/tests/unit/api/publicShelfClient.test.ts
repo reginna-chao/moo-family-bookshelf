@@ -6,6 +6,35 @@ import {
   type PublicShelf,
 } from "@/api/types";
 
+/**
+ * ApiClient public-shelf envelope handling: bodyless responses, `retryAfter`
+ * validation and synthesized-error provenance.
+ *
+ * Bodyless responses: `bodylessResponse` builds a response with NO body whose
+ * `json()` rejects exactly like the real `fetch` does on an empty payload. That
+ * SyntaxError is what used to be laundered into a NETWORK_ERROR envelope and
+ * then swallowed, so a 204 read as a failure and a refused revocation read as a
+ * success. The bodyless allowance is exactly 204, the one status this API
+ * answers without a body. Every other empty response is read as the parse
+ * failure it is, so a backend cannot have the dialog report a link as closed by
+ * answering an empty body on a status the API never returns. 304 lands there
+ * too — it is `!response.ok`, so its empty body was never eligible for the
+ * success path either way.
+ *
+ * retryAfter validation at the envelope boundary: `retryAfter` crosses a trust
+ * boundary — a self-hosted (BYO) backend can put anything in the envelope, and
+ * the value is rendered straight into the back-off copy. Anything unusable must
+ * be dropped so the UI falls back to its static wording instead of printing
+ * 「NaN 秒」/「-1 秒」.
+ *
+ * Provenance cannot cross the wire: `client.ts` marks the envelopes it builds
+ * itself with a module-private Symbol, which `JSON.parse` can never produce — so
+ * a self-hosted (BYO) or hostile backend that puts the client-only
+ * AUTH_REFRESH_RATE_LIMITED code in a response body still yields
+ * `synthesized: false`, and the dialog refuses to render its message verbatim
+ * (see `tests/unit/dialog/publicShareMessages.test.ts`).
+ */
+
 // Pin DEFAULT_API_ENDPOINT (avoids import.meta.env dependence) while keeping
 // every other real constant the client module imports.
 vi.mock("@/constants", async (importOriginal) => {
@@ -36,12 +65,8 @@ function jsonResponse(body: unknown, status = 200) {
   };
 }
 
-/**
- * A response with NO body. `json()` rejects exactly like the real `fetch` does
- * on an empty payload — that SyntaxError is what used to be laundered into a
- * NETWORK_ERROR envelope and then swallowed, so a 204 read as a failure and a
- * refused revocation read as a success.
- */
+/** A response with NO body; `json()` rejects like the real `fetch`. See the header
+ *  → "Bodyless responses". */
 function bodylessResponse(status: number) {
   return {
     ok: status >= 200 && status < 300,
@@ -99,14 +124,8 @@ describe("ApiClient public-shelf envelope handling", () => {
       },
     );
 
-    /**
-     * Counter-case to the row above: the bodyless allowance is exactly 204, the
-     * one status this API answers without a body. Every other empty response is
-     * read as the parse failure it is, so a backend cannot have the dialog
-     * report a link as closed by answering an empty body on a status the API
-     * never returns. 304 lands here too — it is `!response.ok`, so its empty
-     * body was never eligible for the success path either way.
-     */
+    // Counter-case: the bodyless allowance is exactly 204; any other empty body
+    // is a parse failure. See the header → "Bodyless responses".
     it.each([
       { status: 205, label: "Reset Content" },
       { status: 304, label: "Not Modified" },
@@ -266,12 +285,8 @@ describe("ApiClient public-shelf envelope handling", () => {
       expect(err).toMatchObject({ code: "MAX_SHELVES_REACHED" });
     });
 
-    /**
-     * `retryAfter` crosses a trust boundary: a self-hosted (BYO) backend can put
-     * anything in the envelope, and the value is rendered straight into the
-     * back-off copy. Anything unusable must be dropped so the UI falls back to
-     * its static wording instead of printing「NaN 秒」/「-1 秒」.
-     */
+    // An unusable `retryAfter` is dropped, never rendered as「NaN 秒」/「-1 秒」.
+    // See the file header.
     describe("retryAfter validation at the envelope boundary", () => {
       async function rejectWithRetryAfter(retryAfter: unknown) {
         globalThis.fetch = vi.fn().mockResolvedValue(
@@ -317,14 +332,8 @@ describe("ApiClient public-shelf envelope handling", () => {
       });
     });
 
-    /**
-     * Provenance cannot cross the wire. `client.ts` marks the envelopes it
-     * builds itself with a module-private Symbol, which `JSON.parse` can never
-     * produce — so a self-hosted (BYO) or hostile backend that puts the
-     * client-only AUTH_REFRESH_RATE_LIMITED code in a response body still yields
-     * `synthesized: false`, and the dialog refuses to render its message
-     * verbatim (see `tests/unit/dialog/publicShareMessages.test.ts`).
-     */
+    // Provenance cannot cross the wire: a server-sent code stays
+    // `synthesized: false`. See the file header.
     it("never marks a server-sent AUTH_REFRESH_RATE_LIMITED envelope as client-synthesized", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         jsonResponse(

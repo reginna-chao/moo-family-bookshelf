@@ -42,6 +42,109 @@ import {
  * doRefreshToken takes an injected `deps` boundary (request / setAuthToken /
  * callbacks) so this is a pure unit test of the branching — only browser.storage
  * (via the shared setup mock) and the injected request are stubbed.
+ *
+ * Storage seeding (`seedStorage`): writes go into the shared store-backed mock
+ * from `tests/setup.ts`, so every read and every write in a test hits ONE store:
+ * what doRefreshToken sets or removes is what the next read sees. Stubbing `get`
+ * with a frozen snapshot instead would keep answering the pre-call world,
+ * silently defusing any test that calls doRefreshToken twice (the auto-rejoin
+ * test: the second call must see the world the first call left behind — the
+ * removal of familyId is what has to stop the rejoin). The seeding calls are
+ * then wiped from the spies so the assertion helpers only ever observe calls
+ * PRODUCTION made. The store is module-scoped, so `afterEach` clears it before
+ * restoring the mocks, while the store-backed implementations are still installed.
+ *
+ * Family-scoped endpoint: every test seeds `SEEDED_ENDPOINT` (the family's
+ * self-hosted API endpoint this device had accepted) so EVERY branch's effect on
+ * the family-scoped endpoint keys is observable — the gone branch must drop
+ * them, and no other branch may. The API endpoint is FAMILY-scoped (the owner
+ * picks it, every member adopts it), so it lives and dies with the membership,
+ * and being REMOVED ends the membership exactly like leaving does:
+ *  - a client left pointed at the ex-family's server would send the NEXT
+ *    create/join there — userId, display name, the token that server issues and
+ *    the whole personal book list — and bake that host into the sync code it
+ *    then hands out;
+ *  - the declined marker goes for the same reason: a refusal recorded against
+ *    the old family must not silently suppress the confirmation prompt for the
+ *    next one;
+ *  - every retryable branch keeps it: an over-eager reset would send the user's
+ *    next request — and the retry that is still expected to succeed — to a
+ *    different server. The verification branch keeps it because the user is
+ *    about to re-supply their secret and that join has to reach the SAME
+ *    server; the rate-limit branch keeps it because the client still needs to
+ *    reach the right server once the window clears.
+ * `endpointChoiceWasReset()` checks BOTH keys (the accepted endpoint and the
+ * declined marker) — what `resetFamilyEndpointChoice` removes in one call.
+ * Housing the reset INSIDE the shared teardown (`clearFamilyStorageAndBroadcast`)
+ * is what structurally guarantees the silent path and the re-verification path
+ * do it identically.
+ *
+ * MEMBER_REMOVED (owner-initiated removal): the worker writes a
+ * `kicked:{familyId}:{userId}` tombstone when an owner removes another member,
+ * so the recovery join is answered with 403 MEMBER_REMOVED for as long as it
+ * lives. Treating that as family-gone is the whole point of the code: otherwise
+ * silent recovery keeps re-joining and, once the tombstone expires, quietly
+ * undoes the removal.
+ *
+ * onReauthRequired payload: the verification branch reports WHAT blocked
+ * recovery, so the dialog can open the prompt in the right state (locked +
+ * countdown vs. plain challenge).
+ *
+ * Recovery cooldown clamp: the requested wait is clamped to 1 hour
+ * (MAX_RECOVERY_COOLDOWN_SECONDS in `src/api/auth-refresh.ts`) and any
+ * non-positive/absent value falls back to 300s, so a hostile or buggy
+ * self-hosted (BYO) backend cannot suppress auto-recovery effectively forever.
+ * The persisted deadline is clamped on READ as well as on write: a value written
+ * before the write-side cap existed (or inflated by clock skew) must not outlive
+ * the 1h maximum. The clamped value is also what gets returned, so the UI
+ * countdown driven by `cooldownUntil` can never show more than the maximum either.
+ *
+ * Reauth-pending latch (skip guard): a verification prompt raised by an earlier
+ * 401 wave sets `isReauthPending() === true`. On the dialog's second data wave
+ * the refresh POST still runs, but silent join-recovery must be suppressed —
+ * otherwise it would re-spend the per-IP join budget and re-fire
+ * onReauthRequired, wiping the user's in-progress pattern/PIN input.
+ *
+ * Recovery join body: the silent join is flagged `recovery: 1` (#263) so the
+ * server can refuse a user no longer listed in the family instead of re-adding
+ * them, and it still omits displayName so the member's chosen name is kept.
+ *
+ * Own departure in flight (#263): the server can revoke the user's token before
+ * it answers their own "leave family" / "delete account" request, so another
+ * request 401s while the departure is in flight. A silent join then would re-add
+ * the user to the family they are leaving, so it is skipped while the departure
+ * mark is up — but the refresh POST still runs (a token fixed elsewhere recovers
+ * without a join) and nothing is torn down.
+ *
+ * isFamilyGoneError: the SINGLE definition of "the join target is gone for this
+ * user". The underlying code set is exported READ-ONLY for one consumer — the
+ * copy-coverage tripwire in `tests/unit/dialog/familyGoneNotice.test.ts` — and
+ * is never membership-tested at runtime, so the dialog's re-verification flow
+ * (`dialog/useVerificationPrompt.ts`, reached from `dialog/useReauth.ts`)
+ * classifies through this predicate rather than keeping a second copy — the
+ * drift a second copy invites is what the export prevents. The distinction it
+ * draws is load-bearing: a family-gone code means NO secret can make the join
+ * succeed (stop retrying, drop the local family binding), while a verification /
+ * rate-limit code means the opposite (keep the data, let the user try again —
+ * security-ux Invariant 2).
+ *
+ * clearFamilyStorageAndBroadcast: the shared teardown for "this user has no
+ * family any more". Two callers reach it: the silent recovery path in this
+ * module, and the dialog's re-verification join (`dialog/useReauth.ts`), which
+ * only learns of an owner-initiated removal AFTER the user supplied a correct
+ * secret (the server's verification gate answers before its kicked-tombstone
+ * check). Both must tear down identically, so the behaviour is pinned here once.
+ * It deliberately does NOT invoke `onFamilyRemoved` — reacting in the UI is the
+ * caller's business and the two callers do it at different moments.
+ *  - Order matters in both directions: resetting the endpoint while the family
+ *    binding still stands would leave a bound client talking to the wrong
+ *    server, and broadcasting first would let another context react to
+ *    FAMILY_REMOVED while the endpoint was still the ex-family's.
+ *  - `resetFamilyEndpointChoice` swallows its own storage failures, so it can
+ *    never abort the teardown it was added to. Losing the endpoint reset is
+ *    survivable (App's own handler still puts the LIVE client back on the
+ *    default); losing the broadcast is not — other contexts would keep showing
+ *    a family that is gone.
  */
 
 interface RequestOutcome {
@@ -79,26 +182,12 @@ function makeDeps(
   };
 }
 
-/**
- * The family's self-hosted API endpoint this device had accepted, seeded by
- * default so EVERY branch's effect on the family-scoped endpoint keys is
- * observable — the gone branch must drop them, and no other branch may.
- */
+/** Accepted self-hosted endpoint, seeded so every branch's effect on the
+ *  family-scoped endpoint keys is observable. See the header → "Family-scoped endpoint". */
 const SEEDED_ENDPOINT = "https://family.example.com";
 
-/**
- * Seed storage.local so doRefreshToken + attemptJoinRecovery find
- * userId/familyId.
- *
- * Writes go into the shared store-backed mock from `tests/setup.ts`, so every
- * read and every write in a test hits ONE store: what doRefreshToken sets or
- * removes is what the next read sees. Stubbing `get` with a frozen snapshot
- * instead would keep answering the pre-call world, silently defusing any test
- * that calls doRefreshToken twice (see the auto-rejoin test below).
- *
- * The seeding calls are then wiped from the spies so the assertion helpers only
- * ever observe calls PRODUCTION made.
- */
+/** Seed userId/familyId into the ONE shared store, then wipe the seeding calls
+ *  from the spies. Why not a frozen `get` stub: see the header → "Storage seeding". */
 async function seedStorage(
   data: Record<string, unknown> = {
     [USER_ID_KEY]: "u1",
@@ -126,11 +215,8 @@ function familyWasCleared(): boolean {
     );
 }
 
-/**
- * True when the family-scoped endpoint choice was reset — BOTH the accepted
- * endpoint and the declined marker, which is what `resetFamilyEndpointChoice`
- * removes in one call.
- */
+/** True when BOTH family-scoped endpoint keys (accepted endpoint + declined
+ *  marker) were removed — what `resetFamilyEndpointChoice` removes in one call. */
 function endpointChoiceWasReset(): boolean {
   return vi
     .mocked(chrome.storage.local.remove)
@@ -189,9 +275,8 @@ describe("doRefreshToken", () => {
   });
 
   afterEach(async () => {
-    // The store behind the setup mock is module-scoped, so entries written by
-    // one test would otherwise outlive it. Clear before restoring, while the
-    // store-backed implementations are still installed.
+    // The setup mock's store is module-scoped: clear it before restoring, while
+    // the store-backed implementations are still installed.
     await chrome.storage.local.clear();
     await chrome.storage.sync.clear();
     vi.restoreAllMocks();
@@ -354,10 +439,8 @@ describe("doRefreshToken", () => {
             type: "FAMILY_REMOVED",
           });
         }
-        // The API endpoint is FAMILY-scoped, so it lives and dies with the
-        // membership: the gone branch drops it, every retryable branch keeps it
-        // (an over-eager reset would send the user's next request — and the
-        // retry that is still expected to succeed — to a different server).
+        // The FAMILY-scoped endpoint: the gone branch drops it, every retryable
+        // branch keeps it. See the header → "Family-scoped endpoint".
         expect(endpointChoiceWasReset()).toBe(c.expectCleared);
         expect(await storedEndpointChoice()).toEqual(
           c.expectCleared
@@ -371,13 +454,8 @@ describe("doRefreshToken", () => {
     }
   });
 
-  /**
-   * Owner-initiated removal. The worker writes a `kicked:{familyId}:{userId}`
-   * tombstone when an owner removes another member, so the recovery join is
-   * answered with 403 MEMBER_REMOVED for as long as it lives. Treating that as
-   * family-gone is the whole point of the code: otherwise silent recovery keeps
-   * re-joining and, once the tombstone expires, quietly undoes the removal.
-   */
+  // Owner-initiated removal (403 MEMBER_REMOVED from the kicked tombstone) must
+  // count as family-gone. See the header → "MEMBER_REMOVED".
   describe("MEMBER_REMOVED (owner-initiated removal)", () => {
     it("clears family data from local and sync storage and broadcasts FAMILY_REMOVED", async () => {
       await seedStorage();
@@ -403,10 +481,8 @@ describe("doRefreshToken", () => {
       expect(deps.onFamilyRemoved).toHaveBeenCalledWith({
         errorCode: "MEMBER_REMOVED",
       });
-      // The family's endpoint goes with the membership: a client left pointed at
-      // the ex-family's server would send the NEXT create/join there — userId,
-      // display name, the token that server issues and the whole personal book
-      // list — and bake that host into the sync code it then hands out.
+      // The family's endpoint goes with the membership (else the NEXT create/join
+      // leaks to the ex-family's server). See the header → "Family-scoped endpoint".
       expect(await storedEndpointChoice()).toEqual({});
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
         type: "SET_API_ENDPOINT",
@@ -417,9 +493,8 @@ describe("doRefreshToken", () => {
     });
 
     it("stops the silent auto-rejoin: a later refresh issues no second join", async () => {
-      // Two calls against ONE store (seedStorage seeds the shared setup mock),
-      // so the second call sees the world the first call left behind — the
-      // removal of familyId is what has to stop the rejoin.
+      // Two calls against ONE store: the second sees the familyId removal the
+      // first left behind, which is what has to stop the rejoin.
       await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
@@ -440,10 +515,8 @@ describe("doRefreshToken", () => {
     });
   });
 
-  /**
-   * The verification branch now reports WHAT blocked recovery, so the dialog can
-   * open the prompt in the right state (locked + countdown vs. plain challenge).
-   */
+  // The verification branch reports WHAT blocked recovery, so the dialog opens the
+  // prompt in the right state (locked + countdown vs. plain challenge).
   describe("onReauthRequired payload", () => {
     it("passes the blocking code and retryAfter from a 429 lockout", async () => {
       await seedStorage();
@@ -498,9 +571,8 @@ describe("doRefreshToken", () => {
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
     ]);
-    // ...but the verification branch must NOT clear family data, and the
-    // family-scoped endpoint must survive too: the user is about to re-supply
-    // their secret, and that join has to reach the SAME server.
+    // ...but the verification branch must NOT clear family data or the endpoint:
+    // the re-supplied secret's join has to reach the SAME server.
     expect(familyWasCleared()).toBe(false);
     expect(endpointChoiceWasReset()).toBe(false);
     expect(await storedEndpointChoice()).toEqual({
@@ -546,12 +618,8 @@ describe("doRefreshToken", () => {
       expectedSeconds: number;
     }
 
-    /**
-     * The requested wait is clamped to 1 hour (MAX_RECOVERY_COOLDOWN_SECONDS in
-     * `src/api/auth-refresh.ts`) and any non-positive/absent value falls back to
-     * 300s, so a hostile or buggy self-hosted (BYO) backend cannot suppress
-     * auto-recovery effectively forever.
-     */
+    // Wait clamped to 1h (MAX_RECOVERY_COOLDOWN_SECONDS); non-positive/absent → 300s.
+    // See the header → "Recovery cooldown clamp".
     const cases: CooldownCase[] = [
       {
         name: "derives the cooldown from the join's retryAfter",
@@ -620,8 +688,7 @@ describe("doRefreshToken", () => {
         });
         expect(cooldownWriteValue()).toBe(expectedUntil);
         // A rate-limit must NOT prompt verification nor drop family data —
-        // including the family-scoped endpoint, which the client still needs to
-        // reach the right server once the window clears.
+        // the family-scoped endpoint included (needed once the window clears).
         expect(deps.onReauthRequired).not.toHaveBeenCalled();
         expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
         expect(familyWasCleared()).toBe(false);
@@ -658,13 +725,8 @@ describe("doRefreshToken", () => {
       expect(familyWasCleared()).toBe(false);
     });
 
-    /**
-     * The persisted deadline is clamped on READ as well as on write: a value
-     * written before the write-side cap existed (or inflated by clock skew)
-     * must not outlive MAX_RECOVERY_COOLDOWN_SECONDS (1h). The clamped value is
-     * also what gets returned, so the UI countdown driven by `cooldownUntil`
-     * can never show more than the maximum either.
-     */
+    // The persisted deadline is clamped on READ too (1h max), and the clamped value
+    // is what gets returned. See the header → "Recovery cooldown clamp".
     describe("clamping a persisted cooldown on read", () => {
       const HOUR_MS = 3_600_000;
 
@@ -811,13 +873,8 @@ describe("doRefreshToken", () => {
     });
   });
 
-  /**
-   * Reauth-pending latch (skip guard): a verification prompt raised by an
-   * earlier 401 wave sets `isReauthPending() === true`. On the dialog's second
-   * data wave the refresh POST still runs, but silent join-recovery must be
-   * suppressed — otherwise it would re-spend the per-IP join budget and re-fire
-   * onReauthRequired, wiping the user's in-progress pattern/PIN input.
-   */
+  // While `isReauthPending()` is true the refresh POST runs but silent join-recovery
+  // is skipped. See the header → "Reauth-pending latch".
   describe("reauth-pending latch", () => {
     it("skips join recovery and all side effects when isReauthPending() is true", async () => {
       await seedStorage();
@@ -862,11 +919,8 @@ describe("doRefreshToken", () => {
     });
   });
 
-  /**
-   * The silent join is flagged `recovery: 1` (#263) so the server can refuse a
-   * user no longer listed in the family instead of re-adding them, and it still
-   * omits displayName so the member's chosen name is kept.
-   */
+  // `recovery: 1` (#263) lets the server refuse an unlisted user; displayName is
+  // omitted so the member's chosen name is kept.
   it("sends the recovery join with exactly { userId, recovery: 1 }", async () => {
     await seedStorage();
     const deps = makeDeps({
@@ -888,14 +942,8 @@ describe("doRefreshToken", () => {
     });
   });
 
-  /**
-   * #263: the server can revoke the user's token before it answers their own
-   * "leave family" / "delete account" request, so another request 401s while
-   * the departure is in flight. A silent join then would re-add the user to the
-   * family they are leaving, so it is skipped while the departure mark is up —
-   * but the refresh POST still runs (a token fixed elsewhere recovers without a
-   * join) and nothing is torn down.
-   */
+  // #263: while the user's own departure is in flight, the silent join is skipped
+  // but the refresh POST still runs. See the header → "Own departure in flight".
   describe("own departure in flight (#263)", () => {
     let endDeparture: (() => Promise<void>) | undefined;
 
@@ -969,20 +1017,8 @@ describe("doRefreshToken", () => {
   });
 });
 
-/**
- * `isFamilyGoneError` is the SINGLE definition of "the join target is gone for
- * this user". The underlying code set is exported READ-ONLY for one consumer —
- * the copy-coverage tripwire in `tests/unit/dialog/familyGoneNotice.test.ts` —
- * and is never membership-tested at runtime, so the dialog's re-verification
- * flow (`dialog/useVerificationPrompt.ts`, reached from `dialog/useReauth.ts`)
- * classifies through this predicate rather than keeping a second copy — the
- * drift a second copy invites is what the export prevents.
- *
- * The distinction it draws is load-bearing: a family-gone code means NO secret
- * can make the join succeed (stop retrying, drop the local family binding),
- * while a verification / rate-limit code means the opposite (keep the data,
- * let the user try again — security-ux Invariant 2).
- */
+// The SINGLE definition of "the join target is gone for this user"; family-gone vs
+// verification/rate-limit is load-bearing. See the header → "isFamilyGoneError".
 describe("isFamilyGoneError", () => {
   it.each([
     ["FAMILY_NOT_FOUND", true],
@@ -1001,17 +1037,8 @@ describe("isFamilyGoneError", () => {
   });
 });
 
-/**
- * `clearFamilyStorageAndBroadcast` is the shared teardown for "this user has no
- * family any more". Two callers reach it: the silent recovery path in this
- * module, and the dialog's re-verification join (`dialog/useReauth.ts`), which
- * only learns of an owner-initiated removal AFTER the user supplied a correct
- * secret (the server's verification gate answers before its kicked-tombstone
- * check). Both must tear down identically, so the behaviour is pinned here once.
- *
- * It deliberately does NOT invoke `onFamilyRemoved` — reacting in the UI is the
- * caller's business and the two callers do it at different moments.
- */
+// Shared "no family any more" teardown for the silent path and `dialog/useReauth.ts`;
+// never calls `onFamilyRemoved`. See the header → "clearFamilyStorageAndBroadcast".
 describe("clearFamilyStorageAndBroadcast", () => {
   beforeEach(async () => {
     await chrome.storage.local.clear();
@@ -1047,19 +1074,8 @@ describe("clearFamilyStorageAndBroadcast", () => {
     expect(synced[FAMILY_ID_KEY]).toBeUndefined();
   });
 
-  /**
-   * The API endpoint is a FAMILY-scoped setting — the owner picks it and every
-   * member adopts it — so it must not outlive the membership, and being REMOVED
-   * ends the membership exactly like leaving does. A client left pointing at the
-   * former family's server would send the next create/join there (userId,
-   * display name, the token that server issues, the whole personal book list)
-   * and bake that host into the sync code it hands out next. The declined marker
-   * goes for the same reason: a refusal recorded against the old family must not
-   * silently suppress the confirmation prompt for the next one.
-   *
-   * Housing this INSIDE the shared teardown is what structurally guarantees the
-   * silent path and the re-verification path do it identically.
-   */
+  // The FAMILY-scoped endpoint and the declined marker must not outlive the
+  // membership. See the header → "Family-scoped endpoint".
   describe("family-scoped endpoint reset", () => {
     it("drops both the accepted endpoint and the declined marker", async () => {
       await clearFamilyStorageAndBroadcast();
@@ -1083,10 +1099,8 @@ describe("clearFamilyStorageAndBroadcast", () => {
     it("resets the endpoint only after the family binding is gone, and before the broadcast", async () => {
       await clearFamilyStorageAndBroadcast();
 
-      // Order matters in both directions: resetting the endpoint while the
-      // family binding still stands would leave a bound client talking to the
-      // wrong server, and broadcasting first would let another context react to
-      // FAMILY_REMOVED while the endpoint was still the ex-family's.
+      // Order matters in both directions (binding → endpoint → broadcast). See the
+      // header → "clearFamilyStorageAndBroadcast".
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
       expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY]);
       expect(removeCalls[1][0]).toEqual(
@@ -1105,13 +1119,8 @@ describe("clearFamilyStorageAndBroadcast", () => {
       expect(messageTypes).toEqual(["SET_API_ENDPOINT", "FAMILY_REMOVED"]);
     });
 
-    /**
-     * `resetFamilyEndpointChoice` swallows its own storage failures, so it can
-     * never abort the teardown it was added to. Losing the endpoint reset is
-     * survivable (App's own handler still puts the LIVE client back on the
-     * default); losing the broadcast is not — other contexts would keep showing
-     * a family that is gone.
-     */
+    // A failed endpoint reset is survivable; a lost broadcast is not. See the
+    // header → "clearFamilyStorageAndBroadcast".
     it("still broadcasts when the endpoint reset's storage write fails", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       // Only the endpoint remove rejects; the familyId remove still resolves.

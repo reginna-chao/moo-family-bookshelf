@@ -1,13 +1,7 @@
 import { fireEvent, screen } from "@testing-library/react";
 
-/**
- * DOM probes for the member-filter counts in `src/dialog/MemberDropdown.tsx`.
- *
- * The collapsed trigger renders `label · count`; the count sits in its own
- * `.moo-member-filter__count` span and each menu option's count in
- * `.moo-category__option-count`. Both probes return the span's EXACT text so
- * a caller compares with `toBe` (a substring match would accept `12` for `120`).
- */
+/** DOM probes for the member-filter counts in `src/dialog/MemberDropdown.tsx`; the count probes
+ *  return EXACT span text (see their JSDoc). */
 
 /**
  * Matches the trigger's accessible name, `篩選成員：{label}，{count} 本`. It
@@ -22,7 +16,11 @@ export function memberFilterTrigger(): HTMLElement {
   return screen.getByRole("button", { name: MEMBER_FILTER_TRIGGER_NAME });
 }
 
-/** Exact text of the count shown on the (collapsed or open) trigger. */
+/**
+ * Exact text of the count shown on the (collapsed or open) trigger. The trigger renders
+ * `label · count` with the count in its own `.moo-member-filter__count` span; exact so a caller
+ * compares with `toBe` (a substring match would accept `12` for `120`).
+ */
 export function triggerCount(): string {
   const count = memberFilterTrigger().querySelector(
     ".moo-member-filter__count",
@@ -31,7 +29,10 @@ export function triggerCount(): string {
   return count.textContent ?? "";
 }
 
-/** Exact text of the count inside one menu option element. */
+/**
+ * Exact text of the count inside one menu option element — its own `.moo-category__option-count`
+ * span. Exact so a caller compares with `toBe` (a substring match would accept `12` for `120`).
+ */
 export function optionCount(option: HTMLElement): string {
   const count = option.querySelector(".moo-category__option-count");
   if (!count) throw new Error("option count span not found");

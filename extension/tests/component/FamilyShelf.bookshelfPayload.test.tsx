@@ -13,6 +13,29 @@ import { FamilyDataProvider } from "@/dialog/FamilyDataContext";
 import { ApiClient, BoolFlag } from "@/api/client";
 import { memberFilterTrigger } from "./helpers/memberFilter";
 
+/**
+ * The end-to-end check issue #155 asked for: a hostile `GET /api/family/:id/bookshelf` payload driven
+ * through the REAL API client, `FamilyDataContext` and `FamilyShelf` into `dialog/MemberDropdown.tsx`.
+ *
+ * The issue's own proposed repro (an object-valued `displayName`) has been green since the text layer
+ * landed, so it is deliberately NOT what is asserted. The defect is the IDENTITY half: a `userId` that
+ * cannot be a string used to be blanked to `""` and kept, so two degraded members reached the dropdown
+ * as two options sharing one React key and one blank label.
+ *
+ * The payload: TWO members carry a `userId` that is not a usable string — an object and a number, both
+ * shapes `JSON.parse` really produces from a self-hosted (BYO) backend — plus a non-string
+ * `displayName`. The TEXT layer alone normalizes all four fields to `""` and KEEPS both members, so the
+ * dropdown rendered two option buttons keyed on the SAME empty string, both labelled
+ * `"" || "".slice(0, 8)` — blank. The structural layer drops them instead. The third member is
+ * addressable and must be the only one that survives.
+ *
+ * Duplicate-key detector: the main assertion is a negative one ("React never reported a duplicate
+ * key"), so on its own it would stay green if React changed the wording or the option buttons stopped
+ * being keyed at all. The companion case feeds `MemberDropdown` the exact input the old boundary
+ * produced — two members collapsed onto the same empty `userId` — and proves the detector fires, so
+ * the negative assertion cannot pass vacuously.
+ */
+
 vi.mock("@/constants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/constants")>();
   return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
@@ -34,11 +57,8 @@ const FAMILY_ID = "fam-1";
 const SELF_ID = "user-self";
 const VALID_MEMBER_ID = "c".repeat(64);
 
-/**
- * React's duplicate-key diagnostic, as React 19 words it. Pinned as a constant
- * so the negative assertion below and its positive twin at the bottom of this
- * file cannot drift apart.
- */
+/** React's duplicate-key diagnostic, as React 19 words it — one constant so the negative assertion
+ *  and its positive twin at the bottom of this file cannot drift apart. */
 const DUPLICATE_KEY_WARNING = "same key";
 
 /** The exact option labels the dropdown must show for this payload. */
@@ -64,19 +84,8 @@ function makeSharedBook(bookId: string, title: string) {
   };
 }
 
-/**
- * The payload issue #155 is actually about.
- *
- * TWO members carry a `userId` that is not a usable string — an object and a
- * number, both shapes `JSON.parse` really produces from a self-hosted (BYO)
- * backend — plus a `displayName` that is not a string either. The TEXT layer
- * alone normalizes all four fields to `""` and KEEPS both members, so the
- * dropdown used to render two option buttons keyed on the SAME empty string,
- * both labelled `"" || "".slice(0, 8)` — i.e. blank. The structural layer drops
- * them instead, which is what this file pins end to end.
- *
- * The third member is addressable and must be the only one that survives.
- */
+/** The payload issue #155 is about: two members with unusable `userId`s (object, number) that the text
+ *  layer alone would keep as blank duplicates, plus one valid survivor. See the file header. */
 const HOSTILE_BOOKSHELF = {
   members: [
     {
@@ -105,11 +114,8 @@ function mockFetchSuccess(data: unknown) {
   });
 }
 
-/**
- * A client whose `getFamilyBookshelf` is the REAL one — that is the whole point
- * of this file. Every other method is stubbed, so the only backend answer under
- * test is the bookshelf payload.
- */
+/** A client whose `getFamilyBookshelf` is the REAL one — the whole point of this file; every other
+ *  method is stubbed, so the only backend answer under test is the bookshelf payload. */
 function createClient(bookshelfData: unknown): ApiClient {
   const real = new ApiClient(MOCK_ENDPOINT);
   real.setAuthToken("test-token");
@@ -161,17 +167,8 @@ function optionCount(option: HTMLElement): string {
   return option.querySelector(".moo-category__option-count")?.textContent ?? "";
 }
 
-/**
- * The end-to-end check issue #155 asked for: a hostile
- * `GET /api/family/:id/bookshelf` payload driven through the REAL API client,
- * `FamilyDataContext` and `FamilyShelf` into `dialog/MemberDropdown.tsx`.
- *
- * The issue's own proposed repro (an object-valued `displayName`) has been
- * green since the text layer landed, so it is deliberately NOT what is asserted
- * here. The defect is the IDENTITY half: a `userId` that cannot be a string
- * used to be blanked to `""` and kept, so two degraded members reached the
- * dropdown as two options sharing one React key and one blank label.
- */
+/** Issue #155 end to end: the defect is the IDENTITY half (unusable `userId` blanked and kept), not the
+ *  issue's `displayName` repro. See the file header. */
 describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
   const originalFetch = globalThis.fetch;
   let errorSpy: ReturnType<typeof vi.spyOn>;
@@ -179,9 +176,8 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // React reports a duplicate key through console.error; the validator's own
-    // aggregate lines go to console.warn. Both are silenced so the assertions
-    // read the calls rather than the terminal.
+    // React reports a duplicate key via console.error, the validator's aggregate lines via console.warn;
+    // both are silenced so the assertions read the calls rather than the terminal.
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -259,16 +255,8 @@ describe("FamilyShelf member filter with a hostile bookshelf payload", () => {
   });
 });
 
-/**
- * The positive companion to the duplicate-key assertion above.
- *
- * That assertion is a negative one ("React never reported a duplicate key"), so
- * on its own it would stay green if React changed the wording, or if the option
- * buttons stopped being keyed at all. This case feeds `MemberDropdown` the
- * exact input the old boundary produced — two members collapsed onto the same
- * empty `userId` — and proves the detector fires, so the assertion above cannot
- * pass vacuously.
- */
+/** The positive companion to the duplicate-key assertion: proves the detector fires on the old
+ *  boundary's output. See the file header, "Duplicate-key detector". */
 describe("MemberDropdown duplicate-key detector", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 

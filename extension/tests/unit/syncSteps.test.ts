@@ -289,10 +289,8 @@ describe("resolveForUpload", () => {
   });
 });
 
-/**
- * The onboarding sync (`dialog/onboardingBooksUpload.ts`) never judges renames and
- * calls this directly with the scrape's ids and the saved list.
- */
+// The onboarding sync (`dialog/onboardingBooksUpload.ts`) never judges renames and
+// calls this directly with the scrape's ids and the saved list.
 describe("holdBackRenameCandidates", () => {
   const OLD_ID = "210000000000021";
   const NEW_ID = "210000000000022";

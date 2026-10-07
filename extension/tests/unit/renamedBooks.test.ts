@@ -20,7 +20,13 @@ import {
  * additive merge would then keep the saved OLD id forever next to the scraped
  * NEW one. Only a one-to-one same-title match against a brand-new id counts as
  * a rename — everything else that can explain a missing saved id (archived
- * while archive sync is off, lent, refunded) must keep the old entry.
+ * while archive sync is off, lent, refunded) must keep the old entry. Every
+ * `keepCases` row describes such a reason, or an ambiguous match.
+ *
+ * `deferRenameCandidates` (#236 F2): a sync that cannot judge renames must not
+ * upload a brand-new id that could be the new twin of a saved-only id — once
+ * uploaded it is a server id, never brand-new again, and the pair could never be
+ * resolved. Held-back entries wait for a sync that can judge.
  */
 
 const OLD_ID = "210000000000001";
@@ -173,10 +179,8 @@ describe("resolveRenamedBooks", () => {
     expect(result.renamedCount).toBe(result.renamedBooks.length);
   });
 
-  /**
-   * Every case below must KEEP the old entry — each describes a reason other
-   * than an id change for a saved book to be missing, or an ambiguous match.
-   */
+  // Every case must KEEP the old entry: a non-rename reason for a missing saved
+  // book, or an ambiguous match.
   const keepCases: Array<{
     name: string;
     books: () => BookEntry[];
@@ -353,12 +357,8 @@ describe("lentBookIdsOf", () => {
   });
 });
 
-/**
- * `deferRenameCandidates` (#236 F2): a sync that cannot judge renames must not
- * upload a brand-new id that could be the new twin of a saved-only id — once
- * uploaded it is a server id, never brand-new again, and the pair could never
- * be resolved. Held-back entries wait for a sync that can judge.
- */
+// #236 F2: hold back a brand-new id that could twin a saved-only id until a sync
+// can judge renames. See the file header.
 describe("deferRenameCandidates", () => {
   const KEPT_ID = "210000000000004";
   const NEW2_ID = "210000000000005";

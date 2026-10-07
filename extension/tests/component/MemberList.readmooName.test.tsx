@@ -214,12 +214,8 @@ describe("MemberList readmooName section (extension)", () => {
     });
   });
 
-  /**
-   * Same thrown-`ApiError` path as the canLend toggle: a 429 renders the
-   * localized back-off copy instead of the server's English, and the 刪除失敗
-   * fallback stays for everything else. Literals are pinned in
-   * tests/unit/dialog/verificationMessages.test.ts.
-   */
+  /** Same thrown-`ApiError` path as the canLend toggle: a 429 renders localized back-off copy, the 刪除失敗
+   *  fallback stays for everything else (literals pinned in verificationMessages.test.ts). */
   it("shows the localized back-off copy when 刪除 is rate limited", async () => {
     const updateMemberSettings = vi
       .fn()

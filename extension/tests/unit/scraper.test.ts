@@ -2,6 +2,35 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
 import { installListTotalPublisher } from "../helpers/listTotalBridge";
 
+/**
+ * The Readmoo content scraper (`src/content/scraper.ts`): user email, display
+ * name, library / archive books and `scrapeLibrary` completeness.
+ *
+ * `installFiberBridgeMock` installs a mock fiber bridge responder on document:
+ * it listens for `moo-request-fiber-data`, stamps `data-moo-book-id` attributes
+ * on matching `.library-item` elements (matching by title), then dispatches
+ * `moo-fiber-data` to signal completion, and returns a cleanup function that
+ * removes the listener.
+ *
+ * Privacy fallback id length guard: the two hosts put different ids in
+ * `id="privacy-…"` — the legacy host repeats the real 15-digit book id, the new
+ * host exposes an unrelated 8-digit internal id. Accepting the short one would
+ * upload a book keyed by an id that resolves to nothing, so the scraper skips
+ * the book instead.
+ *
+ * scrapeLibrary completeness (#236): only a COMPLETE scrape may be used to
+ * conclude that a saved book is gone from Readmoo, so every own card that could
+ * not be read — and a pagination run that hit its hard cap — must surface as
+ * `complete: false`. Borrowed (借入) cards are not the user's books and never
+ * make a scrape incomplete. Completeness also needs POSITIVE confirmation (F1):
+ * the bridge must publish Readmoo's own list total and it must equal the cards
+ * read. Cases that test some OTHER cause of incompleteness publish a matching
+ * total ("cards"), so that cause is the only one in play. F1 regression: when
+ * the next page is slow, scrolling stops growing after one card while Readmoo
+ * knows of 3 — that must NOT be read as the end of the list (the rename
+ * consequence is pinned in syncBooks.reconcile).
+ */
+
 describe("scrapeUserEmail", () => {
   let scrapeUserEmail: () => string | null;
 
@@ -125,14 +154,8 @@ describe("scrapeDisplayName", () => {
   });
 });
 
-/**
- * Helper: install a mock fiber bridge responder on document.
- *
- * Listens for `moo-request-fiber-data`, stamps `data-moo-book-id`
- * attributes on matching `.library-item` elements (matching by title),
- * then dispatches `moo-fiber-data` to signal completion.
- * Returns a cleanup function to remove the listener.
- */
+/** Mock fiber bridge: stamps `data-moo-book-id` by title, then signals completion;
+ *  returns its cleanup. See the file header. */
 function installFiberBridgeMock(
   mockBooks: Array<{ bookId: string; title: string }>,
 ): () => void {
@@ -363,14 +386,8 @@ describe("scrapeBooks", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  /**
-   * Length guard on the `.privacy` fallback id.
-   *
-   * The two hosts put different ids in `id="privacy-…"`: the legacy host repeats
-   * the real 15-digit book id, the new host exposes an unrelated 8-digit internal
-   * id. Accepting the short one would upload a book keyed by an id that resolves
-   * to nothing, so the scraper skips the book instead.
-   */
+  // A short (8-digit, new-host) `.privacy` id is skipped, never uploaded. See the
+  // header → "Privacy fallback id length guard".
   describe("privacy fallback id length guard", () => {
     const cases: Array<{
       name: string;
@@ -758,18 +775,8 @@ describe("scrapeArchivedBooks", () => {
   });
 });
 
-/**
- * `scrapeLibrary` completeness (#236). Only a COMPLETE scrape may be used to
- * conclude that a saved book is gone from Readmoo, so every own card that could
- * not be read — and a pagination run that hit its hard cap — must surface as
- * `complete: false`. Borrowed (借入) cards are not the user's books and never
- * make a scrape incomplete.
- *
- * Completeness also needs POSITIVE confirmation (F1): the bridge must publish
- * Readmoo's own list total and it must equal the cards read. Cases that test
- * some OTHER cause of incompleteness publish a matching total ("cards"), so
- * that cause is the only one in play.
- */
+// #236 completeness: unreadable own cards / a capped run → `complete: false`;
+// F1 needs a matching list total. See the header → "scrapeLibrary completeness".
 describe("scrapeLibrary", () => {
   type ScraperModule = typeof import("@/content/scraper");
   let scrapeLibrary: ScraperModule["scrapeLibrary"];
@@ -861,9 +868,8 @@ describe("scrapeLibrary", () => {
   });
 
   it("is incomplete when the published total says a later page has not rendered yet", async () => {
-    // F1 regression: the next page is slow, so scrolling stopped growing after
-    // one card while Readmoo knows of 3. That must NOT be read as the end of
-    // the list (the rename consequence is pinned in syncBooks.reconcile).
+    // F1 regression: a slow next page (1 card read, total 3) is NOT the end of
+    // the list (rename consequence: syncBooks.reconcile).
     cleanupBridge = installFiberBridgeMock([
       { bookId: GOOD_ID, title: "好書" },
     ]);

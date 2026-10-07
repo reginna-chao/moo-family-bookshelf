@@ -5,6 +5,34 @@ import { FamilyBookRow } from "@/dialog/FamilyBookRow";
 import { BoolFlag } from "@/api/client";
 import type { BookWithMember } from "@/dialog/BookCard";
 
+/**
+ * FamilyBookRow: the list-view row, its link attributes, and the two server-supplied URL gates
+ * (cover and book link).
+ *
+ * rel="noopener noreferrer" is asserted as the full string: the two tokens do different jobs, so a
+ * substring check stays green after the load-bearing half is deleted — `noopener` severs
+ * `window.opener`, `noreferrer` suppresses the Referer header. Production documents the pair as
+ * load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it is the layer that still holds
+ * when the URL whitelist is bypassed — which has happened: see the base-sensitivity rows in
+ * tests/unit/readmooConfig.test.ts.
+ *
+ * Book link whitelist: `readmooUrl` on a family book arrives from the SERVER, so a member who bypasses
+ * the UI and POSTs a book record can choose it freely. Here the whole ROW is the `<a>`, so a click
+ * anywhere on the book follows it — an arbitrary-redirect / phishing lure under a legitimate book
+ * title, and the destination learns the viewer's IP and User-Agent once the navigation lands. The
+ * referer is NOT leaked only because the render site (extension/src/dialog/FamilyBookRow.tsx) pairs
+ * the href with `rel="noopener noreferrer"` — load-bearing, not decoration. Firing takes a click,
+ * unlike a cover that loads on render, which lowers the rate but not the severity. Nothing in the
+ * browser constrains the destination: the dialog is injected into Readmoo pages, which send no CSP,
+ * and `img-src` would say nothing about a navigation anyway (hence a separate defence from the
+ * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is
+ * the only thing between the stored value and the click. The degradation contract is
+ * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because an
+ * empty `href` resolves to the current document and a click would reload the Readmoo page the dialog
+ * lives in; with no `href` the `<a>` has no `link` role and is inert, while layout and content stay
+ * untouched. The whitelisted counterpart is pinned by "links to readmooUrl".
+ */
+
 function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
   return {
     bookId: "book-1",
@@ -118,23 +146,13 @@ describe("FamilyBookRow", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "https://readmoo.com/book/book-1");
     expect(link).toHaveAttribute("target", "_blank");
-    // Full string, not `toContain("noopener")`: the two tokens do different
-    // jobs, so a substring check stays green after the load-bearing half is
-    // deleted. `noopener` severs `window.opener`; `noreferrer` is the one
-    // that suppresses the Referer header. Production documents the pair as
-    // load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it
-    // is the layer that still holds when the URL whitelist is bypassed —
-    // which has happened: see the base-sensitivity rows in
-    // tests/unit/readmooConfig.test.ts.
+    // Full string, not `toContain("noopener")`: the two tokens do different jobs and `noreferrer` is
+    // load-bearing. See the file header, `rel="noopener noreferrer"` paragraph.
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  /**
-   * Cover URLs on a family book arrive from the SERVER, and the dialog is
-   * injected into Readmoo pages that send no CSP — so `safeCoverUrl`
-   * (extension/src/dialog/safeCoverUrl.ts) is the only thing between a stored
-   * tracking beacon and every viewer's IP / UA.
-   */
+  /** Server-supplied cover URLs on a no-CSP Readmoo page: `safeCoverUrl` (dialog/safeCoverUrl.ts) is all
+   *  that stands between a stored tracking beacon and every viewer's IP / UA. */
   describe("cover URL whitelist", () => {
     it("renders the cover image when the URL is on a Readmoo cover host", () => {
       render(
@@ -163,31 +181,8 @@ describe("FamilyBookRow", () => {
     });
   });
 
-  /**
-   * `readmooUrl` on a family book arrives from the SERVER, so a family member
-   * who bypasses the UI and POSTs a book record can choose it freely. Here the
-   * whole ROW is the `<a>`, so a click anywhere on the book follows it — an
-   * arbitrary-redirect / phishing lure presented under a legitimate book title,
-   * and the destination host learns the viewer's IP and User-Agent once the
-   * navigation lands. The referer is NOT leaked, and only because the render
-   * site pairs the href with `rel="noopener noreferrer"`
-   * (extension/src/dialog/FamilyBookRow.tsx), where `noreferrer` suppresses the
-   * Referer header outright — load-bearing, not decoration. Firing takes a
-   * click, unlike a cover that loads on render, which lowers the rate but not
-   * the severity. Nothing in the browser constrains the destination: the dialog
-   * is injected into Readmoo pages, which send no CSP, and `img-src` would say
-   * nothing about a navigation anyway (which is why this is a separate defence
-   * from the `safeCoverUrl` gate above rather than a second use of it).
-   * `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is the only thing
-   * between the stored value and the click.
-   *
-   * The degradation contract is `href={safeBookUrl(...) || undefined}`: the
-   * attribute is OMITTED rather than set to `""`, because an empty `href`
-   * resolves to the current document and a click would reload the Readmoo page
-   * the dialog lives in. With no `href` the `<a>` has no `link` role and is
-   * inert, while the row's layout and content stay untouched. The whitelisted
-   * counterpart is pinned by "links to readmooUrl" above.
-   */
+  /** A server-chosen `readmooUrl` makes the whole row a phishing lure behind a click; `safeBookUrl` is the
+   *  only gate, and a rejected URL OMITS `href`. See the file header, "Book link whitelist". */
   describe("book link whitelist", () => {
     const PHISHING_URL = "https://evil.example.com/phish";
 
@@ -210,10 +205,8 @@ describe("FamilyBookRow", () => {
 
         const anchors = container.querySelectorAll("a");
         expect(anchors).toHaveLength(1);
-        // Load-bearing assertion, and NOT interchangeable with the role query
-        // below: RTL reports no `link` role for `href=""` either, so only the
-        // attribute check can tell "omitted" from "empty" — i.e. only this line
-        // fails if the `|| undefined` is ever dropped from the render site.
+        // Load-bearing, NOT interchangeable with the role query: RTL reports no `link` role for `href=""`
+        // either, so only this line fails if `|| undefined` is dropped from the render site.
         expect(anchors[0].getAttribute("href")).toBeNull();
         // The role query is what proves the hostile URL never made it in: with
         // the filter removed this anchor would be a real, followable link.

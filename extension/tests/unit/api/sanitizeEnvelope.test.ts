@@ -2,13 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClient } from "@/api/client";
 import { BoolFlag, BorrowStatus } from "@/api/types";
 
-// Pin DEFAULT_API_ENDPOINT (avoids import.meta.env dependence) while keeping
-// every other real constant the client module imports.
-vi.mock("@/constants", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/constants")>();
-  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
-});
-
 /**
  * The WIRING half of the backend-text hardening. `extension/tests/unit/entityText.test.ts`
  * proves the sanitizers are correct in isolation; this file proves they are
@@ -26,7 +19,138 @@ vi.mock("@/constants", async (importOriginal) => {
  * where the user would switch the endpoint back.
  *
  * Every hostile fixture below is a value `JSON.parse` can actually produce.
+ *
+ * Fixture shapes (deliberate differences from the plain hostile fixtures):
+ *  - `HOSTILE_MEMBER_WITH_ID` is the member as BOTH composed call sites see it —
+ *    `getFamilyMembers` reads it as a list element, `updateMemberSettings` as the
+ *    whole PATCH response — where "composed" means a structural rebuild FIRST
+ *    and the text layer second. Versus `HOSTILE_MEMBER`: a usable `userId`,
+ *    because `sanitizeFamilyMember` (`shared/src/api/memberValidation.ts`) DROPS
+ *    a member without one instead of degrading it to `""`; it keeps the
+ *    non-string `readmooName`, which the rebuild OMITS rather than degrades —
+ *    the exact divergence the wiring rows have to make visible; and two extra
+ *    properties, which the 4-field rebuild must strip.
+ *  - `HOSTILE_BOOK_WITH_ID`: versus `HOSTILE_BOOK`, a usable `bookId`, because
+ *    `sanitizeFamilyBookshelfResponse` (`shared/src/api/bookshelfValidation.ts`)
+ *    DROPS a book without one instead of degrading it to `""`. Every other field
+ *    stays hostile on purpose — the structural layer passes a surviving book
+ *    through UNCHANGED, so the text layer is still what blanks them.
+ *  - `HOSTILE_BOOKSHELF`: shaped like `HOSTILE_MEMBERS_GROUP` — the first
+ *    member's `userId` is an object, so it is unaddressable and gets DROPPED;
+ *    `HOSTILE_BOOKSHELF_MEMBER_WITH_ID` survives and carries the text-layer
+ *    expectations.
+ *  - `HOSTILE_LIST_REQUEST` (the borrow LIST element) answers to a different,
+ *    stricter sanitizer than `HOSTILE_REQUEST`: a usable `requestId`, because
+ *    `sanitizeBorrowRequests` DROPS an element without one instead of degrading
+ *    it to `""`; a NON-string `bookCoverUrl`, because the list path normalizes
+ *    that field too (the single-object path leaves it alone); and two extra
+ *    properties, which the 12-field rebuild must strip.
+ *
+ * Expectation tables:
+ *  - `GROUP_EXPECTATIONS` covers the three group methods governed by the shared
+ *    text layer ALONE (`createFamily` / `joinFamily` / `transferOwnership`): every
+ *    declared-`string` field degrades to `""` in place — including a member's,
+ *    since nothing there drops or rebuilds an element.
+ *  - `MEMBERS_GROUP_EXPECTATIONS`: `getFamilyMembers` is the one group method
+ *    behind TWO layers — the structural rebuild in
+ *    `shared/src/api/memberValidation.ts` runs FIRST, the shared text layer
+ *    second. Its member-level contract is strictly stronger, and these rows tell
+ *    the two apart: an unaddressable element is DROPPED rather than blanked,
+ *    `userId` survives verbatim (an unusable one costs the whole element), a
+ *    non-string `readmooName` loses its KEY instead of becoming `""` (absence is
+ *    what the "尚未記錄" hint and the "missing canLend means TRUE" fallback are
+ *    written against), and hostile extras cannot reach React state at all. The
+ *    three GROUP-level text fields still come from the shared layer.
+ *  - `BORROW_EXPECTATIONS`: the two SINGLE-OBJECT borrow paths
+ *    (`createBorrowRequest` / `updateBorrowStatus`), which run `sanitizeRecord` +
+ *    `sanitizeBorrowRequestText`.
+ *  - `LIST_BORROW_EXPECTATIONS`: `listBorrowRequests` is owned by
+ *    `sanitizeBorrowRequests` (`shared/src/borrow/validation.ts`, PR #144), NOT by
+ *    `sanitizeBorrowRequestText`. Its contract is strictly stronger: `requestId`
+ *    survives verbatim (an unusable one drops the whole element rather than
+ *    degrading to `""`), `bookCoverUrl` IS normalized, and every surviving
+ *    element is rebuilt from exactly the 12 interface fields, so hostile extras
+ *    cannot reach React state.
+ *  - `WIRING_CASES`: one row per production call site that applies a sanitizer,
+ *    covering all 15 envelope-based methods (`checkVersion`, the 16th, bypasses
+ *    `request()` and gets its own case). A new wired method needs a row here, or
+ *    its boundary ships unpinned.
+ *  - `getFamilyBookshelf` is composed exactly like `getFamilyMembers`: the
+ *    structural layer (`shared/src/api/bookshelfValidation.ts`) runs FIRST and
+ *    DROPS what cannot be addressed, then the text layer coerces the survivors'
+ *    declared strings. Both halves have to stay visible — an unusable `userId` /
+ *    `bookId` costs the whole element instead of blanking to `""`, which is the
+ *    only way two degraded elements stop colliding on the empty string.
+ *  - `updateMemberSettings` is composed the same way, so its fixture has to be
+ *    ADDRESSABLE: an unusable payload no longer degrades in place, it rejects
+ *    with `INVALID_RESPONSE`. That reject path is pinned in
+ *    `extension/tests/unit/api/member-client.test.ts` and deliberately NOT
+ *    duplicated here, so the blanket "resolves instead of throwing" row keeps
+ *    holding for every entry in the table. Its rows are
+ *    `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped (the method resolves
+ *    with the member itself); `userId` reads back as the PAYLOAD's id, not the
+ *    `:uid` argument — the rebuild copies it verbatim and never echoes the request.
+ *
+ * Valid payloads must survive the boundary byte-identical. If this drifts, the
+ * layer has stopped coercing types and started rewriting content — which would
+ * silently corrupt what the user sees and what the next save uploads. Absent
+ * `apiEndpoint` is the one field where the two layers disagree about absence:
+ *  - `getFamilyMembers`: layer 1 wins because it runs first — `memberValidation`
+ *    ALWAYS emits the key, so a caller never has to tell "absent" from "not a
+ *    string"; the shared layer then sees a PRESENT `null` and keeps it as null.
+ *  - `createFamily` has no structural layer, so the conditional spread in
+ *    `sanitizeFamilyGroupText` decides alone: an omitted optional stays OMITTED
+ *    rather than becoming an explicit `undefined` own property. `JSON.stringify`
+ *    cannot tell those two apart — it drops an `undefined` value either way — so
+ *    the key check is the load-bearing assertion.
+ *
+ * Error envelopes: `sanitizeEnvelope` short-circuits on `data === undefined`, so
+ * an error envelope keeps its exact shape; anything else would break the callers
+ * that branch on `res.error.code`.
+ *
+ * Structurally broken payloads — the FAIL-CLOSED container contract, and the
+ * three reproductions PR #149's review filed as the container-tier white-screen
+ * gap. Before that fix each of these reached React state intact and detonated
+ * one render later — where no caller `try/catch` can reach, and with no
+ * ErrorBoundary in the Dialog the tab stays blank until the user reloads:
+ *   - `members: [null]` → stored by `setMembers`
+ *     (`extension/src/dialog/useFamilyDataMembers.ts:89`), then `members.map` +
+ *     `member.displayName` (`extension/src/dialog/MemberList.tsx:295` / `:49`)
+ *     throws a TypeError.
+ *   - `members: "not-an-array"` → same store, then `members.length`
+ *     (`extension/src/dialog/MemberList.tsx:82`) throws.
+ *   - `data: []` / `data: "x"` → both TRUTHY, so they walk past
+ *     `if (response.data)` and `setMembers(response.data.members)` stores
+ *     `undefined`, which hits that same `members.length`.
+ * All three now degrade to a renderable EMPTY state: `memberValidation` degrades
+ * a non-record `data` to a members-only group plus its always-emitted
+ * `apiEndpoint`, then the text layer materializes the three declared-string
+ * fields. `null` / `undefined` data is the deliberate exception and still passes
+ * through, because absence must stay absence for that very `if (response.data)`
+ * guard: `sanitizeEnvelope` short-circuits on `undefined` and `sanitizeRecord`
+ * returns `null` untouched, so `useFamilyDataMembers` keeps its "the backend sent
+ * nothing" branch instead of rendering an invented family.
+ * The borrow LIST already failed closed before this (PR #144,
+ * `shared/src/borrow/validation.ts`): a non-array container degrades to `[]` and
+ * an unaddressable element is dropped, because an element with no usable
+ * `requestId` can serve neither as a React key nor as the target of
+ * `PATCH /api/borrow/:id`. Its rows are unchanged — it is the precedent this
+ * layer was aligned to. `getFamilyMembers` meets that same element-dropping
+ * strictness ONE LAYER EARLIER (`shared/src/api/memberValidation.ts`, PR #150),
+ * so its cases assert drops rather than blanked fields: a member with no usable
+ * `userId` is exactly as unaddressable as a borrow request with no `requestId`
+ * (`null` cannot carry fields at all; `HOSTILE_MEMBER`'s `userId` is an ARRAY —
+ * unusable as a React key, as either name-lookup key, or as the `:uid` of
+ * `updateMemberSettings` / `removeMember`). Every other group method still
+ * answers to the text layer alone, where a hostile member is degraded in place.
  */
+
+// Pin DEFAULT_API_ENDPOINT (avoids import.meta.env dependence) while keeping
+// every other real constant the client module imports.
+vi.mock("@/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants")>();
+  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
+});
 
 const MOCK_ENDPOINT = "https://test.workers.dev";
 const FAMILY_ID = "fam-abc123";
@@ -102,18 +226,8 @@ const HOSTILE_GROUP = {
   expiresAt: 1_700_000_000_000,
 };
 
-/**
- * The member as BOTH composed call sites see it — `getFamilyMembers` reads it as
- * a list element, `updateMemberSettings` as the whole PATCH response — where
- * "composed" means a structural rebuild FIRST and the text layer second, not the
- * text layer alone. Three deliberate differences from `HOSTILE_MEMBER`:
- * - a usable `userId`, because `sanitizeFamilyMember`
- *   (`shared/src/api/memberValidation.ts`) DROPS a member without one
- *   instead of degrading it to `""`;
- * - it keeps the non-string `readmooName`, which the rebuild OMITS rather than
- *   degrades — the exact divergence the wiring rows have to make visible;
- * - two extra properties, which the 4-field rebuild must strip.
- */
+/** The member as both composed call sites see it: usable `userId`, hostile
+ *  `readmooName`, two extras. See the header → "Fixture shapes". */
 const HOSTILE_MEMBER_WITH_ID = {
   ...HOSTILE_MEMBER,
   userId: OTHER_USER_ID,
@@ -121,45 +235,30 @@ const HOSTILE_MEMBER_WITH_ID = {
   nested: { deep: true },
 };
 
-/**
- * The group payload for `getFamilyMembers`: `HOSTILE_MEMBER` is unaddressable
- * and gets dropped, `HOSTILE_MEMBER_WITH_ID` survives and gets rebuilt.
- */
+/** `getFamilyMembers` payload: `HOSTILE_MEMBER` is unaddressable and dropped,
+ *  `HOSTILE_MEMBER_WITH_ID` survives and gets rebuilt. */
 const HOSTILE_MEMBERS_GROUP = {
   ...HOSTILE_GROUP,
   members: [HOSTILE_MEMBER, HOSTILE_MEMBER_WITH_ID],
 };
 
-/**
- * The bookshelf BOOK as the composed path sees it. One deliberate difference
- * from `HOSTILE_BOOK`: a usable `bookId`, because
- * `sanitizeFamilyBookshelfResponse` (`shared/src/api/bookshelfValidation.ts`)
- * DROPS a book without one instead of degrading it to `""`. Every other field
- * stays hostile on purpose — the structural layer passes a surviving book
- * through UNCHANGED, so the text layer is still what blanks them.
- */
+/** `HOSTILE_BOOK` plus a usable `bookId`; every other field stays hostile.
+ *  See the header → "Fixture shapes". */
 const HOSTILE_BOOK_WITH_ID = {
   ...HOSTILE_BOOK,
   bookId: BOOKSHELF_BOOK_ID,
 };
 
-/**
- * The bookshelf member that SURVIVES: a usable `userId`, a hostile
- * `displayName` for the text layer to blank, and a books list that pairs an
- * unaddressable book with an addressable one.
- */
+/** The surviving bookshelf member: usable `userId`, hostile `displayName`, one
+ *  unaddressable and one addressable book. */
 const HOSTILE_BOOKSHELF_MEMBER_WITH_ID = {
   userId: OTHER_USER_ID,
   displayName: ["小明"],
   books: [HOSTILE_BOOK, HOSTILE_BOOK_WITH_ID],
 };
 
-/**
- * The bookshelf payload for `getFamilyBookshelf`, shaped like
- * `HOSTILE_MEMBERS_GROUP`: the first member's `userId` is an object, so it is
- * unaddressable and gets DROPPED; `HOSTILE_BOOKSHELF_MEMBER_WITH_ID` survives
- * and carries the text-layer expectations.
- */
+/** `getFamilyBookshelf` payload: the first member (object `userId`) is DROPPED,
+ *  `HOSTILE_BOOKSHELF_MEMBER_WITH_ID` survives. */
 const HOSTILE_BOOKSHELF = {
   members: [
     {
@@ -194,15 +293,8 @@ const HOSTILE_REQUEST = {
   updatedAt: [2026],
 };
 
-/**
- * The borrow LIST element, which answers to a different (stricter) sanitizer
- * than `HOSTILE_REQUEST` above. Three deliberate differences:
- * - a usable `requestId`, because `sanitizeBorrowRequests` DROPS an element
- *   without one instead of degrading it to `""`;
- * - a NON-string `bookCoverUrl`, because the list path normalizes that field
- *   too (the single-object path leaves it alone);
- * - two extra properties, which the 12-field rebuild must strip.
- */
+/** The borrow LIST element (stricter sanitizer): usable `requestId`, non-string
+ *  `bookCoverUrl`, two extras. See the header → "Fixture shapes". */
 const HOSTILE_LIST_REQUEST = {
   ...HOSTILE_REQUEST,
   requestId: LIST_REQUEST_ID,
@@ -234,13 +326,8 @@ interface WiringCase {
   expected: Expectation[];
 }
 
-/**
- * The three group methods governed by the shared text layer ALONE
- * (`createFamily` / `joinFamily` / `transferOwnership`). Every declared-`string`
- * field degrades to `""` in place — including a member's, since nothing here
- * drops or rebuilds an element. `getFamilyMembers` is the exception and has its
- * own table below.
- */
+/** Group methods on the text layer ALONE: every declared string degrades to `""`
+ *  in place. `getFamilyMembers` has its own table below. */
 const GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.familyId", value: "" },
   { path: "data.ownerId", value: "" },
@@ -256,17 +343,8 @@ const GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.maxMembers", value: 6 },
 ];
 
-/**
- * `getFamilyMembers` is the one group method behind TWO layers: the structural
- * rebuild in `shared/src/api/memberValidation.ts` runs FIRST, the shared text
- * layer second. Its member-level contract is strictly stronger than
- * `GROUP_EXPECTATIONS`, and these rows are what tell the two apart — an
- * unaddressable element is DROPPED rather than blanked, `userId` survives
- * verbatim (an unusable one costs the whole element), a non-string
- * `readmooName` loses its KEY instead of becoming `""`, and hostile extras
- * cannot reach React state at all. The three GROUP-level text fields still come
- * from the shared layer, which is why they read exactly as they do above.
- */
+/** `getFamilyMembers`: structural rebuild FIRST, text layer second — a strictly
+ *  stronger contract. See the header → "Expectation tables". */
 const MEMBERS_GROUP_EXPECTATIONS: Expectation[] = [
   // Layer 2 — the same declared-string coercion every group method gets.
   { path: "data.familyId", value: "" },
@@ -290,11 +368,8 @@ const MEMBERS_GROUP_EXPECTATIONS: Expectation[] = [
   { path: "data.maxMembers", value: 6 },
 ];
 
-/**
- * The two SINGLE-OBJECT borrow paths (`createBorrowRequest` /
- * `updateBorrowStatus`), which run `sanitizeRecord` + `sanitizeBorrowRequestText`.
- * The list path answers to a different sanitizer — see `LIST_BORROW_EXPECTATIONS`.
- */
+/** The SINGLE-OBJECT borrow paths (`sanitizeRecord` + `sanitizeBorrowRequestText`);
+ *  the list path is `LIST_BORROW_EXPECTATIONS`. */
 const BORROW_EXPECTATIONS: Expectation[] = [
   { path: "requestId", value: "" },
   { path: "familyId", value: "" },
@@ -312,15 +387,8 @@ const BORROW_EXPECTATIONS: Expectation[] = [
   { path: "bookCoverUrl", value: "https://cdn.readmoo.com/cover/1.jpg" },
 ];
 
-/**
- * `listBorrowRequests` is owned by `sanitizeBorrowRequests`
- * (`shared/src/borrow/validation.ts`, PR #144), NOT by
- * `sanitizeBorrowRequestText`. Its contract is strictly stronger, and these rows
- * are what tells the two apart: `requestId` survives verbatim (an unusable one
- * drops the whole element rather than degrading to `""`), `bookCoverUrl` IS
- * normalized here, and every surviving element is rebuilt from exactly the 12
- * interface fields, so hostile extras cannot reach React state.
- */
+/** `listBorrowRequests` answers to `sanitizeBorrowRequests` (PR #144), a stricter
+ *  contract. See the header → "Expectation tables". */
 const LIST_BORROW_EXPECTATIONS: Expectation[] = [
   { path: "0.requestId", value: LIST_REQUEST_ID },
   { path: "0.familyId", value: "" },
@@ -348,12 +416,8 @@ const SHELF_RESULT_EXPECTATIONS: Expectation[] = [
   { path: "shelf.expiresDays", value: 30 },
 ];
 
-/**
- * One row per production call site that applies a sanitizer, covering all 15
- * envelope-based methods (`checkVersion`, the 16th, bypasses `request()` and
- * gets its own case below). A new wired method needs a row here, or its
- * boundary ships unpinned.
- */
+/** One row per sanitizing call site, all 15 envelope methods (`checkVersion` has its
+ *  own case). A new wired method needs a row here. */
 const WIRING_CASES: WiringCase[] = [
   {
     name: "getFamilyMembers",
@@ -380,12 +444,8 @@ const WIRING_CASES: WiringCase[] = [
       client.transferOwnership(FAMILY_ID, USER_ID, OTHER_USER_ID),
     expected: GROUP_EXPECTATIONS,
   },
-  // Composed exactly like `getFamilyMembers`: the structural layer
-  // (`shared/src/api/bookshelfValidation.ts`) runs FIRST and DROPS what cannot
-  // be addressed, then the shared text layer coerces the survivors' declared
-  // strings. Both halves have to stay visible here — an unusable `userId` /
-  // `bookId` costs the whole element instead of blanking to `""`, which is the
-  // only way two degraded elements stop colliding on the empty string.
+  // Composed like `getFamilyMembers`: structural drop FIRST, then text coercion.
+  // See the header → "Expectation tables".
   {
     name: "getFamilyBookshelf",
     data: HOSTILE_BOOKSHELF,
@@ -452,12 +512,8 @@ const WIRING_CASES: WiringCase[] = [
       client.updateBorrowStatus(REQUEST_ID, BorrowStatus.LENT),
     expected: BORROW_EXPECTATIONS,
   },
-  // Composed exactly like `getFamilyMembers` — structural rebuild first, text
-  // layer second — so the fixture has to be ADDRESSABLE: an unusable payload no
-  // longer degrades in place, it rejects with `INVALID_RESPONSE`. That reject
-  // path is pinned in `extension/tests/unit/api/member-client.test.ts` and is
-  // deliberately NOT duplicated here, so the blanket "resolves instead of
-  // throwing" row below keeps holding for every entry in this table.
+  // Composed like `getFamilyMembers`, so the fixture must be ADDRESSABLE (the
+  // `INVALID_RESPONSE` reject lives elsewhere). See the header → "Expectation tables".
   {
     name: "updateMemberSettings",
     data: HOSTILE_MEMBER_WITH_ID,
@@ -465,10 +521,8 @@ const WIRING_CASES: WiringCase[] = [
       client.updateMemberSettings(FAMILY_ID, USER_ID, {
         canLend: BoolFlag.FALSE,
       }),
-    // `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped — this method
-    // resolves with the member itself rather than an envelope. `userId` reads
-    // back as the PAYLOAD's id, not the `:uid` argument: the rebuild copies it
-    // verbatim and never echoes the request.
+    // `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped; `userId` is the
+    // PAYLOAD's id, never the echoed `:uid` argument.
     expected: [
       { path: "userId", value: OTHER_USER_ID },
       { path: "displayName", value: "" },
@@ -581,11 +635,8 @@ describe("ApiClient backend-text sanitization", () => {
     });
   });
 
-  /**
-   * A REAL payload must survive the boundary byte-identical. If this drifts,
-   * the layer has stopped coercing types and started rewriting content — which
-   * would silently corrupt what the user sees and what the next save uploads.
-   */
+  // A REAL payload must survive byte-identical, or the layer is rewriting content.
+  // See the header → "Valid payloads".
   describe("valid payloads", () => {
     const VALID_GROUP = {
       familyId: FAMILY_ID,
@@ -625,10 +676,8 @@ describe("ApiClient backend-text sanitization", () => {
     });
 
     it("materializes an omitted apiEndpoint as null on getFamilyMembers", async () => {
-      // The one field where the two layers disagree about absence, and layer 1
-      // wins because it runs first: `memberValidation` ALWAYS emits the key, so
-      // a caller of THIS method never has to tell "absent" from "not a string".
-      // The shared layer then sees a PRESENT `null` and keeps it as null.
+      // Layer 1 runs first and ALWAYS emits the key, so the text layer keeps a
+      // PRESENT `null`. See the header → "Valid payloads".
       const withoutEndpoint = omit(VALID_GROUP, "apiEndpoint");
       globalThis.fetch = mockFetchSuccess(withoutEndpoint);
 
@@ -642,11 +691,8 @@ describe("ApiClient backend-text sanitization", () => {
     });
 
     it("keeps an omitted apiEndpoint absent on a method the text layer alone governs", async () => {
-      // `createFamily` has no structural layer, so the conditional spread in
-      // `sanitizeFamilyGroupText` decides alone: an omitted optional stays
-      // OMITTED rather than becoming an explicit `undefined` own property.
-      // `JSON.stringify` cannot tell those two apart — it drops an `undefined`
-      // value either way — so the key check is the load-bearing assertion here.
+      // No structural layer: an omitted optional stays OMITTED; the key check is
+      // load-bearing (JSON.stringify can't tell). See the header → "Valid payloads".
       const withoutEndpoint = omit(VALID_GROUP, "apiEndpoint");
       globalThis.fetch = mockFetchSuccess(withoutEndpoint);
 
@@ -657,11 +703,8 @@ describe("ApiClient backend-text sanitization", () => {
     });
   });
 
-  /**
-   * `sanitizeEnvelope` short-circuits on `data === undefined`, so an error
-   * envelope keeps its exact shape. Anything else would break the callers that
-   * branch on `res.error.code`.
-   */
+  // `data === undefined` short-circuits, so an error envelope keeps its exact shape
+  // for callers branching on `res.error.code`.
   describe("error envelopes", () => {
     it("passes an error envelope through untouched", async () => {
       globalThis.fetch = mockFetchBody(
@@ -692,41 +735,8 @@ describe("ApiClient backend-text sanitization", () => {
     });
   });
 
-  /**
-   * The FAIL-CLOSED container contract, and the three reproductions PR #149's
-   * review filed as the container-tier white-screen gap. Before that fix each of
-   * these reached React state intact and detonated one render later — where no
-   * caller `try/catch` can reach, and with no ErrorBoundary in the Dialog the
-   * tab stays blank until the user reloads:
-   *
-   *   - `members: [null]` → stored by `setMembers`
-   *     (`extension/src/dialog/useFamilyDataMembers.ts:89`), then `members.map` +
-   *     `member.displayName` (`extension/src/dialog/MemberList.tsx:295` / `:49`)
-   *     throws a TypeError.
-   *   - `members: "not-an-array"` → same store, then `members.length`
-   *     (`extension/src/dialog/MemberList.tsx:82`) throws.
-   *   - `data: []` / `data: "x"` → both TRUTHY, so they walk past
-   *     `if (response.data)` and `setMembers(response.data.members)` stores
-   *     `undefined`, which hits that same `members.length`.
-   *
-   * All three now degrade to a renderable EMPTY state. `null` / `undefined`
-   * data is the deliberate exception and still passes through, because absence
-   * must stay absence for that very `if (response.data)` guard.
-   *
-   * The borrow LIST already failed closed before this (PR #144,
-   * `shared/src/borrow/validation.ts`): a non-array container degrades to
-   * `[]` and an unaddressable element is dropped, because an element with no
-   * usable `requestId` can serve neither as a React key nor as the target of
-   * `PATCH /api/borrow/:id`. Its rows below are unchanged — it is the precedent
-   * this layer was aligned to.
-   *
-   * `getFamilyMembers` now meets that same element-dropping strictness ONE
-   * LAYER EARLIER (`shared/src/api/memberValidation.ts`, PR #150), so its
-   * cases below assert drops rather than blanked fields: a member with no
-   * usable `userId` is exactly as unaddressable as a borrow request with no
-   * `requestId`. Every other group method still answers to the text layer
-   * alone, where a hostile member is degraded in place instead.
-   */
+  // The FAIL-CLOSED container contract for PR #149's three white-screen repros.
+  // See the header → "Structurally broken payloads".
   describe("structurally broken payloads", () => {
     it("degrades a members list that is not an array to an empty list", async () => {
       globalThis.fetch = mockFetchSuccess({
@@ -744,11 +754,8 @@ describe("ApiClient backend-text sanitization", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       globalThis.fetch = mockFetchSuccess({
         ...HOSTILE_GROUP,
-        // `null` cannot carry fields at all, and `HOSTILE_MEMBER`'s `userId` is
-        // an ARRAY — unusable as a React key, as either name-lookup key, or as
-        // the `:uid` of `updateMemberSettings` / `removeMember` — so on this
-        // method both are DROPPED rather than degraded to `""`. Only the third
-        // carries a usable `userId`.
+        // `null` and the ARRAY-`userId` member are DROPPED, not degraded to `""`;
+        // only the third carries a usable `userId` (see the file header).
         members: [null, HOSTILE_MEMBER, HOSTILE_MEMBER_WITH_ID],
       });
 
@@ -778,10 +785,8 @@ describe("ApiClient backend-text sanitization", () => {
 
         const result = await client.getFamilyMembers(FAMILY_ID);
 
-        // Both layers contribute: `memberValidation` degrades a non-record
-        // `data` to a members-only group plus its always-emitted `apiEndpoint`,
-        // then the shared text layer materializes the three declared-string
-        // fields. The result renders as an EMPTY family instead of throwing.
+        // Both layers contribute (members-only group + `apiEndpoint`, then the
+        // three text fields): an EMPTY family instead of a throw.
         expect(result.data).toStrictEqual({
           familyId: "",
           ownerId: "",
@@ -792,10 +797,8 @@ describe("ApiClient backend-text sanitization", () => {
       },
     );
 
-    // The pass-through branch that must NOT change: `sanitizeEnvelope`
-    // short-circuits on `undefined` and `sanitizeRecord` returns `null`
-    // untouched, so `if (response.data)` in `useFamilyDataMembers` keeps its
-    // "the backend sent nothing" branch instead of rendering an invented family.
+    // The pass-through that must NOT change: `null` stays `null`, keeping the
+    // "backend sent nothing" branch. See the header → "Structurally broken payloads".
     it("leaves a null data payload as null instead of inventing a family", async () => {
       globalThis.fetch = mockFetchSuccess(null);
 

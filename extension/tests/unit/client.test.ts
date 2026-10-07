@@ -13,9 +13,112 @@ import {
   TOKEN_EXPIRES_AT_KEY,
 } from "@/constants";
 
-// Mock the constants module to pin DEFAULT_API_ENDPOINT (avoids import.meta.env
-// dependence) while keeping all real values — notably the storage-key constants
-// that auth-refresh.ts imports.
+/**
+ * ApiClient (`src/api/client.ts`): request mechanics, endpoint validation, the
+ * 401 → refresh → join-recovery path, and the `throwOnError` chokepoint.
+ *
+ * The constants mock pins DEFAULT_API_ENDPOINT (avoids import.meta.env
+ * dependence) while keeping all real values — notably the storage-key constants
+ * that auth-refresh.ts imports.
+ *
+ * validateEndpointUrl: the single gate between an attacker-supplied URL (family
+ * record `apiEndpoint`, sync-code `@host`, settings input) and where this device
+ * sends its auth token and full book list. Two duties:
+ *   1. refuse unsafe values (scheme allowlist + no embedded credentials);
+ *   2. return a CANONICAL string, so what gets stored / compared / displayed is
+ *      exactly the origin the browser would resolve.
+ * Embedded credentials: `https://real.example@evil.com` is a URL whose userinfo
+ * LOOKS like the host — the browser fetches evil.com while the stored/displayed
+ * string reads as real.example. There is no legitimate use for credentials in an
+ * API endpoint, so the whole shape is refused rather than stripped.
+ * Canonical form matters beyond tidiness: the same endpoint spelled two ways
+ * must compare equal (endpoint-switch prompts, declined-value markers), and the
+ * displayed host must be the resolved one.
+ *
+ * `toMatchObject`, not `toEqual`, on personal-books payloads: `getPersonalBooks`
+ * runs its payload through `sanitizePersonalBooksText`, which materializes the
+ * record's declared text fields, so a partial stand-in payload comes back with
+ * the missing ones as `""`. That coercion has its own coverage in
+ * `tests/unit/api/sanitizeEnvelope.test.ts`; this suite is about the request
+ * mechanics, so it pins only the field it supplied.
+ *
+ * Lookup without a secret: the verification gate is opt-in per request.
+ * Self-hosted (BYO) Workers can lag the Extension by releases, so a lookup
+ * WITHOUT a secret must stay byte-identical to the pre-gate request — an
+ * unexpected extra field is what a strict older backend would reject.
+ *
+ * unkickMember: the un-kick call is what makes an owner's removal reversible —
+ * it lifts the server's `kicked:` tombstone so the removed member's sync code
+ * works again. It must hit the `kicked` collection: `/member/` is the REMOVAL
+ * endpoint, so a wrong path here would be a destructive no-op the UI still
+ * calls success.
+ *
+ * 401 handling:
+ *  - Refresh dedup uses two DIFFERENT URLs, so the GET dedup map cannot merge
+ *    them into one request — and neither rebuilds its payload at the API
+ *    boundary (that is `getFamilyMembers`, covered in
+ *    `tests/unit/api/member-client.test.ts`), which keeps the assertion about
+ *    refresh dedup and nothing else.
+ *  - The refusal that tore the binding down travels from the wire body to the
+ *    `onFamilyRemoved` payload, so the dialog can NAME the reason on the
+ *    onboarding view instead of flipping there silently. This is the only test
+ *    that covers that trip end-to-end: the auth-refresh unit tests inject
+ *    `deps.request`, so they never exercise the response parsing.
+ *  - Recovery skipped with NO join error code (familyId missing) is a
+ *    transient/unknown outcome — NOT a genuine "family gone". Per the contract
+ *    (Invariant 2) family data must be left intact and onFamilyRemoved must NOT
+ *    fire on this path.
+ *  - webextension-polyfill's `sendMessage` rejects when no listener is active /
+ *    the context is invalidated; a synchronous try/catch cannot catch this, and
+ *    the recovery-failure path must still resolve cleanly.
+ *
+ * Rate-limited recovery: when staged recovery is throttled by the worker (429
+ * RATE_LIMITED), the 401 path must NOT surface the raw English 401 — it returns
+ * a friendly, localized envelope so the UI can tell the user to retry later (and
+ * must not prompt re-verification, which would fail anyway). Its code,
+ * AUTH_REFRESH_RATE_LIMITED, is client-synthesized and deliberately distinct
+ * from the server's RATE_LIMITED: the UI recognizes it and shows this bespoke
+ * copy verbatim instead of the generic back-off sentence. The envelope carries
+ * no `synthesized` field of its own — the marker is a module-private Symbol,
+ * unreachable from a test and unforgeable by a response body. Provenance only
+ * becomes observable once `unwrap` turns the envelope into an `ApiError`, and
+ * that flag is what the public-shelf dialog requires before rendering the copy
+ * verbatim.
+ *
+ * Reauth-pending latch: once a verification prompt has been raised (recovery
+ * returned a VERIFICATION_* code), the client latches so a second 401 wave —
+ * e.g. the dialog's second concurrent data fetch — does NOT fire silent
+ * join-recovery again. This keeps a single dialog open to at most one
+ * rate-limit unit and stops the in-progress verification prompt from being
+ * re-initialized (which would wipe the user's pattern/PIN input). The latch
+ * releases only on a fresh non-null token or an explicit clearReauthPending().
+ *
+ * throwOnError — hostile envelope text: `throwOnError` is the single chokepoint
+ * every thrown `ApiError` passes through, and both of its text inputs arrive via
+ * `readEnvelope`, which bare-casts `response.json()` (src/api/client.ts). The
+ * endpoint is user-configurable (BYO backend via the sync code's `@host`), so
+ * `code` and `message` are `unknown` at runtime while the types call them
+ * `string`. That gap costs more than wording. `ApiError`'s constructor
+ * interpolates both — `super(\`${code}: ${message}\`)` — so a value whose
+ * ToPrimitive throws (`{ toString: null, valueOf: null }`, a shape `JSON.parse`
+ * really can produce) used to raise a TypeError from INSIDE the constructor: no
+ * `ApiError` was ever built, every caller's `instanceof ApiError` branch went
+ * false, and the machine-readable `code` plus the 429 `retryAfter` the localized
+ * back-off copy counts down from were lost with it. Sanitizing both halves
+ * before construction is what preserves the error's IDENTITY, not just its
+ * text. That 429 branch reads exactly `code` and `retryAfter`, which is why the
+ * review payload's case pins them rather than the (degraded) wording. `code` is
+ * interpolated first, so a hostile code kills construction just as thoroughly
+ * as a hostile message; it must still land as a non-empty string (`err.code ===
+ * ""` would match no branch and read as "no code"). Driven through
+ * `listPublicShelves` because it is an unwrapping method (its result is the
+ * value, so refusals can only surface as a throw). `captureThrown` refuses the
+ * next request with `error` verbatim and hands back whatever the method threw;
+ * `captureRejection`'s trailing throw keeps a resolved call from passing
+ * vacuously.
+ */
+
+// Pin DEFAULT_API_ENDPOINT, keep every real constant. See the file header.
 vi.mock("@/constants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/constants")>();
   return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
@@ -23,10 +126,8 @@ vi.mock("@/constants", async (importOriginal) => {
 
 const MOCK_ENDPOINT = "https://test.workers.dev";
 
-/**
- * Re-key a logical storage-read object to the production `moo:` keys, so the
- * mocked chrome.storage.local.get returns what auth-refresh.ts actually reads.
- */
+/** Re-key a logical storage-read object to the production `moo:` keys, so the
+ *  mocked chrome.storage.local.get returns what auth-refresh.ts actually reads. */
 const STORAGE_KEY_ALIAS: Record<string, string> = {
   userId: USER_ID_KEY,
   familyId: FAMILY_ID_KEY,
@@ -105,14 +206,8 @@ describe("ApiClient", () => {
     });
   });
 
-  /**
-   * The endpoint validator is the single gate between an attacker-supplied URL
-   * (family record `apiEndpoint`, sync-code `@host`, settings input) and where
-   * this device sends its auth token and full book list. Two duties:
-   *   1. refuse unsafe values (scheme allowlist + no embedded credentials);
-   *   2. return a CANONICAL string, so what gets stored / compared / displayed
-   *      is exactly the origin the browser would resolve.
-   */
+  // The single gate for attacker-supplied URLs: refuse unsafe values, return a
+  // CANONICAL string. See the header → "validateEndpointUrl".
   describe("validateEndpointUrl", () => {
     it.each([
       ["https://api.example.com", "https://api.example.com"],
@@ -137,12 +232,8 @@ describe("ApiClient", () => {
       expect(() => validateEndpointUrl(input)).toThrow();
     });
 
-    /**
-     * `https://real.example@evil.com` is a URL whose userinfo LOOKS like the
-     * host: the browser fetches evil.com while the stored/displayed string reads
-     * as real.example. There is no legitimate use for credentials in an API
-     * endpoint, so the whole shape is refused rather than stripped.
-     */
+    // Userinfo that LOOKS like the host (`https://real.example@evil.com`) is refused,
+    // not stripped. See the header → "Embedded credentials".
     describe("embedded credentials", () => {
       it.each([
         ["a host-shaped username", "https://real.example@evil.com"],
@@ -162,11 +253,8 @@ describe("ApiClient", () => {
       });
     });
 
-    /**
-     * Canonicalisation matters beyond tidiness: the same endpoint spelled two
-     * ways must compare equal (endpoint-switch prompts, declined-value markers),
-     * and the displayed host must be the resolved one.
-     */
+    // Two spellings of one endpoint must compare equal, and the displayed host must
+    // be the resolved one.
     describe("canonical form", () => {
       it.each([
         [
@@ -281,14 +369,8 @@ describe("ApiClient", () => {
   });
 
   describe("request() — success handling", () => {
-    /**
-     * `toMatchObject`, not `toEqual`: `getPersonalBooks` runs its payload
-     * through `sanitizePersonalBooksText`, which materializes the record's
-     * declared text fields, so a partial stand-in payload comes back with the
-     * missing ones as `""`. That coercion has its own coverage in
-     * `tests/unit/api/sanitizeEnvelope.test.ts`; this suite is about the
-     * request mechanics, so it pins only the field it supplied.
-     */
+    // `toMatchObject`, not `toEqual`: the payload is sanitized on the way out.
+    // See the file header.
     it("returns data on successful response", async () => {
       globalThis.fetch = mockFetchSuccess({ userId: "abc" });
       const result = await client.getPersonalBooks("user-1");
@@ -362,12 +444,8 @@ describe("ApiClient", () => {
       expect(result.data).toEqual({ existingFamilyId: null, memberCount: 0 });
     });
 
-    /**
-     * The verification gate is opt-in per request. Self-hosted (BYO) Workers can
-     * lag the Extension by releases, so a lookup WITHOUT a secret must stay
-     * byte-identical to the pre-gate request — an unexpected extra field is what
-     * a strict older backend would reject.
-     */
+    // A lookup WITHOUT a secret stays byte-identical to the pre-gate request.
+    // See the header → "Lookup without a secret".
     it.each([
       ["no options argument", undefined],
       ["an empty options object", {}],
@@ -907,12 +985,8 @@ describe("ApiClient", () => {
     });
   });
 
-  /**
-   * The un-kick call is what makes an owner's removal reversible: it lifts the
-   * server's `kicked:` tombstone so the removed member's sync code works again.
-   * It must hit the `kicked` collection — `/member/` is the REMOVAL endpoint, so
-   * a wrong path here would be a destructive no-op the UI still calls success.
-   */
+  // Un-kick must hit the `kicked` collection; `/member/` is the REMOVAL endpoint.
+  // See the header → "unkickMember".
   describe("unkickMember", () => {
     it("sends DELETE to /api/family/:id/kicked/:targetUserId", async () => {
       globalThis.fetch = mockFetchSuccess({ cleared: BoolFlag.TRUE });
@@ -1166,11 +1240,8 @@ describe("ApiClient", () => {
         },
       );
 
-      // Fire two concurrent requests that both get 401. Two DIFFERENT URLs, so
-      // the GET dedup map cannot merge them into one request — and neither
-      // rebuilds its payload at the API boundary (that is `getFamilyMembers`,
-      // covered in `tests/unit/api/member-client.test.ts`), which keeps the
-      // assertion below about refresh dedup and nothing else.
+      // Two concurrent 401s on DIFFERENT URLs, so only refresh dedup is under test.
+      // See the header → "401 handling".
       const [r1, r2] = await Promise.all([
         client.getPersonalBooks("u1"),
         client.getFamilyBookshelf("fam-1"),
@@ -1235,11 +1306,8 @@ describe("ApiClient", () => {
       await client.getPersonalBooks("u1");
 
       expect(onFamilyRemoved).toHaveBeenCalledOnce();
-      // The refusal that tore the binding down travels all the way from the
-      // wire body to the callback payload, so the dialog can NAME the reason on
-      // the onboarding view instead of flipping there silently. This is the only
-      // test that covers that trip end-to-end: the auth-refresh unit tests
-      // inject `deps.request`, so they never exercise the response parsing.
+      // The only end-to-end test of the refusal code travelling wire → callback.
+      // See the header → "401 handling".
       expect(onFamilyRemoved).toHaveBeenCalledWith({
         errorCode: "FAMILY_NOT_FOUND",
       });
@@ -1363,9 +1431,8 @@ describe("ApiClient", () => {
 
       const result = await client.getPersonalBooks("u1");
 
-      // Recovery succeeded — original request retried successfully.
-      // toMatchObject: the payload is sanitized on the way out — see the note
-      // on "returns data on successful response" above.
+      // Recovery succeeded — original request retried. toMatchObject: the payload
+      // is sanitized on the way out (see the file header).
       expect(result.data).toMatchObject({ userId: "u1", books: [] });
       expect(fetchMock).toHaveBeenCalledTimes(4);
       // onFamilyRemoved should NOT be called on successful recovery
@@ -1497,10 +1564,8 @@ describe("ApiClient", () => {
 
       // Only 2 fetch calls — no joinFamily attempt
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      // Recovery was skipped with NO join error code (familyId missing), which
-      // is a transient/unknown outcome — NOT a genuine "family gone". Per the
-      // new contract (Invariant 2) family data must be left intact and
-      // onFamilyRemoved must NOT fire on this path.
+      // No join error code (familyId missing) is transient, NOT "family gone":
+      // data stays, onFamilyRemoved must not fire (Invariant 2).
       expect(onFamilyRemoved).not.toHaveBeenCalled();
       expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
         FAMILY_ID_KEY,
@@ -1627,8 +1692,7 @@ describe("ApiClient", () => {
         },
       );
 
-      // Simulate webextension-polyfill rejecting when no listener is active /
-      // the context is invalidated. A synchronous try/catch cannot catch this;
+      // webextension-polyfill rejects with no listener / an invalidated context;
       // the recovery-failure path must still resolve cleanly.
       vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
         new Error(
@@ -1704,12 +1768,8 @@ describe("ApiClient", () => {
       expect(chrome.storage.local.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
     });
 
-    /**
-     * When staged recovery is throttled by the worker (429 RATE_LIMITED), the
-     * 401 path must NOT surface the raw English 401 — it returns a friendly,
-     * localized RATE_LIMITED envelope so the UI can tell the user to retry later
-     * (and must not prompt re-verification, which would fail anyway).
-     */
+    // A throttled recovery (429) yields a localized envelope, never the raw 401 nor
+    // a verification prompt. See the header → "Rate-limited recovery".
     describe("rate-limited recovery", () => {
       /** 401 → refresh fails → join recovery is 429 RATE_LIMITED. */
       function mockRateLimitedRecovery(retryAfter?: number) {
@@ -1774,12 +1834,11 @@ describe("ApiClient", () => {
         const result = await client.getPersonalBooks("u1");
 
         // Client-synthesized code, deliberately distinct from the server's
-        // RATE_LIMITED: the UI recognizes it and shows this bespoke copy
-        // verbatim instead of the generic back-off sentence.
+        // RATE_LIMITED, so the UI shows this bespoke copy verbatim.
         expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
         expect(result.error?.code).not.toBe("RATE_LIMITED");
-        // Localized (not the raw English 401 message) — contains Chinese and the
-        // stable "稍後" substring; an approximate wait is appended when known.
+        // Localized (not the raw English 401 message): contains CJK and the stable
+        // "稍後" substring; an approximate wait is appended when known.
         expect(result.error?.message).toMatch(/[一-鿿]/);
         expect(result.error?.message).toContain("稍後");
         expect(result.error?.message).toMatch(/分鐘後/);
@@ -1795,9 +1854,8 @@ describe("ApiClient", () => {
 
         const result = await client.getPersonalBooks("u1");
 
-        // A default cooldown is applied, so the envelope is still the localized
-        // recovery-throttle copy; assert only the stable base substring (don't
-        // pin the exact minute figure the fallback produces).
+        // A default cooldown applies; assert only the stable base substring, not
+        // the minute figure the fallback produces.
         expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
         expect(result.error?.message).toContain("稍後");
       });
@@ -1822,13 +1880,8 @@ describe("ApiClient", () => {
         ]);
       });
 
-      /**
-       * The envelope carries no `synthesized` field of its own — the marker is a
-       * module-private Symbol, unreachable from a test and unforgeable by a
-       * response body. Provenance only becomes observable once `unwrap` turns
-       * the envelope into an `ApiError`, and that flag is what the public-shelf
-       * dialog requires before rendering this bespoke copy verbatim.
-       */
+      // Provenance is a module-private Symbol, observable only on the `ApiError`
+      // `unwrap` builds. See the header → "Rate-limited recovery".
       it("marks the thrown error as client-synthesized so the UI may render its copy verbatim", async () => {
         globalThis.fetch = mockRateLimitedRecovery(120);
         seedMembership();
@@ -1843,15 +1896,8 @@ describe("ApiClient", () => {
       });
     });
 
-    /**
-     * Reauth-pending latch: once a verification prompt has been raised (recovery
-     * returned a VERIFICATION_* code), the client latches so a second 401 wave —
-     * e.g. the dialog's second concurrent data fetch — does NOT fire silent
-     * join-recovery again. This keeps a single dialog open to at most one
-     * rate-limit unit and stops the in-progress verification prompt from being
-     * re-initialized (which would wipe the user's pattern/PIN input). The latch
-     * releases only on a fresh non-null token or an explicit clearReauthPending().
-     */
+    // After a VERIFICATION_* recovery, a second 401 wave must not re-fire silent
+    // join-recovery. See the header → "Reauth-pending latch".
     describe("reauth-pending latch", () => {
       /** A 401 on the original protected request. */
       function resp401() {
@@ -2044,36 +2090,15 @@ describe("ApiClient", () => {
     });
   });
 
-  /**
-   * `throwOnError` is the single chokepoint every thrown `ApiError` passes
-   * through, and both of its text inputs arrive via `readEnvelope`, which
-   * bare-casts `response.json()` (src/api/client.ts). The endpoint is
-   * user-configurable (BYO backend via the sync code's `@host`), so `code` and
-   * `message` are `unknown` at runtime while the types call them `string`.
-   *
-   * That gap costs more than wording. `ApiError`'s constructor interpolates
-   * both — `super(\`${code}: ${message}\`)` — so a value whose ToPrimitive
-   * throws (`{ toString: null, valueOf: null }`, a shape `JSON.parse` really
-   * can produce) used to raise a TypeError from INSIDE the constructor: no
-   * `ApiError` was ever built, every caller's `instanceof ApiError` branch went
-   * false, and the machine-readable `code` plus the 429 `retryAfter` the
-   * localized back-off copy counts down from were lost with it. Sanitizing both
-   * halves before construction is what preserves the error's IDENTITY, not just
-   * its text.
-   *
-   * Driven through `listPublicShelves` because it is an unwrapping method (its
-   * result is the value, so refusals can only surface as a throw).
-   */
+  // Hostile `code`/`message` must not kill `ApiError` construction; sanitizing
+  // preserves the error's IDENTITY. See the header → "throwOnError".
   describe("throwOnError — hostile envelope text", () => {
     /** Fallbacks as written at the production call site in src/api/client.ts. */
     const CODE_FALLBACK = "UNKNOWN_ERROR";
     const MESSAGE_FALLBACK = "請稍後再試";
 
-    /**
-     * Refuse the next request with `error` verbatim, then hand back whatever
-     * the unwrapping method threw. `captureRejection`'s trailing throw keeps a
-     * resolved call from passing vacuously.
-     */
+    /** Refuse the next request with `error` verbatim; return what the method threw
+     *  (`captureRejection`'s trailing throw stops a resolved call passing vacuously). */
     async function captureThrown(
       error: Record<string, unknown>,
       status: number,
@@ -2113,12 +2138,8 @@ describe("ApiClient", () => {
     );
 
     it("still throws an ApiError (not a TypeError) for a message that cannot be stringified", async () => {
-      // The exact payload from review: nulling both `toString` and `valueOf`
-      // makes ToPrimitive throw, so `new ApiError(code, message, …)` used to
-      // die inside its own constructor. A TypeError is not an ApiError, so the
-      // 429 branch that renders the localized back-off copy was skipped — and
-      // that branch reads exactly the two fields asserted here, which is why
-      // this pins them rather than the (degraded) wording.
+      // The review payload: null `toString`/`valueOf` made ToPrimitive throw inside
+      // the constructor. Pins the two fields the 429 branch reads (see header).
       const thrown = await captureThrown(
         {
           code: "RATE_LIMITED",
@@ -2136,9 +2157,8 @@ describe("ApiClient", () => {
     });
 
     it("falls back to UNKNOWN_ERROR when the code itself is not a string", async () => {
-      // `code` is interpolated first, so a hostile code kills construction just
-      // as thoroughly as a hostile message. It must still land as a non-empty
-      // string: `err.code === ""` would match no branch and read as "no code".
+      // A hostile `code` kills construction too; it must still land as a non-empty
+      // string (`""` would match no branch and read as "no code").
       const thrown = await captureThrown(
         {
           code: { toString: null, valueOf: null },
@@ -2149,9 +2169,8 @@ describe("ApiClient", () => {
 
       expect(thrown).toBeInstanceOf(ApiError);
       expect((thrown as ApiError).code).toBe(CODE_FALLBACK);
-      // A legitimate message still reaches the user even when the code is junk
-      // — and its presence proves the envelope's own error was used, not the
-      // client's `HTTP 500` stand-in for a missing error field.
+      // A legitimate message survives junk code — proof the envelope's own error
+      // was used, not the client's `HTTP 500` stand-in.
       expect((thrown as ApiError).rawMessage).toBe("伺服器拒絕了這個請求");
       // Sanitizing must not launder provenance: this payload came off the wire,
       // so the UI may not render its text verbatim.
@@ -2159,9 +2178,8 @@ describe("ApiClient", () => {
     });
 
     it("passes a legitimate string code and message through unchanged", async () => {
-      // Positive control: the guard must not over-degrade. Real server text
-      // still reaches the user, the legacy "CODE: message" shape stays intact
-      // for callers that read `message`, and `retryAfter` rides along.
+      // Positive control: real server text, the legacy "CODE: message" shape and
+      // `retryAfter` all survive the guard.
       const thrown = await captureThrown(
         {
           code: "MAX_SHELVES_REACHED",

@@ -9,6 +9,7 @@ import { useFloatingIconSize } from "@/dialog/useFloatingIconSize";
  * callback argument. The mount read is async, so assertions on the loaded value
  * use `waitFor`.
  */
+
 function mockSendMessage(
   getResponse: Record<string, unknown>,
   setResponse: Record<string, unknown> = { ok: true },

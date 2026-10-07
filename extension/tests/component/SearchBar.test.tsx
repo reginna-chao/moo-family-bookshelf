@@ -68,10 +68,8 @@ describe("SearchBar", () => {
   });
 
   describe("responsive sizing", () => {
-    // The 32px-tall mobile input height moved from an inline style to the
-    // `.moo-search__input--mobile` modifier in styles.css (desktop 40px lives on
-    // the base `.moo-search__input`). jsdom does not apply stylesheet rules, so
-    // the observable contract is the modifier class presence/absence.
+    // 32px mobile height is the `.moo-search__input--mobile` modifier (desktop 40px on the base
+    // `.moo-search__input`); jsdom applies no stylesheet, so the modifier's presence/absence is the contract.
     it("adds the --mobile modifier on the input on mobile", () => {
       vi.mocked(useIsMobile).mockReturnValue(true);
       renderSearchBar();

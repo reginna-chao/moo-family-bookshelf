@@ -76,11 +76,8 @@ describe("FloatingIconSizeSelector", () => {
     ).toBeInTheDocument();
   });
 
-  // The segmented-control container clip (overflow: hidden) and per-segment
-  // corner radii moved from inline styles into the shadow-scoped
-  // `.moo-icon-size` / `.moo-icon-size__segment--{first,middle,last}` classes in
-  // styles.css. jsdom does not apply stylesheet rules, so the observable
-  // contract is the class list, not computed inline styles.
+  // The container clip (overflow: hidden) and segment radii are `.moo-icon-size` /
+  // `__segment--{first,middle,last}` in styles.css; jsdom applies none, so the class list is the contract.
   it("carries the segmented-container class that clips child corners", () => {
     render(<FloatingIconSizeSelector size="medium" onChange={vi.fn()} />);
 
@@ -141,10 +138,8 @@ describe("FloatingIconSizeSelector", () => {
     },
   );
 
-  // The borders / hover fill / focus ring / corner radii were folded into the
-  // shared `.moo-segmented__item` component class; `.moo-icon-size__segment`
-  // now only adds `flex: 1`. jsdom does not apply the stylesheet, so the class
-  // list is the contract that keeps the shared base from being dropped.
+  // Borders / hover / focus ring / radii live in the shared `.moo-segmented__item`; the segment class only
+  // adds `flex: 1`. The class list (jsdom) keeps the shared base from being dropped.
   it.each<{ label: string; position: string }>([
     { label: "僅圖示", position: "first" },
     { label: "小尺寸", position: "middle" },

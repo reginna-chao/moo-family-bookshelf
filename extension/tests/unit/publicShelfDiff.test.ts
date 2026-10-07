@@ -11,6 +11,10 @@ import type { PublicShelf } from "@/api/types";
  * what "diverged" means. Its parameters are structural, but the fixtures below
  * stay full `PublicShelf` objects on purpose: that also pins the Extension's own
  * type as assignable to the shared snapshot shape.
+ *
+ * Why the server-adoption branch exists: the server strips characters `trim()`
+ * does not, so without adopting its value the field would read as permanently
+ * unsaved on a title the user can never retype.
  */
 
 const SHELF: PublicShelf = {
@@ -195,9 +199,8 @@ describe("reconcileTitle", () => {
     expect(reconcileTitle(current, sent, stored)).toBe(expected);
   });
 
-  // Why the server-adoption branch exists: the server strips characters
-  // `trim()` does not, so without adopting its value the field would read as
-  // permanently unsaved on a title the user can never retype.
+  // The server strips more than `trim()`; without adopting its value the field
+  // stays "unsaved" forever. See the file header.
   it("clears the divergence that a server-side sanitization would otherwise strand", () => {
     const stored = { title: "書櫃", expiresDays: 30 };
 

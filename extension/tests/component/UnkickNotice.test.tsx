@@ -12,21 +12,12 @@ const FAMILY_ID = "fam-123";
 const TARGET_ID = "user-def67890";
 const DISPLAY_NAME = "大明";
 
-/**
- * Pinned copy of the production hint literal (not exported by the component).
- * The assertion below renders the real component, so this string is compared
- * against the production render site — if the source copy changes, the test
- * fails rather than drifting.
- * Source: shared/src/unkick/messages.ts (UNKICK_HINT_TEXT)
- */
+/** Pinned production hint (shared/src/unkick/messages.ts UNKICK_HINT_TEXT, not exported by the component);
+ *  asserted against the real render, so a source reword fails here instead of drifting. */
 const HINT_TEXT = "解除後對方仍需自行輸入同步碼加入，不會自動回到家庭。";
 
-/**
- * Pinned copies of the two notice literals. They are built by shared/, and every
- * other assertion in this file compares the builder output against itself, so a
- * reword would go unnoticed. These are asserted against the real render site.
- * Source: shared/src/unkick/messages.ts (buildRemovedNoticeText / buildUnkickedNoticeText)
- */
+/** Pinned notice literals (shared/src/unkick/messages.ts buildRemovedNoticeText / buildUnkickedNoticeText):
+ *  every other assertion compares the builder with itself, so only these catch a reword at the render site. */
 const REMOVED_TEXT = `已移除 ${DISPLAY_NAME}，對方 6 小時內無法用同步碼重新加入。如果是誤移除，可以在這裡解除限制；關閉這則通知或離開這個畫面後，就無法再解除。`;
 const UNKICKED_TEXT = `已解除限制，${DISPLAY_NAME} 可重新使用同步碼加入（可能需要約一分鐘生效）`;
 
@@ -59,10 +50,8 @@ describe("UnkickNotice", () => {
     vi.restoreAllMocks();
   });
 
-  /**
-   * Covers both states in one pass because the wording, not the flow, is what
-   * is being fixed here — the flow itself is covered by the suites below.
-   */
+  /** Both states in one pass: the wording, not the flow, is what is fixed here — the flow is covered by
+   *  the suites below. */
   it("pins the exact removed / cleared copy against the render site", async () => {
     renderNotice();
 
@@ -87,11 +76,8 @@ describe("UnkickNotice", () => {
       ).toBeEnabled();
     });
 
-    /**
-     * The product distinction the copy must keep: lifting the block does NOT
-     * put the member back in the family (Inv-4) — they still have to join with
-     * the sync code themselves.
-     */
+    /** The product distinction the copy must keep: lifting the block does NOT put the member back in the
+     *  family (Inv-4) — they still have to join with the sync code themselves. */
     it("states that lifting the block does not re-add the member", () => {
       renderNotice();
 
@@ -176,11 +162,8 @@ describe("UnkickNotice", () => {
       ).not.toBeInTheDocument();
     });
 
-    /**
-     * The endpoint is idempotent — an already-expired tombstone answers 200 with
-     * `cleared: FALSE`. The user-visible outcome is identical, so the UI must
-     * not branch on the flag and re-open the entry.
-     */
+    /** The endpoint is idempotent: an already-expired tombstone answers 200 with `cleared: FALSE`. The
+     *  outcome the user sees is identical, so the UI must not branch on the flag and re-open the entry. */
     it("treats an already-expired tombstone (cleared FALSE) as success", async () => {
       const apiClient = createMockApiClient({
         unkickMember: vi

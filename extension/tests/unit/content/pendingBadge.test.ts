@@ -43,6 +43,16 @@ import {
  * the validation were removed and the raw payload were cast again, the throw
  * would be swallowed by the function's outer `try/catch` and the stale badge
  * would survive — so these assertions fail on exactly that regression.
+ *
+ * Element cases each mix ONE valid pending+owned element among hostile ones, so
+ * a green result proves the sanitize→filter→badge wiring, not just that the call
+ * survived. The sanitizer normalizes a non-string ownerId to "" — which can
+ * never equal the stored userId (an empty userId returns before the fetch), so a
+ * hostile element cannot forge a pending count.
+ *
+ * Account-gate cases each serve a payload that WOULD show "1" and seed a stale
+ * "9", so a request slipping past the gate shows up as a "1" badge and a skipped
+ * cleanup as the "9" — the stored account's count never reaches another one.
  */
 
 if (!globalThis.crypto?.subtle) {
@@ -287,9 +297,8 @@ describe("updatePendingBorrowBadge", () => {
   });
 
   describe("malformed elements", () => {
-    // Every case mixes ONE valid pending+owned element among hostile ones, so a
-    // green result proves the sanitize→filter→badge wiring, not just that the
-    // call survived.
+    // ONE valid element among hostile ones per case: proves the wiring, not mere
+    // survival. See the file header.
     const ELEMENT_CASES: Array<{ name: string; element: unknown }> = [
       { name: "null", element: null },
       { name: "undefined", element: undefined },
@@ -328,9 +337,8 @@ describe("updatePendingBorrowBadge", () => {
     );
 
     it("does not count an element whose ownerId is not a string", async () => {
-      // The sanitizer normalizes a non-string ownerId to "" — which can never
-      // equal the stored userId (an empty userId returns before the fetch), so
-      // a hostile element cannot forge a pending count.
+      // A non-string ownerId becomes "", which never equals the stored userId: no
+      // forged pending count.
       serveData([
         { ...makeBorrowRequest({ requestId: "req-hostile" }), ownerId: 42 },
         {
@@ -457,9 +465,8 @@ describe("updatePendingBorrowBadge", () => {
   });
 
   describe("account gate (issue #275)", () => {
-    // Every case serves a payload that WOULD show "1" and seeds a stale "9", so
-    // a request slipping past the gate shows up as a "1" badge, a skipped
-    // cleanup as the "9" — the stored account's count never reaches another one.
+    // Payload WOULD show "1", stale badge "9": a leaked request reads "1", a
+    // skipped cleanup "9". See the file header.
     beforeEach(() => {
       serveData([makeBorrowRequest()]);
       seedStaleBadge();

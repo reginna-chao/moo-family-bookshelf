@@ -4,6 +4,23 @@ import { OverflowMenu, type OverflowMenuItem } from "@/dialog/OverflowMenu";
 import { PortalContainerContext } from "@/dialog/PortalContainerContext";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
+/**
+ * OverflowMenu: open / select / dismiss, keyboard focus management, Shadow DOM behaviour, and the
+ * trigger's class contract.
+ *
+ * Shadow DOM outside-click (regression): when the menu is portaled into an OPEN shadow root, a
+ * `mousedown` on a menu item is retargeted to the shadow host at the document level, so a
+ * `contains(event.target)` check treats the click as "outside" and closes the menu before the item's
+ * onClick fires. useDismissableMenu must use `event.composedPath()`, which pierces the shadow boundary,
+ * to recognise inside-menu clicks. A plain light-DOM portal container cannot reproduce retargeting.
+ *
+ * Class contract: jsdom does not apply stylesheet rules, so classes are the observable contract. The
+ * 28px (desktop) / 32px (mobile) trigger sizing moved from inline styles to `.moo-overflow__trigger` +
+ * the `--mobile` modifier; the trigger opts into the shared `.moo-button` class (icon-only ghost
+ * variant) instead of restating base button chrome, and asserting it catches a component that
+ * silently drops the shared base again.
+ */
+
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: vi.fn(() => false),
 }));
@@ -194,10 +211,8 @@ describe("OverflowMenu", () => {
     }).not.toThrow();
   });
 
-  // The panel is portaled to the end of the DOM, so native Tab order never
-  // reaches it. The component therefore drives focus itself: it moves focus into
-  // the menu on open, cycles between items on arrow/Tab keys, and hands focus
-  // back to the trigger whenever the menu closes via the keyboard.
+  // The panel is portaled to the end of the DOM, so native Tab never reaches it: the component moves
+  // focus in on open, cycles on arrow/Tab, and returns it to the trigger on a keyboard close.
   describe("keyboard focus management", () => {
     /** Opens the menu and returns the trigger plus the rendered menu items. */
     function openMenu(items: OverflowMenuItem[] = THREE_ITEMS) {
@@ -387,13 +402,8 @@ describe("OverflowMenu", () => {
     });
   });
 
-  // Regression coverage for the Shadow DOM outside-click bug: when the menu is
-  // portaled into an OPEN shadow root, a `mousedown` on a menu item is retargeted
-  // to the shadow host at the document level. A `contains(event.target)` check
-  // therefore treats the click as "outside" and closes the menu before the item's
-  // onClick fires. useDismissableMenu must use `event.composedPath()` (which
-  // pierces the shadow boundary) so inside-menu clicks are recognised. A plain
-  // light-DOM portal container (the block above) cannot reproduce retargeting.
+  // Regression: a retargeted mousedown in a shadow-root portal reads as "outside" unless the dismiss
+  // check uses composedPath(). See the file header, "Shadow DOM outside-click".
   describe("portaled into a real open shadow root (retargeting)", () => {
     let host: HTMLDivElement;
     let shadowRoot: ShadowRoot;
@@ -454,9 +464,8 @@ describe("OverflowMenu", () => {
         shadowRoot.querySelector<HTMLButtonElement>('[role="menuitem"]');
       if (!item) throw new Error("menuitem not found in shadow root");
 
-      // Full pointer sequence on the item. The mousedown is retargeted to the
-      // host at document level; the dismiss handler must recognise it as
-      // inside-menu (via composedPath) and NOT close the menu before the click.
+      // Full pointer sequence: the mousedown is retargeted to the host, and the dismiss handler must see
+      // it as inside-menu (composedPath) and NOT close before the click.
       fireEvent.mouseDown(item);
       fireEvent.mouseUp(item);
       fireEvent.click(item);
@@ -478,10 +487,8 @@ describe("OverflowMenu", () => {
       expect(menuInShadow()).toBeNull();
     });
 
-    // Inside a shadow tree `document.activeElement` is retargeted to the host,
-    // so focus tracking must read `activeElement` off the ShadowRoot returned by
-    // `getRootNode()`. With the retargeted value the "current item" lookup would
-    // never match and every arrow key would land back on the first item.
+    // `document.activeElement` is retargeted to the host, so focus tracking reads it off
+    // `getRootNode()`; otherwise no item matches and every arrow key lands on the first item.
     it("focuses the first item and cycles with arrow keys inside the shadow root", () => {
       renderInShadow(THREE_ITEMS);
 
@@ -515,10 +522,8 @@ describe("OverflowMenu", () => {
   });
 
   describe("responsive sizing", () => {
-    // The 28px (desktop) / 32px (mobile) trigger sizing moved from inline styles
-    // to `.moo-overflow__trigger` + the `--mobile` modifier in styles.css. jsdom
-    // does not apply stylesheet rules, so the observable contract is the modifier
-    // class presence/absence.
+    // Trigger sizing is `.moo-overflow__trigger` + `--mobile`; the modifier's presence/absence is the
+    // contract (see the file header, "Class contract").
     it("renders a desktop trigger without the --mobile modifier", () => {
       vi.mocked(useIsMobile).mockReturnValue(false);
       render(
@@ -540,10 +545,8 @@ describe("OverflowMenu", () => {
     });
   });
 
-  // The trigger opts into the shared `.moo-button` component class (icon-only
-  // ghost variant) instead of restating base button chrome. jsdom does not apply
-  // the stylesheet, so the class list is the observable contract; asserting it
-  // catches a component that silently drops the shared base again.
+  // The trigger carries the shared `.moo-button` ghost-icon classes; the class list is the contract
+  // (see the file header, "Class contract").
   describe("shared .moo-button class contract", () => {
     it.each([{ tone: "overlay" as const }, { tone: "plain" as const }])(
       "carries the ghost-icon button base for the $tone tone",

@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// The fiber bridge injects a main-world <script> and dispatches CustomEvents.
-// In jsdom none of that works, so mock the whole module: waitForBookCard only
-// needs `requestFiberData` to resolve (the "stamp" step), and we assert it is
-// called each poll round rather than actually stamping DOM.
+/**
+ * The Readmoo library search helpers (`src/content/readmoo-search.ts`).
+ *
+ * The fiber bridge injects a main-world <script> and dispatches CustomEvents,
+ * none of which works in jsdom, so the whole `@/content/fiber-data` module is
+ * mocked: waitForBookCard only needs `requestFiberData` to resolve (the "stamp"
+ * step), and the tests assert it is called each poll round rather than actually
+ * stamping DOM.
+ */
+
+// jsdom cannot run the fiber bridge; only `requestFiberData` resolving matters.
+// See the file header.
 vi.mock("@/content/fiber-data", () => ({
   requestFiberData: vi.fn().mockResolvedValue(undefined),
   injectFiberBridge: vi.fn(),

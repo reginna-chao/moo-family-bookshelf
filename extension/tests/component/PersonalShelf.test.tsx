@@ -11,6 +11,20 @@ import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
 import { renamedBooksNotice } from "@/dialog/PersonalShelfSyncNotices";
 
+/**
+ * PersonalShelf: the per-book share toggles, save, load / error states, the personal-books cache, and
+ * how sync results reach the list.
+ *
+ * Since #236 the local cache is never a source of books: usePersonalBooks no longer scrapes and its
+ * baseline is the API record ONLY, so the scraper is mocked just to surface an accidental call. The
+ * cache is still WRITTEN — by syncBooks (during sync) and by handleSave — but the shelf never reads it
+ * (the load path's self-contained display scrape was removed), so a test seeds it only to prove its
+ * contents do not show up. A sync result is what the server now holds, so it REPLACES the list (it
+ * used to be merged into the displayed one, keeping books the sync had dropped); the
+ * "lastSyncBooks replaces the list" tests were rewritten from the old merge semantics, whose fixtures
+ * streamed a partial list without share flags — no longer a real sync result.
+ */
+
 const mockUseFamilyData = vi.fn();
 
 vi.mock("@/dialog/FamilyDataContext", () => ({
@@ -31,17 +45,15 @@ vi.mock("@/dialog/useBookSync", () => ({
   useBookSync: (...args: unknown[]) => mockUseBookSync(...args),
 }));
 
-// Controllable viewport mock for the header buttons' icon-only (mobile) vs
-// icon+text (desktop) rendering. Defaults to false (desktop) so the rest of the
-// suite keeps its desktop behaviour; reset in beforeEach.
+// Controllable viewport mock for the header buttons' icon-only (mobile) vs icon+text (desktop)
+// rendering; defaults to desktop so the rest of the suite is unchanged, reset in beforeEach.
 const mockUseIsMobile = vi.fn<() => boolean>().mockReturnValue(false);
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => mockUseIsMobile(),
 }));
 
-// usePersonalBooks no longer scrapes — its baseline is the API record ONLY
-// (#236: the local cache is never a source of books). The scraper is mocked only
-// so an accidental call would surface; books for these tests come via the API.
+// The baseline is the API record only (#236), so books come via the API; the scraper is mocked only
+// so an accidental call would surface.
 vi.mock("@/content/scraper", () => ({
   scrapeBooks: vi.fn().mockResolvedValue([]),
   scrapeArchivedBooks: vi.fn().mockResolvedValue([]),
@@ -76,10 +88,8 @@ function makeBook(
   };
 }
 
-/**
- * Realistic 15-digit book id. A real Readmoo id is 12+ digits: the scraper
- * refuses shorter ones, and the legacy cleanup can drop a short-id entry.
- */
+/** Realistic 15-digit book id. A real Readmoo id is 12+ digits: the scraper refuses shorter ones, and
+ *  the legacy cleanup can drop a short-id entry. */
 const bookIdOf = (n: number, prefix = "21"): string =>
   `${prefix}${String(n).padStart(13, "0")}`;
 const BOOK_1 = bookIdOf(1);
@@ -129,9 +139,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     createFamily: vi.fn(),
     joinFamily: vi.fn(),
     leaveFamily: vi.fn(),
-    // No server record by default. Tests that need books use
-    // `serverClient` / `renderPersonalShelf`, which supply them as the server
-    // record — so they are server-known and a save goes out as a PATCH.
+    // No server record by default. `serverClient` / `renderPersonalShelf` supply books as the server
+    // record, so they are server-known and a save goes out as a PATCH.
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     patchPersonalBooks: vi
@@ -169,11 +178,8 @@ function setSyncBooks(books: TestBook[], renamedBookCount = 0) {
   });
 }
 
-/**
- * Seed chrome.storage.local's personal-books cache with `books`. Since #236 the
- * shelf never READS that cache (it is still written on save), so a test seeds
- * it only to prove that its contents do not show up.
- */
+/** Seed chrome.storage.local's personal-books cache. Since #236 the shelf never READS it (it is still
+ *  written on save), so a seed only proves its contents do not show up. */
 function seedCache(books: TestBook[]) {
   const store: Record<string, unknown> = {
     displayName: "小明",
@@ -676,16 +682,8 @@ describe("PersonalShelf", () => {
   });
 
   describe("error state", () => {
-    /**
-     * Render, then settle the failed load before asserting on it.
-     *
-     * The rejection → setErrorMessage/setStatus("error") → commit chain runs
-     * outside React's knowledge (usePersonalBooks' load effect). A bare
-     * `waitFor` is not a barrier for it — it polls with the act environment
-     * disabled on a 1s budget, which CPU contention alone can outrun. Only
-     * `act` guarantees pending effects have flushed on exit, after which a
-     * getBy fails loudly instead of timing out.
-     */
+    /** Render, then settle the failed load inside `act`: the rejection → error-state commit runs in the
+     *  load effect, and a bare `waitFor` (1s budget, act disabled) can be outrun by CPU contention. */
     async function renderSettledFailedLoad(apiClient: ApiClient) {
       await act(async () => {
         render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
@@ -1169,9 +1167,8 @@ describe("PersonalShelf", () => {
   });
 
   describe("personalBooksCache", () => {
-    // Note: the load path no longer writes the cache (the self-contained display
-    // scrape was removed). The cache is now written by syncBooks (during sync) and
-    // by handleSave — the latter is exercised below.
+    // The load path no longer writes the cache; syncBooks (during sync) and handleSave (below) do.
+    // See the file header.
     it("updates cache after successful save", async () => {
       const mockUpdate = vi
         .fn()
@@ -1267,13 +1264,8 @@ describe("PersonalShelf", () => {
     });
   });
 
-  /**
-   * #236: a sync result is what the server now holds, so it REPLACES the list
-   * (it used to be merged into the displayed one, keeping books the sync had
-   * dropped). Both tests were rewritten from the old merge semantics: their
-   * fixtures streamed a partial list without share flags, which no longer
-   * describes a real sync result.
-   */
+  /** #236: a sync result REPLACES the list instead of merging into it; both tests were rewritten from the
+   *  old merge semantics. See the file header. */
   describe("lastSyncBooks replaces the list", () => {
     it("shows the sync result with the server's share flags", async () => {
       const apiClient = serverClient({}, [

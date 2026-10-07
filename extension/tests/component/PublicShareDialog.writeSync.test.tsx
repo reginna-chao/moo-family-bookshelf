@@ -16,6 +16,35 @@ import {
   UNSAVED_NOTICE,
 } from "@/dialog/publicShareMessages";
 
+/**
+ * PublicShareDialog write-through sequencing: the debounced title / expiry writes, their failures,
+ * skipped no-op writes, and adoption of server-sanitized titles.
+ *
+ * Readiness: `findByLabelText` alone is not a readiness signal — DOM presence != effects flushed. It
+ * waits with the act environment disabled and ends on a bare `setTimeout(0)`, so React may still owe
+ * the passive effect that publishes the active shelfId, and a write fired in that window is silently
+ * dropped by the hook's shelfId guard; only `act` guarantees pending effects flush on exit.
+ * renderSettledDialog awaits real microtasks, so call it BEFORE any `vi.useFakeTimers()`.
+ * confirmAction drains BOTH clicks inside `act`: the confirm click's handler awaits the API call and
+ * then owes the `[shelf]` passive effect that clears the active shelfId; that drain crosses a
+ * macrotask hop the fake clock never patches, so leaving the first click on RTL's synchronous act
+ * alone made the second act carry work it might finish one flush short of — and a queued write then
+ * slipped past the shelfId guard. Every gate in confirmAction must stay a synchronous `getBy`: most
+ * callers run under vi fake timers, which RTL cannot detect, so a `waitFor` / `findBy*` would poll a
+ * frozen clock and hang to the full test timeout.
+ *
+ * Concurrent writes: the dialog fires these write-through requests without blocking the UI, so the
+ * queue, the wire and the server's answers can interleave in any order. Each case pins one
+ * interleaving that previously alarmed the user about a change still on its way, spent a needless
+ * request, or let a stale answer overwrite a newer one.
+ *
+ * Failures of writes that lost their turn: the catch path suppresses its message for exactly one
+ * reason — the user confirmed a revocation while the write was on the wire, so there is no field left
+ * to reconcile and a red 找不到這個公開書櫃 over a successful 關閉公開分享 would be pure noise. Being
+ * outranked by a NEWER write is NOT such a reason: that write's own field can stay diverged, so its
+ * failure must still surface.
+ */
+
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: vi.fn(() => false),
 }));
@@ -47,12 +76,8 @@ function makeActiveApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/**
- * Stateful stand-in for the server's copy of the shelf: an update applies the
- * body and echoes back the whole record, exactly as the API does. A mock that
- * always returned the same frozen shelf would fake divergence into (or out of)
- * existence between two sequential writes.
- */
+/** Stateful stand-in for the server's shelf: an update applies the body and echoes the whole record,
+ *  as the API does — a frozen mock would fake divergence into (or out of) existence between writes. */
 function createShelfServer(initial: PublicShelf = SHELF) {
   let stored = initial;
   return {
@@ -95,24 +120,14 @@ function renderDialog(apiClient: ApiClient) {
   );
 }
 
-/**
- * Render, then settle the initial load — and hand back the 標題 input.
- *
- * `findByLabelText` alone is not a readiness signal: DOM presence != effects
- * flushed. It waits with the act environment disabled and ends on a bare
- * `setTimeout(0)`, so React may still owe the passive effect that publishes the
- * active shelfId; a write fired in that window is silently dropped by the
- * hook's shelfId guard. Only `act` guarantees pending effects flush on exit.
- * Call it BEFORE any `vi.useFakeTimers()` — it awaits real microtasks.
- */
+/** Render, settle the initial load inside `act`, and return the 標題 input. Call BEFORE any
+ *  `vi.useFakeTimers()`. See the file header, "Readiness". */
 async function renderSettledDialog(apiClient: ApiClient): Promise<HTMLElement> {
   await act(async () => {
     renderDialog(apiClient);
   });
-  // getBy, not findBy: a load that failed to settle must fail loudly right here.
-  // The 標題 label exists in the create view too, so pin the ACTIVE view — a
-  // caller passing `{ shelves: [] }` must fail here, not silently drive the
-  // create form.
+  // getBy, not findBy: an unsettled load must fail loudly here. 標題 also exists in the create view, so
+  // pin the ACTIVE view — `{ shelves: [] }` must fail here, not silently drive the create form.
   expect(
     screen.getByRole("button", { name: "關閉公開分享" }),
   ).toBeInTheDocument();
@@ -128,20 +143,8 @@ function expectNoUnsavedNotice() {
   expect(screen.queryAllByText(new RegExp(UNSAVED_NOTICE))).toHaveLength(0);
 }
 
-/**
- * Press a destructive action and answer its confirm box with 確定.
- *
- * BOTH clicks are drained inside `act`. The confirm click's handler awaits the
- * API call and then owes the `[shelf]` passive effect that clears the active
- * shelfId; that drain crosses a macrotask hop the fake clock never patches, so
- * leaving the first click on RTL's synchronous act alone made the second act
- * carry work it might finish one flush short of — and a queued write then slips
- * past the shelfId guard.
- *
- * Every gate in here must stay a synchronous `getBy`: most callers run under
- * vi fake timers, which RTL cannot detect, so a `waitFor` / `findBy*` would
- * poll a frozen clock and hang to the full test timeout.
- */
+/** Press a destructive action and answer its confirm box with 確定, both clicks drained in `act`; gates
+ *  stay synchronous `getBy` (fake timers). See the file header, "Readiness". */
 async function confirmAction(name: "重設網址" | "關閉公開分享") {
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name }));
@@ -153,15 +156,8 @@ async function confirmAction(name: "重設網址" | "關閉公開分享") {
   });
 }
 
-/**
- * Write sequencing for the debounced title / expiry writes.
- *
- * The dialog fires these write-through requests without blocking the UI, so the
- * queue, the wire and the server's answers can interleave in any order. Each
- * case below pins one interleaving that previously either alarmed the user
- * about a change that was still on its way, spent a needless request, or let a
- * stale answer overwrite a newer one.
- */
+/** Write sequencing for the debounced title / expiry writes; each case pins one past interleaving bug.
+ *  See the file header, "Concurrent writes". */
 describe("PublicShareDialog · concurrent title / expiry writes", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);
@@ -219,9 +215,8 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
     vi.useFakeTimers();
     fireEvent.change(input, { target: { value: "新標題" } });
     await confirmAction("關閉公開分享");
-    // The revocation is fully committed — the create view is what the user sees.
-    // Sequencing point: only past it does the queued write below face the null
-    // shelfId this test is about.
+    // The revocation is fully committed (the create view shows). Only past this point does the queued
+    // write face the null shelfId this test is about.
     expect(
       screen.getByRole("button", { name: "啟用公開書櫃" }),
     ).toBeInTheDocument();
@@ -273,11 +268,8 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
       .mockReturnValueOnce(later.promise);
     await renderSettledDialog(makeActiveApiClient({ updatePublicShelf }));
 
-    // Real timers here. The issue order is already synchronous today —
-    // `runUpdate` reaches `updatePublicShelf` with no preceding `await` — so
-    // these waits pin it on an observable instead of on that internal fact,
-    // keeping "earlier" / "later" well-defined if a future refactor inserts an
-    // await before the request.
+    // Real timers: the issue order is synchronous today (`runUpdate` reaches `updatePublicShelf` with no
+    // `await` first); these waits pin it on an observable, so a future await keeps "earlier" well-defined.
     const select = screen.getByRole("combobox");
     await act(async () => {
       fireEvent.change(select, { target: { value: "7" } });
@@ -311,15 +303,8 @@ describe("PublicShareDialog · concurrent title / expiry writes", () => {
   });
 });
 
-/**
- * A rejected write reports — unless the shelf it addressed no longer exists.
- *
- * The catch path suppresses its message for exactly one reason: the user
- * confirmed a revocation while the write was on the wire, so there is no field
- * left to reconcile and a red 找不到這個公開書櫃 over a successful 關閉公開分享
- * would be pure noise. Being outranked by a NEWER write is NOT such a reason —
- * that write's own field can stay diverged, so its failure must still surface.
- */
+/** A rejected write reports — unless the shelf it addressed no longer exists; being outranked by a newer
+ *  write does not suppress it. See the file header, "Failures of writes that lost their turn". */
 describe("PublicShareDialog · failures of writes that lost their turn", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);
@@ -410,11 +395,8 @@ describe("PublicShareDialog · failures of writes that lost their turn", () => {
   });
 });
 
-/**
- * A write is only worth its cost when the local value actually differs from
- * what the server holds — an echoed `expiresDays` also silently restarts the
- * shelf's expiry clock, and every request spends the per-userId write ceiling.
- */
+/** Write only when the local value differs from the server's: an echoed `expiresDays` silently restarts
+ *  the shelf's expiry clock, and every request spends the per-userId write ceiling. */
 describe("PublicShareDialog · writes with nothing to say are skipped", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);
@@ -443,9 +425,8 @@ describe("PublicShareDialog · writes with nothing to say are skipped", () => {
     expectNoUnsavedNotice();
   });
 
-  // React delivers a change event for a <select> unconditionally, so re-picking
-  // the current option does reach the handler — the divergence check is what
-  // stops it from becoming a PUT that restarts the shelf's expiry clock.
+  // React delivers a <select> change event unconditionally, so re-picking the current option reaches the
+  // handler — the divergence check stops it becoming a PUT that restarts the expiry clock.
   it("spends no request when the expiry selection resolves to the value already stored", async () => {
     const apiClient = makeActiveApiClient();
     await renderSettledDialog(apiClient);
@@ -461,11 +442,8 @@ describe("PublicShareDialog · writes with nothing to say are skipped", () => {
   });
 });
 
-/**
- * The server sanitizes titles beyond what `trim()` can see (zero-width and
- * control characters). Adopting the value it confirms is what keeps the unsaved
- * notice from sticking forever on a title the user can never retype.
- */
+/** The server sanitizes titles beyond `trim()` (zero-width and control characters); adopting the value
+ *  it confirms keeps the unsaved notice from sticking on a title the user can never retype. */
 describe("PublicShareDialog · server-sanitized titles", () => {
   beforeEach(() => {
     vi.mocked(useIsMobile).mockReturnValue(false);

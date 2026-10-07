@@ -32,6 +32,25 @@ import { DEFAULT_API_ENDPOINT } from "@/constants";
  * both entry points, so no production path can reach it. The block below reaches
  * it by stubbing the getter, because "the reassuring line must never be attached
  * to a refused address" has to hold even if that assumption is ever broken.
+ * `withAdoptedEndpoint` forces `getEndpoint()` to report a value production would
+ * never store, restoring the real method even if the assertions inside throw;
+ * each case first asserts that `ApiClient` rejects the value in its constructor
+ * AND in `setEndpoint`. The `invalid` verdict carries no `endpoint` field at
+ * all, so the warning copy has nothing to echo — neither the masqueraded name
+ * nor the host it would really reach. Reassurance lent to a spoofed address is
+ * worse than silence.
+ *
+ * Anchored on production: cosmetic spellings of the default are the SAME
+ * endpoint only because ApiClient canonicalizes them, which is what makes the
+ * comparison inside classifyAdoptedEndpoint a whole-endpoint equality rather
+ * than a string coincidence. A custom endpoint's disclosed value is anchored
+ * twice over — it is what validateEndpointUrl produces, and it is what the
+ * client will actually send the secret to; a disclosure that differs from
+ * either would be vouching for an address the browser never visits.
+ *
+ * The verdict is read from the client at call time, not captured once. It has
+ * to be: `useEndpointSwitch` can adopt a family's endpoint on the live client
+ * mid-session, and the re-auth modal may well render after that.
  */
 
 /** Cosmetic spellings a build env could produce; all canonicalize to the default. */
@@ -61,10 +80,8 @@ describe("classifyAdoptedEndpoint", () => {
     it.each(defaultSpellings)("discloses nothing for %s", (_label, adopted) => {
       const client = new ApiClient(adopted);
 
-      // Anchored on production: these spellings are the SAME endpoint only
-      // because ApiClient canonicalizes them, which is what makes the
-      // comparison inside classifyAdoptedEndpoint a whole-endpoint equality
-      // rather than a string coincidence.
+      // Anchored on production: these are the SAME endpoint only because
+      // ApiClient canonicalizes them (see the file header).
       expect(client.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
       expect(classifyAdoptedEndpoint(client)).toEqual({ kind: "none" });
     });
@@ -115,10 +132,8 @@ describe("classifyAdoptedEndpoint", () => {
     ])("names it in canonical form — %s", (_label, adopted, expected) => {
       const client = new ApiClient(adopted);
 
-      // Anchored on production twice over: the literal expectation is what
-      // validateEndpointUrl produces, and it is what the client will actually
-      // send the secret to. A disclosure that differs from either would be
-      // vouching for an address the browser never visits.
+      // Anchored twice: the validator's output AND where the client really sends
+      // the secret (see the file header).
       expect(expected).toBe(validateEndpointUrl(adopted));
       expect(expected).toBe(client.getEndpoint());
       expect(classifyAdoptedEndpoint(client)).toEqual({
@@ -140,11 +155,8 @@ describe("classifyAdoptedEndpoint", () => {
     });
   });
 
-  /**
-   * The verdict is read from the client at call time, not captured once. It has
-   * to be: `useEndpointSwitch` can adopt a family's endpoint on the live client
-   * mid-session, and the re-auth modal may well render after that.
-   */
+  // Read at call time, not captured: `useEndpointSwitch` can adopt mid-session,
+  // before the re-auth modal renders.
   it("follows the client when the adopted endpoint changes mid-session", () => {
     const client = new ApiClient(DEFAULT_API_ENDPOINT);
     expect(classifyAdoptedEndpoint(client)).toEqual({ kind: "none" });
@@ -157,18 +169,10 @@ describe("classifyAdoptedEndpoint", () => {
     });
   });
 
-  /**
-   * Unreachable through production: `ApiClient` rejects these in its constructor
-   * AND in `setEndpoint`, which each case asserts before forcing the branch. The
-   * coverage is deliberate anyway — the day that assumption breaks, the screen
-   * must warn rather than attach the reassuring "will connect to …" line to an
-   * address the user cannot trust.
-   */
+  // Unreachable through production, covered deliberately (DEFENSIVE). See the
+  // file header.
   describe("an adopted endpoint the client would refuse (defensive)", () => {
-    /**
-     * Force `getEndpoint()` to report a value production would never store,
-     * restoring the real method even if the assertions inside throw.
-     */
+    /** Force `getEndpoint()` to an unstorable value; restored even if assertions throw. */
     function withAdoptedEndpoint<T>(
       client: ApiClient,
       endpoint: string,
@@ -211,10 +215,8 @@ describe("classifyAdoptedEndpoint", () => {
         () => classifyAdoptedEndpoint(client),
       );
 
-      // `invalid` carries no `endpoint` field at all, so the warning copy has
-      // nothing to echo: neither the masqueraded name nor the host it would
-      // really reach. Reassurance lent to a spoofed address is worse than
-      // silence.
+      // `invalid` carries no `endpoint`, so the warning has nothing to echo
+      // (see the file header).
       expect(result).toEqual({ kind: "invalid" });
       expect(JSON.stringify(result)).not.toContain("real.example");
       expect(JSON.stringify(result)).not.toContain("evil.com");

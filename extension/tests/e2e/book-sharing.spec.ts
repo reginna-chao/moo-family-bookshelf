@@ -22,9 +22,7 @@ import { API_ENDPOINT_KEY } from "../../src/constants";
 // runtime resolution of that alias is unproven in this suite.
 import { MEMBER_FILTER_NAME_PREFIX } from "../../../shared/src/familyShelf/memberFilterLabel";
 
-/**
- * Helper: go through the full onboarding flow to get to main view.
- */
+/** Helper: go through the full onboarding flow to get to main view. */
 async function setupFamily(
   page: import("@playwright/test").Page,
   extensionId: string,
@@ -88,10 +86,8 @@ test.describe("Book Sharing", () => {
       timeout: 10_000,
     });
 
-    // Fixture book-4 has no reader-link and only the new site's 8-digit internal
-    // `privacy-` id, which the scraper's length guard rejects. Skipping it is the
-    // expected behaviour — accepting it would create a ghost book that resolves
-    // to no real title.
+    // Fixture book-4 has no reader-link, only the new site's 8-digit `privacy-` id, which the scraper's
+    // length guard rejects — expected: accepting it would create a ghost book with no real title.
     await expect(dialog.locator("text=薩提爾的對話練習")).toHaveCount(0);
 
     await page.close();
@@ -148,12 +144,8 @@ test.describe("Book Sharing", () => {
       timeout: 10_000,
     });
 
-    // The default filter is "其他家人的書" which excludes our own books.
-    // Change the filter to "所有人的書" to see our own shared books.
-    // Books were just shared, so the family shelf has books and the member
-    // filter must render — a missing trigger is a failure, not a skip.
-    // getByLabel substring-matches the prefix of the dynamic accessible name
-    // `篩選成員：{label}，{count} 本`.
+    // The default filter 其他家人的書 excludes our own books, so switch to 所有人的書. Books were just shared,
+    // so a missing trigger is a failure, not a skip; getByLabel matches the `篩選成員：{label}，{count} 本` prefix.
     const dropdown = dialog.getByLabel(MEMBER_FILTER_NAME_PREFIX);
     await expect(dropdown).toBeVisible({ timeout: 10_000 });
 

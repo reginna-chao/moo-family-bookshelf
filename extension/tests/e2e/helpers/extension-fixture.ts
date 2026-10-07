@@ -1,9 +1,5 @@
-/**
- * Playwright fixture that launches Chrome with the E2E-built extension loaded.
- *
- * Provides a `context` and `extensionId` for interacting with the extension
- * in E2E tests.
- */
+/** Playwright fixture that launches Chrome with the E2E-built extension loaded, providing a `context`
+ *  and `extensionId` for E2E tests. */
 
 import { test as base, chromium, type BrowserContext } from "@playwright/test";
 import { resolve, dirname } from "path";

@@ -13,6 +13,23 @@ import {
  * (VerificationPrompt / Onboarding / useReauth) assert against the imported
  * functions instead of restating the copy, so a wording change fails HERE —
  * loudly and in exactly one place — rather than silently passing everywhere.
+ *
+ * rateLimitedEnvelopeMessage is the envelope variant, used by every family-write
+ * call site that reads `response.error` instead of catching a thrown `ApiError`
+ * (leave family, remove member, transfer ownership, save display name). Those
+ * call sites used to render the Worker's English `error.message` verbatim on a
+ * 429.
+ *  - The envelope is raw `JSON.parse` output, so a self-hosted (BYO) backend can
+ *    put anything in `retryAfter`. Unusable values must degrade to the static
+ *    copy instead of rendering 「NaN 秒」 — hence the casts: these shapes are
+ *    unreachable through the type, only over the wire.
+ *  - `retryAfter: 0` is a deliberate divergence from the PWA helper, which flips
+ *    0 to its static copy. Here 0 is a legitimate wait: `rateLimitedMessage`
+ *    formats any non-negative number, and the envelope path keeps that contract
+ *    instead of adding a second "what counts as no wait" rule. (The live
+ *    countdown never reaches this value — `useRetryCountdown` clears at <= 0 — so
+ *    「0 秒」 only ever comes from a server-sent retryAfter.) Pinned by
+ *    pwa/tests/unit/retryMessage.test.ts on the other side.
  */
 
 describe("formatWaitDuration", () => {
@@ -63,12 +80,8 @@ describe("rateLimitedMessage", () => {
   });
 });
 
-/**
- * The envelope variant, used by every family-write call site that reads
- * `response.error` instead of catching a thrown `ApiError` (leave family,
- * remove member, transfer ownership, save display name). Those call sites used
- * to render the Worker's English `error.message` verbatim on a 429.
- */
+// The envelope variant for family-write call sites reading `response.error` (they
+// used to show the Worker's English 429 text). See the file header.
 describe("rateLimitedEnvelopeMessage", () => {
   it.each([
     "OWNER_CANNOT_LEAVE",
@@ -99,12 +112,8 @@ describe("rateLimitedEnvelopeMessage", () => {
     },
   );
 
-  /**
-   * The envelope is raw `JSON.parse` output, so a self-hosted (BYO) backend can
-   * put anything in `retryAfter`. Unusable values must degrade to the static
-   * copy instead of rendering 「NaN 秒」 — hence the casts: these shapes are
-   * unreachable through the type, only over the wire.
-   */
+  // Wire-only `retryAfter` shapes (hence the casts) degrade to the static copy,
+  // never 「NaN 秒」.
   it.each<[string, unknown]>([
     ["a string", "45"],
     ["a numeric-looking string", "45s"],
@@ -138,13 +147,8 @@ describe("rateLimitedEnvelopeMessage", () => {
   });
 
   it("keeps the countdown copy for retryAfter 0 (Extension semantics)", () => {
-    // Deliberate divergence from the PWA helper, which flips 0 to its static
-    // copy. Here 0 is a legitimate wait: `rateLimitedMessage` formats any
-    // non-negative number, and the envelope path keeps that contract instead of
-    // adding a second "what counts as no wait" rule. (The live countdown never
-    // reaches this value — `useRetryCountdown` clears at <= 0 — so 「0 秒」 only
-    // ever comes from a server-sent retryAfter.) Pinned by
-    // pwa/tests/unit/retryMessage.test.ts on the other side.
+    // Deliberate divergence from the PWA: 0 is a legitimate wait here (PWA side:
+    // pwa/tests/unit/retryMessage.test.ts). See the file header.
     expect(
       rateLimitedEnvelopeMessage({ code: "RATE_LIMITED", retryAfter: 0 }),
     ).toBe("嘗試次數過多，請於 0 秒後再試");

@@ -195,12 +195,8 @@ describe("MemberList canLend toggle", () => {
     });
   });
 
-  /**
-   * `updateMemberSettings` THROWS an `ApiError` instead of returning an
-   * envelope, so this call site reads the 429 off the thrown error. The copy is
-   * asserted against the production builder, whose literals are pinned in
-   * tests/unit/dialog/verificationMessages.test.ts.
-   */
+  /** `updateMemberSettings` THROWS an `ApiError` rather than returning an envelope, so this site reads the
+   *  429 off the error; copy via the production builder (literals pinned in verificationMessages.test.ts). */
   describe("rate-limited toggle", () => {
     function renderWithRejection(err: unknown) {
       const onMembersChanged = vi.fn();

@@ -4,6 +4,87 @@ import { BoolFlag } from "@/api/types";
 import type { ApiResponse, BookEntry, FamilyBookshelf } from "@/api/types";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 
+/**
+ * Runtime boundary validation of the `GET /api/family/:id/bookshelf` payload —
+ * `ApiClient.getFamilyBookshelf` and `sanitizeFamilyBookshelfResponse`.
+ *
+ * Driven through the public `getFamilyBookshelf` surface instead of importing
+ * `sanitizeFamilyBookshelfResponse` directly: the contract is what a caller
+ * receives when a self-hosted (BYO) or hostile backend answers, not the shape of
+ * the helper. This method hands back the whole `{ data, error }` envelope —
+ * callers unwrap it themselves — so the passthrough cases are about the
+ * envelope, not about a thrown error. What these cases pin is the COMPOSED
+ * contract of the TWO layers `getFamilyBookshelf` wires, in this order:
+ *  1. `shared/src/api/bookshelfValidation.ts` — the STRUCTURAL layer. It DROPS a
+ *     member with no usable `userId` and a book with no usable `bookId`, because
+ *     normalizing an IDENTITY to `""` keeps the element and two such elements
+ *     then collide (duplicate React keys, an empty member label, collapsed
+ *     family-shelf preference refs, a collapsed update-tracking baseline).
+ *     Survivors are kept by SPREAD, never rebuilt.
+ *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which then
+ *     blanks a survivor's `displayName` / `title` / `author` / … in place.
+ * Where a case can tell the two apart it says so, because a regression in either
+ * layer must fail here instead of being absorbed by the other. Fixtures are
+ * deliberately VALID except for the one field under test (`makeBook`: every
+ * declared-string field really is a string, so the text layer is a no-op on it),
+ * so a field that changes without being asked to is the structural layer
+ * overreaching. `mockFetchEnvelope` serves a whole envelope verbatim — the only
+ * way to reach a 200 that carries `error` alongside `data`, an `error: null`, or
+ * no `data` key at all. The same case tables live in
+ * `pwa/tests/unit/api/bookshelf-client.test.ts`. Layer 1 is the SHARED
+ * implementation both apps import, so the mirrored tables prove each app's own
+ * COMPOSITION of the two layers still holds — that part stays per-app.
+ *  - Error envelopes: an auth failure must never be laundered into an empty
+ *    bookshelf (Invariant 2) — the caller's own `if (response.error)` has to
+ *    still see the error. With `data` alongside `error`, layer 1 stands down
+ *    entirely, while layer 2 has no such rule — it short-circuits on ABSENT data
+ *    only — so the claimed list still degrades. Neither can turn the failure into
+ *    a success: `error` reaches the caller byte-identical. Silence is the proof
+ *    layer 1 did not run: `members: 42` is exactly what its malformed-container
+ *    branch warns about, and the text layer's own degradation of that field is
+ *    deliberately quiet.
+ *  - `error: null`: `if (response.error)` reads it as success and consumes
+ *    `data`, so this envelope is exactly the one that must NOT be waved through —
+ *    while the null itself is preserved. This is the BYO-backend case the module
+ *    calls out by name.
+ *  - A non-record `data` carries no bookshelf field at all, so it degrades to the
+ *    renderable EMPTY state rather than throwing one render later.
+ *  - Kept ids are the positive companion to the drop table: the criterion really
+ *    is "a non-empty string", not "anything that happens to be there", so a real
+ *    userId must survive untouched. Without it, a layer that dropped EVERY member
+ *    would keep the drop table green.
+ *  - The structural layer deliberately does NOT enumerate the member's fields:
+ *    the wire shape can gain a field (`lastUpdated` is a meaningful tri-state),
+ *    and a fixed list would silently drop it.
+ *  - "Never rebuild a book" is load-bearing: `isShared`, `isArchived` and
+ *    `coverUrl` all sit OUTSIDE the text layer's field list, so a structural
+ *    layer that rebuilt the book from a fixed list would silently delete them —
+ *    and `isShared` is the family-shelf filter itself, so losing it empties the
+ *    shelf.
+ *  - Warnings stay aggregate: three members each losing a book and a fourth with
+ *    no usable list is still a single line, because a hostile payload must not
+ *    become log spam.
+ *
+ * The validator's own boundary, called directly. The composed suite runs the
+ * shared TEXT layer after the validator, and it rebuilds every object it
+ * touches, so two contracts are invisible from there and are pinned on the
+ * export itself:
+ *  - the errored envelope is handed BACK unmodified and by IDENTITY
+ *    (`sanitizeEnvelope` would rebuild it), which is Invariant 2 at its source;
+ *  - the structural layer's own prototype handling. The text layer's spread
+ *    re-flattens each object into a fresh one with `Object.prototype`, so a
+ *    regression HERE — say a merge that assigns rather than spreads, letting an
+ *    own `"__proto__"` key reach the setter — is laundered before a composed test
+ *    can see it. Verified: that exact mutation leaves the composed suite fully
+ *    green and turns these cases red. Only `JSON.parse` can produce an OWN
+ *    "__proto__" key (an object literal would set the prototype instead) —
+ *    exactly what a real `response.json()` does with a hostile body. Each case
+ *    asserts BOTH the security claim (`Object.prototype` is untouched) and the
+ *    detectable proxy for it (the returned object still has `Object.prototype`),
+ *    because the first alone stays green for a merge that only re-points the
+ *    ELEMENT's prototype.
+ */
+
 vi.mock("@/constants", () => ({
   DEFAULT_API_ENDPOINT: "https://default.workers.dev",
 }));
@@ -34,11 +115,8 @@ function mockFetchError(code: string, message: string, status = 400) {
   });
 }
 
-/**
- * Serve a whole envelope verbatim — the only way to reach the shapes a
- * `{ data }`-only helper cannot build: a 200 that carries `error` alongside
- * `data`, an `error: null`, or no `data` key at all.
- */
+/** Serve a whole envelope verbatim (`error` beside `data`, `error: null`, no `data`).
+ *  See the file header. */
 function mockFetchEnvelope(envelope: unknown, status = 200) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
@@ -47,11 +125,8 @@ function mockFetchEnvelope(envelope: unknown, status = 200) {
   });
 }
 
-/**
- * A fully VALID book: every declared-string field really is a string, so the
- * text layer that runs second is a no-op on it and anything that changes has to
- * have come from the structural layer.
- */
+/** A fully VALID book: the text layer is a no-op on it, so any change came from
+ *  the structural layer. */
 function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
   return {
     bookId: BOOK_A,
@@ -127,36 +202,8 @@ const NON_ARRAY_CONTAINERS: Array<{ name: string; value: unknown }> = [
   { name: "an object wrapping the list", value: { list: [] } },
 ];
 
-/**
- * Runtime boundary validation of the `GET /api/family/:id/bookshelf` payload.
- *
- * Driven through the public `getFamilyBookshelf` surface instead of importing
- * `sanitizeFamilyBookshelfResponse` directly: the contract is what a caller
- * receives when a self-hosted (BYO) or hostile backend answers, not the shape of
- * the helper. This method hands back the whole `{ data, error }` envelope —
- * callers unwrap it themselves — so the passthrough cases below are about the
- * envelope, not about a thrown error.
- *
- * Driving the public surface means what these cases pin is the COMPOSED
- * contract of the TWO layers `getFamilyBookshelf` wires, in this order:
- *  1. `shared/src/api/bookshelfValidation.ts` — the STRUCTURAL layer. It DROPS
- *     a member with no usable `userId` and a book with no usable `bookId`,
- *     because normalizing an IDENTITY to `""` keeps the element and two such
- *     elements then collide (duplicate React keys, an empty member label,
- *     collapsed family-shelf preference refs, a collapsed update-tracking
- *     baseline). Survivors are kept by SPREAD, never rebuilt.
- *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which then
- *     blanks a survivor's `displayName` / `title` / `author` / … in place.
- * Where a case can tell the two apart it says so, because a regression in
- * either layer must fail here instead of being absorbed by the other. Fixtures
- * are deliberately VALID except for the one field under test, so a field that
- * changes without being asked to is the structural layer overreaching.
- *
- * The same case tables live in `pwa/tests/unit/api/bookshelf-client.test.ts`.
- * Layer 1 is the SHARED implementation both apps import, so the mirrored tables
- * prove each app's own COMPOSITION of the two layers still holds — that part
- * stays per-app.
- */
+// The COMPOSED two-layer contract (structural drop, then text coercion), via the
+// public surface. See the file header.
 describe("ApiClient getFamilyBookshelf", () => {
   let client: ApiClient;
   const originalFetch = globalThis.fetch;
@@ -251,8 +298,7 @@ describe("ApiClient getFamilyBookshelf", () => {
     describe("envelope passthrough", () => {
       it("passes an error envelope through without validating or warning", async () => {
         // An auth failure must never be laundered into an empty bookshelf
-        // (Invariant 2) — the caller's own `if (response.error)` has to still
-        // see the error it would have seen.
+        // (Invariant 2): `if (response.error)` still sees it.
         globalThis.fetch = mockFetchError(
           "FORBIDDEN",
           "Not a member of this family",
@@ -270,12 +316,8 @@ describe("ApiClient getFamilyBookshelf", () => {
       });
 
       it("keeps the error verbatim and stands the structural layer down when a 200 envelope carries both", async () => {
-        // The two layers answer this envelope differently, and both answers
-        // matter. Layer 1 stands down entirely, because an auth failure must
-        // never be laundered into a bookshelf (Invariant 2). Layer 2 has no
-        // such rule — it short-circuits on ABSENT data only — so the claimed
-        // list still degrades. Neither can turn the failure into a success:
-        // `error` reaches the caller's own `if (response.error)` byte-identical.
+        // Layer 1 stands down, layer 2 still degrades; `error` arrives
+        // byte-identical. See the header → "Error envelopes".
         globalThis.fetch = mockFetchEnvelope({
           data: { members: 42 },
           error: { code: "STALE_DATA", message: "Rebuild in progress" },
@@ -287,9 +329,8 @@ describe("ApiClient getFamilyBookshelf", () => {
           code: "STALE_DATA",
           message: "Rebuild in progress",
         });
-        // Silence is the proof layer 1 did not run: `members: 42` is exactly
-        // what its malformed-container branch warns about, and the text layer's
-        // own degradation of that field is deliberately quiet.
+        // Silence proves layer 1 did not run (it would warn on `members: 42`; the
+        // text layer degrades quietly).
         expect(warnSpy).not.toHaveBeenCalled();
         expect(result.data).toStrictEqual({ members: [] });
       });
@@ -314,10 +355,8 @@ describe("ApiClient getFamilyBookshelf", () => {
       });
 
       it("still validates when error is null, because callers read error as truthy", async () => {
-        // `if (response.error)` reads `error: null` as success and consumes
-        // `data`, so this envelope is exactly the one that must NOT be waved
-        // through — while the null itself is preserved for the caller. This is
-        // the BYO-backend case the module calls out by name.
+        // `error: null` reads as success, so `data` must NOT be waved through — the
+        // BYO-backend case the module names. See the file header.
         globalThis.fetch = mockFetchEnvelope({
           data: { members: [memberWith("userId", 42), makeMember()] },
           error: null,
@@ -357,9 +396,8 @@ describe("ApiClient getFamilyBookshelf", () => {
         async ({ data }) => {
           const bookshelf = await sanitizedBookshelf(data);
 
-          // A non-record `data` carries no bookshelf field at all, so it
-          // degrades to the renderable EMPTY state rather than throwing one
-          // render later.
+          // A non-record `data` degrades to the renderable EMPTY state rather
+          // than throwing one render later.
           expect(bookshelf).toStrictEqual({ members: [] });
           expect(warnSpy).toHaveBeenCalledTimes(1);
           expect(warnSpy).toHaveBeenCalledWith(MALFORMED_CONTAINER_WARNING);
@@ -398,10 +436,8 @@ describe("ApiClient getFamilyBookshelf", () => {
         },
       );
 
-      // The positive companion to the table above: the criterion really is "a
-      // non-empty string", not "anything that happens to be there", so a real
-      // userId must survive untouched. Without this, a layer that dropped
-      // EVERY member would keep the drop table green.
+      // Positive companion to the drop table: a real userId survives, so a layer
+      // dropping EVERY member cannot stay green.
       const KEPT_IDS: Array<{ name: string; value: string }> = [
         { name: "a 64-hex userId", value: USER_A },
         { name: "a one-character userId", value: "x" },
@@ -434,9 +470,8 @@ describe("ApiClient getFamilyBookshelf", () => {
 
     describe("member preservation", () => {
       it("keeps a surviving member by spread rather than rebuilding it from a fixed field list", async () => {
-        // The structural layer deliberately does NOT enumerate the member's
-        // fields: the wire shape can gain a field (`lastUpdated` is a
-        // meaningful tri-state), and a fixed list would silently drop it.
+        // Member fields are NOT enumerated: a fixed list would silently drop a new
+        // one (`lastUpdated` is a meaningful tri-state).
         const member = await sanitizedMember({
           ...makeMember(),
           futureField: "kept",
@@ -559,11 +594,8 @@ describe("ApiClient getFamilyBookshelf", () => {
 
     describe("book preservation", () => {
       it("passes a surviving book through byte-identically, flags and cover URL included", async () => {
-        // The load-bearing case for the "never rebuild a book" rule.
-        // `isShared`, `isArchived` and `coverUrl` all sit OUTSIDE the text
-        // layer's field list, so a structural layer that rebuilt the book from
-        // a fixed list would silently delete them — and `isShared` is the
-        // family-shelf filter itself, so losing it empties the shelf.
+        // Load-bearing for "never rebuild a book": a rebuild would delete
+        // `isShared` and empty the shelf. See the file header.
         const book = makeBook({
           isShared: BoolFlag.TRUE,
           isArchived: BoolFlag.TRUE,
@@ -624,9 +656,8 @@ describe("ApiClient getFamilyBookshelf", () => {
       });
 
       it("combines every member's book losses into ONE line", async () => {
-        // Three members each lose a book and a fourth has no usable list at
-        // all — still a single line, because a hostile payload must not become
-        // log spam.
+        // Four degraded members still log a single line: a hostile payload must
+        // not become log spam.
         const members = await sanitizedMembers([
           memberWith("books", [null, makeBook()]),
           { ...makeMember({ userId: USER_B }), books: [42] },
@@ -710,23 +741,8 @@ describe("ApiClient getFamilyBookshelf", () => {
   });
 });
 
-/**
- * The validator's own boundary, called directly.
- *
- * Everything above drives `sanitizeFamilyBookshelfResponse` through
- * `getFamilyBookshelf`, where the shared TEXT layer runs after it and rebuilds
- * every object it touches. Two contracts are invisible from there, and both are
- * pinned on the export itself instead:
- *
- *  - the errored envelope is handed BACK unmodified and by IDENTITY
- *    (`sanitizeEnvelope` would rebuild it), which is Invariant 2 at its source;
- *  - the structural layer's own prototype handling. The text layer's spread
- *    re-flattens each object into a fresh one with `Object.prototype`, so a
- *    regression HERE — say a merge that assigns rather than spreads, letting an
- *    own `"__proto__"` key reach the setter — is laundered before a composed
- *    test can see it. Verified: that exact mutation leaves the composed suite
- *    fully green and turns these cases red.
- */
+// Two contracts the composed suite cannot see (error envelope by IDENTITY,
+// prototype handling). See the header → "The validator's own boundary".
 describe("sanitizeFamilyBookshelfResponse (direct import)", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -767,13 +783,8 @@ describe("sanitizeFamilyBookshelfResponse (direct import)", () => {
   });
 
   describe("prototype safety", () => {
-    // Only `JSON.parse` can produce an OWN "__proto__" key (an object literal
-    // would set the prototype instead) — which is exactly what a real
-    // `response.json()` does with a hostile body. Each case asserts BOTH the
-    // security claim (`Object.prototype` is untouched) and the detectable
-    // proxy for it (the returned object still has `Object.prototype`), because
-    // the first alone stays green for a merge that only re-points the ELEMENT's
-    // prototype.
+    // JSON-parsed own "__proto__" keys; each case asserts the claim AND its proxy.
+    // See the header → "The validator's own boundary".
     it("does not apply a member's JSON-supplied __proto__", () => {
       const hostile: unknown = JSON.parse(
         `{"members":[{"userId":"${USER_B}","displayName":"Hostile","books":[],"__proto__":{"polluted":"yes"}}]}`,

@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+/**
+ * The dialog entry `src/dialog/main.tsx`: mountDialog, its scoped-style
+ * injection and the (absent) auto-mount.
+ *
+ * Scoped-style injection: under Vitest the `./styles.css?raw` import resolves to
+ * an EMPTY string (Vite's CSS plugin intercepts the `.css` extension before
+ * `?raw` in the test transform). The real build inlines the stylesheet bytes
+ * correctly — verified manually on a live Readmoo page. These tests therefore
+ * assert the injection *contract* (right root, single element, idempotent)
+ * rather than CSS content.
+ */
+
 // Mock react-dom/client before importing the module under test
 const mockRender = vi.fn();
 const mockUnmount = vi.fn();
@@ -104,11 +116,8 @@ describe("mountDialog", () => {
 describe("mountDialog scoped-style injection", () => {
   const STYLE_SELECTOR = "style[data-moo-dialog-styles]";
 
-  // NOTE: under Vitest the `./styles.css?raw` import resolves to an EMPTY string
-  // (Vite's CSS plugin intercepts the `.css` extension before `?raw` in the test
-  // transform). The real build inlines the stylesheet bytes correctly — verified
-  // manually on a live Readmoo page. These tests therefore assert the injection
-  // *contract* (right root, single element, idempotent) rather than CSS content.
+  // `styles.css?raw` is EMPTY under Vitest, so these pin the injection contract,
+  // not CSS content. See the file header.
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -239,10 +248,8 @@ describe("auto-mount", () => {
 
     await import("@/dialog/main");
 
-    // mountDialog should NOT have been called automatically
-    // createRoot may have been called 0 times (no auto-mount)
-    // or once from a previous test — but for this import, since
-    // the module was reset, it should be 0.
+    // No auto-mount: with the module reset, this import must leave createRoot at
+    // 0 calls (not the 1 a previous test may have made).
     expect(mockCreateRoot).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,56 @@ import { MOO_ELEMENT_IDS } from "@/utils/extensionContext";
  * external boundary we legitimately mock. We point `getURL` at `@/dialog/main`
  * (the aliased dialog module) and mock that module so `mountDialog` returns a
  * spy-backed unmount handle we can assert on.
+ *
+ * Module setup: `@/content/pageReady` resolves immediately so the top-level init
+ * injects the floating button without waiting on Readmoo's spinner (kept real
+ * it would risk the 5s fallback timeout); pageReady has its own dedicated unit
+ * tests. The content script is imported statically — importing it runs its
+ * top-level init (injects the floating button + wires the click → toggleDialog
+ * handler), and a static import keeps the vi.mock calls hoisted ahead of module
+ * evaluation.
+ *
+ * Load-tolerant waits: `WAIT_TIMEOUT_MS` is a wall-clock budget — the file's
+ * testTimeout is 30s (see extension/vitest.config.ts), and 10s leaves ample
+ * margin while still failing fast with context; the interval is kept small so a
+ * prompt import resolves with near-zero added latency. `waitForCondition` polls
+ * on a wall-clock deadline (`vi.waitFor`) rather than a fixed number of ticks:
+ * under a saturated full-suite run the content script's runtime dynamic import
+ * (vite-node fetch/transform) can take far more than a fixed tick budget to
+ * resolve, so an iteration-capped poll would give up early. On timeout it
+ * throws the described error so a genuine failure surfaces clearly instead of a
+ * cryptic downstream call-count / missing-element diff.
+ *  - `settle` is a fixed 3-tick flush used only by `beforeAll` to let the
+ *    top-level init's button injection settle before the first test. Three
+ *    ticks suffice on this path because it has no real async wait: the
+ *    `waitForPageReady` mock resolves immediately and the `chrome.storage` mock
+ *    is already resolved, so injection completes within a couple of
+ *    microtask/macrotask hops. It is also self-healing — every `beforeEach` runs
+ *    `ensureButtonInjected` (a load-tolerant deadline wait) as a backstop, so a
+ *    slow warm-up never wedges a test.
+ *  - `ensureButtonInjected` re-injects the floating button if a prior test's
+ *    teardown removed it (the context-invalidation path runs
+ *    `cleanupMooFamilyUI`, which removes the button too). A hashchange re-runs
+ *    the content script's `waitAndInjectButton`; the mocked `waitForPageReady`
+ *    resolves immediately, so the button reappears once the injection
+ *    microtasks settle. A wall-clock deadline (`vi.waitFor`) keeps this robust
+ *    under a saturated full-suite run, where a fixed tick budget could give up
+ *    before injection completes and leave later `getButton()` calls throwing.
+ *    No-op when the button is already present (injection is idempotent).
+ *
+ * Dynamic-import ordering (issue #187): before the positive control, the test
+ * waits on `vi.dynamicImportSettled()` for the content script's pending
+ * runtime-resolved import (non-literal `getURL(...)` specifier → resolveId RPC)
+ * to settle. A literal `import("@/dialog/main")` would NOT do: Vite resolves it
+ * at transform time, so it returns from the module cache without ordering after
+ * that RPC. Clicking the positive control while the first import is still in
+ * flight puts two dynamic imports of the mocked module in flight from one
+ * importer, which can make the second bypass `vi.mock` under CI load.
+ * Everything after the resolve (mock lookup → `.then` guard) is microtasks, so
+ * once it returns the guard has definitely run. The positive control — a clean
+ * open in the same test DOES mount — proves the dynamic-import path is
+ * functional, so the skip assertion reflects a real guard skip and not a
+ * silently broken import that never mounts.
  */
 
 // Spy-backed dialog module. `mountDialog` returns the unmount handle the content
@@ -34,37 +84,27 @@ vi.mock("@/dialog/main", () => ({
     mockMountDialog(container, options),
 }));
 
-// Resolve page-ready immediately so the top-level init injects the floating
-// button without waiting on Readmoo's spinner (kept real would risk the 5s
-// fallback timeout). pageReady has its own dedicated unit tests.
+// Resolve page-ready immediately (a real one risks the 5s fallback timeout).
+// See the header → "Module setup".
 vi.mock("@/content/pageReady", () => ({
   waitForPageReady: () => Promise.resolve(),
   PAGE_READY_TIMEOUT_MS: 5000,
 }));
 
-// Importing the content script runs its top-level init (injects the floating
-// button + wires the click → toggleDialog handler). Static import so the
-// vi.mock calls above are hoisted ahead of module evaluation.
+// Runs the content script's top-level init; static so the vi.mock calls above
+// are hoisted ahead of module evaluation.
 import "@/content/index";
 
 /** One macrotask hop. */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-// Wall-clock budget for the load-tolerant waits below. The file's testTimeout is
-// 30s (see extension/vitest.config.ts); 10s leaves ample margin while still
-// failing fast with context. Interval kept small so a prompt import resolves
-// with near-zero added latency.
+// Wall-clock budget for the load-tolerant waits (testTimeout is 30s).
+// See the header → "Load-tolerant waits".
 const WAIT_TIMEOUT_MS = 10_000;
 const WAIT_INTERVAL_MS = 10;
 
-/**
- * Poll `isReady` on a wall-clock deadline (`vi.waitFor`) rather than a fixed
- * number of ticks: under a saturated full-suite run the content script's runtime
- * dynamic import (vite-node fetch/transform) can take far more than a fixed tick
- * budget to resolve, so an iteration-capped poll would give up early. On timeout
- * we throw the described error so a genuine failure surfaces clearly instead of a
- * cryptic downstream call-count / missing-element diff.
- */
+/** Poll `isReady` on a wall-clock deadline, never a tick count; throws the described
+ *  error on timeout. See the header → "Load-tolerant waits". */
 async function waitForCondition(
   isReady: () => boolean,
   describeTimeout: () => string,
@@ -77,10 +117,8 @@ async function waitForCondition(
   );
 }
 
-/**
- * Wait for the async open path (runtime dynamic import → mountDialog) to reach
- * the expected mount count.
- */
+/** Wait for the async open path (runtime dynamic import → mountDialog) to reach
+ *  the expected mount count. */
 async function waitForMountCount(count: number): Promise<void> {
   await waitForCondition(
     () => mockMountDialog.mock.calls.length >= count,
@@ -89,15 +127,8 @@ async function waitForMountCount(count: number): Promise<void> {
   );
 }
 
-/**
- * Fixed 3-tick flush used only by `beforeAll` to let the top-level init's button
- * injection settle before the first test. Three ticks suffice on this path
- * because it has no real async wait: the `waitForPageReady` mock resolves
- * immediately and the `chrome.storage` mock is already resolved, so injection
- * completes within a couple of microtask/macrotask hops. It is also
- * self-healing — every `beforeEach` runs `ensureButtonInjected` (a load-tolerant
- * deadline wait) as a backstop, so a slow warm-up never wedges a test.
- */
+/** Fixed 3-tick flush for `beforeAll` only; `ensureButtonInjected` backstops it.
+ *  See the header → "Load-tolerant waits". */
 const settle = async (): Promise<void> => {
   await tick();
   await tick();
@@ -114,16 +145,8 @@ function hostExists(): boolean {
   return document.getElementById(MOO_ELEMENT_IDS.host) !== null;
 }
 
-/**
- * Re-inject the floating button if a prior test's teardown removed it (the
- * context-invalidation path runs `cleanupMooFamilyUI`, which removes the button
- * too). A hashchange re-runs the content script's `waitAndInjectButton`; the
- * mocked `waitForPageReady` resolves immediately, so the button reappears once
- * the injection microtasks settle. A wall-clock deadline (`vi.waitFor`) keeps
- * this robust under a saturated full-suite run, where a fixed tick budget could
- * give up before injection completes and leave later `getButton()` calls
- * throwing. No-op when the button is already present (injection is idempotent).
- */
+/** Re-inject the button via a hashchange if a prior teardown removed it; no-op when
+ *  present. See the header → "Load-tolerant waits". */
 async function ensureButtonInjected(): Promise<void> {
   if (document.getElementById(MOO_ELEMENT_IDS.button)) return;
   window.dispatchEvent(new Event("hashchange"));
@@ -224,23 +247,15 @@ describe("content script dialog lifecycle", () => {
     getButton().click(); // close: disposeDialogShell removes the host
     expect(hostExists()).toBe(false);
 
-    // Wait for the content script's pending runtime-resolved import (non-literal
-    // `getURL(...)` specifier → resolveId RPC) to settle. A literal
-    // `import("@/dialog/main")` here would NOT do: Vite resolves it at transform
-    // time, so it returns from the module cache without ordering after that RPC.
-    // Clicking the positive control while the first import is still in flight
-    // puts two dynamic imports of the mocked module in flight from one importer,
-    // which can make the second bypass `vi.mock` under CI load (issue #187).
-    // Everything after the resolve (mock lookup → `.then` guard) is microtasks,
-    // so once this returns the guard has definitely run.
+    // Settle the pending runtime-resolved import first — a literal import() would
+    // not order after it (issue #187). See the header → "Dynamic-import ordering".
     await vi.dynamicImportSettled();
 
     // Guard skipped mounting because the mount point was detached.
     expect(mockMountDialog).not.toHaveBeenCalled();
 
-    // Positive control: a clean open in the same test DOES mount — proving the
-    // dynamic-import path is functional, so the assertion above reflects a real
-    // guard skip and not a silently broken import that never mounts.
+    // Positive control: a clean open DOES mount, so the skip above is a real
+    // guard skip, not a silently broken import.
     getButton().click();
     await waitForMountCount(1);
     expect(mockMountDialog).toHaveBeenCalledTimes(1);

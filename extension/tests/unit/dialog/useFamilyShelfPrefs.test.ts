@@ -3,6 +3,25 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { useFamilyShelfPrefs } from "@/dialog/useFamilyShelfPrefs";
 import type { ApiClient } from "@/api/client";
 
+/**
+ * useFamilyShelfPrefs (`src/dialog/useFamilyShelfPrefs.ts`): load, optimistic
+ * edits and the debounced flush of the viewer-private family-shelf prefs.
+ *
+ * `createMockApiClient(prefs)`: `prefs === undefined` → the data has no
+ * familyShelfPrefs (missing); otherwise familyShelfPrefs is the provided partial
+ * (hidden/favorites may individually be absent to exercise the `?? []`
+ * fallbacks).
+ *
+ * Load guard: a NEW apiClient identity re-fires the load effect (its dep list
+ * includes apiClient), but the didLoadRef guard must skip the body — no re-fetch,
+ * and the optimistic edit survives.
+ *
+ * Flush failure runs on real timers throughout: the flush uses a real
+ * setTimeout, and the `.then` that sets syncFailed resolves on a real microtask.
+ * Mixing fake timers with promise resolution there would deadlock waitFor's
+ * polling.
+ */
+
 const FLUSH_DEBOUNCE_MS = 600;
 
 interface PrefsShape {
@@ -10,12 +29,8 @@ interface PrefsShape {
   favorites?: string[];
 }
 
-/**
- * Build a mock ApiClient.
- * - `prefs === undefined` → data has no familyShelfPrefs (missing).
- * - otherwise → familyShelfPrefs is the provided partial (hidden/favorites may
- *   individually be absent to exercise the `?? []` fallbacks).
- */
+/** Build a mock ApiClient; `undefined` prefs = familyShelfPrefs missing, else the
+ *  given partial. See the file header. */
 function createMockApiClient(
   prefs: PrefsShape | undefined = {},
   overrides: Partial<ApiClient> = {},
@@ -315,9 +330,8 @@ describe("useFamilyShelfPrefs", () => {
       });
       expect(result.current.isFavorite("owner-1", "b1")).toBe(true);
 
-      // A NEW apiClient identity re-fires the load effect (its dep list includes
-      // apiClient), but the didLoadRef guard must skip the body: no re-fetch and
-      // the optimistic edit survives.
+      // A NEW apiClient re-fires the load effect; didLoadRef must skip it (no
+      // re-fetch, the optimistic edit survives).
       const nextClient = createMockApiClient({ favorites: ["owner-9:server"] });
       rerender({ client: nextClient });
       await act(async () => {});
@@ -368,9 +382,8 @@ describe("useFamilyShelfPrefs", () => {
       });
       expect(result.current.syncFailed).toBe(false);
 
-      // Real timers throughout: the flush uses a real setTimeout, and the
-      // `.then` that sets syncFailed resolves on a real microtask. Mixing fake
-      // timers with promise resolution here would deadlock waitFor's polling.
+      // Real timers throughout: fake ones would deadlock waitFor's polling. See
+      // the header → "Flush failure".
       act(() => {
         result.current.toggleFavorite("owner-1", "b1");
       });

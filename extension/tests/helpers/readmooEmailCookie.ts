@@ -1,10 +1,7 @@
 import { READMOO_EMAIL_COOKIE } from "@/content/pageAccountCookie";
 
-/**
- * Readmoo's login cookie (`ReadmooNext.email`) for jsdom tests (issue #275).
- * Readmoo stores `encodeURIComponent(base64(email))`, the email's UTF-8 bytes
- * base64-encoded; the cookie name comes from production so it cannot drift.
- */
+/** Readmoo's login cookie (`ReadmooNext.email`) for jsdom tests (issue #275); the cookie name comes from
+ *  production so it cannot drift, and the value format is `encodeReadmooEmail`'s. */
 
 /** `encodeURIComponent(base64(utf8(email)))` — the value Readmoo writes. */
 export function encodeReadmooEmail(email: string): string {

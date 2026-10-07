@@ -38,6 +38,72 @@ import { NO_HOST_CODE, SPOOFED_CODE } from "../helpers/syncCodeHostFixtures";
 
 import { webcrypto } from "node:crypto";
 
+/**
+ * Onboarding container: the welcome → create / join / recovery flows, endpoint adoption, and the
+ * server disclosures (SyncCodeHostNote) shown along the way.
+ *
+ * Lockout timing: the retryAfter test freezes Date.now only. The lockout line re-renders from
+ * Date.now() once a second and this file's fake clock auto-advances with real time
+ * (shouldAdvanceTime), so a join flow taking over a second would tick 90 → 89 and flake the exact
+ * copy assertion; the timer machinery clickStartAndWait drives keeps advancing normally.
+ *
+ * @host refusal: the refusal is the whole attack. A server that FAILS the join has proven nothing,
+ * yet an adopted endpoint outlives the attempt. Left in force it would still be the address when the
+ * user gives up and presses 建立家庭 — shipping the userId, the token that create issues and the
+ * entire personal book list (unshared books included) to that host, which would then be baked into
+ * the sync code handed to the rest of the family.
+ *
+ * Verification challenge disclosure: the challenge REPLACES the join screen, taking that screen's
+ * `@host` disclosure with it — precisely when the user is asked to hand a PIN/pattern to whichever
+ * server the sync code named. So the challenge carries its own note, and its verdict comes from the
+ * endpoint the client has ACTUALLY adopted (never from input text): a sync-code join has already
+ * applied its `@host` by the time the challenge opens, while a create/lookup challenge is still on
+ * the official default and must stay silent. The copy follows the same boundary — no sync code is
+ * visible there, so the note drops the join screens' "此同步碼" lead-in (`variant="verify"`).
+ *
+ * Container disclosure: the onboarding CONTAINER carries a note of its own, above whichever step is
+ * showing. Every button underneath it — create, join, recovery — hits the ADOPTED endpoint, and until
+ * it existed nothing on the welcome or join screen said which server that is: the join screen's note
+ * only ever described the code being TYPED, so a self-hoster whose client already pointed at a custom
+ * Worker could not see that from the screen they act on. Its verdict comes from
+ * `classifyAdoptedEndpoint` (dialog/adoptedEndpoint.ts) — the endpoint the client actually holds,
+ * never input text — so it cannot vouch for an address the user has not accepted, and it says nothing
+ * on the official default (docs/architecture.md → 揭露採用中的伺服器位址, invariant 2).
+ * `verify-prompt` is the one state it is withheld from: that screen renders the same component
+ * with its own lead-in, and two notes naming one address in two tenses is exactly the noise that
+ * teaches a user to scroll past both. The lead-in
+ * literals are reached by rendering the real Onboarding → real SyncCodeHostNote → real shared copy
+ * map, so the lead-in a wrong `variant` would produce fails here; the literals only name what is
+ * expected.
+ *
+ * Two notes on the join screen: they legitimately coexist and answer DIFFERENT questions about
+ * DIFFERENT addresses — "which server am I on now" vs "which server does this pasted code point at".
+ * Pinning both catches either wire crossing: the container fed the typed text (the spoof-vouching bug
+ * adoptedEndpoint.ts exists to prevent) or the join note fed the adopted endpoint. Both collapse the
+ * pair onto one address, and both would still look plausible on screen.
+ *
+ * Same-address suppression: the one case where that pair collapses into noise is the join note
+ * naming the VERY SAME address as the container, so the user reads two amber lines about one fact —
+ * which teaches them to skim the whole note family, including the time it matters. The container's
+ * note stands down there, and only there. Each test pins one edge of that "only there": suppression
+ * fires on two ALREADY-VALIDATED canonicals being byte-equal (never on raw text, so the codes are
+ * deliberately spelled differently from the adopted endpoint — raw-text equality would fail and the
+ * repeated note would survive), it is a function of the CURRENT input, and it never fires on a screen
+ * that renders no typed-code note of its own. Typed text may HIDE a note whose content it exactly
+ * reproduces; it may never change what a note says nor make one appear (docs/architecture.md →
+ * 揭露採用中的伺服器位址, invariant 1). On an `invalid` verdict the two notes say "this code's server is unsafe" and "you are
+ * currently on nas.example.com", so they must coexist: suppressing there would drop the only line
+ * naming where the buttons below would go, at the moment the user is warned off the typed address.
+ *
+ * Copy sync code: the 已複製 reset is a 2s timer armed by the copy click, and closing the dialog
+ * inside that window must cancel it — a bare `setTimeout(() => setCopied(false), 2000)` would fire on
+ * a component that is gone; useTimedFlag's unmount cleanup does the cancelling. restoreClearTimeout
+ * undoes that test's clearTimeout spy, and must run BEFORE the outer afterEach's
+ * `vi.useRealTimers()`: the spy wraps the FAKE clearTimeout, so restoring after the clock swap would
+ * strand the fake on globalThis for every later test. Vitest runs a nested suite's afterEach ahead of
+ * its parent's, which is exactly that order.
+ */
+
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
     Object.defineProperty(globalThis, "crypto", {
@@ -47,9 +113,8 @@ beforeAll(() => {
   }
 });
 
-// Mock the shared crypto/hash module (the single deriveUserId the Extension
-// and the PWA both import) — deriveUserId uses crypto.subtle which competes
-// with fake timers in the test environment, causing CI flakes.
+// Mock the shared crypto/hash module (the deriveUserId Extension and PWA both import): its
+// crypto.subtle competes with fake timers in the test environment, causing CI flakes.
 vi.mock("moo-family-bookshelf-shared/crypto/hash", () => ({
   deriveUserId: vi.fn().mockResolvedValue("a".repeat(64)),
   sha256Hex: vi.fn().mockResolvedValue("b".repeat(64)),
@@ -73,9 +138,8 @@ function createMockApiClient(
   overrides: Partial<ApiClient> = {},
   initialEndpoint = "https://test.workers.dev",
 ): ApiClient {
-  // Mirrors the real client: setEndpoint canonicalizes through the same shared
-  // validator and is what getEndpoint reports back, so the join path persists —
-  // and the verification screen discloses — exactly what production would.
+  // Mirrors the real client: setEndpoint canonicalizes through the shared validator and getEndpoint
+  // reports it back, so the join path persists — and the verify screen discloses — what production would.
   let endpoint = validateEndpointUrl(initialEndpoint);
   return {
     lookupUser: vi
@@ -158,17 +222,14 @@ describe("Onboarding", () => {
     vi.useRealTimers();
   });
 
-  /**
-   * Click the start button and advance timers enough to complete
-   * the navigateAndRun flow (1500ms timeout + microtask flushing).
-   */
+  /** Click the start button and advance timers enough to complete the navigateAndRun flow
+   *  (1500ms timeout + microtask flushing). */
   async function clickStartAndWait() {
     // Fire click — this starts the async handleStart flow
     fireEvent.click(screen.getByText("開始使用"));
 
-    // The handleStart calls scrapeProfile which calls navigateAndRun
-    // which sets location.hash then calls wait(1500).
-    // We need to let the microtask chain progress and advance timers.
+    // handleStart → scrapeProfile → navigateAndRun sets location.hash then calls wait(1500);
+    // let the microtask chain progress while advancing timers.
     for (let i = 0; i < 5; i++) {
       await act(async () => {
         vi.advanceTimersByTime(500);
@@ -477,10 +538,8 @@ describe("Onboarding", () => {
 
       await act(async () => {
         fireEvent.click(screen.getByText("加入家庭公開書櫃"));
-        // Drain the full handleJoin → performJoin → autoSetup.syncBooks chain
-        // (including the keyFingerprint computation) in one pass, without
-        // relying on a fixed iteration count that grows fragile as awaits
-        // are added to production code.
+        // Drain handleJoin → performJoin → autoSetup.syncBooks (keyFingerprint included) in one pass; a
+        // fixed iteration count grows fragile as awaits are added to production code.
         await vi.runAllTimersAsync();
       });
 
@@ -606,12 +665,8 @@ describe("Onboarding", () => {
   });
 
   describe("handleJoin with custom API endpoint", () => {
-    /**
-     * An `@host` sync code is an explicit choice of that server, so joining
-     * persists it directly to storage.local (authoritative — Firefox's sleeping
-     * background page can drop the message) AND still broadcasts
-     * SET_API_ENDPOINT so the rest of the extension follows.
-     */
+    /** An `@host` sync code is an explicit server choice: joining persists it to storage.local (authoritative —
+     *  Firefox's sleeping background page can drop the message) AND still broadcasts SET_API_ENDPOINT. */
     it("persists and broadcasts the endpoint when the sync code contains @host", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
@@ -672,14 +727,8 @@ describe("Onboarding", () => {
       ]);
     });
 
-    /**
-     * The refusal is the whole attack: a server that FAILS the join has proven
-     * nothing, yet an adopted endpoint outlives the attempt. Left in force it
-     * would still be the address when the user gives up and presses 建立家庭 —
-     * shipping the userId, the token that create issues and the entire personal
-     * book list (unshared books included) to that host, which would then be
-     * baked into the sync code handed to the rest of the family.
-     */
+    /** A server that FAILS the join has proven nothing, yet an adopted endpoint would outlive the attempt
+     *  and receive the next 建立家庭's userId, token and book list. See the file header, "@host refusal". */
     it("hands the endpoint back and persists nothing when the @host server refuses the join", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
@@ -857,9 +906,8 @@ describe("Onboarding", () => {
         expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
       });
 
-      // Migration should have called updatePersonalBooks with userId and a PersonalBooks object.
-      // The exact userId is the mocked deriveUserId value — this also proves the
-      // module-level hash mock above really intercepts the production import.
+      // Migration calls updatePersonalBooks with the mocked deriveUserId value as userId — which also
+      // proves the module-level hash mock above really intercepts the production import.
       expect(mockApi.updatePersonalBooks).toHaveBeenCalledWith(
         ONBOARDING_USER_ID, // userId (from the mocked deriveUserId)
         expect.objectContaining({
@@ -1265,9 +1313,8 @@ describe("Onboarding", () => {
 
     it("solo-recovery-confirm: '確認重新同步' triggers performSoloRecovery and calls onFamilyJoined on success", async () => {
       const onFamilyJoined = vi.fn();
-      // 1st call (tryAutoRecovery in handleStart) fails → recovery-choice
-      // 2nd call (performSoloRecovery in handleRecoveryChoiceSkip) fails → solo-recovery-confirm
-      // 3rd call (performSoloRecovery in handleSoloRecoveryConfirm) succeeds
+      // Calls: tryAutoRecovery (handleStart) fails → recovery-choice; performSoloRecovery
+      // (handleRecoveryChoiceSkip) fails → solo-recovery-confirm; (handleSoloRecoveryConfirm) succeeds.
       const joinFamilyMock = vi
         .fn()
         .mockResolvedValueOnce({
@@ -1336,11 +1383,8 @@ describe("Onboarding", () => {
     });
   });
 
-  /**
-   * SEC-1: a manual sync-code join that hits a verification error must open the
-   * verification prompt (heading "需要驗證") so the member can supply their
-   * PIN/pattern — it must NOT be mislabeled as a generic sync-code error.
-   */
+  /** SEC-1: a manual sync-code join hitting a verification error must open the prompt (heading "需要驗證")
+   *  for the member's PIN/pattern — never be mislabeled as a generic sync-code error. */
   describe("handleJoin verification error responses", () => {
     async function joinWithError(
       code: string,
@@ -1415,11 +1459,8 @@ describe("Onboarding", () => {
     });
 
     it("shows the remaining wait when the backend sends retryAfter with the lock", async () => {
-      // The lockout line is re-rendered from Date.now() once a second, and this
-      // file's fake clock auto-advances with real time (shouldAdvanceTime), so a
-      // join flow taking over a second would tick 90 → 89 and flake the exact
-      // copy assertion. Freeze Date only — the timer machinery that
-      // clickStartAndWait drives keeps advancing normally.
+      // Freeze Date only: the lockout line re-renders from Date.now() each second under an auto-advancing
+      // fake clock, so a slow join would tick 90 → 89. See the file header, "Lockout timing".
       const frozenNow = Date.now();
       const nowSpy = vi.spyOn(Date, "now").mockReturnValue(frozenNow);
       onTestFinished(() => nowSpy.mockRestore());
@@ -1447,18 +1488,8 @@ describe("Onboarding", () => {
     });
   });
 
-  /**
-   * The verification challenge REPLACES the join screen, taking that screen's
-   * `@host` disclosure with it — precisely when the user is asked to hand a
-   * PIN/pattern to whichever server the sync code named. So the challenge
-   * carries its own note, and its verdict comes from the endpoint the client has
-   * ACTUALLY adopted (never from input text): a sync-code join has already
-   * applied its `@host` by the time the challenge opens, while a create/lookup
-   * challenge is still on the official default and must stay silent.
-   *
-   * The copy follows the same boundary — no sync code is visible here, so the
-   * note drops the join screens' "此同步碼" lead-in (`variant="verify"`).
-   */
+  /** The challenge REPLACES the join screen and its `@host` note, so it carries its own, judged from the
+   *  ADOPTED endpoint. See the file header, "Verification challenge disclosure". */
   describe("verification challenge endpoint disclosure", () => {
     /** A self-hosted family server, written the way a sync code would carry it. */
     const SELF_HOSTED = "https://nas.example.com/moo/";
@@ -1500,24 +1531,17 @@ describe("Onboarding", () => {
 
       const note = screen.getByTestId("sync-code-host-note");
       expect(note).toHaveTextContent("將連線至自訂伺服器：");
-      // No sync code is on THIS screen — it was typed on the previous one — so
-      // the join lead-in's "此同步碼" would point the user at something that is
-      // not there. Its absence is the only thing pinning `variant="verify"`:
-      // the join copy contains the verify copy as a substring, so the positive
-      // assertion above passes either way.
+      // No sync code is on THIS screen, so no "此同步碼" lead-in. This absence alone pins `variant="verify"`:
+      // the join copy contains the verify copy as a substring, so the positive assertion passes either way.
       expect(note.textContent).not.toContain("此同步碼");
-      // The canonical address the client actually adopted — not the raw `@host`
-      // text, so a trailing slash / uppercase host / IDN cannot make the
-      // disclosure read as a different server from the one being talked to.
+      // The canonical adopted address, not the raw `@host` text: a trailing slash / uppercase host / IDN
+      // must not make the disclosure read as a different server from the one being talked to.
       expect(mockApi.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
       expect(note).toHaveTextContent(mockApi.getEndpoint());
     });
 
-    /**
-     * A create/lookup-triggered challenge never left the official endpoint, so
-     * there is nothing to disclose. Silence matters: a note on EVERY challenge
-     * would train the user to ignore the one that means something.
-     */
+    /** A create/lookup challenge never left the official endpoint, so there is nothing to disclose; a note
+     *  on EVERY challenge would train the user to ignore the one that means something. */
     it("stays silent when the challenge arrives on the official default endpoint", async () => {
       const mockApi = createMockApiClient(
         {
@@ -1552,12 +1576,8 @@ describe("Onboarding", () => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
-    /**
-     * Defence in depth: `ApiClient.setEndpoint` validates, so `getEndpoint()`
-     * cannot normally return an address the client would refuse. Pinned anyway —
-     * whatever put it there, the note must warn rather than lend a refused host
-     * the legitimacy of the reassuring line.
-     */
+    /** Defence in depth: setEndpoint validates, so getEndpoint cannot normally return a refused address.
+     *  Pinned anyway — the note must warn rather than lend a refused host the reassuring line. */
     it("warns instead of naming an adopted endpoint the validator would refuse", async () => {
       const mockApi = createMockApiClient({
         getEndpoint: vi.fn(() => "https://real.example@evil.com"),
@@ -1605,46 +1625,20 @@ describe("Onboarding", () => {
     });
   });
 
-  /**
-   * The onboarding CONTAINER carries a disclosure of its own, above whichever
-   * step is showing. Every button underneath it — create, join, recovery — hits
-   * the ADOPTED endpoint, and until it existed nothing on the welcome or join
-   * screen said which server that is: the join screen's note only ever described
-   * the code being TYPED, so a self-hoster whose client was already pointed at a
-   * custom Worker had no way to see that from the screen they act on.
-   *
-   * Its verdict comes from `classifyAdoptedEndpoint` (dialog/adoptedEndpoint.ts)
-   * — the endpoint the client actually holds, never input text — so the note
-   * cannot vouch for an address the user has not accepted, and it says nothing
-   * at all on the official default (that module's invariant 2).
-   *
-   * `verify-prompt` is the one state it is withheld from: that screen renders
-   * the same component itself with its own lead-in, and two notes naming one
-   * address in two different tenses is exactly the noise that teaches a user to
-   * scroll past both.
-   */
+  /** The container's own note names the ADOPTED server above every step; silent on the official default,
+   *  withheld in `verify-prompt`. See the file header, "Container disclosure". */
   describe("onboarding container endpoint disclosure", () => {
     /** A self-hosted family server, as an ApiClient would already hold it. */
     const SELF_HOSTED = "https://nas.example.com/moo/";
 
-    /**
-     * Production copy. Every assertion below reaches it by rendering the real
-     * Onboarding → real SyncCodeHostNote → real shared copy map, so the lead-in
-     * a wrong `variant` would produce fails here; these literals only name what
-     * is expected. The same set is pinned against
-     * shared/src/hostNote/messages.ts in tests/component/SyncCodeHostNote.test
-     * .tsx ("the valid-branch lead-in per variant") — keep them in step.
-     */
+    /** Production copy, reached through the real component chain. The same set is pinned in
+     *  SyncCodeHostNote.test.tsx ("the valid-branch lead-in per variant") — keep them in step. */
     const ONBOARDING_LEAD_IN = "目前使用自訂伺服器：";
     const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
     const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
 
-    /**
-     * Full text of EVERY valid-branch note currently on screen. Reading them as
-     * a list rather than with `getByTestId` is deliberate: the failure this
-     * block exists to catch is a SECOND note appearing next to the first, and a
-     * singular getter throws on that instead of describing it.
-     */
+    /** Full text of EVERY valid-branch note on screen, as a list: the failure to catch is a SECOND note,
+     *  which a singular `getByTestId` throws on instead of describing. */
     function noteTexts(): string[] {
       return screen
         .queryAllByTestId("sync-code-host-note")
@@ -1660,24 +1654,18 @@ describe("Onboarding", () => {
 
       // The welcome step — before any create / join / recovery button exists.
       expect(screen.getByText("開始使用")).toBeInTheDocument();
-      // Present tense and no sync code named: nothing has been handed over yet,
-      // and there is no code on this screen to point at. Exact equality is what
-      // pins `variant="onboarding"` — the join and verify lead-ins would both
-      // satisfy a substring match on the endpoint alone.
+      // Present tense, no sync code named (nothing handed over yet). Exact equality pins
+      // `variant="onboarding"`: the join and verify lead-ins would both pass a substring match.
       expect(noteTexts()).toEqual([
         `${ONBOARDING_LEAD_IN}${validateEndpointUrl(SELF_HOSTED)}`,
       ]);
-      // The canonical address the client actually holds, not the raw string it
-      // was configured with — a trailing slash must not make the disclosure
-      // read as a different server from the one being talked to.
+      // The canonical address the client holds, not the configured string — a trailing slash must not
+      // make the disclosure read as a different server from the one being talked to.
       expect(mockApi.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
     });
 
-    /**
-     * adoptedEndpoint.ts invariant 2: the official default discloses nothing. A
-     * banner on every single onboarding would train the user to scroll past the
-     * one time it carries meaning.
-     */
+    /** docs/architecture.md → 揭露採用中的伺服器位址, invariant 2: the official default discloses
+     *  nothing — a banner on every onboarding trains the user to skip the one that matters. */
     it("stays silent when the client is on the official default endpoint", async () => {
       const mockApi = createMockApiClient({}, DEFAULT_API_ENDPOINT);
 
@@ -1696,11 +1684,8 @@ describe("Onboarding", () => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
-    /**
-     * The note is mounted by the container, not by any one step, so walking
-     * from welcome to the create/join screen must not drop it — that screen is
-     * where the buttons the disclosure is ABOUT actually live.
-     */
+    /** Mounted by the container, not by a step, so walking to the create/join screen must not drop it —
+     *  that screen is where the buttons the disclosure is ABOUT actually live. */
     it("keeps naming the adopted server once the flow reaches the join screen", async () => {
       const mockApi = createMockApiClient({}, SELF_HOSTED);
 
@@ -1712,19 +1697,15 @@ describe("Onboarding", () => {
           screen.getByPlaceholderText("輸入家庭同步碼"),
         ).toBeInTheDocument();
       });
-      // The join screen's own note describes the TYPED code and stays silent
-      // while the field is empty, so this single note can only be the
-      // container's.
+      // The join screen's own note describes the TYPED code and is silent while the field is empty, so
+      // this single note can only be the container's.
       expect(noteTexts()).toEqual([
         `${ONBOARDING_LEAD_IN}${validateEndpointUrl(SELF_HOSTED)}`,
       ]);
     });
 
-    /**
-     * The challenge brings its own note, in the tense that matters there ("this
-     * PIN is about to go to…"). The container's must step aside rather than
-     * stack a second, differently-worded line about the very same address.
-     */
+    /** The challenge brings its own note ("this PIN is about to go to…"); the container's steps aside
+     *  rather than stack a second, differently-worded line about the same address. */
     it("yields to the challenge's own note instead of stacking a second one", async () => {
       const mockApi = createMockApiClient(
         {
@@ -1758,15 +1739,8 @@ describe("Onboarding", () => {
       expect(screen.queryByText(/目前使用自訂伺服器/)).toBeNull();
     });
 
-    /**
-     * On the join screen the two notes legitimately coexist, and they answer
-     * DIFFERENT questions about DIFFERENT addresses: "which server am I on now"
-     * vs "which server does this pasted code point at". Pinning both is what
-     * catches either wire crossing — the container fed the typed text (the
-     * spoof-vouching bug adoptedEndpoint.ts exists to prevent) or the join note
-     * fed the adopted endpoint. Both mistakes collapse the pair onto one
-     * address, and both would still look perfectly plausible on screen.
-     */
+    /** On the join screen the two notes answer different questions about different addresses; pinning
+     *  both catches either wire crossing. See the file header, "Two notes on the join screen". */
     it("tells the adopted server apart from the pasted code's server", async () => {
       const PASTED = "https://other.example.com/api";
       const mockApi = createMockApiClient({}, SELF_HOSTED);
@@ -1800,21 +1774,8 @@ describe("Onboarding", () => {
       expect(mockApi.getEndpoint()).toBe(validateEndpointUrl(SELF_HOSTED));
     });
 
-    /**
-     * The one case where the pair above collapses into noise: the join screen's
-     * own note names the VERY SAME address the container is naming, so the user
-     * reads two amber lines about one fact — which is what teaches them to skim
-     * past the whole note family, including the time it matters. The container's
-     * note stands down there, and only there.
-     *
-     * Every test below pins one edge of that "only there": suppression fires on
-     * two ALREADY-VALIDATED canonicals being byte-equal (never on raw text, so
-     * the codes here are deliberately spelled differently from the adopted
-     * endpoint), it is a function of the CURRENT input, and it never fires on a
-     * screen that renders no typed-code note of its own. Typed text may HIDE a
-     * note whose content it exactly reproduces; it may never change what a note
-     * says nor make one appear — adoptedEndpoint.ts invariant 1.
-     */
+    /** The container's note stands down only when the join note names the very same address (validated
+     *  canonicals byte-equal). See the file header, "Same-address suppression". */
     describe("same-address suppression", () => {
       /** What the container says about the server the client already holds. */
       const ADOPTED_NOTE = `${ONBOARDING_LEAD_IN}${validateEndpointUrl(SELF_HOSTED)}`;
@@ -1839,11 +1800,8 @@ describe("Onboarding", () => {
         const mockApi = createMockApiClient({}, SELF_HOSTED);
         await renderIntoJoinScreen(mockApi);
 
-        // Same server, different spelling: the uppercase host and the trailing
-        // slash both collapse in `validateEndpointUrl`, so this code is equal to
-        // the adopted endpoint only AFTER canonicalization — which is the
-        // comparison the suppression is allowed to make. Raw-text equality would
-        // fail here, and a note repeating the same address would survive.
+        // Same server, different spelling: uppercase host and trailing slash collapse in validateEndpointUrl,
+        // so it equals the adopted endpoint only after canonicalization — the comparison suppression may make.
         fireEvent.change(syncCodeField(), {
           target: { value: "moo-abcd-efgh@https://NAS.Example.com/moo/" },
         });
@@ -1868,9 +1826,8 @@ describe("Onboarding", () => {
 
         fireEvent.change(syncCodeField(), { target: { value: "" } });
 
-        // An emptied field renders no note of its own, so a suppression that
-        // outlived the input would leave the create/join buttons with nothing
-        // at all naming the server they are about to hit.
+        // An emptied field renders no note of its own, so a suppression that outlived the input would
+        // leave the create/join buttons with nothing naming the server they are about to hit.
         expect(noteTexts()).toEqual([ADOPTED_NOTE]);
       });
 
@@ -1888,22 +1845,16 @@ describe("Onboarding", () => {
         ).not.toBeInTheDocument();
       });
 
-      /**
-       * The two notes answer different questions here — "this code's server is
-       * unsafe" and "you are currently on nas.example.com" — so they must
-       * coexist. Suppressing on an `invalid` verdict would drop the only line
-       * naming where the buttons below would actually go, at the exact moment
-       * the user is being warned off the address in the field.
-       */
+      /** On an `invalid` verdict the two notes say different things and must coexist: suppressing would
+       *  drop the only line naming where the buttons go. See the file header, "Same-address suppression". */
       it("stays beside the warning when the typed @host would be refused", async () => {
         const mockApi = createMockApiClient({}, SELF_HOSTED);
         await renderIntoJoinScreen(mockApi);
 
         fireEvent.change(syncCodeField(), { target: { value: SPOOFED_CODE } });
 
-        // Before the value settles the warning is deliberately withheld (it must
-        // not flicker through every keystroke), so the container's note is alone
-        // on screen — and must be, since nothing else names a server yet.
+        // The warning is withheld until the value settles (no flicker per keystroke), so the container's
+        // note is alone on screen — and must be, since nothing else names a server yet.
         expect(noteTexts()).toEqual([ADOPTED_NOTE]);
         expect(
           screen.queryByTestId("sync-code-host-note-invalid"),
@@ -1919,11 +1870,8 @@ describe("Onboarding", () => {
         expect(noteTexts()).toEqual([ADOPTED_NOTE]);
       });
 
-      /**
-       * The suppression is keyed on the SCREEN as well as the input: leaving the
-       * join screen does not clear `flow.syncCodeInput`, so a state-blind check
-       * would keep hiding the container's note on a view that renders none.
-       */
+      /** Keyed on the SCREEN as well as the input: leaving the join screen keeps `flow.syncCodeInput`, so a
+       *  state-blind check would hide the container's note on a view that renders none. */
       it("comes back once the same-address code leaves the join screen", async () => {
         const mockApi = createMockApiClient({}, SELF_HOSTED);
         await renderIntoJoinScreen(mockApi);
@@ -1941,19 +1889,13 @@ describe("Onboarding", () => {
           expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
         });
 
-        // The typed code is still in the flow's state, but the screen that
-        // displayed it is gone — and this is the screen that hands out a sync
+        // The typed code is still in flow state but its screen is gone — and this screen hands out a sync
         // code, so which server the family lives on matters more here, not less.
         expect(noteTexts()).toEqual([ADOPTED_NOTE]);
       });
 
-      /**
-       * The collision this suppression exists for, arrived at the way a real
-       * user does: a device that onboarded before, lost its local familyId, and
-       * still has one in storage.sync. useOnboardingFlow pre-fills the join
-       * field from that remnant with the ADOPTED endpoint baked in as `@host`,
-       * so the duplicate is guaranteed — nobody typed anything.
-       */
+      /** The real collision: a device that onboarded before, lost its local familyId and still has one in
+       *  storage.sync — useOnboardingFlow pre-fills the join field with the ADOPTED endpoint as `@host`. */
       it("shows one note, not two, for a sync-remnant prefill of the adopted server", async () => {
         const REMNANT_FAMILY_ID = "abcd-efgh";
 
@@ -2002,13 +1944,8 @@ describe("Onboarding", () => {
         expect(noteTexts()).toEqual([TYPED_SAME_ADDRESS_NOTE]);
       });
 
-      /**
-       * The recovery join screen is the second of the two screens that render a
-       * typed-code note, and the only one that is not `renderContent`'s fallback
-       * branch — every test above would still pass if it were dropped from the
-       * suppression, leaving the duplicate standing exactly where a returning
-       * member re-enters their family's sync code.
-       */
+      /** The recovery join screen is the other typed-code-note screen, outside renderContent's fallback
+       *  branch — every test above would still pass if it were dropped from the suppression. */
       it("stands down on the recovery join screen too", async () => {
         const mockApi = createMockApiClient(
           {
@@ -2046,11 +1983,8 @@ describe("Onboarding", () => {
   });
 
   describe("copy sync code", () => {
-    /**
-     * Create a family and land on the created view, with the clipboard stubbed
-     * so 複製同步碼 resolves. Returns the render handle (for `unmount`) and the
-     * clipboard spy.
-     */
+    /** Create a family and land on the created view with the clipboard stubbed (複製同步碼 resolves);
+     *  returns the render handle (for `unmount`) and the clipboard spy. */
     async function reachCreatedViewWithClipboard() {
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.assign(navigator, { clipboard: { writeText } });
@@ -2086,13 +2020,8 @@ describe("Onboarding", () => {
       return { view, writeText };
     }
 
-    /**
-     * Undoes the clearTimeout spy of the unmount-cleanup test. It must run
-     * BEFORE the outer `afterEach`'s `vi.useRealTimers()` — the spy wraps the
-     * FAKE clearTimeout, so restoring after the clock swap would strand the
-     * fake on globalThis for every later test. Vitest runs a nested suite's
-     * afterEach ahead of its parent's, which is exactly that order.
-     */
+    /** Undoes the unmount test's clearTimeout spy BEFORE the outer afterEach's `vi.useRealTimers()` (the
+     *  spy wraps the FAKE clearTimeout). See the file header, "Copy sync code". */
     let restoreClearTimeout = () => {};
 
     afterEach(() => {
@@ -2121,12 +2050,8 @@ describe("Onboarding", () => {
       expect(screen.getByText("複製同步碼")).toBeInTheDocument();
     });
 
-    /**
-     * The 已複製 reset is a 2s timer armed by the copy click. Closing the dialog
-     * inside that window must cancel it — a bare `setTimeout(() => setCopied
-     * (false), 2000)` would fire on a component that is gone. The flag is held
-     * by `useTimedFlag`, whose unmount cleanup does the cancelling.
-     */
+    /** Unmounting inside the 2s 已複製 window must cancel the reset timer (a bare setTimeout would fire on
+     *  a gone component); useTimedFlag's unmount cleanup does it. */
     it("clears the pending 已複製 reset timer when the dialog unmounts", async () => {
       const { view } = await reachCreatedViewWithClipboard();
 

@@ -26,9 +26,8 @@ describe("LoadingState", () => {
   });
 
   it("carries the scoped container class (flex/centered layout lives in styles.css)", () => {
-    // After the Shadow DOM + scoped-CSS conversion the flex/centered layout rules
-    // moved out of inline styles into `.moo-loading-state` in styles.css. jsdom
-    // does not apply stylesheet rules, so the observable contract is now the class.
+    // The flex/centered layout lives in `.moo-loading-state` (styles.css); jsdom applies no stylesheet,
+    // so the class is the contract.
     render(<LoadingState message="test" />);
     const container = screen.getByTestId("loading-state");
     expect(container).toHaveClass("moo-loading-state");

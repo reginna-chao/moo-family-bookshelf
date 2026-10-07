@@ -13,7 +13,9 @@ import { TOKEN_EXPIRES_AT_KEY } from "@/constants";
  * `chrome.storage.local.set` is exactly what the hook reads via
  * `browser.storage.local.get`.
  *
- * All timing is driven by fake timers; every test restores real timers.
+ * All timing is driven by fake timers; every test restores real timers. The
+ * ApiClient stub is minimal — the hook only ever calls `proactiveRefresh()` —
+ * and mocking it (an external boundary) per test follows test.md's mock policy.
  */
 
 const MINUTE = 60 * 1000;
@@ -26,10 +28,8 @@ async function seedExpiry(expiresAt: number | undefined): Promise<void> {
   }
 }
 
-/**
- * Minimal ApiClient stub — the hook only ever calls `proactiveRefresh()`.
- * Mocking the API client (external boundary) is per test.md's mock policy.
- */
+/** Minimal ApiClient stub — the hook only ever calls `proactiveRefresh()`.
+ *  Mocking the API client (external boundary) is per test.md's mock policy. */
 function createMockApiClient(
   proactiveRefresh: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(true),
 ): { client: ApiClient; proactiveRefresh: ReturnType<typeof vi.fn> } {

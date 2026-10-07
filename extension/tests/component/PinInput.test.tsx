@@ -3,6 +3,20 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { PinInput } from "@/dialog/PinInput";
 import { dimmedAncestor, dimmedElements } from "./helpers/dimStyle";
 
+/**
+ * PinInput: verify and setup modes, the disabled / dimmed states, and the deferred refocus.
+ *
+ * Deferred refocus cleanup: moving to the confirm step defers a refocus by a 0ms timer, because the
+ * field can only be refocused after the re-render that clears it. Closing the widget before that tick
+ * must cancel the timer, or the callback runs on a dead component and reaches through a ref React has
+ * already detached. Timer discipline: the render settles on the REAL clock first; the fake one goes in
+ * only to hold the 0ms timer PENDING at unmount. Every assertion past that point is synchronous — an
+ * RTL waiter cannot see vi's clock and would poll a frozen one until the test times out.
+ * restoreClearTimeout undoes the clearTimeout spy while the FAKE clearTimeout is still on globalThis;
+ * restoring after `useRealTimers()` would strand the fake there for every later test — hence restore,
+ * then swap the clock back.
+ */
+
 function getInput(): HTMLInputElement {
   return screen.getByLabelText("PIN 碼輸入") as HTMLInputElement;
 }
@@ -142,12 +156,8 @@ describe("PinInput", () => {
       expect(onComplete).toHaveBeenCalledWith("123456");
     });
 
-    /**
-     * 重新設定 sits OUTSIDE the dimmed wrapper (so it stays readable during a
-     * lockout countdown), which means `pointerEvents: none` does not cover it.
-     * It therefore needs its own `disabled` — otherwise a locked-out user could
-     * still wipe the first PIN and restart the setup mid-lockout.
-     */
+    /** 重新設定 sits OUTSIDE the dimmed wrapper (readable during a lockout), so `pointerEvents: none` misses
+     *  it: it needs its own `disabled`, or a locked-out user could wipe the first PIN mid-lockout. */
     it("marks the setup reset button as disabled while disabled", () => {
       const { rerender } = render(
         <PinInput mode="setup" onComplete={vi.fn()} />,
@@ -184,12 +194,8 @@ describe("PinInput", () => {
     });
   });
 
-  /**
-   * The dim wraps ONLY the interactive cluster (label / hint / input /
-   * 確認). The error line is what explains the lock during a rate-limit
-   * countdown, so it — and the reset button — must stay readable at full
-   * opacity for the whole wait.
-   */
+  /** The dim wraps ONLY the interactive cluster (label / hint / input / 確認): the error line explaining
+   *  the lock, and the reset button, stay at full opacity for the whole countdown. */
   describe("disabled dim scope", () => {
     it("dims the input and confirm button while disabled", () => {
       render(<PinInput mode="verify" onComplete={vi.fn()} disabled />);
@@ -327,23 +333,11 @@ describe("PinInput", () => {
     });
   });
 
-  /**
-   * Moving to the confirm step defers a refocus by a 0ms timer, because the
-   * field can only be refocused after the re-render that clears it. Closing the
-   * widget before that tick must cancel the timer, or the callback runs on a
-   * dead component and reaches through a ref React has already detached.
-   *
-   * Timer discipline: the render settles on the REAL clock first; the fake one
-   * goes in only to hold the 0ms timer PENDING at unmount. Every assertion past
-   * that point is synchronous — an RTL waiter cannot see vi's clock and would
-   * poll a frozen one until the test times out.
-   */
+  /** Unmounting before the 0ms refocus tick must cancel the timer. Real clock to settle, fake only to hold
+   *  it pending; assertions stay synchronous. See the file header, "Deferred refocus cleanup". */
   describe("deferred refocus cleanup", () => {
-    /**
-     * Undoes the clearTimeout spy while the FAKE clearTimeout is still on
-     * globalThis; restoring after `useRealTimers()` would strand the fake there
-     * for every later test. Hence: restore, then swap the clock back.
-     */
+    /** Undoes the clearTimeout spy while the FAKE clearTimeout is still on globalThis — restore, then swap
+     *  the clock back. See the file header. */
     let restoreClearTimeout = () => {};
 
     afterEach(() => {

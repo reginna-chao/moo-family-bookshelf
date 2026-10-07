@@ -48,11 +48,8 @@ describe("LazyCover", () => {
 
   describe("loading state", () => {
     it("renders the not-yet-loaded img and shows the spinner while loading", () => {
-      // The opacity-0 → opacity-1 fade moved from inline `style.opacity` to the
-      // `.moo-lazy-cover__img--loaded` modifier in styles.css. jsdom does not
-      // apply stylesheet rules, so the observable contracts are: (a) the img
-      // carries the base class WITHOUT the --loaded modifier while loading, and
-      // (b) the spinner element (`.moo-lazy-cover__spinner`) is present.
+      // The fade is the `.moo-lazy-cover__img--loaded` modifier (jsdom applies no stylesheet): while loading
+      // the img has the base class WITHOUT `--loaded`, and `.moo-lazy-cover__spinner` is present.
       const { container } = render(
         <LazyCover
           src="https://example.com/cover.jpg"
@@ -146,10 +143,8 @@ describe("LazyCover", () => {
   });
 
   describe("spinner lifecycle", () => {
-    // The spinner keyframes moved from an in-tree <style> into styles.css
-    // (`@keyframes moo-lazy-spin`, applied via `.moo-lazy-cover__spinner`).
-    // LazyCover no longer renders any <style> block, so the spinner ELEMENT's
-    // presence (only while status === "loading") is the observable contract.
+    // The spinner keyframes live in styles.css (`@keyframes moo-lazy-spin` via `.moo-lazy-cover__spinner`),
+    // not an in-tree <style>, so the contract is the spinner ELEMENT, present only while "loading".
     it("renders the spinner element while loading", () => {
       const { container } = render(
         <LazyCover

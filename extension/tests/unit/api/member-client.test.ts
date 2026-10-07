@@ -8,6 +8,108 @@ import type {
   MemberSettingsPayload,
 } from "@/api/types";
 
+/**
+ * ApiClient member endpoints — `getFamilyMembers` and `updateMemberSettings` —
+ * and their runtime payload validation.
+ *
+ * Helpers: `mockFetchEnvelope` serves a whole envelope verbatim — the only way
+ * to reach the shapes a `{ data }`-only helper cannot build: a 200 that carries
+ * `error` alongside `data`, an `error: null`, or no `data` key at all. The
+ * member-shape fixtures are shared by both payload-validation suites: the list
+ * (`getFamilyMembers`) and the single object (`updateMemberSettings`) go through
+ * the SAME `sanitizeFamilyMember` rules, so one set of tables is what keeps the
+ * two suites from asserting subtly different criteria. Only `JSON.parse` can
+ * produce an OWN "__proto__" key (an object literal would set the prototype
+ * instead) — exactly what a real `response.json()` does with a hostile body —
+ * so the prototype-pollution fixtures are parsed, not written as literals.
+ *
+ * getFamilyMembers payload validation — driven through the public
+ * `getFamilyMembers` surface instead of importing `sanitizeFamilyMembersResponse`
+ * directly: the contract is what a caller receives when a self-hosted (BYO) or
+ * hostile backend answers, not the shape of the helper. Unlike the borrow list,
+ * this method hands back the whole `{ data, error }` envelope — callers unwrap
+ * it themselves — so the passthrough cases are about the envelope, not about a
+ * thrown error. What these cases pin is the COMPOSED contract of the TWO layers
+ * `getFamilyMembers` wires, in this order:
+ *  1. `shared/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
+ *     elements that cannot be addressed, rebuilds each survivor from at most the
+ *     four `FamilyMember` keys (so hostile extras and a non-string optional lose
+ *     their key rather than degrade), always emits `apiEndpoint`, and refuses to
+ *     touch an envelope carrying an `error`.
+ *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which then
+ *     hardens the three group-level text fields (`familyId` / `ownerId` /
+ *     `createdAt`) that layer 1 documents as out of its own scope, and re-runs
+ *     over the already-rebuilt members as a no-op.
+ * Where a case can tell the two apart it says so, because a regression in either
+ * layer must fail here instead of being absorbed by the other. The same case
+ * tables live in `pwa/tests/unit/api/member-client.test.ts`. Layer 1 is now the
+ * SHARED implementation both apps import, so the mirrored tables no longer guard
+ * against two copies drifting — they prove each app's own COMPOSITION of the two
+ * layers still holds, which is the part that stays per-app.
+ *  - Error envelopes: an auth failure must never be laundered into an empty
+ *    member list (Invariant 2) — the caller's own `if (response.error)` has to
+ *    still see the error it would have seen. With `data` alongside `error`, the
+ *    two layers answer differently and both answers matter: layer 1 stands down
+ *    entirely, while layer 2 has no such rule — it short-circuits on ABSENT data
+ *    only — so the claimed text fields are still coerced. Neither can turn the
+ *    failure into a success: `error` reaches the caller byte-identical. Silence
+ *    is the proof layer 1 did not run: `members: 42` is exactly what its
+ *    malformed-container branch warns about, and the text layer's own
+ *    degradation of that field is deliberately quiet.
+ *  - `error: null`: `if (response.error)` reads it as success and consumes
+ *    `data`, so this envelope is exactly the one that must NOT be waved through —
+ *    while the null itself is preserved for the caller.
+ *  - Non-record `data`: both layers contribute, and neither invents a claim —
+ *    layer 1 degrades it to a members-only group plus its always-emitted
+ *    `apiEndpoint`, then layer 2 materializes the three declared-string fields
+ *    as `""`. A non-object `data` never claimed any of them, so the result is the
+ *    renderable EMPTY state.
+ *  - Well-formed payload: every text field is a REAL string, which is the point —
+ *    the layers coerce TYPES, never content, so it has to come back
+ *    byte-identical (`apiEndpoint` too; the normalization suite owns what happens
+ *    when it is not a string). A group as sent comes back plus the `apiEndpoint`
+ *    the sanitizer always emits (`null` when the fixture omits the key).
+ *  - Where the two layers divide: `memberValidation` rebuilds `members` and
+ *    normalizes `apiEndpoint` and stops there — but the text layer composed after
+ *    it hardens every field the `FamilyGroup` interface declares `string`, so
+ *    `familyId` / `ownerId` / `createdAt` are no longer claims. What NEITHER layer
+ *    touches stays a claim on purpose: `maxMembers` and `expiresAt` are numbers
+ *    whose consumers do `===` comparisons and `??` fallbacks that are safe for an
+ *    arbitrary value, and `authToken` is a credential — degrading it to `""`
+ *    would hide a broken backend behind a silent re-auth loop instead of the 401
+ *    the request already produces.
+ *  - apiEndpoint normalization: `apiEndpoint` is the one pass-through field that
+ *    reaches a React child — the transfer-owner confirm screen prints it
+ *    (`dialog/MemberList.tsx`, `.moo-member-list__endpoint`) — so its declared
+ *    type has to hold rather than stay a claim: any string survives verbatim,
+ *    everything else collapses to `null`, which is what `apiEndpoint ??
+ *    undefined` already reads as "no custom endpoint". The key is ALWAYS
+ *    emitted, so a caller never has to distinguish "absent" from "not a string".
+ *
+ * updateMemberSettings — the single-member `PATCH /api/family/:id/member/:uid`
+ * payload. The criteria are the SAME `sanitizeFamilyMember` drop/normalize rules
+ * the list suite pins — one function, one contract — but the verdict for a
+ * payload that has to be dropped differs: an unusable element of a list is
+ * skipped silently, while an unusable PATCH response becomes an `ApiError`. It
+ * has to be one: `updateMember` in `dialog/useFamilyDataMembers.ts` splices this
+ * object straight into `members` state, so "skip it" is not an available
+ * outcome, and all three call sites (`dialog/BorrowTab.tsx`'s picker write-back,
+ * `dialog/MemberList.tsx`'s canLend toggle and readmooName delete) already catch
+ * and route through `memberSettingsErrorMessage`. Driven through the public
+ * surface for the same reason as the list suite; request-body wiring for the
+ * three settings combinations lives in
+ * `extension/tests/unit/api/borrow-client.test.ts`.
+ *  - A non-string `canLend` is OMITTED, not set to `undefined`: the object is
+ *    spliced into `members` state as-is, and absence is what the documented
+ *    "missing canLend means TRUE" fallback is written against.
+ *  - The readmooName-delete flow in `dialog/MemberList.tsx` PATCHes `null` and
+ *    gets a member without the field back — the "尚未記錄" hint reads absence,
+ *    so it must survive the rebuild as absence.
+ *  - `unwrap` still owns the envelope contract and runs BEFORE the sanitizer: a
+ *    missing `data` is a protocol failure, not a member object that failed
+ *    validation.
+ */
+
 vi.mock("@/constants", () => ({
   DEFAULT_API_ENDPOINT: "https://default.workers.dev",
 }));
@@ -33,11 +135,8 @@ function mockFetchError(code: string, message: string, status = 400) {
   });
 }
 
-/**
- * Serve a whole envelope verbatim — the only way to reach the shapes a
- * `{ data }`-only helper cannot build: a 200 that carries `error` alongside
- * `data`, an `error: null`, or no `data` key at all.
- */
+/** Serve a whole envelope verbatim (`error` beside `data`, `error: null`, no `data`).
+ *  See the header → "Helpers". */
 function mockFetchEnvelope(envelope: unknown, status = 200) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
@@ -77,12 +176,8 @@ async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
   throw new Error("expected the promise to reject, but it resolved");
 }
 
-/*
- * Member-shape fixtures shared by both payload-validation suites below: the
- * list (`getFamilyMembers`) and the single object (`updateMemberSettings`) go
- * through the SAME `sanitizeFamilyMember` rules, so one set of tables is what
- * keeps the two suites from asserting subtly different criteria.
- */
+// Member-shape fixtures shared by both validation suites (one `sanitizeFamilyMember`
+// contract). See the header → "Helpers".
 
 /** Exactly the keys `FamilyMember` declares — the sanitized member's key set. */
 const MEMBER_KEYS = ["userId", "displayName", "canLend", "readmooName"];
@@ -149,9 +244,8 @@ describe("ApiClient getFamilyMembers", () => {
 
       const result = await client.getFamilyMembers(FAMILY_ID);
 
-      // The group comes back as sent, plus the `apiEndpoint` the sanitizer
-      // always emits — `null` here because the fixture omits the key. The
-      // normalization itself is covered in its own suite below.
+      // As sent, plus the always-emitted `apiEndpoint` (`null`: the fixture omits
+      // it). Normalization has its own suite below.
       expect(result.data).toEqual({ ...group, apiEndpoint: null });
       expect(result.error).toBeUndefined();
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -167,36 +261,8 @@ describe("ApiClient getFamilyMembers", () => {
     });
   });
 
-  /**
-   * Runtime boundary validation of the member-list payload.
-   *
-   * Driven through the public `getFamilyMembers` surface instead of importing
-   * `sanitizeFamilyMembersResponse` directly: the contract is what a caller
-   * receives when a self-hosted (BYO) or hostile backend answers, not the shape
-   * of the helper. Unlike the borrow list, this method hands back the whole
-   * `{ data, error }` envelope — callers unwrap it themselves — so the
-   * passthrough cases below are about the envelope, not about a thrown error.
-   *
-   * Driving the public surface means what these cases pin is the COMPOSED
-   * contract of the TWO layers `getFamilyMembers` wires, in this order:
-   *  1. `shared/src/api/memberValidation.ts` — the STRUCTURAL rebuild. Drops
-   *     elements that cannot be addressed, rebuilds each survivor from at most
-   *     the four `FamilyMember` keys (so hostile extras and a non-string
-   *     optional lose their key rather than degrade), always emits
-   *     `apiEndpoint`, and refuses to touch an envelope carrying an `error`.
-   *  2. `shared/src/api/entityText.ts` — the declared-STRING coercion, which
-   *     then hardens the three group-level text fields (`familyId` / `ownerId` /
-   *     `createdAt`) that layer 1 documents as out of its own scope, and re-runs
-   *     over the already-rebuilt members as a no-op.
-   * Where a case can tell the two apart it says so, because a regression in
-   * either layer must fail here instead of being absorbed by the other.
-   *
-   * The same case tables live in `pwa/tests/unit/api/member-client.test.ts`.
-   * Layer 1 is now the SHARED implementation both apps import, so the mirrored
-   * tables no longer guard against two copies drifting — they prove each app's
-   * own COMPOSITION of the two layers still holds, which is the part that stays
-   * per-app.
-   */
+  // The COMPOSED two-layer contract (structural rebuild, then text coercion), via
+  // the public surface. See the header → "getFamilyMembers payload validation".
   describe("getFamilyMembers payload validation", () => {
     /** Mirrors the literal in `shared/src/api/memberValidation.ts`. */
     const MALFORMED_CONTAINER_WARNING =
@@ -245,8 +311,7 @@ describe("ApiClient getFamilyMembers", () => {
     describe("envelope passthrough", () => {
       it("passes an error envelope through without sanitizing or warning", async () => {
         // An auth failure must never be laundered into an empty member list
-        // (Invariant 2) — the caller's own `if (response.error)` has to still
-        // see the error it would have seen.
+        // (Invariant 2): `if (response.error)` still sees it.
         globalThis.fetch = mockFetchError(
           "FORBIDDEN",
           "Not a member of this family",
@@ -264,13 +329,8 @@ describe("ApiClient getFamilyMembers", () => {
       });
 
       it("keeps the error verbatim and stands the structural rebuild down when a 200 envelope carries both", async () => {
-        // The two layers answer this envelope differently, and both answers
-        // matter. Layer 1 (`memberValidation`) stands down entirely, because an
-        // auth failure must never be laundered into a member list
-        // (Invariant 2). Layer 2 (the shared text layer) has no such rule — it
-        // short-circuits on ABSENT data only — so the claimed text fields are
-        // still coerced. Neither can turn the failure into a success: `error`
-        // reaches the caller's own `if (response.error)` byte-identical.
+        // Layer 1 stands down, layer 2 still coerces; `error` arrives byte-identical.
+        // See the header → "Error envelopes".
         globalThis.fetch = mockFetchEnvelope({
           data: { members: 42 },
           error: { code: "STALE_DATA", message: "Rebuild in progress" },
@@ -282,9 +342,8 @@ describe("ApiClient getFamilyMembers", () => {
           code: "STALE_DATA",
           message: "Rebuild in progress",
         });
-        // Silence is the proof layer 1 did not run: `members: 42` is exactly
-        // what its malformed-container branch warns about, and the text layer's
-        // own degradation of that field is deliberately quiet.
+        // Silence proves layer 1 did not run (it would warn on `members: 42`; the
+        // text layer degrades quietly).
         expect(warnSpy).not.toHaveBeenCalled();
         expect(result.data).toStrictEqual({
           familyId: "",
@@ -317,9 +376,8 @@ describe("ApiClient getFamilyMembers", () => {
       });
 
       it("still sanitizes when error is null, because callers read error as truthy", async () => {
-        // `if (response.error)` reads `error: null` as success and consumes
-        // `data`, so this envelope is exactly the one that must NOT be waved
-        // through — while the null itself is preserved for the caller.
+        // `error: null` reads as success, so `data` must NOT be waved through —
+        // while the null itself is preserved.
         globalThis.fetch = mockFetchEnvelope({
           data: { ...makeGroup(), members: "not-an-array" },
           error: null,
@@ -377,11 +435,8 @@ describe("ApiClient getFamilyMembers", () => {
         async ({ data }) => {
           const group = await sanitizedGroup(data);
 
-          // Both layers contribute, and neither invents a claim: layer 1
-          // degrades a non-record `data` to a members-only group plus its
-          // always-emitted `apiEndpoint`, then layer 2 materializes the three
-          // declared-string fields as `""`. A non-object `data` never claimed
-          // any of them, so the result is the renderable EMPTY state.
+          // Both layers contribute, neither invents a claim: the renderable EMPTY
+          // state. See the header → "Non-record `data`".
           expect(group).toEqual({
             familyId: "",
             ownerId: "",
@@ -554,11 +609,8 @@ describe("ApiClient getFamilyMembers", () => {
 
     describe("group field handling", () => {
       it("passes every other FamilyGroup field through verbatim while rebuilding members", async () => {
-        // Every text field here is a REAL string, which is the point: the
-        // layers coerce TYPES, never content, so a well-formed payload has to
-        // come back byte-identical. `apiEndpoint` survives verbatim for the
-        // same reason; the `apiEndpoint normalization` suite below owns what
-        // happens when it is not a string.
+        // REAL strings throughout: the layers coerce TYPES, never content, so it
+        // comes back byte-identical (`apiEndpoint` included).
         const group = await sanitizedGroup({
           familyId: FAMILY_ID,
           ownerId: USER_A,
@@ -596,18 +648,8 @@ describe("ApiClient getFamilyMembers", () => {
       });
 
       it("coerces the declared-string fields in the text layer while non-text fields stay unproven claims", async () => {
-        // Where the two layers divide. `memberValidation` rebuilds `members`
-        // and normalizes `apiEndpoint` and stops there, documenting the rest as
-        // out of its scope — but the shared text layer composed after it then
-        // hardens every field the `FamilyGroup` interface declares `string`, so
-        // `familyId` / `ownerId` / `createdAt` are no longer claims.
-        //
-        // What NEITHER layer touches stays a claim on purpose: `maxMembers` and
-        // `expiresAt` are numbers whose consumers do `===` comparisons and `??`
-        // fallbacks that are safe for an arbitrary value, and `authToken` is a
-        // credential — degrading it to `""` would hide a broken backend behind
-        // a silent re-auth loop instead of the 401 the request already
-        // produces.
+        // Where the two layers divide, and what stays a claim on purpose
+        // (`maxMembers` / `expiresAt` / `authToken`). See the file header.
         const group = await sanitizedGroup({
           familyId: 42,
           ownerId: null,
@@ -632,15 +674,8 @@ describe("ApiClient getFamilyMembers", () => {
       });
     });
 
-    /**
-     * `apiEndpoint` is the one pass-through field that reaches a React child —
-     * the transfer-owner confirm screen prints it (`dialog/MemberList.tsx`,
-     * `.moo-member-list__endpoint`) — so its declared type has to hold rather
-     * than stay a claim: any string survives verbatim, everything else
-     * collapses to `null`, which is what `apiEndpoint ?? undefined` already
-     * reads as "no custom endpoint". The key is ALWAYS emitted, so a caller
-     * never has to distinguish "absent" from "not a string".
-     */
+    // Any string survives verbatim, everything else → `null`; the key is ALWAYS
+    // emitted. See the header → "apiEndpoint normalization".
     describe("apiEndpoint normalization", () => {
       /** The sanitized `apiEndpoint` of a group claiming `apiEndpoint`. */
       async function sanitizedEndpoint(
@@ -729,9 +764,8 @@ describe("ApiClient getFamilyMembers", () => {
       });
 
       it("drops a JSON-supplied __proto__ property instead of carrying or applying it", async () => {
-        // Only `JSON.parse` can produce an OWN "__proto__" key (an object
-        // literal would set the prototype instead) — which is exactly what a
-        // real `response.json()` does with a hostile body.
+        // Only `JSON.parse` yields an OWN "__proto__" key — as a real
+        // `response.json()` does with a hostile body.
         const hostile: unknown = JSON.parse(
           `{"members":[{"userId":"${USER_B}","displayName":"Hostile","__proto__":{"polluted":"yes"},"evil":"x"}]}`,
         );
@@ -849,25 +883,8 @@ describe("ApiClient getFamilyMembers", () => {
   });
 });
 
-/**
- * Runtime boundary validation of the single-member `PATCH
- * /api/family/:id/member/:uid` payload.
- *
- * The criteria are the SAME `sanitizeFamilyMember` drop/normalize rules the list
- * suite above pins — one function, one contract — but the verdict for a payload
- * that has to be dropped differs: an unusable element of a list is skipped
- * silently, while an unusable PATCH response becomes an `ApiError`. It has to be
- * one: `updateMember` in `dialog/useFamilyDataMembers.ts` splices this object
- * straight into `members` state, so "skip it" is not an available outcome, and
- * all three call sites (`dialog/BorrowTab.tsx`'s picker write-back,
- * `dialog/MemberList.tsx`'s canLend toggle and readmooName delete) already catch
- * and route through `memberSettingsErrorMessage`.
- *
- * Driven through the public `updateMemberSettings` surface instead of importing
- * the sanitizer: the contract is what a caller receives when a self-hosted (BYO)
- * or hostile backend answers. Request-body wiring for the three settings
- * combinations lives in `extension/tests/unit/api/borrow-client.test.ts`.
- */
+// Same `sanitizeFamilyMember` rules as the list, but an unusable PATCH response
+// becomes an `ApiError`. See the header → "updateMemberSettings".
 describe("ApiClient updateMemberSettings", () => {
   /** The PATCH target — the member whose settings are being written. */
   const TARGET_UID = USER_A;
@@ -1050,9 +1067,8 @@ describe("ApiClient updateMemberSettings", () => {
       async ({ value }) => {
         const result = await patchMember(withField("canLend", value));
 
-        // Omitted, not set to `undefined`: this object is spliced into
-        // `members` state as-is, and absence is what the documented "missing
-        // canLend means TRUE" fallback is written against.
+        // Omitted, not `undefined`: absence is what the "missing canLend means
+        // TRUE" fallback is written against.
         expect("canLend" in result).toBe(false);
         expect(Object.keys(result)).not.toContain("canLend");
       },
@@ -1084,9 +1100,8 @@ describe("ApiClient updateMemberSettings", () => {
     );
 
     it("omits readmooName when the backend does not send it at all", async () => {
-      // The readmooName-delete flow in `dialog/MemberList.tsx` PATCHes `null`
-      // and gets a member without the field back — the "尚未記錄" hint reads
-      // absence, so it must survive the rebuild as absence.
+      // The readmooName delete gets a member without the field back; the
+      // "尚未記錄" hint reads absence, so it must survive as absence.
       const result = await patchMember(withoutField("readmooName"));
 
       expect("readmooName" in result).toBe(false);
@@ -1106,8 +1121,7 @@ describe("ApiClient updateMemberSettings", () => {
     });
 
     it("drops a JSON-supplied __proto__ property instead of carrying or applying it", async () => {
-      // Only `JSON.parse` can produce an OWN "__proto__" key (an object literal
-      // would set the prototype instead) — which is exactly what a real
+      // Only `JSON.parse` yields an OWN "__proto__" key — as a real
       // `response.json()` does with a hostile body.
       const hostile: unknown = JSON.parse(
         `{"userId":"${USER_B}","displayName":"Hostile","__proto__":{"polluted":"yes"},"evil":"x"}`,
@@ -1185,9 +1199,8 @@ describe("ApiClient updateMemberSettings", () => {
     ])(
       "rejects with EMPTY_RESPONSE when a success envelope $name",
       async ({ envelope }) => {
-        // `unwrap` still owns the envelope contract and runs BEFORE the
-        // sanitizer: a missing `data` is a protocol failure, not a member
-        // object that failed validation.
+        // `unwrap` runs BEFORE the sanitizer: a missing `data` is a protocol
+        // failure, not a member that failed validation.
         globalThis.fetch = mockFetchEnvelope(envelope);
 
         const err = await rejectedRequest();

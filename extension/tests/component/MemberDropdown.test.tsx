@@ -252,9 +252,8 @@ describe("MemberDropdown", () => {
     });
   });
 
-  // The aria-label replaces the button text for assistive tech, so it must
-  // announce the same label and count the trigger shows. Literal strings pin the
-  // production copy (memberFilterAccessibleName in shared/src/familyShelf/).
+  // The aria-label replaces the button text for assistive tech, so it announces the trigger's label and
+  // count. Literals pin production copy (memberFilterAccessibleName in shared/src/familyShelf/).
   describe("trigger accessible name", () => {
     it("announces the default selection's label and count, not the bare prefix", () => {
       renderDropdown({ value: "all-except-self" });
@@ -446,10 +445,8 @@ describe("MemberDropdown", () => {
     });
   });
 
-  // The focused option unmounts with the menu; without an explicit focus move a
-  // keyboard / screen-reader user would be dropped on <body>. Assertions target
-  // the trigger element itself (production mounts it in a shadow root, where
-  // document.activeElement would be the host).
+  // The focused option unmounts with the menu; without a focus move keyboard / screen-reader users land
+  // on <body>. Assert on the trigger itself (in production's shadow root activeElement is the host).
   describe("focus return", () => {
     it("moves focus to the trigger after an option is chosen, which then names the new scope", () => {
       render(<StatefulDropdown initial="all-except-self" />);

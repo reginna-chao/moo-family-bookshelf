@@ -21,6 +21,24 @@ import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "@/constants";
  *
  * tests/setup.ts backs `browser.storage.local` with a real in-memory store, so
  * these tests assert on the resulting store contents as well as the calls.
+ *
+ * A hand-edited / legacy / corrupted declined record must degrade to "nothing
+ * declined" so the confirmation prompt reappears instead of a stale marker
+ * silently suppressing it.
+ *
+ * readStoredApiEndpoint: the dialog boots on this value. App reads it DIRECTLY
+ * (dialog/App.tsx) — the GET_API_ENDPOINT round-trip has the same Firefox
+ * failure mode as the write, where a sleeping background page would silently
+ * boot a member who accepted a custom endpoint onto the official default
+ * instead.
+ *
+ * resetFamilyEndpointChoice: leaving a family drops this device's endpoint state
+ * entirely. The endpoint is FAMILY-scoped — the owner picks it, every member
+ * adopts it — so a family-less client left pointing at the former family's
+ * server would send the next create/join there (userId, display name, the token
+ * that server issues, the whole personal book list) and bake that host into the
+ * sync code it hands out next. The declined marker goes with it: a refusal
+ * recorded against the old family must not suppress the prompt for the next one.
  */
 
 const CUSTOM_ENDPOINT = "https://family.example";
@@ -65,9 +83,8 @@ describe("familyEndpointChoice storage", () => {
       });
     });
 
-    // A hand-edited / legacy / corrupted record must degrade to "nothing
-    // declined" so the confirmation prompt reappears instead of a stale marker
-    // silently suppressing it.
+    // A corrupted record degrades to "nothing declined", so the prompt reappears
+    // rather than being silently suppressed.
     const malformed: Array<[string, unknown]> = [
       ["a bare string", CUSTOM_ENDPOINT],
       ["a number", 42],
@@ -101,12 +118,8 @@ describe("familyEndpointChoice storage", () => {
     });
   });
 
-  /**
-   * The dialog boots on this value. App reads it DIRECTLY (dialog/App.tsx) —
-   * the GET_API_ENDPOINT round-trip has the same Firefox failure mode as the
-   * write, where a sleeping background page would silently boot a member who
-   * accepted a custom endpoint onto the official default instead.
-   */
+  // The dialog boots on this value, read DIRECTLY (no Firefox-fragile round-trip).
+  // See the header → "readStoredApiEndpoint".
   describe("readStoredApiEndpoint", () => {
     it("returns null when this device has accepted no custom endpoint", async () => {
       await expect(readStoredApiEndpoint()).resolves.toBeNull();
@@ -296,15 +309,8 @@ describe("familyEndpointChoice storage", () => {
     });
   });
 
-  /**
-   * Leaving a family drops this device's endpoint state entirely. The endpoint
-   * is FAMILY-scoped — the owner picks it, every member adopts it — so a
-   * family-less client left pointing at the former family's server would send
-   * the next create/join there (userId, display name, the token that server
-   * issues, the whole personal book list) and bake that host into the sync code
-   * it hands out next. The declined marker goes with it: a refusal recorded
-   * against the old family must not suppress the prompt for the next one.
-   */
+  // Leaving a family drops the FAMILY-scoped endpoint AND the declined marker.
+  // See the header → "resetFamilyEndpointChoice".
   describe("resetFamilyEndpointChoice", () => {
     it("drops the accepted endpoint AND the declined marker", async () => {
       await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);

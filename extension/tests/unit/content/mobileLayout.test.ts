@@ -10,6 +10,34 @@ import {
 import { SHELL_BOOTSTRAP_CSS } from "@/content/shellStyles";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
+/**
+ * Mobile layout of the injected UI (`src/content/mobileLayout.ts`): the shell
+ * sizing and the floating button's offset above Readmoo's bottom bar.
+ *
+ * Close-button size: the static size moved from inline cssText to the
+ * `.moo-shell-close` class in SHELL_BOOTSTRAP_CSS (injected into the shadow
+ * root). jsdom does not reflect stylesheet rules onto `.style`, so the class is
+ * now the observable contract for the size — the test asserts the class and
+ * pins the actual px value against the source stylesheet.
+ *
+ * Bottom-bar selectors: each fixture isolates ONE entry of the production
+ * selector allowlist, so removing that entry breaks its test.
+ *  - `addMainMenuBar` appends Readmoo's real bottom bar as a `div.main-menu`
+ *    (exactly `main-menu`, no `nav nav-justified`), so ONLY the `.main-menu`
+ *    selector can match it — none of the pre-existing selectors (`.bottom-nav`,
+ *    `nav[class*='bottom']`, `footer nav`, …) do. Its height 60 is deliberately
+ *    distinct from every fallback path so the assertion proves a MEASURED value,
+ *    not a tautology: measured → 60 + 12 = 72px; fallback → 55 + 12 = 67px
+ *    (width > 370) | 76 + 12 = 88px (width <= 370). Reaching 72px can only
+ *    happen via the `.main-menu` selector at the front of the allowlist.
+ *  - `addNavJustifiedBar` appends a bar matched ONLY by `.nav.nav-justified`
+ *    (exactly `nav nav-justified`, NO `main-menu`), so the leading `.main-menu`
+ *    selector cannot match it. Its height 67 differs from the 76px small-phone
+ *    fallback height, and the resulting 79px offset (67 + 12) matches no fallback
+ *    (67px / 88px), so reaching 79px can only happen via the `.nav.nav-justified`
+ *    selector — removing that line from the production allowlist fails the test.
+ */
+
 type ChangeListener = () => void;
 
 interface MockMql {
@@ -232,11 +260,8 @@ describe("mobileLayout", () => {
 
     it("is a 35px touch target with an accessible label", () => {
       const btn = createCloseIcon(vi.fn(), true);
-      // The static size moved from inline cssText to the `.moo-shell-close`
-      // class in SHELL_BOOTSTRAP_CSS (injected into the shadow root). jsdom does
-      // not reflect stylesheet rules onto `.style`, so the class is now the
-      // observable contract for the size — assert the class here and pin the
-      // actual px value against the source stylesheet below.
+      // jsdom ignores stylesheet rules, so the class is the size contract; the px
+      // value is pinned against SHELL_BOOTSTRAP_CSS below.
       expect(btn.classList.contains("moo-shell-close")).toBe(true);
       expect(SHELL_BOOTSTRAP_CSS).toMatch(
         /\.moo-shell-close\s*\{[^}]*width:\s*35px/,
@@ -306,13 +331,8 @@ describe("mobileLayout", () => {
       return nav;
     }
 
-    /**
-     * Append Readmoo's real bottom bar as a `div.main-menu` and stub its rect so
-     * it reads as a bottom bar. The class is exactly `main-menu` (no
-     * `nav nav-justified`) so ONLY the new `.main-menu` selector can match it —
-     * none of the pre-existing selectors (`.bottom-nav`, `nav[class*='bottom']`,
-     * `footer nav`, …) do — which isolates the `.main-menu` path.
-     */
+    /** Append a bottom bar only `.main-menu` can match, with a stubbed rect.
+     *  See the header → "Bottom-bar selectors". */
     function addMainMenuBar(barRect: Partial<DOMRect>): HTMLElement {
       const bar = document.createElement("div");
       bar.className = "main-menu";
@@ -321,14 +341,8 @@ describe("mobileLayout", () => {
       return bar;
     }
 
-    /**
-     * Append Readmoo's bottom bar matched ONLY by the `.nav.nav-justified`
-     * selector and stub its rect so it reads as a bottom bar. The class is
-     * exactly `nav nav-justified` (NO `main-menu`) so the leading `.main-menu`
-     * selector cannot match it — reaching a measured height can only happen via
-     * the `.nav.nav-justified` entry in the allowlist. This isolates that line so
-     * removing it from the production selector list breaks this test.
-     */
+    /** Append a bottom bar only `.nav.nav-justified` can match, with a stubbed rect.
+     *  See the header → "Bottom-bar selectors". */
     function addNavJustifiedBar(barRect: Partial<DOMRect>): HTMLElement {
       const bar = document.createElement("div");
       bar.className = "nav nav-justified";
@@ -428,13 +442,8 @@ describe("mobileLayout", () => {
 
     it("matches Readmoo's real .main-menu div as the bottom bar (measured, not fallback)", () => {
       setViewport(400, 800);
-      // Height 60 is deliberately distinct from every fallback path so the
-      // assertion proves a MEASURED value, not a tautology:
-      //   measured  -> 60 + 12 = 72px
-      //   fallback  -> 55 + 12 = 67px (width > 370) | 76 + 12 = 88px (width <= 370)
-      // Only a div.main-menu (no `.bottom-nav`, no `nav[class*='bottom']`) is
-      // present, so reaching 72px can only happen via the new `.main-menu`
-      // selector at the front of the allowlist.
+      // 60 + 12 = 72px matches no fallback (67px / 88px), so 72px proves the
+      // `.main-menu` measurement. See the header → "Bottom-bar selectors".
       const barHeight = 60;
       addMainMenuBar({
         width: 400,
@@ -451,15 +460,8 @@ describe("mobileLayout", () => {
 
     it("matches the .nav.nav-justified bottom bar (measured, not fallback)", () => {
       setViewport(400, 800);
-      // Height 67 is deliberately distinct from every fallback path so the
-      // assertion proves a MEASURED value, not a tautology:
-      //   measured  -> 67 + 12 = 79px
-      //   fallback  -> 55 + 12 = 67px (width > 370) | 76 + 12 = 88px (width <= 370)
-      // (67 is used as the HEIGHT here; it differs from the 76px small-phone
-      // fallback height, and the resulting 79px offset matches no fallback.)
-      // Only a div.nav.nav-justified (NO `.main-menu`) is present, so reaching
-      // 79px can only happen via the `.nav.nav-justified` selector — removing
-      // that line from the production allowlist makes this test fail.
+      // 67 + 12 = 79px matches no fallback (67px / 88px), so 79px proves the
+      // `.nav.nav-justified` measurement. See the header → "Bottom-bar selectors".
       const barHeight = 67;
       addNavJustifiedBar({
         width: 400,

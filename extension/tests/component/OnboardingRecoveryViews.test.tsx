@@ -16,6 +16,16 @@ import {
   TRUSTED_ENDPOINT,
 } from "../helpers/syncCodeHostFixtures";
 
+/**
+ * Onboarding recovery views: RecoveryChoiceView, RecoveryJoinView and SoloRecoveryConfirmView.
+ *
+ * Custom-server note timing — WHEN the warning may appear, as opposed to what it says. The recovery
+ * join screen runs the same delayed-disclosure hook as onboarding, so it gets the same coverage: the
+ * warning may be held back until the value settles, never suppressed, and never replaced by a note
+ * that contradicts the field. Mirrors the IdleView block in
+ * extension/tests/component/OnboardingViews.test.tsx.
+ */
+
 describe("RecoveryChoiceView", () => {
   const defaultProps = {
     userEmail: "user@example.com",
@@ -265,11 +275,8 @@ describe("RecoveryJoinView", () => {
     ).not.toBeInTheDocument();
   });
 
-  /**
-   * Recovery is the screen a user reaches when something already went wrong, so
-   * a spoofed `@host` must be called out here too rather than presented as the
-   * server they are about to hand their book list to.
-   */
+  /** Recovery is reached when something already went wrong, so a spoofed `@host` is called out here too
+   *  rather than presented as the server the book list is about to go to. */
   it("warns instead of naming the host when the @host would be refused", () => {
     render(
       <RecoveryJoinView
@@ -302,21 +309,11 @@ describe("RecoveryJoinView", () => {
     expect(screen.queryByTestId("sync-code-host-note")).not.toBeInTheDocument();
   });
 
-  /**
-   * WHEN the warning may appear, as opposed to what it says. The recovery join
-   * screen runs the same delayed-disclosure hook as onboarding, so it gets the
-   * same coverage: the warning may be held back until the value settles, never
-   * suppressed, and never replaced by a note that contradicts the field.
-   *
-   * Mirrors the IdleView block in
-   * extension/tests/component/OnboardingViews.test.tsx.
-   */
+  /** The delayed-disclosure hook, as on onboarding: held back until settled, never suppressed or
+   *  contradicted. See the file header, "Custom-server note timing". */
   describe("custom-server note timing", () => {
-    /**
-     * RecoveryJoinView is controlled by dialog/Onboarding.tsx, so a stateful
-     * wrapper is what lets these tests drive the real input → onChange → prop
-     * round trip (and with it the onPaste / onBlur handlers).
-     */
+    /** RecoveryJoinView is controlled by dialog/Onboarding.tsx; this wrapper drives the real input →
+     *  onChange → prop round trip (and with it the onPaste / onBlur handlers). */
     function ControlledRecoveryJoinView({
       initialSyncCode = "",
       onJoin = () => {},
@@ -383,9 +380,8 @@ describe("RecoveryJoinView", () => {
         expectNoNote();
       }
 
-      // Anchor against a vacuous pass: the same field DOES speak once the value
-      // is a complete, adoptable endpoint, so the silence above is the delay
-      // doing its job — not a note that never renders at all.
+      // Anchor against a vacuous pass: the same field DOES speak once the value is a complete, adoptable
+      // endpoint, so the silence above is the delay at work — not a note that never renders.
       typeCode(LAN_CODE);
       expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
     });
@@ -454,11 +450,8 @@ describe("RecoveryJoinView", () => {
       expectWarning();
     });
 
-    /**
-     * Appending `@evil.com` to a host the user already saw named must remove
-     * that name at once. A note kept alive across the change would lend the
-     * spoofed address the legitimacy of the host it replaced.
-     */
+    /** Appending `@evil.com` to a host the user already saw named must remove that name at once; a kept
+     *  note would lend the spoofed address the legitimacy of the host it replaced. */
     it("drops the previously named host the instant the value turns invalid", () => {
       const { container } = render(
         <ControlledRecoveryJoinView initialSyncCode={TRUSTED_CODE} />,

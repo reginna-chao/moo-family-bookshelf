@@ -27,6 +27,13 @@ import { MAX_SAVE_PUT_ATTEMPTS } from "moo-family-bookshelf-shared/personal/full
  * `{ data: record }` with a fresh server stamp. The full PUT is reached the
  * way the shelf reaches it in practice: a batch share of more than the
  * Worker's 1000-change PATCH cap. PWA mirror: pwa/tests/unit/hooks/usePersonalShelfSave.test.ts.
+ *
+ * #259 fix cycle (C1 / S1): a sync result carries the `lastUpdated` its own PUT
+ * stored, and applying it puts THAT stamp in the record the next full PUT builds
+ * on. The screen then never holds a newer stamp over the sync's older flags
+ * (C1), and a shelf that loaded no record gets a precondition (S1). A result
+ * without a stamp (its PUT response carried no usable `lastUpdated`) keeps
+ * whatever stamp was held.
  */
 
 const USER = "user-abc";
@@ -522,14 +529,8 @@ describe("useSavePersonalShelf (via usePersonalBooks) — full-PUT save over a l
   });
 });
 
-/**
- * #259 fix cycle (C1 / S1): a sync result carries the `lastUpdated` its own PUT
- * stored, and applying it puts THAT stamp in the record the next full PUT
- * builds on. The screen then never holds a newer stamp over the sync's older
- * flags (C1), and a shelf that loaded no record gets a precondition (S1). A
- * result without a stamp (its PUT response carried no usable `lastUpdated`)
- * keeps whatever stamp was held.
- */
+// #259 C1 / S1: a sync result's own stamp becomes the next full PUT's precondition.
+// See the header → "#259 fix cycle".
 describe("usePersonalBooks — the stamp a sync result carries (#259)", () => {
   /** The stamp the sync's own PUT stored on the fake server. */
   const LS = "2026-09-30T10:00:03.000Z";
