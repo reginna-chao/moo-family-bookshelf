@@ -74,10 +74,8 @@ export interface FullPutRead<T> {
 export interface FullPutRebaseInput<T extends ShareFlagEntry> {
   /** The list the save sends. */
   books: T[];
-  /**
-   * The save's unsaved-toggle ids: their local flag survives a rebase. Any
-   * other id a re-read lacks is sent not-shared.
-   */
+  /** The save's unsaved-toggle ids: their local flag survives a rebase. Any
+   *  other id a re-read lacks is sent not-shared. */
   dirtyBookIds: ReadonlySet<string>;
   /** The record the screen last read. */
   raw: PersonalBooksRaw;

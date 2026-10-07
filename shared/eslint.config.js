@@ -25,10 +25,9 @@ const BROWSER_ONLY_GLOBALS = [
 // entry — split the file instead. Keys are relative to this directory.
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
-  "src/api/bookshelfValidation.ts": 233,
-  "src/api/entityText.ts": 280,
-  "src/api/types.ts": 292,
-  "src/config/readmoo.ts": 410,
+  "src/api/entityText.ts": 246,
+  "src/api/types.ts": 242,
+  "src/config/readmoo.ts": 374,
 };
 
 export default tseslint.config(

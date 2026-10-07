@@ -1,14 +1,5 @@
-/**
- * Local-vs-server reconciliation for the public-shelf editable fields.
- *
- * The dialog writes title / expiry through debounced, fire-and-forget requests,
- * so a rejected write (429 above all) leaves the input showing a value the
- * server never stored. This module is the single definition of "diverged",
- * shared by the Extension and the PWA so the rule cannot drift between them.
- *
- * Parameter types are structural on purpose: neither app's `PublicShelf` type is
- * imported here, so `shared/` keeps no dependency on either consumer.
- */
+/** The one definition of a diverged public-shelf field: debounced fire-and-forget writes (429 above all) can
+ *  leave the input on a value the server never stored. Structural params, so no app type is imported. */
 
 /** The server-confirmed values a local edit is compared against. */
 export interface PublicShelfSnapshot {

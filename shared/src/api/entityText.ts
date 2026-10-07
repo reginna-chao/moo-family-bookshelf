@@ -1,32 +1,5 @@
-/**
- * Per-entity text sanitizers for backend payloads — the layer the two API
- * clients actually call. The threat model, and why the degraded value is `""`,
- * are documented once in `./safeText.ts`.
- *
- * Parameter types are structural and generic, the same convention as
- * `publicShelf/diff.ts`: neither app's entity types are imported here, so
- * `shared/` keeps no dependency on either consumer, and every field a caller
- * declares beyond the text ones — `BoolFlag` flags, numbers, timestamps,
- * `PersonalBooks`' index-signature extras — survives untouched.
- *
- * An optional field is rebuilt with a CONDITIONAL spread —
- * `...(field !== undefined && { field: safeText(field) })` — so a field the
- * backend omitted stays OMITTED rather than becoming an explicit `undefined` own
- * property. Absence, not an `undefined` value, is what the "treat missing as X"
- * fallbacks downstream are written against, and it is the idiom
- * `shared/src/api/memberValidation.ts` already uses: `getFamilyMembers`
- * composes both layers — member validation first, this sanitizer second — so
- * the spread here must not re-introduce a key that layer deliberately left out.
- *
- * The condition is `!== undefined`, never truthiness: `null` is a PRESENT value
- * (`apiEndpoint: null` means "this family uses the default endpoint"), so it
- * survives the rebuild through `safeNullableText`.
- *
- * `authToken` is the one declared-`string` field deliberately left alone: it is
- * a credential, never rendered and never passed to a string method, and
- * degrading it to `""` would hide a broken backend behind a silent re-auth loop
- * instead of the 401 the request already produces.
- */
+/** Per-entity text sanitizers the two API clients call; structural generic params (no app types),
+ *  optionals via conditional spread. Why: docs/architecture.md → 伺服器回傳資料的檢查. */
 
 import {
   safeText,
@@ -44,7 +17,7 @@ export interface BookTextFields {
   category: string;
 }
 
-/** `coverUrl` is excluded on purpose — see the note in `./safeText.ts`. */
+/** `coverUrl` is excluded on purpose — see docs/architecture.md → 伺服器回傳資料的檢查. */
 export function sanitizeBookText<T extends BookTextFields>(book: T): T {
   return {
     ...book,
@@ -104,12 +77,8 @@ export interface BookshelfMemberTextFields {
   userId: string;
   displayName: string;
   books: BookTextFields[];
-  /**
-   * On the wire for BOTH apps — `FamilyBookshelfMember.lastUpdated` in
-   * `./types.ts` declares it as a required `string | null`. Optional HERE only
-   * because this layer is structural and does not import that type (see the
-   * file header), so a caller passing a narrower shape still type-checks.
-   */
+  /** Required on the wire (`FamilyBookshelfMember.lastUpdated` in `./types.ts`); optional here only
+   *  because this layer is structural and does not import that type. */
   lastUpdated?: string | null;
 }
 
@@ -129,11 +98,8 @@ export function sanitizeBookshelfMemberText<
 
 export interface FamilyBookshelfTextFields {
   members: BookshelfMemberTextFields[];
-  /**
-   * On the wire for BOTH apps — `FamilyBookshelf.familyId` in `./types.ts`
-   * declares it as a required `string`. Optional HERE only because this layer
-   * is structural and does not import that type (see the file header).
-   */
+  /** Required on the wire (`FamilyBookshelf.familyId` in `./types.ts`); optional here only
+   *  because this layer is structural and does not import that type. */
   familyId?: string;
 }
 

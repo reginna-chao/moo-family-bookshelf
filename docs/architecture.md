@@ -56,6 +56,7 @@
 - **觸發方式**：頁面載入時自動注入入口按鈕，使用者點擊後開啟 Dialog
 - **爬取內容**：書名、作者、ISBN、封面圖片 URL、讀墨連結、書籍 ID
 - **注意**：僅爬取公開可見的書單資訊，不涉及帳號憑證
+- **讀墨網址**：讀墨把書櫃前端搬到新主機並加上路徑前綴（新站 `https://next.readmoo.com/read/#/library`，注意 `/read`），舊站 `https://read.readmoo.com/#/library` 仍在線，兩者都必須支援。讀墨主機、hash 路由與書櫃 DOM selector 只定義在 `shared/src/config/readmoo.ts`，任何地方都不得另行寫死
 
 ### 2.2 Dialog UI (React)
 
@@ -154,7 +155,7 @@
 
 - **職責**：使用者識別碼雜湊（deriveUserId）
 - **技術**：Web Crypto API（SHA-256）
-- **位置**：實作只有一份，位於 `shared/src/crypto/hash.ts`，擴充功能與 PWA 共用；輸出就是既有使用者的 userId，演算法不可更動
+- **位置**：實作只有一份，位於 `shared/src/crypto/hash.ts`，擴充功能與 PWA 共用；輸出就是既有使用者的 userId，演算法不可更動——包括其中的兩次正規化（`deriveUserId` 與 `sha256Hex` 各自做一次轉小寫加去頭尾空白）
 - **流程**：
   ```
   使用者 Email → 加鹽 SHA-256 雜湊 → userId → 用於 API 識別
@@ -190,6 +191,8 @@
 Extension 的書單同步（讀取 → 合併 → 整份 PUT）會帶上它讀到的 `lastUpdated`；收到 `BOOKS_CONFLICT` 時重新讀取、重新合併後重送，上傳最多 3 次（含第一次），3 次都衝突就讓這次同步失敗：書單不會寫入，也不記錄同步成功時間。加入家庭後的第一次同步（`extension/src/dialog/onboardingBooksUpload.ts`）照同一套規則：帶上讀到的 `lastUpdated`，衝突時重新讀取、重新合併後重送，最多 3 次，放棄時顯示同步失敗。
 
 個人書櫃的儲存（對話框與 PWA）在 `decideSaveStrategy` 判定 PATCH 不安全、改走整份 PUT 時（#259），也帶上畫面最後一次讀到的 `lastUpdated`（沒有紀錄時不帶）。收到 `BOOKS_CONFLICT` 時重新讀取，再以重讀的紀錄重組要送出的書單：書籍集合維持畫面上的清單；這次儲存的未儲存改動（送出當下的 dirty 集合）保留畫面上的設定；其餘的書改用伺服器上的現值；這次沒改過、而且重讀時伺服器已經沒有的書，一律以不分享送出——那個 id 是在畫面讀取之後被別處移除的（例如書籍編號變更，#236），不能由這次儲存把它以分享狀態寫回。然後帶著新的 `lastUpdated` 重送，每次儲存最多 3 次 PUT（含第一次）。重讀失敗、重讀找不到紀錄（`409` 表示紀錄存在，重讀卻讀不到，例如跨 colo 的讀取落差），或第 3 次仍衝突就放棄：不寫入，畫面顯示儲存失敗，未儲存的改動維持未儲存。重組與重試的邏輯放在 `shared/src/personal/fullPutConflict.ts`，兩端各自注入自己的讀取解析（Extension 與載入時一樣先解析舊編號重複項目，PWA 把分享旗標正規化成 `BoolFlag`）。PUT 成功後，畫面上目前沒有未儲存改動的書改顯示這次實際寫入的設定，否則之後一次帶著新 `lastUpdated` 的整份 PUT 會把畫面上的舊值寫回去；記住的 `lastUpdated` 改用 PUT 回應中的新值，回應沒有時沿用最後一次讀到的值。PATCH 儲存不帶此欄位，回應也不含新的 `lastUpdated`，所以 PATCH 之後的第一次整份 PUT 會先收到一次衝突，重讀後就能送出。對話框套用同步結果時，記住的 `lastUpdated` 改用那次同步自己上傳成功時 PUT 回應中的值，回應沒有時沿用原值（不清掉，沒有值就等於不帶前提條件）。原因：同步結果可能在一次較晚落地的儲存之後才套用，若沿用儲存留下的較新 `lastUpdated`，畫面上就是較新的 `lastUpdated` 配上同步讀到的較舊分享設定，下一次整份 PUT 會通過比對，把舊設定寫回去；改用同步自己的值，那次 PUT 會先收到衝突，重讀後以伺服器現值重組。載入時伺服器還沒有紀錄的對話框，也是從套用第一次同步結果起才開始帶前提條件。
+
+`decideSaveStrategy` 的 `includePromoted`（預設 `false`：不送、也不計入 PATCH 的數量上限）只有 Extension 可以開：它在載入時就解析舊編號重複項目，本機清單可能在使用者沒有切換任何書的情況下與快照不同，被「提升」的那本書必須一起送出，分享才不會遺失。**PWA 不得開啟**：PWA 以 truthiness 正規化本機的分享旗標，快照卻保留伺服器原始值（這裡以嚴格相等比較），伺服器上存成 `true` 或 `"1"` 的書就會被讀成「有差異」，使用者儲存任何其他書時，它會在沒有本人選擇的情況下被分享出去。
 
 被拒的每一次上傳都計入 `put-books` 每小時 30 次的上限。剩下的窗口見「已接受的殘餘風險」。
 
@@ -944,6 +947,77 @@ interface PublicShelfSnapshot {
 | 自選書籍模式   | 啟用 `selectionMode: "explicit"` + `bookIds[]`                    |
 | 既有資料相容性 | 既有單組記錄無需遷移（已是 array 結構）                           |
 | API 路由形狀   | 無需變更（已採 `:shelfId` 定址）                                  |
+
+---
+
+## 十二、共用套件（shared/）的設計理由
+
+`shared/src/` 的程式碼註解最多兩行，較長的設計理由集中在本節，註解以「`docs/architecture.md → <小節名稱>`」指回這裡。
+
+### 伺服器回傳資料的檢查
+
+**威脅模型**：兩端的 API client 都以 `(await response.json()) as ApiResponse<T>` 直接轉型讀取回應，而 API 位址可由使用者設定——同步碼的 `@host` 會把整個 App 指向自架（BYO）伺服器。因此 `shared/src/api/types.ts` 與 `shared/src/borrow/types.ts` 只有宣告：宣告成 `string` 的欄位只是後端「聲稱」的內容，執行時其實是 `unknown`。Extension 對話框與 PWA 都沒有 ErrorBoundary，下列兩種情況都會造成**永久白屏**，直到使用者重新載入；而且錯誤是在 render／`useMemo` 中拋出，任何呼叫端的 `try/catch` 都接不到：
+
+1. 物件被當成 JSX child 渲染：React 19 拋出 "Objects are not valid as a React child" 並卸載整棵樹（例如兩端 `MemberList.tsx` 渲染物件型別的 `displayName`）。
+2. 對非字串呼叫字串方法：`useSearch` 的 `title.toLowerCase()`、借閱分組 `sortNewestFirst` 的 `createdAt.localeCompare()`、公開分享對話框與 `publicShelf/diff.ts` 的 `title.trim()`、成員名稱查表的 `userId.slice(0, 8)`（Extension `BorrowTab.tsx` 的 `buildOwnerNameLookup`、PWA `BorrowPage.tsx` 的 `buildMemberNameMap`，都在父層 `useMemo` 裡、任何卡片掛載之前執行）。
+
+防護分兩層，都在兩端 API client 的邊界套用；規則放在 `shared/`，兩端就不可能對同一份資料套用不同規則。成員清單與家庭書櫃是**結構層先跑，文字層後跑**（見兩端 client 的 `getFamilyMembers`／`getFamilyBookshelf`）；借閱清單只走結構層，因為它本身就把 12 個欄位全部重建並轉型。
+
+**文字層**（`shared/src/api/safeText.ts` 的基本函式，加上 client 實際呼叫的 `entityText.ts` 逐實體函式）：
+
+- 只轉型別：真正的字串（包括 `""`）一字不改通過，不 trim、不正規化、不改寫內容。非字串降為 `""`，而且刻意不提供 fallback 參數——備用文案屬於本來就帶著它的呼叫端（`displayName || userId.slice(0, 8)`、`{book.author && …}`），`""` 是 falsy，既有的 `||` 與條件渲染會照常補上。
+- `null` 有意義的欄位（`apiEndpoint: null` 表示「這個家庭使用預設端點」）改用 `safeNullableText`，保留 `null`。
+- 容器：缺少的資料（`null`／`undefined`）維持缺少；其他不是物件的值（原始值、陣列）降為空實體；非陣列的清單降為 `[]`，無法承載欄位的元素直接丟棄——能渲染的空狀態勝過一次拋錯。壞掉的容器或元素會在下一次 render 才爆開（`.map` 或讀欄位時），例如 `members: [null]` 經 `setMembers` 存入後在 `members.map` 加 `member.displayName` 爆開，`data: []` 則在 `members.length` 爆開。陣列一律不展開：`{ ...arr }` 會帶上數字鍵，把壞資料偽裝成合法實體。
+- 「能承載欄位的紀錄」只有一個定義：排除陣列的 plain object，與 `shared/src/borrow/validation.ts` 的 `isRecord` 相同。
+- 清單丟棄元素時**不出聲**（不 `console.warn`），與結構層不同：它跑在家庭書櫃聚合等熱路徑上，每次回應一行警告只是雜訊。這是政策選擇，不是疏漏。
+- 選填欄位以條件展開重建（`...(field !== undefined && { field: safeText(field) })`），後端省略的欄位維持省略，而不是變成值為 `undefined` 的屬性：下游「缺少就當作 X」的備援是針對「不存在」寫的，結構層刻意省略的鍵也不能在這裡被加回來。條件是 `!== undefined` 而不是 truthiness，因為 `null` 是存在的值。
+- 刻意不處理的欄位：
+  - `authToken`：憑證，不渲染、也不呼叫字串方法；降為 `""` 只會把壞掉的後端藏在無聲的重新驗證迴圈後面，而不是請求本來就會得到的 401。
+  - `error.message`／`error.code`：由錯誤文字的防護負責。
+  - 封面網址（`coverUrl`、`bookCoverUrl`）：它們會到的兩個地方都不會因非字串而當掉——`<img src>` 屬性由 DOM 轉成字串；而且先經過讀墨網址白名單（兩端的 `safeCoverUrl` → `shared/src/config/readmoo.ts` 的 `isAllowedCoverUrl`），白名單快速路徑的 `typeof` 防護讓非字串得到 `false`，而不是從 render 拋出 `TypeError`。白名單若拿掉這道防護，這個排除就不再安全，這兩個欄位必須改在文字層轉型；`extension/tests/unit/readmooConfig.test.ts` 的 describe「isAllowedCoverUrl / isAllowedBookUrl on non-string input」會先變紅。
+  - 數字、`BoolFlag` 與字串字面值聯集（`status`、`selectionMode`、`method`）：轉成 `string` 會破壞型別，它們的渲染處以 `ReadonlyMap` 查表防護。
+
+**結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：
+
+- **無法定位就丟棄**：元素不是 plain object，或身分欄位（成員 `userId`、書 `bookId`、借閱 `requestId`）不是非空字串，就整筆丟棄——它當不了 React key、名稱查表的鍵或家庭書櫃偏好 ref 的擁有者那一半，也當不了 `updateMemberSettings`／`removeMember` 的 `:uid` 或 `PATCH /api/borrow/:id` 的目標。
+- **其餘欄位正規化**：非字串降為 `""`（消費端都有 `||` 備援，`""` 對 `localeCompare` 與 `.slice` 都安全）。成員的兩個選填欄位不符宣告型別時直接省略：`canLend` 只接受 `BoolFlag` 的兩個值（`true`、`2`、`"1"` 都當作缺少），缺少照舊讀成 TRUE（兩端 `MemberList.tsx` 的 `canLend !== BoolFlag.FALSE`，相容還沒有這個欄位的舊版 Worker）；`readmooName` 缺少時，「尚未記錄」提示照舊顯示。
+- **家庭書櫃的身分欄位為什麼丟棄而不是正規化**：降為 `""` 仍保留元素，兩筆這樣的元素就會在空字串上相撞，造成四種看得到的後果（都不會當掉）：
+  1. React key 重複：兩端的成員篩選選單以 `m.userId` 當 key（`memberFilterOptions.tsx`），書卡以 `` `${memberName}-${bookId}` `` 當 key（Extension `FamilyShelfBookList.tsx`、PWA `FamilyBookList.tsx`）。
+  2. 成員標籤空白：`displayName || userId.slice(0, 8)` 兩半都是 `""`。
+  3. 檢視者私人的家庭書櫃偏好塌縮：`familyPrefRef` 組成 `` `${ownerId}:${bookId}` ``（`shared/src/familyShelf/prefRefs.ts`），隱藏或收藏一張壞卡會作用到所有壞卡，塌縮後的 ref 還會經 `updateFamilyPrefs` 存到伺服器。
+  4. 更新追蹤基準損壞：`baseline[member.userId]`（`shared/src/familyShelf/updateTracking.ts`）把所有壞成員塌縮到同一個 `""` 鍵，並存進 `chrome.storage.local`／`localStorage`。
+- **已知殘餘，刻意不處理**：規則是「可用」而不是「唯一」。兩名成員共用同一個非空 `userId` 會直接重現 1 與 4，若再共用 `bookId` 也會重現 3；同一名成員有兩本 `bookId` 相同的書會重現 1 與 3。只有 2 被完全排除（空白標籤需要 `userId === ""`，存活的成員不可能再有）。成員清單有相同的殘餘；官方 Worker 也不對 `bookId` 去重（`worker/src/routes/user.ts` 的 `parseBooks`），去重會是兩端的政策變更而不是邊界檢查，而且這些碰撞都不會讓畫面當掉。
+- **重建或保留**：成員清單與借閱清單的元素以全新物件字面值重建（成員最多 4 個欄位、借閱剛好 12 個），絕不展開原始元素，惡意的多餘屬性（包括 `JSON.parse` 產生的自有 `__proto__` 鍵）因此進不了畫面狀態。家庭書櫃刻意不同：存活的**成員**以 `{ ...element, books }` 保留——固定的欄位清單可能悄悄丟掉日後新增的欄位（例如對更新追蹤有意義的三態 `lastUpdated`），而重建要防的多餘屬性風險在這裡不存在，因為兩個消費端在進入畫面狀態前都會重建成 3 個欄位的新物件（Extension `useFamilyDataBookshelf.ts` 的 `parsedMembers`、PWA `useFamilyData.tsx` 的 `memberBooks`）。存活的**書**完全不動：`isShared`、`isArchived`、`coverUrl` 不在文字層處理的欄位裡，卻缺一不可——`isShared === BoolFlag.TRUE` 就是家庭書櫃的篩選本身，重建會把它們刪掉。欄位的型別轉換一律留給後跑的文字層。
+- 借閱的 `status` 不驗證：未知狀態由兩端的渲染處處理（Extension `BorrowRequestCard.tsx` 的 `STATUS_META.get(...) ?? UNKNOWN_STATUS`、PWA `BorrowCard.tsx` 中 `getStatusStyle` 的 `default:`），對它做的比較（`Set.has`、`===`）對任意值都安全。
+- 成員清單回應的 `apiEndpoint` 是唯一會進到 React child 的穿透欄位：Extension 的移轉管理權確認畫面原樣印出它（`MemberList.tsx` 的 `.moo-member-list__endpoint`），PWA 則經 `hooks/useFamilyData.tsx` 提供給任何畫面。因此字串原樣保留，其他值一律變成 `null`（`apiEndpoint ?? undefined` 本來就把它讀成「沒有自訂端點」）。
+- 容器壞掉時降為「沒有成員／沒有書／沒有申請」，不拋錯、也不新增錯誤代碼：使用者對它無能為力，空清單本來就能渲染。不是物件的 `data` 沒有可穿透的欄位，降為只有成員清單的資料，缺少的 `members` 再由陣列檢查回報。
+- **檢查在 `{ data, error }` 信封內進行**（呼叫端自己讀信封）。帶 `error` 或沒有 `data` 的信封原樣通過——驗證失敗絕不能被洗成空清單（`.claude/rules/security-ux-invariants.md` 的 Invariant 2）。`error` 以 truthiness 判斷而不是 `!== undefined`：BYO 後端可以送 `error: null`，兩端的 `if (response.error)` 都會把它當成功並讀取 `data`，放行就等於整份資料沒經過檢查。`data` 以 nullish 判斷，理由方向相反：下游根本不讀它。
+- **只輸出彙總警告，絕不逐元素輸出**，惡意資料不能變成洗版。成員清單與借閱清單每次回應最多一行；家庭書櫃最多兩行（成員一行、書一行）。家庭書櫃把書的損失跨成員累計後輸出一行（「丟棄的書」與「書單整個不可用的成員」分開計數，因為不可用的容器藏著不知多少本書）；成員的容器警告與丟棄警告互斥，所以成員那一半最多一行。log 前綴（`[memberValidation]`、`[bookshelfValidation]`、`[borrowValidation]`）指的是檢查而不是檔名，兩端的測試都會比對它，搬檔時要保留。
+
+**錯誤物件**（`shared/src/api/types.ts` 的 `ApiError`）：
+
+- `synthesized` 只在用戶端自己組出信封、而不是從回應解析時為真；Extension 以 `JSON.parse` 產生不出來的 symbol 標記證明這一點（`extension/src/api/client.ts`）。任何原樣渲染 `rawMessage` 的畫面都必須要求它為真，否則自架或惡意後端可以回傳只有用戶端才會用的錯誤代碼，把任意文字畫進對話框。PWA 目前恆為 `false`：它沒有自行合成信封的路徑（Extension 的驗證復原節流是唯一一處），未來的 PWA 合成點直接沿用這道檢查。它刻意是一般的 `boolean` 而不是 `BoolFlag`：這是記憶體中的來源標記，從來不是 API payload 或 KV 欄位，讓它留在可序列化的詞彙之外正是重點。
+- `retryAfter` 在建構時檢查：自架後端可以送任何值，`NaN`、負數或小數會讓退避文案出現「NaN 秒」之類的內容。不是有限非負數的值直接丟棄（UI 改用固定文案），小數則無條件捨去。
+
+### 借閱失敗文案只接受錯誤代碼
+
+`shared/src/borrow/messages.ts` 把 `POST /api/family/:id/borrow` 的失敗轉成文案。Extension 對話框與 PWA 頁面從同一個「申請借閱」按鈕打同一個端點，失敗訊息兩邊必須一致，所以對照表只有這一份。
+
+- **只進代碼、只出本機字串**：只接受機器可讀的 `code`，回傳固定的繁體中文句子；絕不接受、插入或回傳伺服器提供的訊息文字。API 位址可由使用者設定（BYO，以及同步碼的 `@host` 讓寫邀請的人決定位址），信封的 `message` 等於攻擊者可控的文字，原樣渲染會讓惡意後端把任意內容畫進對話框。只有用戶端自己合成的 `ApiError` 可以原樣顯示（見上一節的 `synthesized`）。不要「改良」成多收一個 `message`／`rawMessage` 參數當備援。
+- **對照表收錄的代碼**：使用者能採取行動的失敗——`DUPLICATE_REQUEST`、`TOO_MANY_PENDING_REQUESTS`、`RATE_LIMITED`、`LENDING_DISABLED`、`NOT_FAMILY_MEMBER`、`INVALID_OWNER`、`INVALID_OWNER_SELF`、`FAMILY_NOT_FOUND`、`UNAUTHORIZED`、`INVALID_COVER_URL`——加上 API client 自己的 `NETWORK_ERROR`（fetch 失敗、沒有信封）。只有格式錯誤的用戶端請求才會觸發的代碼（`INVALID_FAMILY_ID`／`INVALID_JSON`／`MISSING_FIELDS`／`INVALID_FIELDS`／`INVALID_USER_ID`）與 `INTERNAL_ERROR` 刻意不收：它們沒有使用者能照做的建議，落到通用句即可。
+- **用 `Map` 而不是物件字面值**：`code` 由後端控制，物件查表會經原型鏈解析到 `"__proto__"`／`"toString"`。
+- **`RATE_LIMITED` 刻意不寫秒數**：信封的 `retryAfter` 由兩端刻意分開的函式格式化（兩者對 `retryAfter === 0` 的處理不同，見 `extension/src/dialog/verificationMessages.ts` 的 `rateLimitedEnvelopeMessage`），在這裡插入秒數會把這個模組要防的兩端分歧帶回來。
+
+### 共用文案的產品語意
+
+- **自訂伺服器提示**（`shared/src/hostNote/messages.ts`）：這行字在使用者交出同步碼、驗證密碼或書單之前，說出自架伺服器的位址。Extension（`extension/src/dialog/SyncCodeHostNote.tsx`）與 PWA（`pwa/src/components/SyncCodeHostNote.tsx`）用兩套樣式系統呈現同一則提示，文案過去兩邊各一份、只靠註解承諾逐字相同，沒有任何東西強制；集中成一份讓分歧不可能發生。這裡比一般文案更要緊：兩個用戶端對同一台伺服器的描述不同，正是偽造位址可以利用的模糊。三個 variant 只差在 valid 分支的引導語，差別完全取決於「畫面上有沒有那組同步碼」：
+  - `join`：同步碼就在畫面上 → 直接指名「此同步碼」。
+  - `verify`：驗證挑戰畫面上沒有同步碼（可能是建立家庭，或加入很久之後的重新驗證）→ 不提同步碼。
+  - `onboarding`：還沒有任何動作發生，只是陳述目前採用的伺服器 → 用現在式。
+
+  警告文案刻意不分 variant：它講的是「帶著壞位址的那組同步碼」，與畫面無關。
+
+- **移除成員**（`shared/src/unkick/messages.ts`）：「解除限制」解除的是後端的 kicked tombstone（6 小時內擋住同步碼重新加入），**不會**把對方加回家庭（`.claude/rules/security-ux-invariants.md` 的 Invariant 4），對方仍須自己輸入同步碼，文案必須維持這個區別。解除成功文案括號內「可能需要約一分鐘生效」不是保守說法：tombstone 刪除後，仍持有舊 key 的 colo 最長約一分鐘才看得到，這段期間對方重新加入可能仍被拒（重試即可）。
 
 ---
 

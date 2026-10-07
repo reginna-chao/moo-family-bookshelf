@@ -44,15 +44,8 @@ export interface SaveStrategyInput<
   savedRawPayload: { books?: unknown } | null;
   /** Backend cap on PATCH `changes` length; over this → PUT. */
   maxPatchChanges: number;
-  /**
-   * Send promoted books (default `false` → none sent, none counted toward the
-   * cap). Only a caller whose local list can legitimately differ from the
-   * snapshot without a toggle may set it: the Extension, which resolves legacy
-   * entries at load. The PWA must not — it normalizes local flags by
-   * truthiness while the snapshot keeps the raw server value (compared
-   * strictly here), so a stored `true` / `"1"` would read as a difference and
-   * a save of any other book would share it without an opt-in.
-   */
+  /** Send promoted books (default `false`: none sent, none counted). Extension only — the PWA must NOT
+   *  set it, or a save could share a book without an opt-in. See docs/architecture.md → 個人開放設定 API. */
   includePromoted?: boolean;
 }
 
@@ -139,11 +132,8 @@ function toFlag(value: unknown): BoolFlag {
   return value === BoolFlag.TRUE ? BoolFlag.TRUE : BoolFlag.FALSE;
 }
 
-/**
- * Server-known bookId → server `isShared`, in server order. Entries without
- * a non-empty string bookId are skipped — the Worker would reject the whole
- * PATCH if one reached `changes`.
- */
+/** Server-known bookId → server `isShared`, in server order. Entries without a non-empty string
+ *  bookId are skipped — the Worker would reject the whole PATCH if one reached `changes`. */
 function readServerFlags(
   savedRawPayload: { books?: unknown } | null,
 ): Map<string, BoolFlag> {

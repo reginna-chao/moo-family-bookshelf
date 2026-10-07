@@ -1,12 +1,7 @@
 import type { FamilyShelfMemberBooks } from "./prefRefs";
 
-/**
- * Pure "what is new on the family shelf" rules, shared so the Extension and
- * the PWA flag the same books. Persistence stays on each surface: the
- * Extension keeps these records in `chrome.storage.local` (keys from
- * `extension/src/constants.ts`), the PWA in `localStorage` (keys and helpers in
- * `pwa/src/hooks/updateTracking.ts`).
- */
+/** Pure "what is new on the family shelf" rules, shared so both apps flag the same books. Persistence stays
+ *  per app: `chrome.storage.local` (`extension/src/constants.ts`), `localStorage` (`pwa/src/hooks/updateTracking.ts`). */
 
 export interface BookshelfSeenRecord {
   [userId: string]: {
@@ -20,10 +15,8 @@ export interface BookshelfChipsRecord {
   expiresAt: string;
 }
 
-/**
- * Raw member metadata used for update tracking — structurally the subset of
- * the wire `FamilyBookshelfMember` this module reads.
- */
+/** Raw member metadata for update tracking — structurally the subset of the
+ *  wire `FamilyBookshelfMember` this module reads. */
 interface RawMemberInfo {
   userId: string;
   lastUpdated: string | null;

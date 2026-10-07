@@ -1,15 +1,5 @@
-/**
- * API endpoint URL validation — the single copy shared by Extension and PWA.
- *
- * This is a security boundary: the value it blesses is what a member's auth
- * token and full book list get sent to. Two clients disagreeing on the rules is
- * exactly the drift `shared/` exists to prevent, so neither app may keep a
- * local variant.
- *
- * Runtime-agnostic by construction — `URL` is the only global used, so this
- * module is equally safe in the Extension, the PWA, and Node scripts run under
- * `tsx` (see shared/eslint.config.js `no-restricted-globals`).
- */
+/** The single API endpoint URL validator for Extension and PWA — a security boundary, so no app keeps
+ *  a local variant. See docs/architecture.md → 同步碼位址的驗證與揭露. */
 
 /** Hostname patterns allowed over plain HTTP (dev / LAN self-hosting). */
 const PRIVATE_HOST_RE =

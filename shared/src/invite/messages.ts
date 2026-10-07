@@ -1,18 +1,5 @@
-/**
- * Build the human-friendly invite messages copied to the clipboard from the
- * family settings screen.
- *
- * Shared by the Extension and PWA so the wording stays identical on both
- * sides. Pure functions, no side effects.
- *
- * Two distinct join flows, two distinct messages:
- *  - sync-code message → recipient joins on desktop via the Chrome Extension
- *    and pastes the sync code manually.
- *  - link message → recipient joins on mobile via the PWA (the sync code is
- *    auto-filled from the link), with a reminder that the PWA cannot read
- *    their Readmoo shelf, so they must sync once from the desktop Extension
- *    to share their own books.
- */
+/** Clipboard invite messages from family settings, shared so both apps word them alike: the sync-code one is
+ *  for a desktop Extension join, the link one for a mobile PWA join (plus a sync-once-on-desktop reminder). */
 
 /** Invite message for the desktop Extension join flow (sync code pasted manually). */
 export function buildSyncCodeInviteMessage(syncCode: string): string {

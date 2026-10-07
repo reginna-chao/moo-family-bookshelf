@@ -1,16 +1,5 @@
-/**
- * The per-borrower finished-borrow history cap, plus the two UI hints that
- * state it to the user.
- *
- * The Worker enforces the cap when it rewrites a family's borrow index, and
- * the Extension / PWA borrow tabs tell the user what the cap is. Those two
- * must be the same number — a hint promising more records than the trim keeps
- * would point at history that is already gone — so the constant lives here and
- * `worker/src/kv/schema.ts` re-exports it, leaving every Worker-side importer
- * on its existing path.
- *
- * Pure constants, runtime-agnostic: no globals, no side effects.
- */
+/** Per-borrower finished-borrow history cap and its two UI hints: the Worker trims with the number the
+ *  UIs state, so it lives here once (`worker/src/kv/schema.ts` re-exports it). Pure constants. */
 
 /**
  * How many TERMINAL borrow records (RETURNED / REJECTED / CANCELLED) a

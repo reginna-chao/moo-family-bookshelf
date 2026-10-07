@@ -1,14 +1,5 @@
-/**
- * Single source of truth for Readmoo web-app hosts, URLs and DOM selectors.
- *
- * Readmoo moved the bookshelf front-end to a new host + path prefix while
- * keeping the legacy one online:
- *   - next   → https://next.readmoo.com/read/#/library   (note the `/read` prefix)
- *   - legacy → https://read.readmoo.com/#/library
- *
- * Both must stay supported. Anything that hard-codes a Readmoo host, hash route
- * or library DOM selector should import from here instead.
- */
+/** Single source of truth for Readmoo hosts, URLs and DOM selectors — the new and legacy sites are both
+ *  supported, so never hard-code one elsewhere. See docs/architecture.md → 2.1 Content Script. */
 
 export const READMOO_HOST_NEXT = "next.readmoo.com";
 export const READMOO_HOST_LEGACY = "read.readmoo.com";
@@ -34,10 +25,8 @@ export const LIBRARY_HASH = "#/library";
 /** Hash route of the profile (個人資料) page. */
 export const ME_HASH = "#/me";
 
-/**
- * Path prefix that sits between the origin and the hash route.
- * The new site serves the app under `/read`; the legacy site serves it at root.
- */
+/** Path prefix between the origin and the hash route: the new site serves the app
+ *  under `/read`, the legacy site at root. */
 const NEXT_APP_PATH = "/read/";
 /** Same prefix without the trailing slash, for `pathname` matching. */
 const NEXT_APP_PATH_PREFIX = "/read";
@@ -71,26 +60,12 @@ export function isReadmooCoverHost(hostname: string): boolean {
   );
 }
 
-/**
- * Probe base for the base-sensitivity check in {@link isAllowedReadmooUrl}.
- *
- * Two properties are load-bearing:
- *   - The scheme MUST be `https:`. WHATWG only enters "relative" state when the
- *     base scheme equals the input's scheme, so a base on any other scheme
- *     would make the check inert rather than strict.
- *   - `base.invalid` is reserved by RFC 2606, can never resolve and can never
- *     be a Readmoo domain, which is what rules out a false "stable" verdict
- *     (see the core's JSDoc).
- * The nested path merely keeps relative resolution off the root.
- */
+/** Probe base for {@link isAllowedReadmooUrl}'s base-sensitivity check; must stay `https:` on the reserved
+ *  `base.invalid` host — see .claude/rules/backend.md → KV Key Patterns (Readmoo URL whitelist). */
 const BASE_SENSITIVITY_PROBE = "https://base.invalid/a/b";
 
-/**
- * The canonical absolute-https spelling. Used ONLY by the fast path in
- * {@link isAllowedReadmooUrl} to early-accept a subset that is provably
- * base-independent — never as a criterion, and never to reject anything.
- * Read that function's "Fast path" section before touching this.
- */
+/** Canonical absolute-https spelling, used ONLY to early-accept in {@link isAllowedReadmooUrl} — never
+ *  a criterion, never a rejection. Read that JSDoc's "Fast path" section before touching it. */
 const ABSOLUTE_HTTPS_PREFIX = "https://";
 
 /**
@@ -254,19 +229,8 @@ function isAllowedReadmooUrl(url: string): boolean {
   ) {
     return false;
   }
-  // Early-accept only, never a rejection and never the criterion: a literal
-  // `https://` prefix is a subset that is provably base-independent, so the
-  // second parse below can be skipped. Everything else falls through to it and
-  // is judged by base-invariance exactly as before.
-  //
-  // The `typeof` guard is load-bearing, NOT redundant with the `string`
-  // parameter type: this is the only member call on `url` (both `new URL`
-  // stringify instead), so at runtime it is the one place a non-string from a
-  // BYO backend could throw. Keeping it makes the fast path purely an
-  // accelerator. See "Fast path" above before removing either half. What turns
-  // red the moment either half goes is the `describe` block
-  // "isAllowedCoverUrl / isAllowedBookUrl on non-string input" in
-  // `extension/tests/unit/readmooConfig.test.ts` — not this comment.
+  // Early-accept only (never a rejection or the criterion); the `typeof` half is load-bearing. See
+  // "Fast path" above; pinned by readmooConfig.test.ts "… on non-string input".
   if (typeof url === "string" && url.startsWith(ABSOLUTE_HTTPS_PREFIX)) {
     return true;
   }

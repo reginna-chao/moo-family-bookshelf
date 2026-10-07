@@ -1,26 +1,5 @@
-/**
- * Runtime boundary validation for `GET /api/family/:id/borrow` payloads, applied
- * at the API-client boundary of BOTH apps (`extension/src/api/client.ts`,
- * `pwa/src/api/client.ts`) — it lives here so the two ends cannot enforce
- * different rules on the same payload.
- *
- * Self-hosted (BYO) backends are inside this project's threat model, so the
- * borrow list arrives unvalidated: a non-string `createdAt` crashes
- * `sortNewestFirst`'s `localeCompare` inside a parent-level `useMemo` (before
- * any card mounts), a non-string `borrowerId` / `ownerId` crashes `.slice`, and
- * React throws outright when an object is rendered as a child.
- *
- * Two failure modes, deliberately handled differently:
- * - DROP the element when it cannot be addressed at all (not an object, or no
- *   usable `requestId` — it could serve neither as a React key nor as the
- *   target of `PATCH /api/borrow/:id`).
- * - NORMALIZE every other field to `""` when it is not a string, because each
- *   downstream consumer already has a `||` fallback and `""` is safe for both
- *   `localeCompare` and `.slice`.
- *
- * The `[borrowValidation]` log prefix names the CHECK, not the file, and both
- * apps' tests assert on it — it deliberately survived the move into `shared/`.
- */
+/** Structure layer for `GET /api/family/:id/borrow` (drop unaddressable, normalize the rest); the
+ *  `[borrowValidation]` prefix is test-asserted. Why: docs/architecture.md → 伺服器回傳資料的檢查. */
 
 import type { BorrowRequest, BorrowStatus } from "./types";
 
@@ -34,13 +13,8 @@ function toStringField(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/**
- * Rebuild one element as a trusted `BorrowRequest`, or `null` to drop it.
- *
- * The result is a fresh object literal holding exactly the 12 interface fields —
- * never a spread of the raw element, so hostile extra properties cannot survive
- * into React state.
- */
+/** Rebuild one element as a trusted `BorrowRequest` (a fresh literal of exactly the 12 fields, never
+ *  a spread, so hostile extras cannot reach React state), or `null` to drop it. */
 function sanitizeBorrowRequest(element: unknown): BorrowRequest | null {
   if (!isRecord(element)) return null;
 
@@ -57,12 +31,8 @@ function sanitizeBorrowRequest(element: unknown): BorrowRequest | null {
     bookTitle: toStringField(element.bookTitle),
     bookAuthor: toStringField(element.bookAuthor),
     bookCoverUrl: toStringField(element.bookCoverUrl),
-    // `status` passes through unvalidated ON PURPOSE. Unknown-status handling is
-    // owned by the render side of each app (`STATUS_META.get(...) ??
-    // UNKNOWN_STATUS` in `extension/src/dialog/BorrowRequestCard.tsx`, the
-    // `default:` branch of `getStatusStyle` in `pwa/src/components/BorrowCard.tsx`),
-    // and every comparison performed on it here and downstream (`Set.has`,
-    // `===`) is safe for an arbitrary value.
+    // Unvalidated ON PURPOSE: each app's render side handles an unknown status, and every
+    // comparison on it (`Set.has`, `===`) is safe for any value. See docs/architecture.md → 伺服器回傳資料的檢查.
     status: element.status as BorrowStatus,
     createdAt: toStringField(element.createdAt),
     updatedAt: toStringField(element.updatedAt),

@@ -1,11 +1,5 @@
-/**
- * Display-side classification of a sync code's `@host` segment, shared by
- * Extension and PWA so both disclose the same thing about the same code.
- *
- * Separate from `endpointUrl.ts` on purpose: that module decides whether an
- * endpoint may be ADOPTED (and throws when it may not), this one turns the same
- * verdict into something renderable without a try/catch at every call site.
- */
+/** Display-side `@host` classification shared by both apps; `endpointUrl.ts` decides ADOPTION (and throws),
+ *  this renders that verdict without a try/catch. See docs/architecture.md → 同步碼位址的驗證與揭露. */
 
 import { validateEndpointUrl } from "./endpointUrl";
 
