@@ -1,26 +1,5 @@
-/**
- * "This user's own leave / delete-account request is in flight" mark (#263).
- *
- * The server can revoke the user's token before it answers their own "leave
- * family" or "delete account" request, so another request of theirs may 401
- * meanwhile — and the silent recovery join (`attemptJoinRecovery` in
- * `api/auth-refresh.ts`) would then re-add them to the family they are
- * leaving, because the local family id is only cleared after the response.
- * `dialog/useFamilySettingsLeave.ts` / `useFamilySettingsDelete.ts` send through
- * `runGuardedDeparture`, which holds the mark until the request settles;
- * `doRefreshToken` skips the join while it is active. Mirrors
- * `pwa/src/utils/selfDeparture.ts`.
- *
- * Read and written directly in `browser.storage.local` — never through a
- * background message, which Firefox's sleeping event page can drop — so every
- * context of the extension (each tab's dialog included) sees it. The value is
- * an expiry (epoch ms), not a flag: a context that dies mid-request blocks
- * recovery for at most `SELF_DEPARTURE_TTL_MS`.
- *
- * Failures are swallowed in the direction that keeps the user unblocked: a
- * refused write costs the guard, never the leave itself, and an unreadable
- * store reads as "not departing" so recovery keeps working.
- */
+/** "Own leave / delete-account request in flight" mark (#263): blocks the silent recovery join
+ *  meanwhile. See docs/architecture.md → 背景自動復原的防護. */
 
 import browser from "webextension-polyfill";
 import type { ApiResponse } from "../api/types";

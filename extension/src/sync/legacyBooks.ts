@@ -1,9 +1,8 @@
 import { BookEntry, BoolFlag } from "../api/client";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 
-// The real-book-id rule lives in `shared/` so the scraper, this cleanup and the
-// Worker's PUT books boundary cannot drift apart. Re-exported so existing
-// `../sync/legacyBooks` importers keep working.
+// The real-book-id rule lives in `shared/` so the scraper, this cleanup and the Worker's PUT books
+// boundary cannot drift; re-exported so existing `../sync/legacyBooks` importers keep working.
 export {
   REAL_BOOK_ID_PATTERN,
   isRealBookId,
@@ -24,10 +23,8 @@ function titleKey(entry: BookEntry): string {
   return typeof entry.title === "string" ? entry.title.trim() : "";
 }
 
-/**
- * Title → the single real entry carrying it. A title shared by two or more
- * real entries maps to `null` (ambiguous); empty titles are not indexed.
- */
+/** Title → the single real entry carrying it; a title shared by 2+ real entries maps to `null`
+ *  (ambiguous), and empty titles are not indexed. */
 function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
   const index = new Map<string, BookEntry | null>();
   for (const entry of books) {

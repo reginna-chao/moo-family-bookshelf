@@ -1,14 +1,5 @@
-/**
- * Readmoo library search automation (Scope B lending support).
- *
- * Readmoo's library grid is infinite-scroll, so a book the owner wants to lend
- * may not be in the currently-rendered DOM at all. This module drives Readmoo's
- * built-in search modal to filter the library down to a target book by title,
- * then re-stamps fiber ids so the card can be matched exactly by `bookId`.
- *
- * Each function is stateless to keep them independently testable; timeouts are
- * injectable and failures throw `ReadmooLendError`.
- */
+/** Readmoo library search automation (lending support): filter the infinite-scroll grid to a title via
+ *  Readmoo's search modal, then re-stamp fiber ids. See docs/architecture.md → 讀墨借出自動化. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { requestFiberData } from "./fiber-data";
@@ -85,11 +76,8 @@ export async function openSearchModal(
   return { modal, input, submitButton };
 }
 
-/**
- * Set a React-controlled input's value using the native value setter, then
- * dispatch an `input` event so React's onChange fires. Directly assigning
- * `input.value` would be ignored by React's controlled-input tracking.
- */
+/** Set a React-controlled input via the native value setter, then dispatch `input` so onChange fires;
+ *  a plain `input.value =` is ignored by React's controlled-input tracking. */
 function setControlledInputValue(input: HTMLInputElement, value: string): void {
   const descriptor = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -99,11 +87,8 @@ function setControlledInputValue(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/**
- * Wait for the search modal to leave the DOM (Readmoo auto-closes it on submit).
- * Best-effort: resolves on timeout too, since the grid re-render — not the modal
- * removal — is what the caller actually depends on.
- */
+/** Wait for the search modal to leave the DOM (Readmoo closes it on submit); resolves on timeout too —
+ *  the caller depends on the grid re-render, not the modal removal. */
 function waitForModalGone(
   modal: HTMLElement,
   timeoutMs: number,

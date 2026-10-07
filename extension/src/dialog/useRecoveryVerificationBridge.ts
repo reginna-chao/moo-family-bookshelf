@@ -7,10 +7,8 @@ import {
 } from "./useVerificationPrompt";
 import type { OnboardingFlowStore } from "./useOnboardingFlowState";
 
-/** Shown when a verified join is refused because the family is gone for this
- *  user (deleted / full / removed by the owner) and the backend sent no message
- *  of its own. The server normally explains the exact reason — this is the
- *  fallback for an older or self-hosted backend that does not. */
+/** Fallback when a verified join is refused for good (deleted / full / removed by the owner) and an
+ *  older or self-hosted backend sent no message; the server normally explains the reason. */
 const FAMILY_GONE_FALLBACK_MESSAGE = "無法加入此家庭，請聯繫家庭管理者確認。";
 
 export interface RecoveryVerificationBridgeOptions {
@@ -26,14 +24,8 @@ export function useRecoveryVerificationBridge({
   setState,
   showRetryableError,
 }: RecoveryVerificationBridgeOptions) {
-  /**
-   * Shared bridge for every flow that can hit the verification gate (start,
-   * create, sync-code join, auto-recovery, solo recovery): if a failed
-   * lookup/join/create carried a verification code, open the verification prompt
-   * (state → "verify-prompt") and wire up a retry that re-runs the same flow
-   * with the collected secret. Returns true when the prompt took over so the
-   * caller can stop; false to fall back to its own error handling.
-   */
+  /** For every gated flow (start, create, sync-code join, auto/solo recovery): a verification code opens
+   *  the prompt with a retry re-running the flow. True = prompt took over; false = caller handles it. */
   const promptRecoveryVerification = useCallback(
     async (params: {
       errorCode: string | undefined;
@@ -47,13 +39,8 @@ export function useRecoveryVerificationBridge({
         retryAfter?: number;
       }>;
       onCancel: () => void;
-      /**
-       * End the attempt when the verified join is refused for good (family
-       * deleted / full / removed by the owner). Defaults to the retryable error
-       * view carrying `message`; a caller holding attempt-scoped state — the
-       * `@host` handleJoin adopts from the sync code — passes its own so that
-       * state is released before the user is on an actionable screen again.
-       */
+      /** Ends the attempt when the verified join is refused for good; defaults to the retryable error
+       *  view. handleJoin passes its own to release the adopted `@host` before any actionable screen. */
       onFamilyGone?: (message: string) => void;
     }): Promise<boolean> => {
       if (!isVerificationError(params.errorCode)) return false;
@@ -73,21 +60,14 @@ export function useRecoveryVerificationBridge({
             };
           },
           onCancel: params.onCancel,
-          // Nothing local to clear — onboarding persists a family only once a
-          // join succeeds — so this branch only has to end the attempt and say
-          // why. Only the manual-join path (`PerformJoinFailure`) carries the
-          // server's own message today; the recovery bridges' `RecoveryResult`
-          // has no `errorMessage` field, so those paths always show the client
-          // fallback below.
+          // Nothing local to clear (a family persists only on a join). Only the manual join
+          // (`PerformJoinFailure`) carries a server message; `RecoveryResult` paths get the fallback.
           onFamilyGone: (_errorCode, errorMessage) => {
             const message = errorMessage ?? FAMILY_GONE_FALLBACK_MESSAGE;
             (params.onFamilyGone ?? showRetryableError)(message);
           },
-          // `run` may move the flow into a progress state ("recovering",
-          // "syncing-books", …), which would hide the still-open prompt behind
-          // the full-screen loading overlay. The controller calls this back on
-          // every failed attempt — including an unexpected throw — but only
-          // while the prompt session is still live.
+          // `run` may enter a progress state ("recovering", …) hiding the open prompt behind the overlay;
+          // the controller calls this on every failed attempt (throws too) while the session is live.
           onAttemptFailed: () => setState("verify-prompt"),
         },
         params.retryAfter,

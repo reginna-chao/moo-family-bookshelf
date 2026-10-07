@@ -22,13 +22,8 @@ interface StatusMeta {
   modifier: string;
 }
 
-/**
- * Per-status label + badge modifier class (colors live in styles.css).
- * A Map, not an object literal: `request.status` arrives unvalidated from a
- * user-configurable backend, and a Map lookup never walks the prototype chain,
- * so a hostile `"__proto__"` / `"toString"` resolves to nothing instead of an
- * Object.prototype member.
- */
+/** Per-status label + badge modifier (colors in styles.css). A Map, not an object literal: the
+ *  unvalidated `status` must not resolve `"__proto__"` / `"toString"` via the prototype chain. */
 const STATUS_META: ReadonlyMap<BorrowStatus, StatusMeta> = new Map([
   [
     BorrowStatus.PENDING,

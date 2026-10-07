@@ -1,9 +1,5 @@
-/**
- * Archive scraping logic for Readmoo library page.
- *
- * Manipulates Readmoo's filter dialog to switch to the archived books
- * view, scrapes the results, then restores the normal library view.
- */
+/** Archive scraping on the Readmoo library page: switch Readmoo's filter dialog to the archived view,
+ *  scrape it, then restore the normal library view. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
@@ -15,9 +11,7 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Poll for an element matching the selector, returning null on timeout.
- */
+/** Poll for an element matching the selector, returning null on timeout. */
 function waitForElement(
   selector: string,
   timeoutMs: number,
@@ -37,9 +31,7 @@ function waitForElement(
   });
 }
 
-/**
- * Find and click an element by selector. Returns true if successful.
- */
+/** Find and click an element by selector. Returns true if successful. */
 function clickElement(selector: string): boolean {
   const el = document.querySelector<HTMLElement>(selector);
   if (el) {
@@ -49,9 +41,7 @@ function clickElement(selector: string): boolean {
   return false;
 }
 
-/**
- * Find the filter button in the Readmoo nav bar.
- */
+/** Find the filter button in the Readmoo nav bar. */
 function findFilterButton(): HTMLElement | null {
   const btns = document.querySelectorAll<HTMLElement>(
     READMOO_SELECTORS.topNavBtn,
@@ -62,12 +52,8 @@ function findFilterButton(): HTMLElement | null {
   return null;
 }
 
-/**
- * Wait for the library to finish reloading after a filter change.
- * Readmoo clears `.library-item` elements, then re-renders new ones.
- * We wait for items to disappear (or count to change), then wait for
- * new items to appear and stabilize.
- */
+/** Wait for the library to reload after a filter change: Readmoo clears `.library-item`s, then re-renders,
+ *  so wait for the items to go (or the count to change), then for new ones to appear and stabilize. */
 async function waitForLibraryReload(timeoutMs: number): Promise<void> {
   const start = Date.now();
 

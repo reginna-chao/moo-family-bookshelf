@@ -16,9 +16,8 @@ const RECOVERY_STATES = new Set<OnboardingState>([
   "solo-recovery-confirm",
 ]);
 
-// The store's setters and refs appear in the dependency arrays below only
-// because they arrive as arguments; they are identity-stable, so every
-// callback is memoised exactly as when it lived in useOnboardingFlow.
+// Store setters/refs sit in the deps only because they arrive as arguments; being identity-stable,
+// every callback memoises exactly as it did inside useOnboardingFlow.
 export function useOnboardingNavigation(
   store: OnboardingFlowStore,
   autoSetup: UseOnboardingFlowOptions["autoSetup"],

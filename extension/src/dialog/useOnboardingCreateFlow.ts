@@ -10,10 +10,8 @@ import type { OnboardingFlowStore } from "./useOnboardingFlowState";
 import type { useOnboardingNavigation } from "./useOnboardingNavigation";
 import type { PromptRecoveryVerification } from "./useRecoveryVerificationBridge";
 
-/** Shown when the user backs out of the verification prompt during create. The
- *  gate blocked either the lookup (family membership unknown) or the create
- *  itself, so the normal onboarding screen would invite the user to fork a
- *  second family instead of finishing the one attempt they started. */
+/** Shown on backing out of create's verification prompt: the gate blocked the lookup or the create,
+ *  and the normal screen would invite a second family instead of finishing this attempt. */
 const VERIFY_CANCELLED_MESSAGE = "需要完成驗證才能建立家庭書櫃，請重試。";
 
 type Navigation = ReturnType<typeof useOnboardingNavigation>;
@@ -27,9 +25,8 @@ export interface OnboardingCreateFlowOptions extends OnboardingAttempts {
   promptRecoveryVerification: PromptRecoveryVerification;
 }
 
-// The store's setters and refs appear in the dependency arrays below only
-// because they arrive as arguments; they are identity-stable, so every
-// callback is memoised exactly as when it lived in useOnboardingFlow.
+// Store setters/refs sit in the deps only because they arrive as arguments; being identity-stable,
+// every callback memoises exactly as it did inside useOnboardingFlow.
 export function useOnboardingCreateFlow(opts: OnboardingCreateFlowOptions) {
   const { store, apiClient, attemptCreate, attemptRecovery } = opts;
   const { backToRecoveryChoice, showError, showRetryableError } = opts;
@@ -37,9 +34,8 @@ export function useOnboardingCreateFlow(opts: OnboardingCreateFlowOptions) {
   const { setState, setErrorMessage, setErrorActions } = store;
   const { userEmailRef, userDisplayNameRef, handleCreateRef } = store;
 
-  /** Resume handleCreate once the user cleared the lookup challenge: re-run the
-   *  lookup with the secret, then recover into the family it reveals — or
-   *  create a new one, carrying the same secret. */
+  /** Resume handleCreate after the lookup challenge: re-run the lookup with the secret, then recover
+   *  into the family it reveals or create one, carrying the same secret. */
   const resumeCreateAfterVerification = useCallback(
     async (userId: string, verifySecret: string): Promise<RecoveryResult> => {
       const lookup = await lookupFamily({ apiClient, userId, verifySecret });
@@ -70,10 +66,8 @@ export function useOnboardingCreateFlow(opts: OnboardingCreateFlowOptions) {
     [apiClient, attemptCreate, attemptRecovery, userDisplayNameRef],
   );
 
-  /** Cancel handler for the verification gate in handleCreate. The generic 重試
-   *  action leads back to the "create or join a family" screen, which invites a
-   *  second family; re-run the create flow instead so the user lands back on the
-   *  challenge that 「請重試」 promises here. */
+  /** Cancel for handleCreate's gate: the generic 重試 would lead to "create or join" (inviting a second
+   *  family), so re-run the create flow, landing on the challenge 「請重試」 promises. */
   const cancelCreateVerification = useCallback(() => {
     showError(VERIFY_CANCELLED_MESSAGE, [
       {

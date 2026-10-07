@@ -1,10 +1,5 @@
-/**
- * useVerificationPrompt — controller for the PWA-login verification challenge
- * that the backend (SEC-1) now demands from EXISTING members who reconnect via
- * `POST /api/family/:id/join`. It is flow-agnostic: any onboarding/recovery
- * join flow can hand it a verification error code plus a `retry` closure, and
- * the controller drives the prompt UI + re-submission.
- */
+// Flow-agnostic controller for the PWA-login verification challenge (SEC-1) on members' joins: a flow
+// hands it a verification code plus a `retry` closure, and it drives the prompt and re-submission.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isFamilyGoneError } from "../api/auth-refresh";
@@ -30,17 +25,11 @@ export function isVerificationError(code: string | undefined): boolean {
 export interface VerificationAttemptResult {
   ok: boolean;
   errorCode?: string;
-  /**
-   * Seconds the caller must wait before retrying, from the 429 body
-   * (`error.retryAfter`). Optional: RATE_LIMITED always carries it, while
-   * VERIFICATION_LOCKED only does on newer backends.
-   */
+  /** Seconds to wait before retrying (429 `error.retryAfter`): RATE_LIMITED always carries it,
+   *  VERIFICATION_LOCKED only on newer backends. */
   retryAfter?: number;
-  /**
-   * The backend's user-facing message for this failure, when it sent one.
-   * Handed to `onFamilyGone` so a terminal refusal can be explained in the
-   * server's own words instead of a second, client-side copy of them.
-   */
+  /** The backend's user-facing message, if sent; handed to `onFamilyGone` so a terminal refusal is
+   *  explained in the server's own words. */
   errorMessage?: string;
 }
 
@@ -50,22 +39,11 @@ export interface VerificationContext {
   retry: (verifySecret: string) => Promise<VerificationAttemptResult>;
   /** Restore the caller's view when the user abandons the prompt. */
   onCancel: () => void;
-  /**
-   * Restore the caller's view when an attempt did not succeed. `retry` often
-   * moves the caller into a progress view ("recovering", "syncing-books", …)
-   * that would hide the still-open prompt; this hook calls back once the
-   * failure is confirmed AND the session is still live, so the restore can
-   * never resurrect a prompt whose context has already been torn down.
-   */
+  /** Restore the caller's view after a failed attempt (`retry` may enter a progress view hiding the
+   *  prompt); called only once failure is confirmed AND the session is still live. */
   onAttemptFailed?: () => void;
-  /**
-   * The join target is gone for this user (family deleted / full / member
-   * removed by the owner). Retrying with a correct secret can never succeed, so
-   * the prompt tears itself down instead of showing a retryable error; the
-   * caller owns the side effects (clearing local family data, navigating, or
-   * just surfacing the reason). Omit it and the flow keeps the generic failure
-   * handling — the controller stays flow-agnostic either way.
-   */
+  /** The join target is gone for this user (deleted / full / removed): no secret can succeed, so the
+   *  prompt tears down and the caller owns the side effects. Omitted → generic failure handling. */
   onFamilyGone?: (
     errorCode: string,
     errorMessage?: string,
@@ -75,9 +53,8 @@ export interface VerificationContext {
 export interface UseVerificationPromptResult {
   active: boolean;
   method: VerifyMethod | null;
-  /** True when the method could not be loaded for an active challenge (backend
-   *  inconsistency). Distinct from a genuine OTP ("code") account so the UI can
-   *  show a load-error message instead of the OTP guidance. */
+  /** True when an active challenge's method failed to load (backend inconsistency) — distinct from a
+   *  genuine OTP ("code") account, so the UI shows a load error, not the OTP guidance. */
   methodError: boolean;
   error: string;
   locked: boolean;
@@ -85,9 +62,8 @@ export interface UseVerificationPromptResult {
   /** Remaining seconds of a rate-limit / lockout wait, or null when the backend
    *  sent no `retryAfter` and no wait is being tracked. */
   countdownSeconds: number | null;
-  /** Set up the prompt for a verification error code. Returns false (no-op) for
-   *  non-verification codes so the caller falls back to its normal handling.
-   *  `retryAfter` (seconds) starts the lockout countdown when available. */
+  /** Set up the prompt for a verification code (false, a no-op, for any other so the caller handles
+   *  it); `retryAfter` (seconds) starts the lockout countdown when available. */
   begin: (
     errorCode: string | undefined,
     ctx: VerificationContext,
@@ -106,9 +82,8 @@ export function useVerificationPrompt(
   const [error, setError] = useState("");
   const [locked, setLocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  // Mirrors `submitting` so submit() can reject a re-entrant call synchronously,
-  // before the first attempt's await resolves — the state value would be stale
-  // in the useCallback closure and let a second join fire.
+  // Mirrors `submitting` so submit() rejects re-entry synchronously; the state value is stale in the
+  // useCallback closure and would let a second join fire.
   const submittingRef = useRef(false);
   const ctxRef = useRef<VerificationContext | null>(null);
   // Mirrors `method` so applyCode can skip a redundant fetch without depending
@@ -125,9 +100,8 @@ export function useVerificationPrompt(
     };
   }, []);
 
-  // A finished wait means the server window has cleared: drop the lock and the
-  // stale message so the user can type again without reopening the prompt. If
-  // the server still refuses, the next attempt brings a fresh retryAfter.
+  // A finished wait means the server window cleared: unlock and drop the stale message (a renewed
+  // refusal brings a fresh retryAfter).
   const handleWaitElapsed = useCallback(() => {
     setLocked(false);
     setError("");
@@ -137,11 +111,8 @@ export function useVerificationPrompt(
   const startCountdown = countdown.start;
   const clearCountdown = countdown.clear;
 
-  // Arms the wait countdown from a 429 response, or clears any running one when
-  // the response carried no usable `retryAfter`. Without the clear, a deadline
-  // armed by an earlier 429 would survive into the new state: it would render
-  // the wrong remaining wait and, on elapse, unlock a prompt that should have
-  // stayed locked.
+  // Arm the countdown from a 429, or clear a running one without a usable `retryAfter`: a stale deadline
+  // would show the wrong wait and, on elapse, unlock a prompt that should stay locked.
   const syncCountdown = useCallback(
     (retryAfter: number | undefined): void => {
       if (!startCountdown(retryAfter)) clearCountdown();
@@ -159,10 +130,8 @@ export function useVerificationPrompt(
     setSubmitting(next);
   }, []);
 
-  // Loads the verification method for an active challenge. A REQUIRED/FAILED/
-  // LOCKED response means the user really has a pin/pattern/code method, so
-  // missing data or "none" is a backend inconsistency → methodError, NOT the
-  // OTP guidance path.
+  // A REQUIRED/FAILED/LOCKED code means a real pin/pattern/code method, so missing data or "none" is a
+  // backend inconsistency → methodError, NOT the OTP guidance path.
   const fetchMethod = useCallback(
     async (userId: string, generation: number): Promise<void> => {
       const res = await apiClient.getVerifyMethod(userId);
@@ -247,18 +216,13 @@ export function useVerificationPrompt(
   const submit = useCallback(
     async (secret: string): Promise<void> => {
       const ctx = ctxRef.current;
-      // submittingRef guards re-entry: a fast second onComplete (pattern/PIN
-      // resubmitted while the first join is in flight) must not fire a second
-      // network join. The ref is set synchronously below, so the racing call
-      // sees it before the first attempt's await resolves.
+      // A fast second onComplete while the first join is in flight must not fire another join; the
+      // ref is set synchronously below, before the first attempt's await resolves.
       if (!ctx || locked || submittingRef.current) return;
       const generation = generationRef.current;
       updateSubmitting(true);
-      // The retry closure runs a whole onboarding flow (lookup + join +
-      // browser.storage writes + book sync), any step of which can reject.
-      // An escaping rejection would skip updateSubmitting(false) and strand
-      // the prompt on 「驗證中…」, so contain it here rather than relying on
-      // every caller's closure being defensive.
+      // `retry` runs a whole flow (lookup, join, storage writes, book sync) that can reject; contain it
+      // here, or updateSubmitting(false) is skipped and the prompt stuck on 「驗證中…」.
       let result: VerificationAttemptResult;
       try {
         result = await ctx.retry(secret);
@@ -275,25 +239,20 @@ export function useVerificationPrompt(
       if (!isMountedRef.current || generationRef.current !== generation) return;
       updateSubmitting(false);
       if (result.ok) {
-        // The retry closure owns the success side-effects (navigation, sync).
-        // No onAttemptFailed here: the flow has navigated away, and forcing the
-        // prompt back would render it over an already-completed journey.
+        // `retry` owns the success side effects; no onAttemptFailed, which would put the prompt back
+        // over a completed journey.
         reset();
         return;
       }
-      // Terminal for this user — no secret can make this join succeed, so the
-      // prompt must close instead of inviting a retry that will fail forever.
-      // Ordered BEFORE onAttemptFailed on purpose: the restore-view callback
-      // would put the caller back on a flow it is about to unwind.
+      // Terminal for this user: close instead of inviting a retry that always fails. BEFORE
+      // onAttemptFailed on purpose — it would restore a flow that is about to unwind.
       if (isFamilyGoneError(result.errorCode) && ctx.onFamilyGone) {
         reset();
         try {
           await ctx.onFamilyGone(result.errorCode, result.errorMessage);
         } catch (err) {
-          // Same containment stance as the `retry` closure above: the callback
-          // runs caller-owned teardown (storage clears, navigation) that can
-          // reject, and letting it escape would reject submit() itself. Nothing
-          // is left to unwind here — the prompt is already reset — so log only.
+          // Contained like `retry`: caller teardown can reject, which must not reject submit(); the
+          // prompt is already reset, so log only.
           console.warn("[Verification] onFamilyGone handler failed", err);
         }
         return;
@@ -311,9 +270,8 @@ export function useVerificationPrompt(
         return;
       }
       if (result.errorCode === "RATE_LIMITED") {
-        // Server rate limit hit (429) — per-IP sensitive tier, or the verify
-        // attempt ceiling on a wrong secret. Keep the prompt open so the user
-        // can retry once the window clears, with a specific message.
+        // 429 (per-IP sensitive tier, or the verify ceiling on a wrong secret): keep the prompt open
+        // with a specific message so the user retries once the window clears.
         setError(rateLimitedMessage(null));
         syncCountdown(result.retryAfter);
         return;

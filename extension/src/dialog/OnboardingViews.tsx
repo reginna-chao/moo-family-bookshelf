@@ -119,9 +119,7 @@ export function ErrorView({ errorMessage, actions }: ErrorViewProps) {
   );
 }
 
-// IdleView is the only stateful onboarding view (it calls
-// useSyncCodeHostVerdict), so it lives in its own module. This re-export is
-// permanent: it is the public surface that Onboarding.tsx and
-// OnboardingViews.test.tsx import from.
+// IdleView (the only stateful view: useSyncCodeHostVerdict) lives in its own module; this re-export
+// is permanent — Onboarding.tsx and OnboardingViews.test.tsx import it from here.
 export { IdleView } from "./IdleView";
 export type { IdleViewProps } from "./IdleView";

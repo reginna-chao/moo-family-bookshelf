@@ -1,25 +1,5 @@
-/**
- * Bootstrap stylesheet for the content-script-injected dialog shell.
- *
- * This is a TINY, self-contained stylesheet — NOT the full scoped `styles.css`.
- * It is injected into the dialog's shadow root the instant the shadow root is
- * created (see `toggleDialog` in `index.ts`), BEFORE the backdrop/dialog are
- * appended, so the shell renders styled immediately. The full scoped stylesheet
- * is injected LATER by `mountDialog` (via a dynamic import of styles.css); if
- * these structural rules lived only there, the shell would flash unstyled.
- *
- * Scope discipline: only the STATIC structural properties of the four shell
- * elements live here. Every property that `applyDialogLayout` /
- * `applyBackdropLayout` set per-breakpoint (position/size/border-radius/height)
- * and the close-icon `display` toggle stay JS-driven as inline styles so a
- * static rule never fights the dynamic inline value. Inline styles win the
- * cascade, but leaving a stale static value here would be confusing, so those
- * dynamic properties are intentionally OMITTED from these rules.
- *
- * NOTE: this module must stay import-free (no `styles.css`, no shared modules)
- * so it can be bundled into the content-script IIFE without pulling the dialog
- * bundle or the full stylesheet into the content bundle.
- */
+/** Tiny bootstrap stylesheet for the dialog shell, injected before the shell is appended (styles.css
+ *  comes later): static rules only, import-free. See docs/architecture.md → 浮動按鈕與 Dialog 外殼. */
 
 /** Marker attribute so the shell stylesheet is never injected twice into a root. */
 export const SHELL_STYLE_MARKER = "data-moo-shell-styles";

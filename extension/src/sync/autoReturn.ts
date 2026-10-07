@@ -1,16 +1,5 @@
-/**
- * Auto-detect returned books during a bookshelf sync.
- *
- * When a Readmoo book is lent out it disappears entirely from the owner's
- * library page; returning/recalling it makes it reappear. `mergeBooks` keeps
- * saved-only books, so a lent book is never removed from the share list — which
- * means a reappearance in a fresh scrape is a reliable "book is back" signal.
- * So if a book the current user owns and has an active LENT request for shows up
- * again in a scrape, mark that request RETURNED.
- *
- * SPA residue guard: a freshly-lent book can linger in the un-refreshed page DOM,
- * so LENT requests updated less than `minLentAgeMs` ago are skipped.
- */
+/** Auto-detect returned books during a sync: an owned LENT book reappearing in the scrape is marked
+ *  RETURNED (LENT < `minLentAgeMs` old is skipped). See docs/architecture.md → 書單同步. */
 
 import { ApiClient, BorrowRequest, BorrowStatus } from "../api/client";
 

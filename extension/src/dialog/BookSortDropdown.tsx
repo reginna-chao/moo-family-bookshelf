@@ -27,9 +27,8 @@ function clampIndex(index: number): number {
   return index;
 }
 
-// Selected (blue) wins; a keyboard-active but unselected option gets a neutral
-// grey highlight; everything else is transparent. Keeps the existing selected
-// colour semantics untouched. Mirrors the .moo-sort__option modifier rules.
+// Selected (blue) wins; a keyboard-active unselected option gets neutral grey; the rest are
+// transparent. Mirrors the .moo-sort__option modifier rules.
 function optionClass(selected: boolean, active: boolean): string {
   if (selected) return "moo-sort__option moo-sort__option--selected";
   if (active) return "moo-sort__option moo-sort__option--active";
@@ -79,9 +78,8 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
     place(triggerRef.current, menuRef.current);
   }, [open, place, reset]);
 
-  // Restore focus to the trigger after a real open→close transition so Esc,
-  // outside-click, and selection all leave focus in a predictable place. The
-  // wasOpenRef guard prevents stealing focus on the initial mount.
+  // After a real open→close (Esc, outside click, selection) focus returns to the trigger;
+  // wasOpenRef keeps the initial mount from stealing focus.
   useLayoutEffect(() => {
     if (open) {
       wasOpenRef.current = true;
@@ -92,10 +90,8 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
     }
   }, [open]);
 
-  // Seed the active option and move focus into the listbox only once it is
-  // positioned (and therefore visibility:visible) — focusing a visibility:hidden
-  // element is a no-op in real browsers, which would leave the keyboard handler
-  // unreachable on first open.
+  // Seed the active option and focus the listbox only once positioned (visibility:visible):
+  // focusing a visibility:hidden element is a no-op, leaving the keys unreachable on first open.
   useLayoutEffect(() => {
     if (!open || !position) return;
     setActiveValue(value);

@@ -34,9 +34,8 @@ export function PinInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Refocus has to wait for the re-render that clears the field, so it is
-  // deferred by a 0ms timer. Track that timer: re-arming clears the previous
-  // one, and unmount clears any pending one instead of touching a dead ref.
+  // Refocus waits for the re-render that clears the field (0ms timer); re-arming clears the
+  // previous timer and unmount clears a pending one instead of touching a dead ref.
   const focusInputSoon = useCallback(() => {
     if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
     focusTimerRef.current = setTimeout(() => {
@@ -125,10 +124,8 @@ export function PinInput({
 
   return (
     <div className="moo-secret-entry">
-      {/* The dim only covers the interactive cluster. The error line below stays
-          at full opacity: during a rate-limit countdown it is the only text
-          explaining why input is locked, so dimming it would leave the sole
-          explanation unreadable for the whole wait. */}
+      {/* Only the interactive cluster dims: the error line below is the sole explanation of a
+          rate-limit lock, so it stays at full opacity for the whole wait. */}
       <div
         style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
       >

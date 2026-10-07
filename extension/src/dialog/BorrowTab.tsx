@@ -53,11 +53,8 @@ function buildOwnerNameLookup(members: FamilyMember[]): Map<string, string> {
   return map;
 }
 
-/**
- * Local state for the "請選擇對應的讀墨家庭成員" picker. Held in BorrowTab
- * (instead of inside readmoo-lend) so React owns the UI lifecycle and we can
- * await the user's choice with a Promise resolver pattern.
- */
+/** State of the "請選擇對應的讀墨家庭成員" picker, held here (not in readmoo-lend) so React owns
+ *  its lifecycle and the user's choice can be awaited through a Promise resolver. */
 interface PickerState {
   request: BorrowRequest;
   lendDialog: HTMLElement;
@@ -111,11 +108,8 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     [apiClient, applyBorrowStatus],
   );
 
-  /**
-   * Show the readmoo member picker and wait for the user to either pick a
-   * member or cancel. The PATCH and Readmoo dialog dismissal are owned by
-   * `handleApproveLending` — the picker only collects the user's choice.
-   */
+  /** Show the Readmoo member picker and await a pick or cancel. It only collects the choice; the
+   *  PATCH and the Readmoo dialog dismissal belong to `handleApproveLending`. */
   const requestPick = useCallback(
     (
       request: BorrowRequest,
@@ -136,22 +130,14 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
     [],
   );
 
-  /**
-   * Approve an incoming PENDING request: drive Readmoo's native lending
-   * flow via Content Script, then mark the MooFamily request as LENT
-   * once the Readmoo dialog closes (signals the user accepted the
-   * native confirm).
-   *
-   * When n ≥ 2 and readmooName is missing / does not match, surface the
-   * picker; on confirm we PATCH readmooName before clicking the option.
-   */
+  /** Approve a PENDING request: drive Readmoo's native lending, mark it LENT once that dialog closes.
+   *  n ≥ 2 with no matching readmooName shows the picker, which PATCHes it before the click. */
   const handleApproveLending = useCallback(
     async (request: BorrowRequest) => {
       setActionError(null);
       setPendingRequestId(request.requestId);
-      // Only set once the search has actually been submitted (successful return
-      // from openLendDialogForBook). Stays null if it throws before searching
-      // (e.g. NOT_ON_LIBRARY), so we skip the restore in that case.
+      // Set only once openLendDialogForBook has submitted the search; stays null (no restore)
+      // when it throws before searching, e.g. NOT_ON_LIBRARY.
       let previousQuery: string | null = null;
       try {
         const borrower = members.find((m) => m.userId === request.borrowerId);
@@ -205,16 +191,11 @@ export function BorrowTab({ userId, apiClient }: BorrowTabProps) {
         const msg = err instanceof Error ? err.message : "借出失敗";
         setActionError(`自動借出失敗：${msg}`);
       } finally {
-        // Restore the user's prior library search state. Runs after the whole
-        // flow (including the picker cancel early-return) so no click lands on a
-        // detached card node. Best-effort inside restoreLibrarySearch.
+        // Restore the prior library search (best-effort) after the whole flow, picker cancel
+        // included, so no click lands on a detached card node.
         if (previousQuery !== null) {
-          // ORDER MATTERS: dismiss any lingering .book-detail-modal BEFORE
-          // restoring. Post-success failures (MEMBER_NOT_FOUND, CONFIRM_TIMEOUT,
-          // updateBorrowStatus throw) and picker cancel can leave the detail
-          // modal open; restoring re-renders the grid, and a still-open modal
-          // would otherwise stack on top of it. On success this also tidies up
-          // any leftover detail modal — an intended improvement.
+          // ORDER MATTERS: close a lingering .book-detail-modal first — MEMBER_NOT_FOUND, CONFIRM_TIMEOUT,
+          // a failed PATCH or picker cancel can leave it open to stack on the re-rendered grid.
           dismissOpenDialogs();
           await restoreLibrarySearch(previousQuery);
         }

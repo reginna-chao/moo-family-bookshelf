@@ -1,23 +1,5 @@
-/**
- * Shared DOM primitives for every Readmoo page-scraping consumer.
- *
- * Originally extracted so `readmoo-lend.ts` and `readmoo-search.ts` could both
- * depend on these low-level helpers without importing each other (which
- * previously formed a module cycle). It has since become the common base for
- * three consumers, and depends on none of them:
- *   - the lending flow (`readmoo-lend.ts` / `readmoo-search.ts`) — card lookup
- *     (`findBookCardInLibrary`) and DOM waiting (`waitForElement`).
- *   - the scraper (`scraper.ts`) — legacy-selector fallback
- *     (`queryWithLegacyFallback`) and degradation warnings (`warnOnce`).
- *   - the sync entry points (`sync/syncBooks.ts`, `dialog/useAutoSetup.ts`) —
- *     they call `resetScrapeWarnings()` once per scrape run.
- *
- * The warn-once de-duplication state below is module-level and therefore SHARED
- * by all of them; `resetScrapeWarnings` is the single reset point, and must be
- * called by the scrape ENTRY POINT (not inside `scrapeBooks`, which can run more
- * than once per run — e.g. library + archive — and would then re-arm the
- * de-duplication mid-run and emit duplicate warnings).
- */
+/** Shared DOM primitives for every Readmoo-scraping consumer (lending, scraper, sync entry points),
+ *  depending on none of them. See docs/architecture.md → Content Script 的擷取與注入. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 
@@ -53,15 +35,8 @@ export function findBookCardInLibrary(bookId: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(selector);
 }
 
-/**
- * Labels that have already emitted a scrape-time warning.
- *
- * Deliberately de-duplicated PER LABEL rather than warning per element: a
- * library page renders 25+ `.library-item` cards, and scraping every card would
- * otherwise flood the console with 25 identical lines and bury real errors. One
- * line per label per sync is enough to answer the only question these warnings
- * exist for — "is this degraded path still being hit?".
- */
+/** Labels that already warned: de-duplicated PER LABEL, not per element (25+ cards would bury real
+ *  errors); one line per label per sync answers "is this degraded path still being hit?". */
 const warnedLabels = new Set<string>();
 
 /**

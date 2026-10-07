@@ -1,12 +1,5 @@
-/**
- * User-facing wait / lock copy for back-off failures (HTTP 429).
- *
- * Not verification-only: consumers now span `useVerificationPrompt` (which owns
- * the static message state), `VerificationPrompt` (which renders the
- * live-countdown variant), `publicShareMessages` and the rate-limited family
- * write paths. Every wording lives here exactly once so the variants cannot
- * drift apart.
- */
+// The single home of the wait / lock copy for 429 back-offs, shared by the verification prompt (static
+// and live-countdown variants), publicShareMessages and the rate-limited family writes.
 
 /** Remaining wait as 「45 秒」, or 「14 分 59 秒」 once it reaches a minute. */
 export function formatWaitDuration(totalSeconds: number): string {

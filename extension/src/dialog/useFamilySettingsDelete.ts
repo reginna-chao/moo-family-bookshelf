@@ -40,9 +40,8 @@ export function useFamilySettingsDelete({
       setDeleteState("idle");
       return;
     }
-    // Best-effort local cleanup: the server account is already deleted and
-    // non-reversible, so the server state is the source of truth. A failure
-    // to clear local storage must not block onLeave() or surface as an error.
+    // Best-effort: the server account is already, irreversibly, deleted, so a failed local clear
+    // must not block onLeave() or surface as an error.
     try {
       await browser.storage.local.clear();
     } catch (clearErr) {

@@ -1,21 +1,5 @@
-/**
- * useReauth — drives the in-place re-verification prompt shown when the auth
- * token dies server-side and silent recovery is blocked by a PWA-login
- * verification requirement (security-ux Invariant 2: token expiry must prompt
- * re-authentication, never silently drop data).
- *
- * It reuses the existing verification prompt machinery (useVerificationPrompt +
- * VerificationPrompt) and wires `apiClient.onReauthRequired`. On completion it
- * re-joins the family with the collected secret, persists the fresh token, and
- * dismisses the prompt so the user continues exactly where they were.
- *
- * When that re-join is refused with a family-gone code instead, the local family
- * data is cleared and the dialog falls back to onboarding — see
- * `tearDownGoneFamily`. That branch is not hypothetical: the server's
- * verification gate runs BEFORE its kicked-tombstone check, so a removed member
- * whose account has verification configured cannot learn of the removal until
- * they have supplied a valid secret.
- */
+// Drives the in-place re-verification prompt when PWA-login verification blocks silent recovery
+// (Invariant 2). See docs/architecture.md → 重新驗證視窗.
 
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
@@ -40,20 +24,13 @@ import {
 } from "./useVerificationPrompt";
 
 export interface UseReauthOptions {
-  /**
-   * Invoked once the re-join succeeds (fresh token persisted + primed in the
-   * client). App uses it to reload the dialog's family data so the stale 401
-   * view is replaced automatically instead of waiting for a manual retry.
-   */
+  /** Invoked once the re-join succeeds (fresh token persisted and primed); App reloads the family
+   *  data so the stale 401 view is replaced without a manual retry. */
   onSuccess?: () => void;
 }
 
-/**
- * Re-join the family with the supplied verification secret, flagged `recovery`
- * so the server refuses a user no longer listed (409 RECOVERY_NOT_MEMBER). On
- * success persist the fresh token and prime the in-memory client; on failure
- * surface the code so the prompt can retry / show locked messaging.
- */
+/** Re-join with the secret, flagged `recovery` (409 RECOVERY_NOT_MEMBER for a user no longer listed).
+ *  Success persists and primes the token; failure returns the code for the prompt. */
 async function runReauthJoin(
   apiClient: ApiClient,
   familyId: string,
@@ -90,19 +67,8 @@ async function runReauthJoin(
   return { ok: true };
 }
 
-/**
- * Tear down the local family binding after a re-verification join came back with
- * a family-gone code (family deleted / full / user removed or no longer listed).
- *
- * The secret was CORRECT here — the silent recovery never got past the server's
- * verification gate, so the refusal only surfaces once the user has typed a
- * valid PIN/pattern. Without this teardown the prompt would keep re-offering the
- * same input and the user would loop on "correct secret → error" for as long as
- * the server's kicked tombstone lives (6h).
- *
- * `errorCode` is the family-gone code that caused the refusal; it is forwarded
- * to `onFamilyRemoved` so the dialog can name the reason on the onboarding view.
- */
+/** Tear down the local binding after a CORRECT secret met a family-gone code (else the prompt loops
+ *  for the 6h tombstone); `errorCode` goes to `onFamilyRemoved`. docs/architecture.md → 重新驗證視窗. */
 async function tearDownGoneFamily(
   apiClient: ApiClient,
   errorCode: string,
@@ -110,16 +76,11 @@ async function tearDownGoneFamily(
   try {
     await clearFamilyStorageAndBroadcast();
   } catch (err) {
-    // `storage.local.remove` inside is unguarded, so this can reject. Swallow
-    // it: a storage failure must not strand the latch — a stale one mutes every
-    // later 401 for the rest of the session and the view never flips.
+    // Can reject (unguarded storage.local.remove); swallowed so a storage failure never strands
+    // the latch, which would mute every later 401 this session.
     console.warn("[Reauth] Family teardown storage clear failed", err);
-    // The `finally` below tells the dialog the family is gone regardless, and
-    // App's handler puts the LIVE client back on the default endpoint. The
-    // stored choice must not be the one thing left pointing at the ex-family's
-    // server: it is what the NEXT boot restores, and by then the user may have
-    // joined a different family with a plain (no-@host) sync code, which never
-    // overwrites it. Cannot reject — it swallows its own storage failures.
+    // The stored endpoint is what the NEXT boot restores, so it must not keep the ex-family's
+    // server (never rejects). See docs/architecture.md → 重新驗證視窗.
     await resetFamilyEndpointChoice();
   } finally {
     // The 401 path already nulled the token; repeated because this hook owns
@@ -155,18 +116,14 @@ export function useReauth(
         const displayName =
           (stored[DISPLAY_NAME_KEY] as string | undefined) ?? "";
         if (!userId || !familyId) {
-          // Storage lacks the identity needed to re-join, so no prompt can be
-          // shown. Release the latch the client set before invoking us —
-          // otherwise it stays true forever and later 401 waves skip recovery
-          // silently (no re-auth prompt ever appears again).
+          // No stored identity to re-join with, so no prompt: release the client's latch, or every
+          // later 401 skips recovery and no re-auth prompt ever appears again.
           apiClient.clearReauthPending();
           return;
         }
 
-        // Seed with the code that actually blocked the silent recovery, so a
-        // locked user sees the countdown right away instead of an active input.
-        // Anything unexpected falls back to VERIFICATION_REQUIRED, which fetches
-        // the method and renders the matching challenge (pin / pattern / OTP).
+        // Seed with the code that blocked recovery (a locked user sees the countdown at once);
+        // anything else falls back to VERIFICATION_REQUIRED, which fetches the method.
         const blocked = isVerificationError(info?.errorCode) ? info : undefined;
         await verifyBegin(
           blocked?.errorCode ?? "VERIFICATION_REQUIRED",
@@ -181,9 +138,8 @@ export function useReauth(
                 verifySecret,
                 onSuccess,
               ),
-            // Abandoning the prompt just closes it; the user stays on the main
-            // view. Release the reauth latch so a later authenticated action can
-            // re-trigger the challenge (otherwise the latch would suppress it).
+            // Cancel only closes the prompt (main view stays); releasing the latch lets a later
+            // authenticated action re-trigger the challenge.
             onCancel: () => {
               apiClient.clearReauthPending();
             },

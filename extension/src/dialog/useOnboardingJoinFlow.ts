@@ -14,9 +14,8 @@ export interface OnboardingJoinFlowOptions extends UseOnboardingFlowOptions {
   promptRecoveryVerification: PromptRecoveryVerification;
 }
 
-// The store's setters and refs appear in the dependency arrays below only
-// because they arrive as arguments; they are identity-stable, so every
-// callback is memoised exactly as when it lived in useOnboardingFlow.
+// Store setters/refs sit in the deps only because they arrive as arguments; being identity-stable,
+// every callback memoises exactly as it did inside useOnboardingFlow.
 export function useOnboardingJoinFlow(opts: OnboardingJoinFlowOptions) {
   const { store, apiClient, autoSetup, onFamilyJoined } = opts;
   const { showRetryableError, promptRecoveryVerification } = opts;
@@ -41,15 +40,8 @@ export function useOnboardingJoinFlow(opts: OnboardingJoinFlowOptions) {
     setErrorMessage("");
     setErrorActions([]);
 
-    // This scope owns the sync code's `@host` for the whole attempt. performJoin
-    // applies it (the join must go there) and persists it only once a join
-    // succeeds; it deliberately leaves it applied on failure, because the
-    // verification challenge below is a continuation of the same attempt — it
-    // queries that server for the account's verification method and retries the
-    // join against it. Every exit that ends the attempt WITHOUT a join hands the
-    // endpoint back: otherwise a code whose server answered "no" would keep
-    // steering this client, and the 建立家庭 the user reaches for next would ship
-    // the userId, the token it issues and the whole book list there.
+    // This scope owns the `@host` for the whole attempt (kept through the challenge); every exit
+    // WITHOUT a join hands the endpoint back. See docs/architecture.md → 同步碼位址的驗證與揭露.
     const endpointBeforeAttempt = apiClient.getEndpoint();
     let joined = false;
     const abandonAttempt = () => {
@@ -72,9 +64,8 @@ export function useOnboardingJoinFlow(opts: OnboardingJoinFlowOptions) {
         return;
       }
 
-      // Verification-enabled member reconnecting: prompt for the secret and
-      // retry the same join with it, rather than failing the sync code. Goes
-      // through the shared bridge so the prompt-restore guard applies here too.
+      // Verification-enabled member: prompt for the secret and retry the same join, via the shared
+      // bridge so its prompt-restore guard applies here too.
       const handled = await promptRecoveryVerification({
         errorCode: result.errorCode,
         retryAfter: result.retryAfter,
@@ -105,9 +96,8 @@ export function useOnboardingJoinFlow(opts: OnboardingJoinFlowOptions) {
           abandonAttempt();
           setState(recoveryActiveRef.current ? "recovery-join" : "idle");
         },
-        // A verified join the family refuses for good also ends the attempt, so
-        // the sync code's `@host` must be handed back here too — otherwise the
-        // rejected server would still be in force when the user presses 建立家庭.
+        // A verified join refused for good ends the attempt too: hand the `@host` back, or the
+        // rejected server stays in force for the 建立家庭 that follows.
         onFamilyGone: (message) => {
           abandonAttempt();
           showRetryableError(message);

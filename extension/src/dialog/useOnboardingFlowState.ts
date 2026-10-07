@@ -30,21 +30,17 @@ export function useOnboardingFlowState(apiClient: ApiClient) {
   /** Tracks the familyId discovered during lookup so the recovery-choice /
    *  solo-recovery-confirm handlers can run `performSoloRecovery` later. */
   const recoveryFamilyIdRef = useRef("");
-  /** Mirrors the latest state so handleRetry can distinguish "user is currently
-   *  on a recovery view" (→ welcome) from "user hit an error while in a recovery
-   *  flow" (→ recovery-choice). Updated via useEffect on every state change. */
+  /** Latest state (synced by an effect) so handleRetry tells "on a recovery view" (→ welcome) from
+   *  "error inside a recovery flow" (→ recovery-choice). */
   const stateRef = useRef<OnboardingState>("welcome");
-  /** Becomes true when the user first enters the recovery-choice screen.
-   *  Lets handleRetry navigate back to recovery-choice after an error that
-   *  occurred mid-recovery-flow, even though stateRef is now "error". */
+  /** Set on first entering recovery-choice, so handleRetry can return there after a mid-recovery
+   *  error even though stateRef is now "error". */
   const recoveryActiveRef = useRef(false);
-  /** Mirrors handleStart. cancelStartVerification must be able to re-run the
-   *  lookup challenge, but it is itself a dependency of handleStart — a ref
-   *  breaks that cycle without duplicating the flow or reordering it. */
+  /** Mirrors handleStart: cancelStartVerification re-runs the lookup challenge yet is a dependency
+   *  of handleStart, and the ref breaks that cycle without duplicating or reordering the flow. */
   const handleStartRef = useRef<(() => Promise<void>) | null>(null);
-  /** Mirrors handleCreate for the same reason as handleStartRef:
-   *  cancelCreateVerification must re-run the create flow (which re-opens the
-   *  verification challenge), but it is a dependency of handleCreate. */
+  /** Mirrors handleCreate likewise: cancelCreateVerification re-runs the create flow (re-opening
+   *  the challenge) yet is a dependency of handleCreate. */
   const handleCreateRef = useRef<(() => Promise<void>) | null>(null);
 
   userEmailRef.current = userEmail;
@@ -57,10 +53,8 @@ export function useOnboardingFlowState(apiClient: ApiClient) {
     stateRef.current = state;
   }, [state]);
 
-  // Pre-fill the sync-code input from a storage.sync remnant: when this device
-  // has onboarded (local userId) but lost its local familyId while sync still
-  // holds one, offer the encoded sync code so the user can rejoin in one tap.
-  // Pre-fill ONLY — never auto-submit; functional update avoids clobbering typing.
+  // A storage.sync familyId remnant (local one lost) pre-fills the sync code for a one-tap rejoin —
+  // pre-fill ONLY, never auto-submit; the functional update never clobbers typing.
   useEffect(() => {
     let cancelled = false;
     void (async () => {

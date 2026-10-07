@@ -46,11 +46,8 @@ function useEscapeToClose(onClose: () => void): void {
   }, [onClose]);
 }
 
-/**
- * Wraps Tab / Shift+Tab inside the modal. `aria-modal="true"` is a hint for
- * assistive tech only — without this the keyboard walks the shelf controls
- * rendered behind the overlay.
- */
+/** Wraps Tab / Shift+Tab inside the modal: `aria-modal="true"` only hints assistive tech, so the
+ *  keyboard would otherwise walk the shelf controls behind the overlay. */
 function useFocusTrap(containerRef: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const container = containerRef.current;
@@ -112,10 +109,8 @@ export function PublicShareDialog({
   useEscapeToClose(onClose);
   useFocusTrap(dialogRef);
 
-  // Move focus into the modal on open (it renders after the trigger in DOM order,
-  // so Tab would otherwise walk the shelf controls first), and restore focus to
-  // the opener (公開分享 button) on close. getRootNode() reaches the real focused
-  // element inside the shadow tree, where document.activeElement is retargeted.
+  // Focus the modal on open (it follows the shelf controls in DOM order) and the opener (公開分享)
+  // on close; getRootNode() finds the real focused element, retargeted in the shadow tree.
   useEffect(() => {
     const root = dialogRef.current?.getRootNode();
     const opener =

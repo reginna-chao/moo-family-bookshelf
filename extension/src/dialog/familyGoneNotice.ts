@@ -1,19 +1,5 @@
-/**
- * 繁體中文 copy explaining WHY the dialog dropped back to onboarding after the
- * local family binding was torn down.
- *
- * Both teardown entry points — the silent one in `api/auth-refresh.ts`
- * (`clearFamilyAndNotify`, after a failed recovery join) and the
- * re-verification one in `dialog/useReauth.ts` (`tearDownGoneFamily`) — hand the
- * triggering error code to `onFamilyRemoved`, and `dialog/App.tsx` renders this
- * text as a banner above `Onboarding`. Without it the view just flips with no
- * reason given, which reads as a bug rather than as a state change the user's
- * family owner caused. The PWA already explains the same refusals in
- * `pwa/src/utils/joinErrorMessages.ts`.
- *
- * Copy lives in this module, not inline in the component, so tests can pin the
- * production literals instead of asserting on their own copies of them.
- */
+// 繁體中文 copy explaining WHY the dialog dropped back to onboarding after a family teardown.
+// See docs/architecture.md → 家庭綁定被解除時的說明.
 
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 

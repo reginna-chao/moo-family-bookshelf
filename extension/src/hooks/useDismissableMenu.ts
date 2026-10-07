@@ -5,30 +5,13 @@ export interface DismissableMenuOptions {
   onClose: () => void;
   triggerRef: RefObject<HTMLElement | null>;
   menuRef: RefObject<HTMLElement | null>;
-  /**
-   * On Escape, move focus back to the trigger after closing, so keyboard and
-   * screen-reader users land on it (and hear its current name) instead of on
-   * `<body>` when the focused option unmounts. Focus is returned only when
-   * Escape is pressed with focus in the menu or on its trigger, or when focus
-   * has already fallen to the document (the focused option unmounted); a
-   * control the user moved to while the menu stayed open keeps focus. Outside
-   * click, scroll and resize never move focus — the user went elsewhere.
-   * Default true (the ARIA APG button-popup convention); pass false only for a
-   * special case. Keep the name and semantics identical to
-   * `pwa/src/hooks/useDismissableMenu.ts`.
-   */
+  /** On Escape, refocus the trigger if focus was in the menu / trigger or fell to the document; never on
+   *  outside click / scroll / resize. Default true (ARIA APG). Twin: .claude/rules/frontend.md. */
   returnFocusOnEscape?: boolean;
 }
 
-/**
- * Returns true when the event's propagation path starts inside the trigger or
- * the menu. Used to decide when NOT to dismiss (clicks/scrolls that belong to
- * the menu itself). composedPath() pierces the shadow boundary — at the document
- * level `e.target` is retargeted to the shadow host, so `menu.contains(e.target)`
- * would report an inside interaction as "outside"; composedPath() returns the
- * real inner nodes and works identically in light DOM (e.g. BookSortDropdown
- * portaling to body).
- */
+/** True when the event's path starts inside the trigger or the menu (must not dismiss); composedPath()
+ *  sees past the shadow host `e.target` is retargeted to. Twin: .claude/rules/frontend.md. */
 function eventStartedInMenu(
   e: Event,
   trigger: HTMLElement | null,
@@ -40,11 +23,8 @@ function eventStartedInMenu(
   );
 }
 
-/**
- * Returns true when a document-level key event has no focused element behind
- * it — the focused option already unmounted, or nothing was focused — so focus
- * has fallen to the document itself rather than to a control the user chose.
- */
+/** True when a document-level key event has no focused element behind it (the focused option
+ *  unmounted, or nothing was focused): focus fell to the document, not to a chosen control. */
 function focusIsNowhere(target: EventTarget | null): boolean {
   return (
     target === document ||
@@ -92,9 +72,8 @@ export function useDismissableMenu({
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      // Reclaim only focus the menu owned, or focus that already fell to the
-      // document; a control the user Tabbed to while the menu stayed open
-      // keeps it. Decided before onClose, which may unmount the menu.
+      // Reclaim only focus the menu owned or that fell to the document (a control Tabbed to keeps
+      // it); decided before onClose, which may unmount the menu.
       const reclaim =
         returnFocusRef.current &&
         (eventStartedInMenu(e, triggerRef.current, menuRef.current) ||
@@ -112,10 +91,8 @@ export function useDismissableMenu({
       onCloseRef.current();
     }
 
-    // A scroll inside an open shadow tree does not reach `window` (scroll events
-    // are composed: false). Also listen on the trigger's ShadowRoot in capture
-    // phase so scrolling the dialog's panels dismisses the menu; keep the window
-    // listener for the dev page / light DOM and window-level scroll.
+    // Shadow-tree scrolls never reach `window` (composed: false): also capture on the trigger's
+    // ShadowRoot; the window listener stays for light DOM. Twin: .claude/rules/frontend.md.
     const scrollRoot = triggerRef.current?.getRootNode();
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);

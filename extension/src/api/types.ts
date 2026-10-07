@@ -1,6 +1,4 @@
-/**
- * Shared types, interfaces, and enums for the API layer.
- */
+/** Shared types, interfaces, and enums for the API layer. */
 
 /**
  * The wire contract itself — the `{ data, error }` envelope, `BoolFlag`, the

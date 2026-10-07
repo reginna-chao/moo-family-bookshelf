@@ -1,10 +1,5 @@
-/**
- * Book-id sources for one `.library-item` card, tried in order by the scraper:
- * the fiber bridge's `data-moo-book-id`, the reader-link href, then the
- * `.privacy` element. Every source must yield a real Readmoo book id
- * (`isRealBookId`, 12+ digits) — an id from any other namespace would upload a
- * ghost entry that never matches the book again.
- */
+/** Book-id sources for a `.library-item`, in order: fiber `data-moo-book-id`, reader-link href, `.privacy`.
+ *  Each must be a real id (`isRealBookId`, 12+ digits) — any other would upload a never-matching ghost. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";

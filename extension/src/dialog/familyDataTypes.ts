@@ -53,11 +53,8 @@ export interface FamilyDataState {
   borrowRequestsState: BorrowLoadState;
   borrowRequestsError: string | null;
   refreshBorrowRequests: () => Promise<void>;
-  /**
-   * Optimistically set a borrow request's status locally after a successful
-   * PATCH, without re-fetching. Avoids KV eventual-consistency read-after-write
-   * clobbering the confirmed state back to stale data.
-   */
+  /** Set a request's status locally after a successful PATCH, without re-fetching: a KV
+   *  read-after-write could clobber the confirmed state with stale data. */
   applyBorrowStatus: (requestId: string, status: BorrowStatus) => void;
 
   /** Refresh functions for child components */

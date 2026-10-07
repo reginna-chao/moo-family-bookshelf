@@ -10,9 +10,8 @@ import type { OnboardingFlowStore } from "./useOnboardingFlowState";
 import type { useOnboardingNavigation } from "./useOnboardingNavigation";
 import type { PromptRecoveryVerification } from "./useRecoveryVerificationBridge";
 
-/** Shown when the user backs out of the lookup challenge during start. The
- *  server withheld the family data, so the normal onboarding screen would
- *  wrongly tell a user who has a family that they have none. */
+/** Shown on backing out of start's lookup challenge: the family data was withheld, so the normal
+ *  screen would wrongly tell a user who has a family that they have none. */
 const START_VERIFY_CANCELLED_MESSAGE =
   "需要完成驗證才能讀取你的家庭資料，請重試。";
 
@@ -28,9 +27,8 @@ export interface OnboardingStartFlowOptions {
   promptRecoveryVerification: PromptRecoveryVerification;
 }
 
-// The store's setters and refs appear in the dependency arrays below only
-// because they arrive as arguments; they are identity-stable, so every
-// callback is memoised exactly as when it lived in useOnboardingFlow.
+// Store setters/refs sit in the deps only because they arrive as arguments; being identity-stable,
+// every callback memoises exactly as it did inside useOnboardingFlow.
 export function useOnboardingStartFlow(opts: OnboardingStartFlowOptions) {
   const { store, apiClient, autoSetup, attemptRecovery } = opts;
   const { backToRecoveryChoice, showError, promptRecoveryVerification } = opts;
@@ -73,18 +71,15 @@ export function useOnboardingStartFlow(opts: OnboardingStartFlowOptions) {
     [apiClient, attemptRecovery, setState],
   );
 
-  /** Cancel handler for the lookup challenge in handleStart. Falls back to the
-   *  recovery-choice screen once a family is known; otherwise the familyId is
-   *  necessarily unknown (the server withheld it), so show an error instead of
-   *  the onboarding screen that claims the user has no family. */
+  /** Cancel for handleStart's lookup challenge: recovery-choice once a family is known; otherwise the
+   *  familyId was withheld, so an error instead of the screen claiming there is no family. */
   const cancelStartVerification = useCallback(() => {
     if (recoveryFamilyIdRef.current) {
       backToRecoveryChoice();
       return;
     }
-    // The generic 重試 action leads to the "create or join a family" screen —
-    // exactly the misreading this message exists to prevent. Re-run the lookup
-    // challenge instead, which is what 「請重試」 promises here.
+    // The generic 重試 leads to "create or join" — the very misreading this prevents — so re-run the
+    // lookup challenge, as 「請重試」 promises.
     showError(START_VERIFY_CANCELLED_MESSAGE, [
       {
         label: "重新驗證",

@@ -1,9 +1,5 @@
-/**
- * Hash navigation of the Readmoo SPA from the Dialog (same document, content
- * script isolated world): go to a route, wait for it to render, read the DOM.
- * Shared by onboarding (dialog/useAutoSetup.ts), the account check
- * (dialog/accountIdentityCheck.ts) and the book sync (sync/syncBooks.ts).
- */
+/** Hash navigation of the Readmoo SPA from the Dialog: go to a route, wait for render, read the DOM.
+ *  Shared by onboarding (useAutoSetup), the account check (accountIdentityCheck) and sync/syncBooks.ts. */
 
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 

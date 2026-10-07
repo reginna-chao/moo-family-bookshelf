@@ -174,9 +174,8 @@ export function FamilyShelf({ userId, pageSize }: FamilyShelfProps) {
 
       {prefsSyncFailed && <PrefsSyncFailedNotice />}
 
-      {/* key = the attempt counter: failing the same way twice writes the same
-          text, and a reused node means role="alert" stays silent and nothing
-          on screen moves. A new key re-mounts the live region so it speaks. */}
+      {/* key = the attempt counter: an identical repeat failure would reuse the node and keep
+          role="alert" silent; a new key re-mounts the live region so it speaks. */}
       {borrowFailureText !== "" && (
         <div
           key={borrowFailureKey}

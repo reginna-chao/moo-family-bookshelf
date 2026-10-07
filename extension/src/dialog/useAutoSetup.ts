@@ -101,10 +101,8 @@ export function useAutoSetup(): UseAutoSetupReturn {
       setErrorMessage("");
       setProgressMessage("");
 
-      // Auto-setup is a scrape ENTRY POINT, so it owns the warn-once reset (see
-      // content/readmoo-dom.ts). Without it, a degraded path already warned
-      // about by an earlier sync in this same page session would stay silenced
-      // here — and onboarding is exactly when we most want that signal.
+      // A scrape ENTRY POINT owns the warn-once reset (content/readmoo-dom.ts): otherwise a path an
+      // earlier sync this page session already warned about stays silent in onboarding.
       resetScrapeWarnings();
 
       try {
@@ -142,9 +140,8 @@ export function useAutoSetup(): UseAutoSetupReturn {
           return false;
         }
 
-        // Record the successful sync timestamp so the personal-shelf mount
-        // auto-sync (gated by canAutoSync() via LAST_SYNC_AT_KEY) does not
-        // treat a freshly onboarded user as never-synced and double-sync.
+        // Record the sync time so the mount auto-sync (canAutoSync() via LAST_SYNC_AT_KEY) does not
+        // treat a freshly onboarded user as never-synced and sync twice.
         await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
         restoreHash();

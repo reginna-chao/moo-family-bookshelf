@@ -1,20 +1,5 @@
-/**
- * Best-effort storage read helper.
- *
- * After the extension is reloaded / updated / disabled, a content script left
- * behind on the page becomes an orphan: its `browser.storage.local.*` references
- * are severed and any `.get(...)` call throws `Extension context invalidated`.
- * A fire-and-forget `await browser.storage.local.get(...)` then surfaces as an
- * uncaught promise rejection.
- *
- * `safeStorageGet` degrades silently in that case: it checks the context first
- * and swallows any read error, returning an empty result so callers fall back to
- * their existing defaults instead of crashing.
- *
- * NOTE: swallowing the error is intentional and this helper is for best-effort
- * READS only. Do NOT use it where a read failure must be surfaced to the user;
- * callers must be correct when they receive `{}` (an empty object).
- */
+/** Best-effort `storage.local` read: `{}` on an orphaned content script or any error. READS only —
+ *  never where a failure must surface. See docs/architecture.md → 本機儲存與同步. */
 
 import browser from "webextension-polyfill";
 import { isExtensionContextValid } from "../utils/extensionContext";

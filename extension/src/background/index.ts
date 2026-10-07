@@ -1,18 +1,5 @@
-/**
- * Cross-browser Extension Service Worker (background script).
- * Handles messaging between content script and extension internals.
- *
- * Storage strategy:
- * - familyId: written to BOTH browser.storage.sync and browser.storage.local.
- *   Read from sync first, falling back to local. This enables multi-device sync
- *   for users signed into the same browser account.
- * - apiEndpoint: local only (different devices may use different endpoints).
- *
- * Messaging strategy (webextension-polyfill):
- * - The onMessage listener returns a Promise that resolves to the response
- *   object. There is no `sendResponse` + `return true` — under the polyfill,
- *   returning a Promise IS the async response mechanism.
- */
+/** Cross-browser background script: message dispatch between the content script and extension
+ *  internals. Storage and messaging rules: docs/architecture.md → 背景 Service Worker 與訊息. */
 
 import browser from "webextension-polyfill";
 import { migrateStorageKeys } from "../storage/migrate";
@@ -33,32 +20,22 @@ browser.runtime.onInstalled.addListener(async () => {
   // Awaited so the service worker stays alive until migration completes.
   await migrateStorageKeys();
 
-  // Background scheduled sync (alarms) was removed; sync now only runs
-  // when the user opens their personal shelf. The `alarms` permission was
-  // dropped, so any leftover alarm on an upgrading device simply becomes an
-  // inert no-op (no listener consumes it).
+  // No scheduled background sync (alarms removed, permission dropped): a leftover alarm on an
+  // upgraded device is inert. See docs/architecture.md → 背景 Service Worker 與訊息.
 });
 
-// Resilience: re-attempt the storage migration on browser startup in case a
-// previous onInstalled migration failed (the flag guard makes this a no-op
-// once migration has completed).
+// Re-attempt on browser startup in case the onInstalled migration failed (no-op once done).
 browser.runtime.onStartup.addListener(() => {
   void migrateStorageKeys();
 });
 
-/**
- * Listen for messages from content script / dialog.
- *
- * Returns a Promise (resolving to the response object) for known message
- * types — the polyfill forwards that to the sender's awaited
- * `browser.runtime.sendMessage`. Unknown types return `undefined`.
- */
+/** Messages from the content script / dialog: a known type returns a Promise of the response (the
+ *  polyfill's async reply, no `sendResponse`); an unknown type returns `undefined`. */
 browser.runtime.onMessage.addListener(
   (message: unknown): Promise<unknown> | undefined => {
     const msg = message as BackgroundMessage;
-    // messageHandlers[msg.type] is the specific variant handler for msg.type;
-    // a single localized cast to the union-accepting MessageHandler lets us
-    // invoke it with the full message (runtime dispatch is correct by key).
+    // One localized cast to the union-accepting MessageHandler: the key already picked the
+    // variant's handler, so runtime dispatch is correct.
     const handler = messageHandlers[msg.type] as MessageHandler | undefined;
     if (!handler) return undefined;
     return Promise.resolve(handler(msg));

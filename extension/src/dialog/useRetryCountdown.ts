@@ -1,31 +1,17 @@
-/**
- * useRetryCountdown — a purely local "wait before retrying" ticker.
- *
- * Given a `retryAfter` (seconds) from a 429 response it records a deadline and
- * exposes the remaining whole seconds, ticking once per second. It performs NO
- * I/O: the tick only re-renders text, so it costs nothing on the backend quota.
- * The interval exists only while a deadline is set and is cleared on unmount,
- * on `clear()`, and the moment the countdown hits zero.
- */
+// A purely local 1 s ticker for a 429's `retryAfter`: no I/O (it only re-renders text); the interval
+// lives only while a deadline is set and is cleared on unmount, on clear() and at zero.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * Upper bound (1 hour) applied to any incoming `retryAfter`. The official worker
- * never asks for more than 900s, so this only guards against a hostile or buggy
- * self-hosted backend arming an effectively endless ticker on the client.
- */
+/** 1-hour cap on any `retryAfter`: the official worker never asks for more than 900s, so this only
+ *  stops a hostile or buggy self-hosted backend arming an endless ticker. */
 const MAX_RETRY_WAIT_SECONDS = 3600;
 
 export interface UseRetryCountdownResult {
   /** Remaining whole seconds, or null when no wait is active. */
   seconds: number | null;
-  /**
-   * Begin (or restart) the countdown. Ignores a missing / non-positive value so
-   * callers can forward an optional backend field directly, and caps the wait at
-   * `MAX_RETRY_WAIT_SECONDS`.
-   * Returns true when a countdown actually started.
-   */
+  /** Begin (or restart) the countdown, capped at `MAX_RETRY_WAIT_SECONDS`; a missing / non-positive
+   *  value is ignored so callers can forward the backend field. True when one started. */
   start: (retryAfterSeconds: number | undefined) => boolean;
   /** Stop any active countdown without invoking `onElapsed`. */
   clear: () => void;

@@ -7,12 +7,8 @@ import {
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 
-/**
- * 移除成員後的「解除重新加入限制」入口。
- *
- * 產品語意（文案本身住在 shared/，兩端逐字共用）：解除的是後端的 kicked
- * tombstone，**不會**把對方加回家庭——對方仍須自己輸入同步碼。
- */
+// The "lift the rejoin block" entry after a removal: it clears the kicked tombstone and never re-adds
+// the member. Copy in shared/: docs/architecture.md → 共用文案的產品語意.
 
 // Re-exported so tests can treat this component as the single import entry
 // for its copy, instead of also reaching into shared/.

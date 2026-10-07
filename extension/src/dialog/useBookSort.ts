@@ -29,9 +29,8 @@ export function useBookSort(shelf: BookSortShelf): UseBookSortReturn {
           shelf,
         })) as { sort?: unknown } | undefined;
         if (cancelled) return;
-        // Background may return a legacy value (`title`/`author`); normalize to
-        // the canonical `-asc` form before applying so stored preferences carry
-        // over without a migration. Unrecognized values normalize to default.
+        // Legacy values (`title`/`author`) normalize to the `-asc` form so stored preferences carry
+        // over without a migration; unrecognized ones become default.
         setSortState(normalizeSortMode(response?.sort));
       } catch {
         // Background unavailable — keep default

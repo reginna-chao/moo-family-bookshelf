@@ -1,27 +1,5 @@
-/**
- * Storage layer for the "switch to the family's API endpoint?" decision.
- *
- * The `apiEndpoint` stored on a family record is chosen by the family OWNER and
- * redistributed to every member. Adopting it silently would let an owner point
- * another member's client at a host of their choosing — which would receive
- * that member's Bearer token and full book list, unshared books included. The
- * Dialog therefore asks before switching (see dialog/useEndpointSwitch.ts) and
- * this module owns the storage access that decision needs — both directions of
- * API_ENDPOINT_KEY plus the declined marker:
- *
- * - ACCEPT writes API_ENDPOINT_KEY straight to storage.local (mirroring the
- *   background's handleSetApiEndpoint) and drops the declined marker. The
- *   direct write is what makes the choice stick in Firefox, whose sleeping
- *   background event page can drop the SET_API_ENDPOINT round-trip — the same
- *   reasoning as persistJoinCredentials in dialog/onboardingFlow.ts.
- * - DECLINE records the refused value so the user is asked again only once the
- *   family record moves to a DIFFERENT endpoint.
- * - READ hands the accepted endpoint back at dialog boot, again directly: the
- *   GET_API_ENDPOINT round-trip has the same Firefox failure mode as the write,
- *   where it would silently boot the dialog on the default endpoint.
- * - RESET drops both keys when the user leaves the family, because the endpoint
- *   is family-scoped and must not outlive the membership.
- */
+/** Storage for the "switch to the family's API endpoint?" decision (accept / decline / read / reset),
+ *  all via DIRECT storage access. See docs/architecture.md → 端點切換確認. */
 
 import browser from "webextension-polyfill";
 import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "../constants";
@@ -137,12 +115,12 @@ export async function persistAcceptedFamilyEndpoint(
  * Drop this device's family-endpoint state entirely — the accepted endpoint AND
  * the declined marker — so a family-less client is back on the official default.
  *
- * Called when the user leaves a family (dialog/App.tsx). The endpoint is a
- * FAMILY-scoped setting: the owner picks it and every member adopts it, so it
- * must not outlive the membership. A client left pointing at a former family's
- * server would send the next create/join there — userId, display name, the auth
- * token that server issues, and the whole personal book list, unshared books
- * included — and would bake that host into the sync code it hands out next.
+ * Called when the user leaves a family (dialog/familyBindingReset.ts, dialog/useReauth.ts,
+ * api/auth-refresh.ts). The endpoint is a FAMILY-scoped setting: the owner picks it and every
+ * member adopts it, so it must not outlive the membership. A client left pointing at a former
+ * family's server would send the next create/join there — userId, display name, the auth token
+ * that server issues, and the whole personal book list, unshared books included — and would bake
+ * that host into the sync code it hands out next.
  * Clearing the declined marker matters for the same reason: a refusal recorded
  * against the old family must not silently suppress the confirmation prompt for
  * the next one.

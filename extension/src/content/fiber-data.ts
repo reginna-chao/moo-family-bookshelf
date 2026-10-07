@@ -1,12 +1,5 @@
-/**
- * Fiber-bridge client.
- *
- * Injects the main-world `fiber-bridge.js` script and asks it to stamp
- * `data-moo-book-id` (and related metadata) onto every `.library-item` node.
- *
- * Shared by the bookshelf scraper (sync flow) and the lending search flow so
- * the stamping logic lives in exactly one place — do not duplicate it.
- */
+/** Fiber-bridge client: injects main-world `fiber-bridge.js` and asks it to stamp `.library-item` nodes.
+ *  Shared by the scraper (sync) and the lending search, so the stamping exists once — never duplicate it. */
 
 import browser from "webextension-polyfill";
 
