@@ -98,6 +98,11 @@ import {
  * before the write-side cap existed (or inflated by clock skew) must not outlive
  * the 1h maximum. The clamped value is also what gets returned, so the UI
  * countdown driven by `cooldownUntil` can never show more than the maximum either.
+ * The read clamp is PERSISTED back (#293): clamping only the returned value would
+ * re-clamp a far-future deadline against a fresh `now` on every read, so a legacy
+ * 10-day deadline kept auto-recovery suppressed for the full 10 days. Re-saving it
+ * at the 1h max lets the cooldown actually expire 1h later (PWA twin:
+ * `pwa/src/utils/recoveryCooldown.ts`).
  *
  * Reauth-pending latch (skip guard): a verification prompt raised by an earlier
  * 401 wave sets `isReauthPending() === true`. On the dialog's second data wave
@@ -725,8 +730,8 @@ describe("doRefreshToken", () => {
       expect(familyWasCleared()).toBe(false);
     });
 
-    // The persisted deadline is clamped on READ too (1h max), and the clamped value
-    // is what gets returned. See the header → "Recovery cooldown clamp".
+    // The persisted deadline is clamped on READ too (1h max); the clamped value is
+    // returned AND persisted back. See the header → "Recovery cooldown clamp".
     describe("clamping a persisted cooldown on read", () => {
       const HOUR_MS = 3_600_000;
 
@@ -734,6 +739,8 @@ describe("doRefreshToken", () => {
         name: string;
         storedOffsetMs: number;
         expectedOffsetMs: number;
+        /** Deadline re-saved by the read clamp; undefined = nothing written. */
+        expectedWrite: number | undefined;
       }
 
       const readCases: ReadCase[] = [
@@ -741,21 +748,25 @@ describe("doRefreshToken", () => {
           name: "passes a 60s deadline through unchanged",
           storedOffsetMs: 60_000,
           expectedOffsetMs: 60_000,
+          expectedWrite: undefined,
         },
         {
           name: "passes a deadline sitting exactly on the 1h cap through unchanged",
           storedOffsetMs: HOUR_MS,
           expectedOffsetMs: HOUR_MS,
+          expectedWrite: undefined,
         },
         {
           name: "clamps a deadline 1ms past the 1h cap",
           storedOffsetMs: HOUR_MS + 1,
           expectedOffsetMs: HOUR_MS,
+          expectedWrite: FIXED_NOW + HOUR_MS,
         },
         {
           name: "clamps a 24h deadline down to the 1h cap",
           storedOffsetMs: 24 * HOUR_MS,
           expectedOffsetMs: HOUR_MS,
+          expectedWrite: FIXED_NOW + HOUR_MS,
         },
       ];
 
@@ -782,14 +793,36 @@ describe("doRefreshToken", () => {
             rateLimited: true,
             cooldownUntil: FIXED_NOW + c.expectedOffsetMs,
           });
-          // Still an active cooldown, so the quota-sensitive join stays suppressed
-          // and nothing is re-persisted or dropped on the way out.
+          // Still an active cooldown, so the join stays suppressed; only an
+          // over-long deadline is re-persisted (at the cap), and nothing is dropped.
           expect(joinWasRequested(deps.request)).toBe(false);
-          expect(cooldownWriteValue()).toBeUndefined();
+          expect(cooldownWriteValue()).toBe(c.expectedWrite);
           expect(deps.onReauthRequired).not.toHaveBeenCalled();
           expect(familyWasCleared()).toBe(false);
         });
       }
+
+      it("lets a legacy 10-day cooldown expire 1h later instead of after 10 days", async () => {
+        await seedStorage({
+          [USER_ID_KEY]: "u1",
+          [FAMILY_ID_KEY]: "fam-1",
+          [AUTH_TOKEN_KEY]: "old-token",
+          [RECOVERY_COOLDOWN_UNTIL_KEY]: FIXED_NOW + 240 * HOUR_MS,
+        });
+        const deps = makeDeps({
+          refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+          join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+        });
+
+        const first = await doRefreshToken(deps);
+        // Two hours on, past the 1h cap but far short of the stored 10 days.
+        vi.setSystemTime(FIXED_NOW + 2 * HOUR_MS);
+        const second = await doRefreshToken(deps);
+
+        expect(first.rateLimited).toBe(true);
+        expect(second.refreshed).toBe(true);
+        expect(joinRequestCount(deps.request)).toBe(1);
+      });
 
       it("ignores a non-number persisted cooldown and attempts the join", async () => {
         await seedStorage({
