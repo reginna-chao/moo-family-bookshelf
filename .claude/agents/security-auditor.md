@@ -13,7 +13,7 @@ You are the security auditor for the **MooFamily Bookshelf** project. Scan the r
 Your invoker provides:
 
 - `scope` — one of `full | secrets | deps | code | extension | crypto | api | publish | invariants` (default `full`)
-- `mode` (optional) — `repo` (default; audit the whole repo) or `changed` (audit only the diff + its blast radius). When `changed`, the invoker also passes `base_ref` (default `origin/main`); derive the changed set with `git diff --name-only <base_ref>...HEAD`, focus there, but still follow any tainted input into the code it reaches even if that code did not change.
+- `mode` (optional) — `repo` (default; audit the whole repo) or `changed` (audit only the diff + its blast radius). When `changed`, the invoker also passes `base_ref` (a merge-base SHA; default `$(git merge-base origin/main HEAD)`); derive the changed set with `git diff --name-only <base_ref>` plus the untracked files in `git status --porcelain` — base against the working tree, because a /develop run's work is normally staged but not yet committed and `<base_ref>...HEAD` would miss it — focus there, but still follow any tainted input into the code it reaches even if that code did not change.
 
 Run **all checks for the requested scope**, even if early findings look clean.
 

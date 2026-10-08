@@ -54,7 +54,10 @@ agent and the orchestrator lands as two duplicate issues.
 
 - **Issue body** carries, explicitly: the tier (P0 / P1), the exact `file:line`, the concrete
   consequence of leaving it unfixed, and whether a failing check can be written — the same three
-  items required of any proposal above.
+  items required of any proposal above. Verify every factual claim before filing: "X has no test"
+  greps the test trees by the exported SYMBOL (re-exports defeat a file-name grep) and the body
+  carries that grep; "this changes the API contract / response order" traces the real request path
+  (middleware → validator → handler), not the handler's own statement order.
 - **Label** the issue with its tier: `P0` or `P1`. Labeling is **best-effort** — if attaching the label fails (the label does not exist in the repo, or `gh` rejects it), still create the issue and prefix its title with `[P0]` / `[P1]` so the tier survives in plain text.
 - **Title** in English, imperative form — same convention as commit messages
   (e.g. `Fix stale status timer left running after unmount`).
@@ -62,6 +65,8 @@ agent and the orchestrator lands as two duplicate issues.
 - **Worktrees are reserved exclusively for tasks the user explicitly starts.** A finding is never a
   reason to create one.
 - `gh` in this repo runs under the personal account via `GH_CONFIG_DIR`, configured in
-  `.claude/settings.local.json` (gitignored, per-developer). If `gh` is unavailable in a session **or
+  `.claude/settings.local.json` (gitignored, per-developer). That `env` does not reach the Bash
+  tool's shell: prefix each call with `GH_CONFIG_DIR=<value from settings.local.json>`, and send
+  `--json` output to a file, then Read it — plain-text output can come back empty. If `gh` is unavailable in a session **or
   issue creation itself fails** (auth, network, rate limit), list the item in that run's final report
   instead — never drop it silently, and never fall back to a worktree or a task chip.

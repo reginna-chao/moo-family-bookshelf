@@ -152,3 +152,5 @@ Local-dev facts (each cost a debugging session once):
 
 - `wrangler kv key put --local` needs `--preview false`, or the value lands in the preview namespace and the dev Worker reads nothing.
 - Run ONE `wrangler dev` at a time — multiple instances share the dev registry and knock each other over.
+- A worktree has no `worker/.dev.vars` (gitignored), so a dev Worker started there runs without `DEV_MODE` and its rate-limit path answered 500 when tried: copy the file from the main checkout, or start `npx wrangler dev --var DEV_MODE:1 --env=""` from `worker/`. Families cap at 2 members — give each manual scenario its own family.
+- Handlers can be exercised without `wrangler dev`: a scratch `.mts` script run from `worker/` with `../extension/node_modules/.bin/tsx` (the Worker package has no tsx) imports `src/index.ts` and `tests/helpers/mockKv.ts` and calls `app.request()` in-process.

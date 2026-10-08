@@ -52,7 +52,7 @@ translation of a matched string fails silently, at the next run, far from the ed
 
 - **CRLF false positives**: with `core.autocrlf=true`, `prettier --check` can flag untouched files. Confirm with `diff --strip-trailing-cr` (or a `git diff` showing no content change) and leave untouched files alone — never "fix" files you didn't edit.
 - **Edit can rewrite EOLs**: the Edit tool intermittently rewrites a whole file to CRLF. After editing, check EOL (git's CRLF warning / `prettier --check` on that file) and convert back to LF if tripped.
-- **CJK files: Edit tool only**: sed/perl one-liners silently corrupt non-ASCII content; reserve stream editors for pure-ASCII mechanical changes.
+- **CJK files: Edit tool only**: sed/perl one-liners silently corrupt non-ASCII content; reserve stream editors for pure-ASCII mechanical changes. Even then, `grep -c` the anchor first (it must match exactly once) and `git diff` afterwards; `node -e` in-place writes can be silently dropped in the agent shell. Never slice a file by line numbers (`sed -n 'N,$p'`) once it has been modified — after rewriting a large file, diff its untouched regions against `origin/main` to catch silent truncation.
 - **cwd does not persist**: every git/verify command starts with `cd "<absolute worktree root>" && …` (Bash) or an absolute path (PowerShell) — never rely on a previous call's directory. If the Bash tool's PATH lacks git, run git via PowerShell.
 - **Split long verifications**: run typecheck / lint / test as separate calls so the 2-minute default timeout can't truncate them; when piping test output, capture to a file — `| tail` / `| grep` can swallow the failure status line.
 
