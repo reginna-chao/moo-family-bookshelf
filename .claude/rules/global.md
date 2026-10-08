@@ -129,7 +129,7 @@ Any code modification — **regardless of size** — must go through this cycle,
 
 **Enforcement route:**
 
-- `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend` or `backend`). It holds every user gate itself.
+- `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend`, `backend` or `config`). It holds every user gate itself.
 - The Fix Cycle lives in `/develop` (`references/code-cycle.md`). The `coder` / `tester` / `reviewer` agents are dispatched ONLY by `/develop`'s orchestration — invoking an implementation agent in a way that skips the cycle is prohibited.
 - If the user dispatches a single agent directly (e.g. just a `coder`), follow that agent's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.
 
