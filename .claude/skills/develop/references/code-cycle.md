@@ -147,7 +147,7 @@ Dispatch **`reviewer`** (`scope`, `target` = changed files, `business_logic`, pl
 
 1. No overlap with upstream's changed files → `git merge --ff-only origin/main`.
 2. Overlap only in `CHANGELOG.md` → save `git diff --cached -- CHANGELOG.md` to a scratchpad patch, `git restore --staged --worktree CHANGELOG.md`, fast-forward, then `git apply --3way` the patch (or re-insert the same bullet text at the end of its sub-section with Edit). Moving existing copy is mechanical — the orchestrator does it, no coder dispatch.
-3. Overlap in code → a temporary WIP commit, `git rebase origin/main`, `git reset --soft HEAD~1` (undo only the WIP commit — `--soft origin/main` would also flatten a continued branch's earlier commits); production conflicts go to the `coder`, test conflicts (and adapting upstream's new tests) to the `tester`.
+3. Overlap in code → `git commit -m "wip: <slug>"`, then `git rebase --reapply-cherry-picks --empty=keep origin/main` (a plain rebase DROPS a WIP whose changes are already on main, so `HEAD~1` would then be a real commit), confirm `git log -1 --format=%s` prints the `wip:` subject, and only then `git reset --soft HEAD~1` — never `--soft origin/main`, which would also flatten a continued branch's earlier commits; production conflicts go to the `coder`, test conflicts (and adapting upstream's new tests) to the `tester`.
 
 Then re-run verify workspace-wide — `pnpm lint` and `pnpm typecheck` from the root, not only this run's scope: a moved main can break a content-dependent ratchet (max-lines ceilings) in a file this run never touched. Red on main itself → `.claude/rules/change-triage.md` disposition, never a wider run.
 
