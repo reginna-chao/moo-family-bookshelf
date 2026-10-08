@@ -43,6 +43,54 @@
  * broken for everyone. Refusals additionally pin "no KV write" via
  * `writeTrail()`, and the companion pins the key a successful call writes, so
  * the negative assertion cannot pass on a drifted key.
+ *
+ * Fixtures:
+ * - `seedTwoMemberFamily`: USER1 creates the family, USER2 joins, both have a
+ *   shared book, and USER2 holds a PENDING request for USER1's book — all
+ *   through the real API.
+ * - `applyMembership`: hollow = the state a kick leaves behind when a stale
+ *   full-record write re-lists the target: still listed, pointer gone, token
+ *   still valid.
+ * - A case's `writes` is the key a successful call writes (asserted as
+ *   `put {key}` in the active companion), omitted for read-only calls; when the
+ *   hollow call is a refusal (`hollow.code` set) it must write NOTHING.
+ * - `makeUser2Owner` restores `ownerId` to USER2 — what a stale full-record
+ *   write that read the record before an ownership transfer does when it lands
+ *   after the new owner kicked the ex-owner. USER1 stays an active non-owner.
+ * - `makeUser2LastListed` rewrites `family:{id}` so USER2 is the ONLY listed
+ *   member and `ownerId` is the given `ownerId` — the state a stale
+ *   full-record write can leave behind. USER1 is unlisted but keeps its
+ *   `member:{uid}` pointer and token, so it can still reach the family-record
+ *   read on the members GET afterwards.
+ * - `makeUser1UnlistedOwnerOfThree` rewrites `family:{id}` without USER1 while
+ *   `ownerId` still names USER1, after USER3 joined: a MULTI-member family
+ *   (USER2, USER3) whose recorded owner is unlisted but keeps a pointer naming
+ *   this family and a valid token.
+ *
+ * INFO-2: a hollow ex-owner's self-DELETE is decided by `ownerId` + the list
+ * alone: the missing pointer does not turn the recorded owner's leave into a
+ * plain self-leave that would drop them off the list while `ownerId` still
+ * names them.
+ *
+ * Race interleaving (`kickRacingDisplayNamePut`): kick USER2 while USER2's
+ * displayName PUT runs against the pre-kick record, driven deterministically
+ * through a Proxy over `kv`:
+ * 1. The owner's kick reaches its tombstone put and is held there.
+ * 2. USER2's displayName PUT runs: it reads the record (USER2 still listed)
+ *    and the pointer (still naming the family — the revoke has not run), so it
+ *    passes its active-member check, and reaches its own `family:{id}` put,
+ *    which is held.
+ * 3. The owner's kick resumes: tombstone, list put (USER2 removed), revoke
+ *    (pointer + token deleted).
+ * 4. The held displayName put lands AFTER the owner's list put — the stale
+ *    record, USER2 still in it: the hollow member.
+ * Every wait inside the hook is a `Promise.race` against "the PUT reached its
+ * family put", so a request that returns early can never deadlock the kick.
+ *
+ * Fresh token: the kick's revoke deleted USER2's token. A reconnect that read
+ * the pointer before the revoke can mint a fresh one (the documented
+ * residual); the race case stands in for it so its reads are made by an
+ * AUTHENTICATED hollow member rather than answered 401 by the auth middleware.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -77,9 +125,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// ----- Helpers -----
 
 type Membership = "hollow" | "active";
 
@@ -173,10 +219,8 @@ async function expectError(res: Response, status: number, code: string) {
   expect(((await res.json()) as Json).error.code).toBe(code);
 }
 
-/**
- * USER1 creates the family, USER2 joins, both have a shared book, and USER2
- * holds a PENDING request for USER1's book — all through the real API.
- */
+/** USER1's family + USER2, shared books both sides, USER2's PENDING request — via
+ *  the real API. See the header → "Fixtures". */
 async function seedTwoMemberFamily(): Promise<Ctx> {
   const created = await request("POST", "/api/family", {
     userId: USER1,
@@ -208,11 +252,8 @@ async function seedTwoMemberFamily(): Promise<Ctx> {
   };
 }
 
-/**
- * Put USER2 into `membership`. Hollow = the state a kick leaves behind when a
- * stale full-record write re-lists the target: still listed, pointer gone,
- * token still valid.
- */
+/** Put USER2 into `membership`; hollow = still listed, pointer gone, token valid.
+ *  See the header → "Fixtures". */
 async function applyMembership(ctx: Ctx, membership: Membership) {
   expect(await listedMemberIds(ctx.familyId)).toContain(USER2);
   expect(await kv.get(kvKeys.member(USER2))).toBe(ctx.familyId);
@@ -232,20 +273,15 @@ async function arrange(
   return { ctx, ops: watchKvOps(kv) };
 }
 
-// ---------------------------------------------------------------------------
-// (A) Member-level paths
-// ---------------------------------------------------------------------------
+// ----- (A) Member-level paths -----
 
 interface MemberCase {
   name: string;
   run: (ctx: Ctx) => Promise<Response>;
   hollow: { status: number; code?: string };
   active: { status: number };
-  /**
-   * The key a successful call writes (asserted as `put {key}` in the active
-   * companion). Omitted for read-only calls. When the hollow call is a refusal
-   * (`hollow.code` set) it must write NOTHING.
-   */
+  /** Key a successful call writes; omitted for reads. A hollow refusal writes
+   *  NOTHING. See the header → "Fixtures". */
   writes?: (ctx: Ctx) => string;
   check?: (ctx: Ctx, membership: Membership, res: Response) => Promise<void>;
 }
@@ -441,15 +477,10 @@ describe("hollow member — member-level family-scoped paths (#222)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// (B) Owner-only paths — a hollow ex-owner holds no owner power
-// ---------------------------------------------------------------------------
+// ----- (B) Owner-only paths — a hollow ex-owner holds no owner power -----
 
-/**
- * Restore `ownerId` to USER2 — what a stale full-record write that read the
- * record before an ownership transfer does when it lands after the new owner
- * kicked the ex-owner. USER1 stays an active non-owner.
- */
+/** Restore `ownerId` to USER2 as a stale post-transfer write would; USER1 stays an
+ *  active non-owner. See the header → "Fixtures". */
 async function makeUser2Owner(ctx: Ctx) {
   const record = await readFamily(ctx.familyId);
   expect(record).not.toBeNull();
@@ -542,9 +573,8 @@ describe("hollow ex-owner — owner-only paths (#222)", () => {
         ctx.memberToken,
       );
 
-      // Decided by `ownerId` + the list alone (INFO-2): the missing pointer
-      // does not turn the recorded owner's leave into a plain self-leave that
-      // would drop them off the list while `ownerId` still names them.
+      // Decided by `ownerId` + the list alone, never the pointer.
+      // See the header → "INFO-2".
       await expectError(res, 403, "OWNER_CANNOT_LEAVE");
       expect(ops.writeTrail()).toEqual([]);
       // The family survives untouched; USER1 keeps their seat.
@@ -587,27 +617,10 @@ describe("hollow ex-owner — owner-only paths (#222)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// (C) The race end to end
-// ---------------------------------------------------------------------------
+// ----- (C) The race end to end -----
 
-/**
- * Kick USER2 while USER2's displayName PUT runs against the pre-kick record.
- *
- * Interleaving, driven deterministically through a Proxy over `kv`:
- * 1. The owner's kick reaches its tombstone put and is held there.
- * 2. USER2's displayName PUT runs: it reads the record (USER2 still listed)
- *    and the pointer (still naming the family — the revoke has not run), so it
- *    passes its active-member check, and reaches its own `family:{id}` put,
- *    which is held.
- * 3. The owner's kick resumes: tombstone, list put (USER2 removed), revoke
- *    (pointer + token deleted).
- * 4. The held displayName put lands AFTER the owner's list put — the stale
- *    record, USER2 still in it: the hollow member.
- *
- * Every wait inside the hook is a `Promise.race` against "the PUT reached its
- * family put", so a request that returns early can never deadlock the kick.
- */
+/** Kick USER2 while USER2's displayName PUT runs against the pre-kick record.
+ *  See the header → "Race interleaving". */
 async function kickRacingDisplayNamePut(ctx: Ctx) {
   const tombstoneKey = kvKeys.kicked(ctx.familyId, USER2);
   const familyKey = kvKeys.family(ctx.familyId);
@@ -685,10 +698,8 @@ describe("hollow member — the stale-write race end to end (#222)", () => {
     expect(await listedMemberIds(ctx.familyId)).toEqual([USER1, USER2]);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
 
-    // The kick's revoke deleted USER2's token. A reconnect that read the
-    // pointer before the revoke can mint a fresh one (the documented residual);
-    // stand in for it so the reads below are made by an AUTHENTICATED hollow
-    // member rather than answered 401 by the auth middleware.
+    // Stand in for a residual reconnect's fresh token so the reads are AUTHENTICATED.
+    // See the header → "Fresh token".
     const freshToken = await seedAuthToken(kv, USER2);
 
     await expectError(
@@ -720,16 +731,10 @@ describe("hollow member — the stale-write race end to end (#222)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// (D) The last listed member leaving dissolves the family
-// ---------------------------------------------------------------------------
+// ----- (D) The last listed member leaving dissolves the family -----
 
-/**
- * Rewrite `family:{id}` so USER2 is the ONLY listed member and `ownerId` is
- * `ownerId` — the state a stale full-record write can leave behind. USER1 is
- * unlisted but keeps its `member:{uid}` pointer and token, so it can still
- * reach the family-record read on the members GET afterwards.
- */
+/** USER2 the ONLY listed member, `ownerId` as given; USER1 unlisted but keeps pointer
+ *  and token. See the header → "Fixtures". */
 async function makeUser2LastListed(ctx: Ctx, ownerId: string) {
   const record = await readFamily(ctx.familyId);
   expect(record).not.toBeNull();
@@ -904,15 +909,10 @@ describe("last listed member leaving — dissolve, never an empty list (#222)", 
   });
 });
 
-// ---------------------------------------------------------------------------
-// (E) Owner rules need `ownerId` AND a listing
-// ---------------------------------------------------------------------------
+// ----- (E) Owner rules need `ownerId` AND a listing -----
 
-/**
- * Rewrite `family:{id}` without USER1 while `ownerId` still names USER1, after
- * USER3 joined: a MULTI-member family (USER2, USER3) whose recorded owner is
- * unlisted but keeps a pointer naming this family and a valid token.
- */
+/** Multi-member family (USER2, USER3) whose recorded owner USER1 is unlisted but
+ *  keeps pointer and token. See the header → "Fixtures". */
 async function makeUser1UnlistedOwnerOfThree(ctx: Ctx) {
   // Room for a third member (the default family holds 2), so USER3 joins
   // through the real API.

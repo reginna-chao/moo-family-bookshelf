@@ -20,6 +20,127 @@ import {
   type RateLimitBindingCall,
 } from "../helpers/rateLimitBindings";
 
+/**
+ * Borrow-request routes (`src/routes/borrow.ts`): create, list and PATCH.
+ *
+ * Fixtures and readers:
+ *  - `createFamilyWithThreeMembers` builds USER1 (family owner) + USER2 +
+ *    USER3, so a record can have a party set that excludes one member.
+ *    `maxMembers` defaults to 2 on create (`routes/family.ts`) and no route
+ *    raises it, so the capacity is bumped directly in KV — setup only, every
+ *    assertion still goes through the HTTP handlers.
+ *  - `VALID_COVER_URL` clears the `isAllowedCoverUrl` boundary check in
+ *    `src/routes/borrow.ts` (https + Readmoo registrable domain + default
+ *    port). The field itself is OPTIONAL, but any fixture that SUPPLIES a
+ *    non-empty cover and expects to reach the handler's business logic must
+ *    carry one — an off-Readmoo host short-circuits at 400 INVALID_COVER_URL.
+ *  - `readIndex` reads the family's borrow index — the SINGLE SOURCE OF TRUTH
+ *    for borrow records since the index was denormalised (#160 item 2,
+ *    `src/services/borrowIndex.ts`). It holds full `BorrowRequest` objects,
+ *    NOT a `string[]` of requestIds; asserting the mapped ids (rather than
+ *    `toContain(requestId)`) is what keeps a shape check from passing again if
+ *    the index ever regresses to bare strings.
+ *  - `readIndexEntry` returns the stored record for `requestId`, read where
+ *    production now keeps it. `borrow:{requestId}` is only a `{ familyId }`
+ *    pointer, so a test that wants a record's status or fields must look inside
+ *    the family index — reading the pointer would silently assert against an
+ *    object that carries neither. The pointer also exists for a record the
+ *    trim has evicted from the index, so it cannot prove a record is listed.
+ *
+ * Required fields: the slot that once read "should return 400 if missing
+ * required fields (bookCoverUrl)" now pins the OTHER half of that contract —
+ * `bookCoverUrl` left the required set when it became optional, so the case
+ * pins the required-field list itself via the production literal in
+ * src/routes/borrow.ts. If the falsy guard ever regains `bookCoverUrl`, the
+ * message regains it too and the assertion fails — the cheapest tripwire
+ * against the regression that made every cover-less book unborrowable.
+ *
+ * POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL: regression guard for
+ * cover-less books. The family-bookshelf aggregation (src/routes/bookshelf.ts)
+ * sanitizes every off-whitelist cover to "" and the clients forward that
+ * verbatim, so a borrow request for such a book arrives with an EMPTY
+ * bookCoverUrl. While the field sat in the falsy MISSING_FIELDS guard, that
+ * request was answered 400 MISSING_FIELDS — which the frontend swallowed
+ * silently, leaving the user with a dead borrow button. Absent / null / "" now
+ * all mean "no cover" and are stored as "" — never undefined / null, because
+ * BorrowRequest.bookCoverUrl (src/kv/schema.ts) is a non-optional string and
+ * the list endpoint hands the value straight to the clients. The whitelist
+ * cannot wave "" through instead: `isAllowedCoverUrl("")` is false
+ * (`new URL("")` throws), so the handler's explicit `!== ""` exemption is what
+ * makes these cases pass. A SUPPLIED value of the wrong type stays a
+ * request-format error; `0` and `false` are the load-bearing rows: they are
+ * falsy, so before the fix they were caught by the MISSING_FIELDS guard, and a
+ * table without them would still pass if that guard came back.
+ *
+ * POST /api/family/:id/borrow — bookCoverUrl whitelist: `bookCoverUrl` is
+ * stored verbatim and later rendered into an <img src> by the PWA / Extension,
+ * so a family member who plants an attacker-controlled URL turns every
+ * viewer's render into a tracking beacon (IP + UA leak). Every NON-EMPTY value
+ * the handler receives must satisfy `isAllowedCoverUrl`
+ * (shared/src/config/readmoo.ts): https, a Readmoo registrable domain, and the
+ * default port. Only the empty case is exempt, and it is pinned by the
+ * "optional bookCoverUrl" block — making the field optional did not widen what
+ * the whitelist accepts. The base-sensitive row is a scheme with no `//`.
+ * Standalone it parses to host `cdn.readmoo.com`, which is why the pre-fix
+ * whitelist accepted it, but a browser resolves an `<img src>` against the
+ * base of the RENDERING document and WHATWG then switches to "relative" state,
+ * so the host becomes the VIEWER's own origin. Unlike a book link this needs
+ * no click: the request fires on render, which inside the Extension means a
+ * same-site GET to Readmoo carrying the viewer's cookies. Rejecting it is
+ * intended, not collateral — the scraper reads already-absolute `src` values
+ * off the Readmoo DOM and can never emit this shape.
+ *
+ * Rate-limit accounting (these cases run WITHOUT DEV_MODE): DEV_MODE
+ * short-circuits `enforcePerUserRateLimit`, so the cases that ask "was the
+ * caller charged?" send their borrow POST through `prodRequest`, which omits
+ * it and carries the Rate Limiting bindings a production deploy carries,
+ * returning the response together with every `limit()` call it made. Family
+ * setup deliberately keeps using the DEV_MODE `request` helper: it must not
+ * spend any of the caller's budget. The `borrow-create` ceiling is 10 per 60s,
+ * so since #160 item 1 it is counted by a Rate Limiting binding and leaves NO
+ * KV key behind. "Was the caller charged?" is therefore read off the binding
+ * call log, not off KV — and the bindings must be injected, or the request
+ * would silently fall back to the old counter and the assertions would stop
+ * describing production.
+ *  - `BORROW_CREATE_SCOPE` mirrors the inline
+ *    `enforcePerUserRateLimit({ scope: "borrow-create", … })` call in
+ *    `src/routes/borrow.ts`, which does not export its options object — this
+ *    literal is the one unavoidable copy. The assertions stay honest even if
+ *    the scope is renamed, because they first pin the count of ALL per-userId
+ *    counters.
+ *  - The INVALID_COVER_URL and INVALID_FIELDS "not charged" cases are a matched
+ *    pair: the two guards are different, so the sibling stays green if the
+ *    INVALID_FIELDS type guard is ever moved AFTER `enforcePerUserRateLimit`;
+ *    the type-guard case is the one that goes red — a wrong-typed body must not
+ *    burn the caller's borrow-create quota. Their positive companion asserts
+ *    exactly one charge, on the AUTHENTICATED caller's own id (security-ux
+ *    Invariant 6): without it a handler that never charged at all would keep
+ *    them green.
+ *
+ * POST /api/family/:id/borrow — free-text length caps: since the borrow index
+ * was denormalised (#160 item 2) every record of a family lives inside ONE KV
+ * value (`borrows:family:{familyId}`) that every member reads in full on every
+ * borrow list and that is rewritten on every borrow write. Unbounded free text
+ * is therefore a way for one member to inflate what the whole family pays for,
+ * on both the read and the write side. The four bounds are that ceiling; they
+ * are imported, never spelled as numbers, so moving one is a deliberate
+ * product change rather than a test failure that says nothing.
+ * `readmooCoverUrlOfLength` builds a Readmoo cover URL of EXACTLY `length`
+ * characters, so the case one over the cap is still a URL the whitelist would
+ * otherwise accept — the refusal must be INVALID_FIELDS (never MISSING_FIELDS,
+ * the value is present, and never INVALID_COVER_URL), which is what proves the
+ * LENGTH guard refused it. The cap is checked in the same guard slot as the
+ * string-type check, BEFORE `enforcePerUserRateLimit` — a malformed request
+ * must not burn the caller's own borrow quota; the matching "charged once"
+ * case lives in the bookCoverUrl whitelist block.
+ *
+ * PATCH membership re-check: since #159 the handler re-checks membership of
+ * the record's family BEFORE the party check, so an outsider is refused with
+ * the same code (NOT_FAMILY_MEMBER) the create / list handlers use. A current
+ * member who is merely not a party still gets FORBIDDEN — pinned in
+ * tests/integration/borrowMembershipRecheck.test.ts.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -79,14 +200,8 @@ async function createFamilyWithTwoMembers() {
   return { familyId, token1, token2 };
 }
 
-/**
- * USER1 (family owner) + USER2 + USER3, so a record can have a party set that
- * excludes one member.
- *
- * `maxMembers` defaults to 2 on create (`routes/family.ts`) and no route raises
- * it, so the capacity is bumped directly in KV — setup only, every assertion
- * below still goes through the HTTP handlers.
- */
+// USER1 (owner) + USER2 + USER3; `maxMembers` is bumped directly in KV (setup only).
+// See the header → "Fixtures and readers".
 async function createFamilyWithThreeMembers() {
   const { familyId, authToken: token1 } = await createFamilyAndGetToken(USER1);
 
@@ -107,13 +222,8 @@ async function createFamilyWithThreeMembers() {
   return { familyId, token1, token2, token3 };
 }
 
-/**
- * A cover URL that clears the `isAllowedCoverUrl` boundary check in
- * `src/routes/borrow.ts` (https + Readmoo registrable domain + default port).
- * The field itself is OPTIONAL, but any fixture that SUPPLIES a non-empty cover
- * and expects to reach the handler's business logic must carry one — an
- * off-Readmoo host short-circuits at 400 INVALID_COVER_URL.
- */
+// A cover URL that clears the `isAllowedCoverUrl` boundary check (off-Readmoo = 400).
+// See the header → "Fixtures and readers".
 const VALID_COVER_URL = "https://cdn.readmoo.com/cover/cover.jpg";
 
 const validBorrowBody = {
@@ -124,12 +234,8 @@ const validBorrowBody = {
   ownerId: USER1,
 };
 
-/**
- * Read the family's borrow index — the SINGLE SOURCE OF TRUTH for borrow
- * records since the index was denormalised (#160 item 2,
- * `src/services/borrowIndex.ts`). It holds full `BorrowRequest` objects, NOT a
- * `string[]` of requestIds.
- */
+// Reads the family's borrow index (full `BorrowRequest` objects, the SINGLE SOURCE OF TRUTH).
+// See the header → "Fixtures and readers".
 async function readIndex(familyId: string): Promise<BorrowRequest[] | null> {
   return await kv.get<BorrowRequest[]>(
     kvKeys.borrowsByFamily(familyId),
@@ -137,13 +243,8 @@ async function readIndex(familyId: string): Promise<BorrowRequest[] | null> {
   );
 }
 
-/**
- * The stored record for `requestId`, read where production now keeps it.
- *
- * `borrow:{requestId}` is only a `{ familyId }` pointer, so a test that wants a
- * record's status or fields must look inside the family index — reading the
- * pointer would silently assert against an object that carries neither.
- */
+// The stored record for `requestId`, from the family index (`borrow:{id}` is only a pointer).
+// See the header → "Fixtures and readers".
 async function readIndexEntry(
   familyId: string,
   requestId: string,
@@ -161,9 +262,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// POST /api/family/:id/borrow — create borrow request
-// ===========================================================================
+// --- POST /api/family/:id/borrow — create borrow request ---
 
 describe("POST /api/family/:id/borrow", () => {
   it("should return 201 with correct response shape", async () => {
@@ -256,11 +355,8 @@ describe("POST /api/family/:id/borrow", () => {
     expect(json.error.code).toBe("MISSING_FIELDS");
   });
 
-  // Was: "should return 400 if missing required fields (bookCoverUrl)".
-  // `bookCoverUrl` left the required set when it became optional, so the same
-  // slot now pins the OTHER half of that contract — the required-field list
-  // itself. Acceptance of a missing cover is covered by the "optional
-  // bookCoverUrl" describe block below.
+  // Pins the required-field list itself (a missing cover is accepted — "optional" block below).
+  // See the header → "Required fields".
   it("should not name bookCoverUrl among the required fields", async () => {
     const { familyId, token2 } = await createFamilyWithTwoMembers();
 
@@ -273,10 +369,8 @@ describe("POST /api/family/:id/borrow", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MISSING_FIELDS");
-    // Pins the production literal in src/routes/borrow.ts. If the falsy guard
-    // ever regains `bookCoverUrl`, this message regains it too and this
-    // assertion fails — the cheapest tripwire against the regression that made
-    // every cover-less book unborrowable.
+    // Pins the production literal: if the falsy guard regains `bookCoverUrl`, this fails.
+    // See the header → "Required fields".
     expect(json.error.message).toBe(
       "bookId, bookTitle, bookAuthor, and ownerId are required",
     );
@@ -394,9 +488,8 @@ describe("POST /api/family/:id/borrow", () => {
     const nonMemberCode = ((await nonMemberRes.json()) as Json).error
       .code as string;
 
-    // Positive companions first: each branch must keep its OWN literal, so the
-    // inequality below cannot pass vacuously by both branches drifting to some
-    // third shared code.
+    // Positive companions first: each branch keeps its OWN literal, so the inequality below
+    // cannot pass vacuously by both branches drifting to some third shared code.
     expect(selfCode).toBe("INVALID_OWNER_SELF");
     expect(nonMemberCode).toBe("INVALID_OWNER");
     // Clients map each code to its own copy — re-merging them turns "you can't
@@ -519,9 +612,8 @@ describe("POST /api/family/:id/borrow", () => {
     expect(stored?.requestId).toBe(requestId);
     expect(stored?.status).toBe(BorrowStatus.PENDING);
 
-    // Verify the index shape itself: objects, not a string[] of ids. Asserting
-    // the mapped ids (rather than `toContain(requestId)`) is what keeps this
-    // from passing again if the index ever regresses to bare strings.
+    // The index shape itself: objects, not a string[] of ids (mapped ids, not `toContain`).
+    // See the header → "Fixtures and readers".
     const index = await readIndex(familyId);
     expect(index?.map((r) => r.requestId)).toContain(requestId);
     expect(typeof index?.[0]).toBe("object");
@@ -563,21 +655,8 @@ describe("POST /api/family/:id/borrow", () => {
   });
 });
 
-// ===========================================================================
-// POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL
-// ===========================================================================
-//
-// Regression guard for cover-less books. The family-bookshelf aggregation
-// (src/routes/bookshelf.ts) sanitizes every off-whitelist cover to "" and the
-// clients forward that verbatim, so a borrow request for such a book arrives
-// with an EMPTY bookCoverUrl. While the field sat in the falsy MISSING_FIELDS
-// guard, that request was answered 400 MISSING_FIELDS — which the frontend
-// swallowed silently, leaving the user with a dead borrow button. Absent /
-// null / "" now all mean "no cover" and are stored as "".
-//
-// Note the whitelist cannot wave "" through instead: `isAllowedCoverUrl("")`
-// is false (`new URL("")` throws), so the handler's explicit `!== ""` exemption
-// is what makes these cases pass.
+// --- POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL ---
+// See the header → "POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL".
 
 /** The valid body minus the cover — the shape a cover-less book produces. */
 const coverlessBorrowBody = {
@@ -612,10 +691,8 @@ describe("POST /api/family/:id/borrow optional bookCoverUrl", () => {
       const json = (await res.json()) as Json;
       expect(json.data.bookCoverUrl).toBe("");
 
-      // The stored record must carry "" — never undefined / null, because
-      // BorrowRequest.bookCoverUrl (src/kv/schema.ts) is a non-optional string
-      // and the list endpoint hands the value straight to the clients. Read
-      // from the family index: that is where the record now lives.
+      // The stored record (read from the family index) must carry "" — never undefined / null.
+      // See the header → "POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL".
       const stored = await readIndexEntry(familyId, json.data.requestId);
       expect(stored).toBeDefined();
       expect(stored?.bookCoverUrl).toBe("");
@@ -623,10 +700,8 @@ describe("POST /api/family/:id/borrow optional bookCoverUrl", () => {
     },
   );
 
-  // A SUPPLIED value of the wrong type stays a request-format error. `0` and
-  // `false` are the load-bearing rows: they are falsy, so before the fix they
-  // were caught by the MISSING_FIELDS guard. A table without them would still
-  // pass if that guard came back.
+  // A SUPPLIED wrong-typed value stays a format error; falsy `0` / `false` are load-bearing.
+  // See the header → "POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL".
   it.each([
     { label: "the number 0", coverUrl: 0 },
     { label: "the boolean false", coverUrl: false },
@@ -658,51 +733,21 @@ describe("POST /api/family/:id/borrow optional bookCoverUrl", () => {
   });
 });
 
-// ===========================================================================
-// POST /api/family/:id/borrow — bookCoverUrl whitelist
-// ===========================================================================
-//
-// `bookCoverUrl` is stored verbatim and later rendered into an <img src> by the
-// PWA / Extension, so a family member who plants an attacker-controlled URL
-// turns every viewer's render into a tracking beacon (IP + UA leak). Every
-// NON-EMPTY value the handler receives must satisfy `isAllowedCoverUrl`
-// (shared/src/config/readmoo.ts): https, a Readmoo registrable domain, and the
-// default port. Only the empty case is exempt, and it is pinned by the
-// "optional bookCoverUrl" describe block above — making the field optional did
-// not widen what the whitelist accepts.
+// --- POST /api/family/:id/borrow — bookCoverUrl whitelist ---
+// See the header → "POST /api/family/:id/borrow — bookCoverUrl whitelist".
 
 /** Prefix shared by every per-userId rate-limit counter key. */
 const PER_USER_COUNTER_PREFIX = "ratelimit:user:";
 
-/**
- * Counter scope of the create-borrow ceiling.
- *
- * Mirrors the inline `enforcePerUserRateLimit({ scope: "borrow-create", … })`
- * call in `src/routes/borrow.ts`, which does not export its options object —
- * this literal is the one unavoidable copy. The assertions below stay honest
- * even if the scope is renamed, because they first pin the count of ALL
- * per-userId counters.
- */
+// Counter scope of the create-borrow ceiling — the one unavoidable copy of the route's literal.
+// See the header → "Rate-limit accounting".
 const BORROW_CREATE_SCOPE = "borrow-create";
 
-// --- Rate-limit accounting (these cases run WITHOUT DEV_MODE) ---
-//
-// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the cases that ask
-// "was the caller charged?" send their borrow POST through a helper that
-// omits it. Family setup deliberately keeps using the DEV_MODE `request`
-// helper: it must not spend any of the caller's budget.
-//
-// The `borrow-create` ceiling is 10 per 60s, so since #160 item 1 it is
-// counted by a Rate Limiting binding and leaves NO KV key behind. "Was the
-// caller charged?" is therefore read off the binding call log, not off KV —
-// and the bindings must be injected, or the request would silently fall back
-// to the old counter and the assertions would stop describing production.
+// --- Rate-limit accounting (these cases run WITHOUT DEV_MODE; charges read off the binding log) ---
+// See the header → "Rate-limit accounting".
 
-/**
- * Same as {@link request} but WITHOUT `DEV_MODE` (so the live limiters run)
- * and WITH the Rate Limiting bindings a production deploy carries. Returns
- * the response together with every `limit()` call it made.
- */
+// Same as `request` but WITHOUT `DEV_MODE` and WITH the production bindings; returns the
+// response plus every `limit()` call it made.
 async function prodRequest(
   method: string,
   path: string,
@@ -757,15 +802,8 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
       label: "a third-party tracking beacon",
       coverUrl: "https://attacker.example/b.png?u=victim",
     },
-    // A scheme with no `//`. Standalone it parses to host `cdn.readmoo.com`,
-    // which is why the pre-fix whitelist accepted it, but a browser resolves an
-    // `<img src>` against the base of the RENDERING document and WHATWG then
-    // switches to "relative" state, so the host becomes the VIEWER's own
-    // origin. Unlike a book link this needs no click: the request fires on
-    // render, which inside the Extension means a same-site GET to Readmoo
-    // carrying the viewer's cookies. Rejecting it here is intended, not
-    // collateral — the scraper reads already-absolute `src` values off the
-    // Readmoo DOM and can never emit this shape.
+    // A scheme with no `//`: resolves onto the VIEWER's own origin and fires on render.
+    // See the header → "POST /api/family/:id/borrow — bookCoverUrl whitelist".
     {
       label:
         "a bare scheme with no // that resolves against the rendering page",
@@ -870,10 +908,8 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as Json).error.code).toBe("INVALID_FIELDS");
 
-    // Matched pair with the INVALID_COVER_URL case above: the two guards are
-    // different, so the sibling stays green if the INVALID_FIELDS type guard is
-    // ever moved AFTER `enforcePerUserRateLimit`. This is the case that goes
-    // red — a wrong-typed body must not burn the caller's borrow-create quota.
+    // Matched pair with the INVALID_COVER_URL case: this one goes red if the type guard moves
+    // after the charge. See the header → "Rate-limit accounting".
     expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
@@ -889,9 +925,8 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
     );
     expect(res.status).toBe(201);
 
-    // Positive companion for the two "not charged" cases above: without it a
-    // handler that never charged at all would keep them green. Exactly one
-    // charge, on the AUTHENTICATED caller's own id (security-ux Invariant 6).
+    // Positive companion for the two "not charged" cases: exactly one charge, on the
+    // AUTHENTICATED caller's own id (security-ux Invariant 6).
     expect(perUserCharges(calls)).toEqual([
       `${PER_USER_COUNTER_PREFIX}${BORROW_CREATE_SCOPE}:${USER2}`,
     ]);
@@ -900,25 +935,11 @@ describe("POST /api/family/:id/borrow bookCoverUrl validation", () => {
   });
 });
 
-// ===========================================================================
-// POST /api/family/:id/borrow — free-text length caps
-// ===========================================================================
-//
-// Since the borrow index was denormalised (#160 item 2) every record of a
-// family lives inside ONE KV value (`borrows:family:{familyId}`) that every
-// member reads in full on every borrow list and that is rewritten on every
-// borrow write. Unbounded free text is therefore a way for one member to
-// inflate what the whole family pays for, on both the read and the write side.
-// The four bounds below are that ceiling; they are imported, never spelled as
-// numbers, so moving one is a deliberate product change rather than a test
-// failure that says nothing.
+// --- POST /api/family/:id/borrow — free-text length caps (imported, never spelled as numbers) ---
+// See the header → "POST /api/family/:id/borrow — free-text length caps".
 
-/**
- * Build a Readmoo cover URL of EXACTLY `length` characters, so the case that
- * sits one over the cap is still a URL the whitelist would otherwise accept.
- * Without that, an over-cap value could be refused for the wrong reason and
- * the length guard would never be exercised.
- */
+// A Readmoo cover URL of EXACTLY `length` characters, so one-over-the-cap is still on the
+// whitelist and only the length guard can refuse it.
 const COVER_URL_PREFIX = "https://cdn.readmoo.com/cover/";
 function readmooCoverUrlOfLength(length: number): string {
   return COVER_URL_PREFIX + "a".repeat(length - COVER_URL_PREFIX.length);
@@ -965,9 +986,8 @@ describe("POST /api/family/:id/borrow field length caps", () => {
 
       expect(res.status).toBe(400);
       const json = (await res.json()) as Json;
-      // Never MISSING_FIELDS (the value is present) and — for the cover URL —
-      // never INVALID_COVER_URL: the over-cap value IS on the whitelist, so
-      // this code is what proves the LENGTH guard refused it.
+      // Never MISSING_FIELDS nor INVALID_COVER_URL (the over-cap value IS whitelisted), so this
+      // code proves the LENGTH guard refused it.
       expect(json.error.code).toBe("INVALID_FIELDS");
 
       // Nothing persisted, so an oversized field cannot reach the shared value
@@ -1016,18 +1036,14 @@ describe("POST /api/family/:id/borrow field length caps", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as Json).error.code).toBe("INVALID_FIELDS");
 
-    // The cap is checked in the same guard slot as the string-type check,
-    // BEFORE `enforcePerUserRateLimit` — a malformed request must not burn the
-    // caller's own borrow quota. The matching "charged once" case lives in the
-    // bookCoverUrl describe above.
+    // The cap runs BEFORE `enforcePerUserRateLimit`, so a malformed request burns no quota.
+    // See the header → "POST /api/family/:id/borrow — free-text length caps".
     expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
 });
 
-// ===========================================================================
-// GET /api/family/:id/borrow — list borrow requests
-// ===========================================================================
+// --- GET /api/family/:id/borrow — list borrow requests ---
 
 describe("GET /api/family/:id/borrow", () => {
   /** Create a PENDING borrow request; returns its requestId. */
@@ -1098,10 +1114,8 @@ describe("GET /api/family/:id/borrow", () => {
     // USER2 borrows USER1's book — USER3 is in the family but not a party.
     const requestId = await createBorrow(familyId, token2, USER1, "book-1");
 
-    // The record really exists IN THE INDEX the list handler reads; emptiness
-    // below must come from the party filter, not from a missing record. Reading
-    // the `borrow:{requestId}` pointer would not prove that — it exists even
-    // for a record the trim has evicted from the index.
+    // The record exists IN THE INDEX, so emptiness below comes from the party filter
+    // (the pointer would not prove it). See the header → "Fixtures and readers".
     expect(await readIndexEntry(familyId, requestId)).toBeDefined();
 
     const visible = await listBorrows(familyId, token3);
@@ -1213,9 +1227,7 @@ describe("GET /api/family/:id/borrow", () => {
   });
 });
 
-// ===========================================================================
-// PATCH /api/borrow/:requestId — update borrow status
-// ===========================================================================
+// --- PATCH /api/borrow/:requestId — update borrow status ---
 
 describe("PATCH /api/borrow/:requestId", () => {
   /** Helper: create a PENDING borrow request and return its requestId. */
@@ -1512,11 +1524,8 @@ describe("PATCH /api/borrow/:requestId", () => {
     );
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
-    // Since #159 the handler re-checks membership of the record's family
-    // BEFORE the party check, so an outsider is refused with the same code the
-    // create / list handlers use. A current member who is merely not a party
-    // still gets FORBIDDEN — pinned in
-    // tests/integration/borrowMembershipRecheck.test.ts.
+    // Since #159 membership is re-checked BEFORE the party check (an outsider gets this code).
+    // See the header → "PATCH membership re-check".
     expect(json.error.code).toBe("NOT_FAMILY_MEMBER");
   });
 

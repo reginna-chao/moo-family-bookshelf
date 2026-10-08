@@ -1,3 +1,38 @@
+/** KV key-touch recorder — usage, scope caveats and the `writeTrail` ordering
+ *  semantics are in the `watchKvOps` / `KvOpLog` JSDoc. */
+import { vi } from "vitest";
+
+/** The spy surface this helper reads — structural, so all three ops share it. */
+interface SpyLog {
+  mock: { calls: unknown[][]; invocationCallOrder: number[] };
+}
+
+/**
+ * Keys touched by KV since {@link watchKvOps} was called, per operation.
+ *
+ * `writeTrail`: every `put` / `delete` in the order it actually ran, as
+ * `"{op} {key}"` — e.g. `"put publicshelves:abc"`. Assert it with `toEqual` to
+ * pin a handler's COMPLETE mutation sequence, order included.
+ *
+ * The sequence comes from Vitest's global `invocationCallOrder`, so it is one
+ * real cross-spy ordering rather than three independent per-op lists. It
+ * records when a call was ENTERED, not when its promise settled; a handler
+ * that `await`s its writes one at a time — which every write ordering rule in
+ * this codebase relies on — makes the two identical.
+ *
+ * Reads are deliberately excluded from the trail: an order rule about writes
+ * must not break because auth middleware or a parallel `Promise.all` read
+ * moved. Use {@link KvOpLog.getKeys} for read cost.
+ */
+export interface KvOpLog {
+  getKeys: () => string[];
+  putKeys: () => string[];
+  deleteKeys: () => string[];
+  /** Every `put` / `delete` in run order, as `"{op} {key}"`; reads excluded.
+   *  Semantics: see {@link KvOpLog}. */
+  writeTrail: () => string[];
+}
+
 /**
  * Record which KV keys a request touched, without changing KV behaviour.
  *
@@ -14,7 +49,7 @@
  *   written.
  * - WRITE ORDER (`writeTrail`): pinning the SEQUENCE of a multi-step mutation
  *   whose partial-failure safety depends on which step lands first. The three
- *   per-op lists above cannot see that — a handler that swaps two writes keeps
+ *   per-op lists cannot see that — a handler that swaps two writes keeps
  *   every one of them green.
  *
  * Call it AFTER seeding, so only the request under test is counted, and restore
@@ -26,36 +61,6 @@
  * one counter `put` per request — the pipeline's only fixed write — is absent
  * by construction and is NOT what such an assertion proves.
  */
-import { vi } from "vitest";
-
-/** The spy surface this helper reads — structural, so all three ops share it. */
-interface SpyLog {
-  mock: { calls: unknown[][]; invocationCallOrder: number[] };
-}
-
-/** Keys touched by KV since {@link watchKvOps} was called, per operation. */
-export interface KvOpLog {
-  getKeys: () => string[];
-  putKeys: () => string[];
-  deleteKeys: () => string[];
-  /**
-   * Every `put` / `delete` in the order it actually ran, as `"{op} {key}"` —
-   * e.g. `"put publicshelves:abc"`. Assert it with `toEqual` to pin a handler's
-   * COMPLETE mutation sequence, order included.
-   *
-   * The sequence comes from Vitest's global `invocationCallOrder`, so it is one
-   * real cross-spy ordering rather than three independent per-op lists. It
-   * records when a call was ENTERED, not when its promise settled; a handler
-   * that `await`s its writes one at a time — which every write ordering rule in
-   * this codebase relies on — makes the two identical.
-   *
-   * Reads are deliberately excluded: an order rule about writes must not break
-   * because auth middleware or a parallel `Promise.all` read moved. Use
-   * {@link KvOpLog.getKeys} for read cost.
-   */
-  writeTrail: () => string[];
-}
-
 export function watchKvOps(kv: KVNamespace): KvOpLog {
   const gets = vi.spyOn(kv, "get");
   const puts = vi.spyOn(kv, "put");

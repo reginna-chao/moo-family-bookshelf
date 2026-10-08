@@ -15,28 +15,29 @@
  *
  * PER-KEY CLASSIFICATION
  * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
- *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   by Cloudflare's native Rate Limiting binding (the `rateLimit` middleware): zero KV
  *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone from both arrays.
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `bookshelf` counter — REMOVED by #160 item 1 for the same
- *   reason (rateLimit.ts:608); scope "bookshelf", ceiling 30 per 60s
- *   (routes/bookshelf.ts:68-73), which is what selects RATE_LIMIT_30_PER_MIN.
+ *   reason (`enforcePerUserRateLimit`); scope "bookshelf", ceiling 30 per 60s
+ *   (routes/bookshelf.ts, `getFamilyBookshelfRoute`), which is what selects RATE_LIMIT_30_PER_MIN.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `member:{userId}` (routes/bookshelf.ts:74), `family:{familyId}` (:80) and
- *   one `user:{memberId}` per member (:107) — the aggregation itself. Inherent
+ * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `member:{userId}` (routes/bookshelf.ts, `getMemberFamilyId`),
+ *   `family:{familyId}` (`getFamilyRecord`) and one `user:{memberId}` per
+ *   member (`getUserBooksRecord`) — the aggregation itself. Inherent
  *   to this endpoint, NOT part of #160; a change here is a real design change.
  * - `member:{otherMemberId}` — one pointer read per listed member OTHER than
- *   the caller (routes/bookshelf.ts:104, `filterActiveMembers`), added by #222:
+ *   the caller (routes/bookshelf.ts, `filterActiveMembers`), added by #222:
  *   a kicked member re-listed by a stale full-record write is listed but
  *   pointerless, and their shared books must not reach the rest of the family
  *   (Inv-4). An AUTHORISATION read, not waste — dropping it re-opens that
  *   leak (tests/integration/hollowMember.test.ts). It runs in `Promise.all`
  *   alongside the book reads, so it adds reads but no round trip; being the
  *   FIRST argument of that pair is what puts it before the `user:` reads in
- *   `getKeys()` below. The caller's own pointer (already read at :74) is NOT
+ *   `getKeys()` below. The caller's own pointer (already read by `getMemberFamilyId`) is NOT
  *   read a second time — a duplicate `member:{USER1}` here is a regression.
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
@@ -45,7 +46,7 @@
  * Worker produces. See tests/helpers/rateLimitBindings.ts.
  *
  * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit layers
- * short-circuit under it (rateLimit.ts:415, :601) ahead of the binding lookup,
+ * short-circuit under it (`rateLimit`, `enforcePerUserRateLimit`) ahead of the binding lookup,
  * which would hide the fixed cost pinned in `calls`. See the scope caveat at
  * the end of tests/helpers/kvOps.ts.
  */
@@ -152,16 +153,15 @@ describe("KV budget: GET /api/family/:id/bookshelf", () => {
     expect(res.status).toBe(200);
 
     expect(ops.getKeys()).toEqual([
-      // auth middleware, auth.ts:46
+      // auth middleware, `authMiddleware`
       kvKeys.authToken(token),
-      // handler, bookshelf.ts:74 / :80 — the caller's pointer and the record
+      // handler, `getMemberFamilyId` / `getFamilyRecord` — the caller's pointer and the record
       kvKeys.member(USER1),
       kvKeys.family(FAMILY_ID),
-      // handler, bookshelf.ts:104 — the OTHER member's pointer, for the
-      // active-member filter (#222). Only USER2: the caller's pointer was
-      // confirmed above and is not re-read.
+      // handler, `filterActiveMembers` — the OTHER member's pointer for the #222
+      // active-member filter; the caller's own pointer is not re-read.
       kvKeys.member(USER2),
-      // handler, bookshelf.ts:107 (one per member)
+      // handler, `getUserBooksRecord` (one per member)
       kvKeys.user(USER1),
       kvKeys.user(USER2),
     ]);
@@ -171,10 +171,8 @@ describe("KV budget: GET /api/family/:id/bookshelf", () => {
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
 
-    // The fixed per-request rate-limit cost, in the form it now takes: two
-    // binding calls, zero KV operations. The second key carries the
-    // AUTHENTICATED caller's id (Invariant 6), and the binding NAME encodes the
-    // ceiling routes/bookshelf.ts asked for.
+    // Fixed rate-limit cost: two binding calls, zero KV ops; the second keyed on the
+    // AUTHENTICATED caller (Inv-6), its NAME encoding the ceiling bookshelf.ts asked for.
     expect(calls).toEqual([
       { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
       {

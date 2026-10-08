@@ -29,6 +29,14 @@ type Json = any;
  * the other branches are exercised only here. The last two describe blocks
  * cover the tag lookup: the production param schemas map to their registry
  * copy, and an unregistered tag falls back to INVALID_PARAMS.
+ *
+ * Unparsable JSON body: documents the note in the hook's JSDoc — an unparsable
+ * JSON body never reaches `defaultHook`. Hono's validator throws
+ * HTTPException(400) before zod runs, so it lands on the app's onError instead
+ * of becoming an INVALID_FIELDS envelope. This synthetic app's onError is a
+ * stand-in; the PRODUCTION onError maps that throw to 400 INVALID_JSON via
+ * `clientErrorFor` (src/utils/errors.ts) — pinned in
+ * tests/integration/appOnError.test.ts.
  */
 
 // Distinctive value placed in every failing field: it must never come back.
@@ -345,12 +353,8 @@ describe("defaultHook", () => {
     },
   );
 
-  // Documents the note in the hook's JSDoc: an unparsable JSON body never
-  // reaches `defaultHook`. Hono's validator throws HTTPException(400) before
-  // zod runs, so it lands on the app's onError instead of becoming an
-  // INVALID_FIELDS envelope. This synthetic app's onError is a stand-in; the
-  // PRODUCTION onError maps that throw to 400 INVALID_JSON via `clientErrorFor`
-  // (src/utils/errors.ts) — pinned in tests/integration/appOnError.test.ts.
+  // An unparsable JSON body never reaches `defaultHook` (Hono throws HTTPException 400 first).
+  // See the header → "Unparsable JSON body".
   it("is bypassed by an unparsable JSON body (hono throws HTTPException 400)", async () => {
     const caveatApp = buildApp();
     const thrown: unknown[] = [];
@@ -373,13 +377,10 @@ describe("defaultHook", () => {
   });
 });
 
-// ===========================================================================
-// Tagged path params (#227)
-// ===========================================================================
+// --- Tagged path params (#227) ---
 
-// Contract copy — the registry in src/schemas/common.ts (not exported). These
-// are the pre-#227 handler responses; written out, not derived, so a reworded
-// registry turns this red instead of passing by construction.
+// Contract copy of the (unexported) src/schemas/common.ts registry = the pre-#227 handler responses;
+// written out, not derived, so a reworded registry turns this red instead of passing by construction.
 const FAMILY_ID_COPY = {
   code: "INVALID_FAMILY_ID",
   message: "Family ID format is invalid",
@@ -406,12 +407,8 @@ const VALID_USER_ID = "a".repeat(64);
 const VALID_UUID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const VALID_SHARE_TOKEN = "b".repeat(32);
 
-/**
- * Tags that are NOT registered codes. `constructor` / `__proto__` /
- * `toString` / `hasOwnProperty` / `valueOf` live on every object's prototype
- * chain, so a plain `in` or bracket lookup would "find" them; the rest belong
- * to other targets or differ from a registered code only by case / whitespace.
- */
+// Tags that are NOT registered codes: prototype-chain names a plain `in` / bracket lookup would
+// "find", plus other targets' tags and case / whitespace variants of registered codes.
 const UNREGISTERED_TAGS = [
   "constructor",
   "__proto__",

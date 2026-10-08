@@ -6,9 +6,7 @@ import { parseFamilyPrefs } from "../../src/routes/user";
 const OWNER = "a".repeat(64);
 const ref = (bookId: string, owner = OWNER) => `${owner}:${bookId}`;
 
-// ---------------------------------------------------------------------------
-// isValidFamilyPrefRef
-// ---------------------------------------------------------------------------
+// --- isValidFamilyPrefRef ---
 
 describe("isValidFamilyPrefRef", () => {
   it("accepts exactly 64 lowercase hex + ':' + non-empty bookId", () => {
@@ -42,9 +40,7 @@ describe("isValidFamilyPrefRef", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// parseFamilyPrefs
-// ---------------------------------------------------------------------------
+// --- parseFamilyPrefs ---
 
 describe("parseFamilyPrefs", () => {
   // --- Success cases: hidden ---
@@ -276,11 +272,8 @@ describe("parseFamilyPrefs", () => {
     }
   });
 
-  // --- Non-object body guard (PR #60 WARNING 1 regression) ---
-  //
-  // The param is typed `unknown`; a truthy primitive or array must NOT reach
-  // `kind in body` (which would throw a TypeError → 500). Instead the top guard
-  // returns a clean INVALID_PAYLOAD with a stable message.
+  // --- Non-object body guard (PR #60 WARNING 1 regression): a truthy primitive / array must not
+  // reach `kind in body` (TypeError → 500); the top guard returns INVALID_PAYLOAD, stable message.
   it.each<{ label: string; body: unknown }>([
     { label: "a number", body: 5 },
     { label: "a boolean", body: true },

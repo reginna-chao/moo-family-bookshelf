@@ -7,19 +7,28 @@ import { OWNER1, OWNER2, USER1 } from "../helpers/ids";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-// ---------------------------------------------------------------------------
-// Invariant #5 — Settings Persistence (.claude/rules/security-ux-invariants.md)
-//
-// "Personal sharing preferences (user:{userId}) are tied to the user, NOT the
-//  family. Unbinding from a family MUST NOT delete or reset the user's sharing
-//  settings. Re-joining a different family MUST automatically reflect the user's
-//  existing sharing preferences."
-//
-// The leave handler (worker/src/routes/family.ts → removeMember) deliberately
-// deletes ONLY `member:{id}` + the auth token, never `user:{id}`. No prior test
-// asserted this, so a regression that added `KV.delete(kvKeys.user(id))` on leave
-// would pass every existing test. These tests fail loudly if that happens.
-// ---------------------------------------------------------------------------
+/**
+ * Invariant #5 — Settings Persistence (.claude/rules/security-ux-invariants.md)
+ *
+ * "Personal sharing preferences (user:{userId}) are tied to the user, NOT the
+ *  family. Unbinding from a family MUST NOT delete or reset the user's sharing
+ *  settings. Re-joining a different family MUST automatically reflect the user's
+ *  existing sharing preferences."
+ *
+ * The leave handler (worker/src/routes/family.ts → removeMember) deliberately
+ * deletes ONLY `member:{id}` + the auth token, never `user:{id}`. No prior test
+ * asserted this, so a regression that added `KV.delete(kvKeys.user(id))` on leave
+ * would pass every existing test. These tests fail loudly if that happens.
+ *
+ * Book ids: B1..B3 are real-shaped Readmoo bookIds (12+ digits), because PUT
+ * /books drops any NEW bookId of another shape (`dropNewMalformedBookIds` in
+ * `src/routes/user.ts`).
+ *
+ * Standard fixture (`seedUserInFamilyAWithBooks`): OWNER1 owns family A, USER1
+ * joins it (non-owner, so leaving does not tear down the family), then USER1
+ * saves the mixed book list. It returns the join token so the caller can leave
+ * / read as USER1.
+ */
 
 let kv: KVNamespace;
 
@@ -38,10 +47,8 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/**
- * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
- * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
- */
+/** Real-shaped (12+ digit) bookIds — PUT /books drops new short ones.
+ *  See the header → "Book ids". */
 const B1 = "210439468000101";
 const B2 = "210439468000102";
 const B3 = "210439468000103";
@@ -94,11 +101,8 @@ async function createFamily(ownerId: string) {
   };
 }
 
-/**
- * Seed the standard fixture: OWNER1 owns family A, USER1 joins it (non-owner so
- * leaving does not tear down the family), then USER1 saves the mixed book list.
- * Returns the join token so the caller can leave / read as USER1.
- */
+/** OWNER1's family A + USER1 (non-owner) with the mixed books; returns USER1's token.
+ *  See the header → "Standard fixture". */
 async function seedUserInFamilyAWithBooks() {
   const { familyId: familyA } = await createFamily(OWNER1);
   const joinRes = await request("POST", `/api/family/${familyA}/join`, {

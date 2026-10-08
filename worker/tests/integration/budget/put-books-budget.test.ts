@@ -15,13 +15,13 @@
  *
  * PER-KEY CLASSIFICATION
  * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
- *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   by Cloudflare's native Rate Limiting binding (the `rateLimit` middleware): zero KV
  *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone from both arrays.
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - `ratelimit:user:put-books:{userId}:{hourBucket}` — 1 get
- *   (peekPerUserRateLimit, rateLimit.ts:509) + 1 put (chargePerUserRateLimit,
- *   rateLimit.ts:551); scope "put-books", ceiling 30 per 3600s
- *   (routes/user.ts:443-448). Note the HOURLY bucket index — it is
+ *   (peekPerUserRateLimit) + 1 put (chargePerUserRateLimit); scope
+ *   "put-books", ceiling 30 per 3600s (routes/user.ts, `putUserBooksRoute`).
+ *   Note the HOURLY bucket index — it is
  *   `floor(now / 3_600_000)`, not the per-minute index the other budgets use,
  *   and that is exactly why this pair SURVIVED #160 item 1: the platform
  *   accepts only a 10s or 60s period and this Worker configures 60
@@ -30,18 +30,19 @@
  *   "finish the job" by deleting it — see `bindingForWindow` in
  *   middleware/rateLimit.ts. The key stays on the AUTHENTICATED caller, never
  *   on a body/path target id (security-ux Invariant 6).
- * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `user:{userId}` (get routes/user.ts:495, put :531), `member:{userId}`
- *   (:496) and `publicshelves:{userId}` (:497) — three parallel reads plus the
+ * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `user:{userId}` (get `getUserBooksRecord`, put `putUserBooksRecord`),
+ *   `member:{userId}` (`getMemberFamilyId`) and `publicshelves:{userId}`
+ *   (`getPublicShelves`) — three parallel reads plus the
  *   record write. Real cost, NOT part of #160: the pointer read is what keeps a
  *   stale books save from resurrecting a revoked share token.
- * - `family:{familyId}` — resolveDisplayName (routes/user.ts:66, reached from
- *   :504) because the caller is in a family; the family record is authoritative
+ * - `family:{familyId}` — resolveDisplayName (routes/user.ts, reached from
+ *   `putUserBooksRoute`) because the caller is in a family; the family record is authoritative
  *   for displayName. Real cost, NOT part of #160. A caller with no
  *   `member:{userId}` entry does not pay it.
  *
  * NOT SEEDED, deliberately: no `publicshelves:{userId}` record and no legacy
- * `publicSharing` field, so `updateAllPublicSnapshots` (routes/user.ts:40-50)
+ * `publicSharing` field, so `updateAllPublicSnapshots` (routes/user.ts)
  * writes zero `public:{shareToken}` snapshots. This budget is therefore the
  * FLOOR of a books save; a user with N public shelves pays N extra writes.
  *
@@ -51,7 +52,7 @@
  * Worker produces. See tests/helpers/rateLimitBindings.ts.
  *
  * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit layers
- * short-circuit under it (rateLimit.ts:415, :601), which would hide the per-IP
+ * short-circuit under it (`rateLimit`, `enforcePerUserRateLimit`), which would hide the per-IP
  * binding call pinned in `calls` AND the hourly counter's get + put. See the
  * scope caveat at the end of tests/helpers/kvOps.ts.
  */
@@ -75,20 +76,17 @@ const PATH = `/api/user/${USER1}/books`;
 /** Unique per file so the per-IP counter cannot be shared with another suite. */
 const CALLER_IP = "10.0.0.5";
 const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
-/** The "put-books" scope uses a 3600s window (routes/user.ts:447). */
+/** The "put-books" scope uses a 3600s window (routes/user.ts, `putUserBooksRoute`). */
 const HOUR_BUCKET = Math.floor(PINNED_NOW / 3_600_000);
 
-/**
- * Real-shaped Readmoo bookIds (12+ digits). The measured save adds a NEW book,
- * and PUT drops a new bookId of any other shape (`dropNewMalformedBookIds`), so
- * a short id would silently measure a request that discards half its payload.
- */
+/** Real-shaped (12+ digit) bookIds: PUT drops a NEW short id (`dropNewMalformedBookIds`),
+ *  so a short one would measure a save that discards half its payload. */
 const STORED_BOOK_ID = "210439468000101";
 const NEW_BOOK_ID = "210439468000102";
 
 let kv: KVNamespace;
 
-/** Book shape accepted by parseBooks (routes/user.ts:306); "" coverUrl is valid. */
+/** Book shape accepted by parseBooks (routes/user.ts); "" coverUrl is valid. */
 function book(bookId: string, isShared: BoolFlag): BookEntry {
   return {
     bookId,
@@ -176,33 +174,31 @@ describe("KV budget: PUT /api/user/:id/books", () => {
     expect(res.status).toBe(200);
 
     expect(ops.getKeys()).toEqual([
-      // auth middleware, auth.ts:46
+      // auth middleware, `authMiddleware`
       kvKeys.authToken(token),
-      // HOURLY per-userId counter read, rateLimit.ts:509 — stays on KV by
-      // design: BINDING_PERIOD_SECONDS is 60, so no binding can serve an
-      // hour-long window.
+      // HOURLY per-userId counter read, `peekPerUserRateLimit` — on KV by design
+      // (BINDING_PERIOD_SECONDS is 60; no binding serves an hour).
       `ratelimit:user:put-books:${USER1}:${HOUR_BUCKET}`,
-      // handler, user.ts:494-498 — three parallel reads, recorded in array order
+      // handler, `putUserBooksRoute` — three parallel reads, recorded in array order
       kvKeys.user(USER1),
       kvKeys.member(USER1),
       kvKeys.publicShelves(USER1),
-      // resolveDisplayName, user.ts:66 — only paid by a caller in a family
+      // resolveDisplayName — only paid by a caller in a family
       kvKeys.family(FAMILY_ID),
     ]);
 
     expect(ops.putKeys()).toEqual([
-      // HOURLY per-userId counter write, rateLimit.ts:551 — same design note.
+      // HOURLY per-userId counter write, `chargePerUserRateLimit` — same design note.
       `ratelimit:user:put-books:${USER1}:${HOUR_BUCKET}`,
-      // handler, user.ts:531 — the rebuilt books record
+      // handler, `putUserBooksRecord` — the rebuilt books record
       kvKeys.user(USER1),
     ]);
 
     // No public shelves seeded, so no snapshot write and no snapshot delete.
     expect(ops.deleteKeys()).toEqual([]);
 
-    // The only rate-limit cost that moved off KV on this route: the per-IP
-    // tier. The `put-books` ceiling has no binding to move to, so exactly ONE
-    // call is expected here and the hourly pair stays in the arrays above.
+    // Only the per-IP tier moved off KV: exactly ONE binding call, while the
+    // hourly `put-books` pair stays in the arrays above.
     expect(calls).toEqual([
       { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
     ]);

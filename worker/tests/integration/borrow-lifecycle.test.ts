@@ -4,6 +4,22 @@ import { createMockKV } from "../helpers/mockKv";
 import { BorrowStatus } from "../../src/kv/schema";
 import { USER1, USER2 } from "../helpers/ids";
 
+/**
+ * Borrow Lifecycle: PENDING → LENT → RETURNED, end to end through the app.
+ *
+ * Cover URLs: `bookCoverUrl` is OPTIONAL, but every value SUPPLIED below sits
+ * on a Readmoo host on purpose: the create handler runs `isAllowedCoverUrl`
+ * (shared/src/config/readmoo.ts) on every non-empty value and refuses anything
+ * else with 400 INVALID_COVER_URL, which would never reach the lifecycle logic
+ * these cases are about. The cover-less variant gets its own case at the end of
+ * the lifecycle block; rejection cases live in `tests/unit/borrow.test.ts`.
+ *
+ * Cover-less book: the bookshelf aggregation sanitizes an off-whitelist cover
+ * to "" and the clients forward that verbatim, so an empty `bookCoverUrl` is
+ * exactly the payload a book with no renderable cover produces. It used to be
+ * answered 400 MISSING_FIELDS, making such books permanently unborrowable.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -52,16 +68,8 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Borrow Lifecycle: PENDING → LENT → RETURNED
-// ===========================================================================
-//
-// `bookCoverUrl` is OPTIONAL, but every value SUPPLIED below sits on a Readmoo
-// host on purpose: the create handler runs `isAllowedCoverUrl`
-// (shared/src/config/readmoo.ts) on every non-empty value and refuses anything
-// else with 400 INVALID_COVER_URL, which would never reach the lifecycle logic
-// these cases are about. The cover-less variant gets its own case at the end of
-// this block; rejection cases live in `tests/unit/borrow.test.ts`.
+// ===== Borrow Lifecycle: PENDING → LENT → RETURNED =====
+// Supplied covers are on Readmoo hosts. See the header → "Cover URLs".
 
 describe("Borrow Lifecycle Integration", () => {
   it("should complete full lifecycle: create family → add members → create borrow → approve → return", async () => {
@@ -364,10 +372,8 @@ describe("Borrow Lifecycle Integration", () => {
   });
 
   it("should run the full lifecycle for a cover-less book, keeping bookCoverUrl empty end to end", async () => {
-    // The bookshelf aggregation sanitizes an off-whitelist cover to "" and the
-    // clients forward that verbatim, so this is exactly the payload a book with
-    // no renderable cover produces. It used to be answered 400 MISSING_FIELDS,
-    // making such books permanently unborrowable.
+    // An empty cover is what a book with no renderable cover sends; it used to be
+    // refused 400 MISSING_FIELDS. See the header → "Cover-less book".
     const { familyId, authToken: token1 } = await createFamilyAndGetToken(
       USER1,
       "Alice",

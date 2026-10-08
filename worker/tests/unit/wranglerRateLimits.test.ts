@@ -49,7 +49,43 @@
  * array-of-tables headers, `key = "string"`, and
  * `simple = { limit = N, period = N }`. Anything else inside a ratelimit block
  * THROWS, so re-spelling the config in another valid TOML form fails loudly
- * here instead of quietly pinning nothing.
+ * here instead of quietly pinning nothing. `stripComment` drops a trailing
+ * `# ...` comment and is quote-aware only as far as this file needs: a `#`
+ * inside a string value is left alone, escaped quotes are not handled (none
+ * exist here, and one would surface as a throw from `stringField`, not as a
+ * silent misread). `rateLimitBindingBlocks` returns the blocks declared under
+ * one header path: a `[[ratelimits]]` block carries no `type` field — the
+ * header alone is the discriminator, so every block under it must have the
+ * binding shape.
+ *
+ * INDEPENDENT ORACLES. `EXPECTED_PERIOD_SECONDS` (60) is the only period
+ * Cloudflare's Rate Limiting binding accepts besides 10s, and the one
+ * `BINDING_PERIOD_SECONDS` in src/middleware/rateLimit.ts uses. Written as a
+ * literal rather than imported (it is not exported anyway): this file has to
+ * stay an independent oracle for what the deployed config must say, not a
+ * mirror of it. `EXPECTED_BINDING_NAMES` lists every name in the
+ * `RateLimitBindingName` union as an exhaustive `Record`, so a FIFTH member
+ * added in src/utils/env.ts is a compile error here until it is listed — and
+ * then a red test until wrangler.toml declares its block. The reverse drift (a
+ * toml block the union does not name) fails the same assertion from the other
+ * side. The routing case takes (max, window) from wrangler.toml, so it goes red
+ * as soon as the SHIPPED number stops being the one `BINDING_BY_LIMIT` maps to
+ * that name — the mismatch no runtime check can see.
+ *
+ * LEGACY SPELLING GUARD. `LEGACY_HEADERS` are the wrangler-3 header paths the
+ * bindings USED to live under, as `[[unsafe.bindings]]` +
+ * `type = "ratelimit"`, kept only so the guard can name what it forbids.
+ * wrangler 4 still ACCEPTS that spelling, so a stale block surviving next to the
+ * `[[ratelimits]]` ones would declare the same binding name twice and break the
+ * deploy — or, if only one set were reverted, leave dev and production on
+ * different spellings. `legacyRateLimitBlocks` is the selector the guard
+ * negates: every block under a legacy header that declares
+ * `type = "ratelimit"`. It is shared by the negative guard (over the real file)
+ * and its positive companion (over a fixture) so both pin the SAME predicate —
+ * a drift there is caught by the companion, not hidden by it. "Zero legacy
+ * blocks" is vacuous if the reader (headers, comment stripping, `type` field)
+ * drifts so it no longer recognises one; the companion's fixture proves the
+ * shared selector fires.
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -62,22 +98,12 @@ import { createMockKV } from "../helpers/mockKv";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WRANGLER_TOML_PATH = resolve(HERE, "../../wrangler.toml");
 
-/**
- * The only period Cloudflare's Rate Limiting binding accepts besides 10s, and
- * the one `BINDING_PERIOD_SECONDS` in src/middleware/rateLimit.ts uses. Written
- * as a literal rather than imported (it is not exported anyway): this file has
- * to stay an independent oracle for what the deployed config must say, not a
- * mirror of it.
- */
+// The binding period production uses, as a literal: an independent oracle, not a mirror.
+// See the header → "INDEPENDENT ORACLES".
 const EXPECTED_PERIOD_SECONDS = 60;
 
-/**
- * Every name in the `RateLimitBindingName` union, as an exhaustive `Record` so
- * a FIFTH member added in src/utils/env.ts is a compile error here until it is
- * listed — and then a red test until wrangler.toml declares its block. The
- * reverse drift (a toml block the union does not name) fails the same
- * assertion from the other side.
- */
+// Every `RateLimitBindingName`, as an exhaustive `Record` (a new member is a compile error here).
+// See the header → "INDEPENDENT ORACLES".
 const EXPECTED_BINDING_NAMES = Object.keys({
   RATE_LIMIT_60_PER_MIN: true,
   RATE_LIMIT_30_PER_MIN: true,
@@ -88,9 +114,7 @@ const EXPECTED_BINDING_NAMES = Object.keys({
 /** A binding's limit is encoded in its own name — the second oracle. */
 const NAME_RE = /^RATE_LIMIT_(\d+)_PER_MIN$/;
 
-// ===========================================================================
-// The minimal TOML reader (see PARSING above)
-// ===========================================================================
+// --- The minimal TOML reader (see PARSING above) ---
 
 /** One `[[array.of.tables]]` block, before any shape is required of it. */
 interface RawBlock {
@@ -111,13 +135,8 @@ interface RateLimitBindingBlock {
   line: number;
 }
 
-/**
- * Drop a trailing `# ...` comment.
- *
- * Quote-aware only as far as this file needs: a `#` inside a string value is
- * left alone, escaped quotes are not handled (none exist here, and one would
- * surface as a throw from {@link stringField}, not as a silent misread).
- */
+// Drops a trailing `# ...` comment; quote-aware only as far as this file needs.
+// See the header → "PARSING IS HAND-ROLLED".
 function stripComment(line: string): string {
   let inString = false;
   for (let i = 0; i < line.length; i++) {
@@ -187,11 +206,8 @@ function requireStringField(block: RawBlock, key: string): string {
 
 const ALL_BLOCKS = readArrayOfTables(readFileSync(WRANGLER_TOML_PATH, "utf8"));
 
-/**
- * The rate limiting binding blocks declared under one header path. A
- * `[[ratelimits]]` block carries no `type` field — the header alone is the
- * discriminator, so every block under it must have the binding shape.
- */
+// The binding blocks under one header path; a `[[ratelimits]]` block has no `type` field,
+// so the header alone discriminates and every block under it must have the binding shape.
 function rateLimitBindingBlocks(header: string): RateLimitBindingBlock[] {
   return ALL_BLOCKS.filter((block) => block.header === header).map((block) => {
     const simple = SIMPLE_RE.exec(block.fields.get("simple") ?? "");
@@ -213,11 +229,8 @@ function rateLimitBindingBlocks(header: string): RateLimitBindingBlock[] {
 const DEV_BINDINGS = rateLimitBindingBlocks("ratelimits");
 const PRODUCTION_BINDINGS = rateLimitBindingBlocks("env.production.ratelimits");
 
-/**
- * The wrangler-3 header paths the bindings USED to live under, as
- * `[[unsafe.bindings]]` + `type = "ratelimit"`. Kept only so the spelling guard
- * below can name what it forbids.
- */
+// The wrangler-3 header paths the bindings USED to live under, kept only so the
+// spelling guard can name what it forbids. See the header → "LEGACY SPELLING GUARD".
 const LEGACY_HEADERS = new Set([
   "unsafe.bindings",
   "env.production.unsafe.bindings",
@@ -230,12 +243,8 @@ interface LegacyRateLimitBlock {
   line: number;
 }
 
-/**
- * The selector the spelling guard negates: every block under a legacy header
- * that declares `type = "ratelimit"`. Shared by the negative guard (over the
- * real file) and its positive companion (over a fixture) so both pin the SAME
- * predicate — a drift here is caught by the companion, not hidden by it.
- */
+// The selector the spelling guard negates, shared with its positive companion.
+// See the header → "LEGACY SPELLING GUARD".
 function legacyRateLimitBlocks(blocks: RawBlock[]): LegacyRateLimitBlock[] {
   return blocks
     .filter(
@@ -255,9 +264,7 @@ const BINDING_SETS = [
   { label: "production ([env.production])", blocks: PRODUCTION_BINDINGS },
 ];
 
-// ===========================================================================
-// The assertions
-// ===========================================================================
+// --- The assertions ---
 
 describe.each(BINDING_SETS)(
   "wrangler.toml rate limiting bindings — $label",
@@ -296,9 +303,8 @@ describe.each(BINDING_SETS)(
         const stub: RateLimit = { limit: async () => ({ success: true }) };
         const env: Env = { KV: createMockKV(), ...{ [name]: stub } };
 
-        // (max, window) come from wrangler.toml, so this goes red as soon as
-        // the SHIPPED number stops being the one BINDING_BY_LIMIT maps to this
-        // name — the mismatch no runtime check can see.
+        // (max, window) come from wrangler.toml: red as soon as the SHIPPED number stops
+        // being the one BINDING_BY_LIMIT maps to this name — a mismatch no runtime check sees.
         expect(bindingForWindow(env, block!.limit, block!.period)).toBe(stub);
       },
     );
@@ -345,10 +351,8 @@ describe("wrangler.toml rate limiting bindings — dev vs production", () => {
 
 describe("wrangler.toml rate limiting bindings — spelling", () => {
   it("leaves no binding in the wrangler-3 [[unsafe.bindings]] form", () => {
-    // wrangler 4 still ACCEPTS `[[unsafe.bindings]]` + `type = "ratelimit"`, so
-    // a stale block surviving next to the `[[ratelimits]]` ones would declare
-    // the same binding name twice and break the deploy — or, if only one set
-    // were reverted, leave dev and production on different spellings.
+    // wrangler 4 still ACCEPTS the legacy spelling, so a stale block would double-declare a name.
+    // See the header → "LEGACY SPELLING GUARD".
     const legacy = legacyRateLimitBlocks(ALL_BLOCKS).map(
       (block) =>
         `[[${block.header}]] ${block.name} (wrangler.toml:${block.line})`,
@@ -358,9 +362,8 @@ describe("wrangler.toml rate limiting bindings — spelling", () => {
   });
 
   it("still recognises the wrangler-3 form when it is present", () => {
-    // Positive companion of the guard above. "Zero legacy blocks" is vacuous
-    // if the reader (headers, comment stripping, `type` field) drifts so it no
-    // longer recognises one — this fixture proves the shared selector fires.
+    // Positive companion: "zero legacy blocks" is vacuous if the reader stops recognising one;
+    // this fixture proves the shared selector fires.
     const fixture = `
 # 3/min — legacy spelling
 [[unsafe.bindings]]

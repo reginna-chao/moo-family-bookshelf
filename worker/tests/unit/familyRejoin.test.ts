@@ -10,6 +10,32 @@ import {
 } from "../../src/kv/schema";
 import { USER1, USER2, USER3 } from "../helpers/ids";
 
+/**
+ * `POST /api/family/:id/join` for a user the family already knows: the
+ * existing-member rejoin and the owner-removal (kicked) tombstone.
+ *
+ * Tombstone seeding (`seedKickedTombstone`): the tombstone is written straight
+ * into KV, through the production key builder and TTL constant. Seeding it
+ * directly rather than driving a real `DELETE /:id/member/:uid` is deliberate:
+ * these cases are about what JOIN does once the key exists, and one of them
+ * needs a state the DELETE cannot leave behind — a family record that still
+ * LISTS the removed member (a stale cross-colo read racing the removal). The
+ * write itself is covered end-to-end in tests/integration/kickedTombstone.test.ts.
+ *
+ * Kicked tombstone — the reconnect branch: the tombstone check sits AFTER the
+ * verification gate and BEFORE the existing-member branch, so it covers a
+ * reconnect as well as a first-time join. While the key lives, "still in the
+ * member list" can only mean a stale KV read of the family record racing the
+ * removal write, and denying is the fail-closed reading of the owner's newer
+ * intent. The 繁中 refusal copy is pinned over the real HTTP path in
+ * tests/integration/kickedTombstone.test.ts; these cases assert the code.
+ *
+ * Ordering — the verification gate runs BEFORE the tombstone gate: backend
+ * rules forbid adding a PRE-gate disclosure to this public endpoint. "This
+ * userId was recently removed from this family" is therefore revealed only to
+ * a caller who already passed the account's OWN verification gate.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -64,17 +90,8 @@ async function setPin(userId: string, pin: string) {
   expect(res.status).toBe(200);
 }
 
-/**
- * Write an owner-removal tombstone straight into KV, through the production key
- * builder and TTL constant.
- *
- * Seeding it directly rather than driving a real `DELETE /:id/member/:uid` is
- * deliberate: these cases are about what JOIN does once the key exists, and one
- * of them needs a state the DELETE cannot leave behind — a family record that
- * still LISTS the removed member (a stale cross-colo read racing the removal).
- * The write itself is covered end-to-end in
- * tests/integration/kickedTombstone.test.ts.
- */
+// Writes an owner-removal tombstone straight into KV (production key builder + TTL constant).
+// See the header → "Tombstone seeding (`seedKickedTombstone`)".
 async function seedKickedTombstone(
   familyId: string,
   userId: string,
@@ -93,9 +110,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Existing member rejoin — verification with no method still passes (SEC-1)
-// ===========================================================================
+// --- Existing member rejoin — verification with no method still passes (SEC-1) ---
 
 describe("POST /:id/join — existing member rejoin (no verification set)", () => {
   it("should allow existing member to rejoin WITHOUT verifySecret when method is none", async () => {
@@ -179,10 +194,8 @@ describe("POST /:id/join — existing member rejoin (no verification set)", () =
   });
 });
 
-// ===========================================================================
-// SEC-1: existing member rejoin MUST pass the verification gate too
+// --- SEC-1: existing member rejoin MUST pass the verification gate too ---
 // (verification was hoisted BEFORE the existing-member branch)
-// ===========================================================================
 
 describe("POST /:id/join — existing member rejoin verification enforcement (SEC-1)", () => {
   it("should REJECT existing member rejoin with PIN set but no verifySecret (403)", async () => {
@@ -275,9 +288,7 @@ describe("POST /:id/join — existing member rejoin verification enforcement (SE
   });
 });
 
-// ===========================================================================
-// New member join — verification and capacity still enforced
-// ===========================================================================
+// --- New member join — verification and capacity still enforced ---
 
 describe("POST /:id/join — new member verification enforcement", () => {
   it("should allow new member to join without verification when none is set", async () => {
@@ -321,18 +332,8 @@ describe("POST /:id/join — new member verification enforcement", () => {
   });
 });
 
-// ===========================================================================
-// Kicked tombstone — the reconnect branch
-//
-// The tombstone check sits AFTER the verification gate and BEFORE the
-// existing-member branch, so it covers a reconnect as well as a first-time
-// join. While the key lives, "still in the member list" can only mean a stale
-// KV read of the family record racing the removal write, and denying is the
-// fail-closed reading of the owner's newer intent.
-//
-// The 繁中 refusal copy is pinned over the real HTTP path in
-// tests/integration/kickedTombstone.test.ts; these cases assert the code.
-// ===========================================================================
+// --- Kicked tombstone — the reconnect branch ---
+// See the header → "Kicked tombstone — the reconnect branch".
 
 describe("POST /:id/join — kicked tombstone on the existing-member branch", () => {
   it("should refuse an existing-member reconnect while a tombstone exists", async () => {
@@ -342,9 +343,8 @@ describe("POST /:id/join — kicked tombstone on the existing-member branch", ()
     });
     expect(joinRes.status).toBe(200);
 
-    // The owner's removal landed elsewhere; this read still lists USER2 and
-    // `member:{USER2}` still points at the family — the widest possible stale
-    // state, in which the pre-fix code happily minted a fresh token.
+    // The removal landed elsewhere; this read still lists USER2 and `member:{USER2}` still points
+    // here — the widest stale state, in which the pre-fix code happily minted a fresh token.
     await seedKickedTombstone(familyId, USER2);
 
     const rejoinRes = await request("POST", `/api/family/${familyId}/join`, {
@@ -378,13 +378,8 @@ describe("POST /:id/join — kicked tombstone on the existing-member branch", ()
   });
 });
 
-// ===========================================================================
-// Ordering: the verification gate runs BEFORE the tombstone gate
-//
-// Backend rules forbid adding a PRE-gate disclosure to this public endpoint.
-// "This userId was recently removed from this family" is therefore revealed
-// only to a caller who already passed the account's OWN verification gate.
-// ===========================================================================
+// --- Ordering: the verification gate runs BEFORE the tombstone gate ---
+// See the header → "Ordering — the verification gate runs BEFORE the tombstone gate".
 
 describe("POST /:id/join — kicked tombstone vs verification gate ordering", () => {
   it("should ask for verification rather than disclose the removal when no secret is supplied", async () => {
@@ -414,9 +409,8 @@ describe("POST /:id/join — kicked tombstone vs verification gate ordering", ()
       verifySecret: CORRECT_PIN,
     });
 
-    // Proving ownership of the account does not undo the owner's removal — and
-    // the family has a free seat, so the refusal can only come from the
-    // tombstone, never from FAMILY_FULL.
+    // Proving account ownership does not undo the removal; the family has a free seat,
+    // so the refusal can only come from the tombstone, never from FAMILY_FULL.
     expect(res.status).toBe(403);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MEMBER_REMOVED");

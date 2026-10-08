@@ -30,6 +30,21 @@
  * DEV_MODE is on for every request: rate limiting is not what these cases are
  * about, and its counter writes would pollute the `watchKvOps` assertions (see
  * the scope caveat at the end of tests/helpers/kvOps.ts).
+ *
+ * Selective delete failure: `failDeletesMatching` makes KV `delete` reject only
+ * for keys matching `predicate` and behave normally otherwise. The selectivity
+ * is the point: the removal handler's OWN deletes (member key, auth token) must
+ * still land, or the 200 under test would be proving something else.
+ *
+ * Both removal callers: the owner kicking a member and that member walking out
+ * on their own reach the SAME settlement. Running the identical fixture
+ * (`departureFixture`: one index covering every branch of the settlement at
+ * once, in index order, BOB departing throughout) through both is what stops
+ * the purge from being wired to one branch only.
+ *
+ * Write ORDER is load-bearing: the index put lands FIRST, so no surviving
+ * entry is ever left without its pointer. The settlement runs before the
+ * family record is touched, so it owns the head of the trail.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -157,12 +172,8 @@ async function livePointerKeys(): Promise<string[]> {
   return keys.map((k) => k.name).filter((name) => name.startsWith("borrow:"));
 }
 
-/**
- * A KV whose `delete` rejects for keys matching `failing`, and behaves normally
- * otherwise. The selectivity is the point: the removal handler's OWN deletes
- * (member key, auth token) must still land, or the 200 under test would be
- * proving something else.
- */
+/** KV `delete` rejects only for keys matching `predicate`.
+ *  See the header → "Selective delete failure". */
 function failDeletesMatching(predicate: (key: string) => boolean): void {
   const realDelete = kv.delete.bind(kv);
   vi.spyOn(kv, "delete").mockImplementation(async (key: string) => {
@@ -179,14 +190,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// The full settlement, on the two routes that reach it
-// ===========================================================================
+// ===== The full settlement, on the two routes that reach it =====
 
-/**
- * One index covering every branch of the settlement at once, in index order.
- * BOB is the departing member throughout.
- */
+/** One index covering every branch of the settlement at once, in index order;
+ *  BOB is the departing member throughout. */
 function departureFixture() {
   const bobPending = makeRecord(0); // BOB borrows → cancelled, then purged
   const bobReturned = makeRecord(1, { status: BorrowStatus.RETURNED }); // purged
@@ -232,11 +239,8 @@ function departureFixture() {
   };
 }
 
-/**
- * Both removal callers reach the SAME settlement: the owner kicking a member,
- * and that member walking out on their own. Running the identical fixture
- * through both is what stops the purge from being wired to one branch only.
- */
+// Kick and self-leave reach the SAME settlement, so both run the identical fixture.
+// See the header → "Both removal callers".
 describe.each([
   { label: "the owner removes a member", caller: ALICE },
   { label: "a member leaves voluntarily", caller: BOB },
@@ -273,9 +277,8 @@ describe.each([
       ids(fixture.kept).map(kvKeys.borrow),
     );
 
-    // Write ORDER is load-bearing: the index put lands FIRST, so no surviving
-    // entry is ever left without its pointer. The settlement runs before the
-    // family record is touched, so it owns the head of the trail.
+    // Index put FIRST, then the purged pointers, at the head of the trail.
+    // See the header → "Write ORDER is load-bearing".
     expect(ops.writeTrail().slice(0, 1 + fixture.purged.length)).toEqual([
       `put ${kvKeys.borrowsByFamily(FAMILY_ID)}`,
       ...ids(fixture.purged).map((id) => `delete ${kvKeys.borrow(id)}`),
@@ -287,9 +290,7 @@ describe.each([
   });
 });
 
-// ===========================================================================
-// Dissolve: the index goes with the family
-// ===========================================================================
+// ===== Dissolve: the index goes with the family =====
 
 describe("DELETE /api/family/:id/member/:uid — sole-owner dissolve", () => {
   it.each<{ shape: IndexShape }>([{ shape: "new" }, { shape: "legacy" }])(
@@ -357,9 +358,7 @@ describe("DELETE /api/family/:id/member/:uid — sole-owner dissolve", () => {
   });
 });
 
-// ===========================================================================
-// Account deletion takes the same two exits
-// ===========================================================================
+// ===== Account deletion takes the same two exits =====
 
 describe("DELETE /api/user/:id", () => {
   it("deletes the whole index when the departing account was the family's only member", async () => {
@@ -418,9 +417,7 @@ describe("DELETE /api/user/:id", () => {
   });
 });
 
-// ===========================================================================
-// Fail-open: cleanup never turns a completed operation into an error
-// ===========================================================================
+// ===== Fail-open: cleanup never turns a completed operation into an error =====
 
 describe("Departure cleanup when KV deletes reject", () => {
   it("still removes the member when an evicted pointer's delete rejects, and logs it", async () => {

@@ -36,11 +36,8 @@ let kv: KVNamespace;
 /** What the app is handed as `env.KV` — `kv`, or a fault-injecting Proxy over it. */
 let envKv: KVNamespace;
 
-/**
- * Production 繁中 copy of the refusal (`routes/family.ts`). Asserted only on
- * real `app.request` responses, so a copy change fails here (test.md,
- * "User-visible copy needs a production-anchored assertion").
- */
+/** Production refusal copy (`routes/family.ts`), asserted only on real responses
+ *  (test.md, "User-visible copy needs a production-anchored assertion"). */
 const RECOVERY_NOT_MEMBER_MESSAGE = "你已經不是這個家庭的成員";
 
 const CORRECT_PIN = "123456";
@@ -48,9 +45,7 @@ const CORRECT_PIN = "123456";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// ----- Helpers -----
 
 function request(
   method: string,
@@ -177,11 +172,8 @@ async function expectAdmittedWithToken(res: Response): Promise<string> {
   return token;
 }
 
-/**
- * Make every `op` on `failingKey` throw ONCE; all else goes straight through
- * to `kv`. A Proxy, so a `watchKvOps(kv)` installed afterwards still sees
- * every write that landed.
- */
+/** Make every `op` on `failingKey` throw ONCE, all else passing through to `kv`; a
+ *  Proxy, so a later `watchKvOps(kv)` still sees every write that landed. */
 function failNextKvOp(op: "put" | "delete", failingKey: string) {
   vi.spyOn(console, "error").mockImplementation(() => {});
   let fired = false;
@@ -224,9 +216,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// ===========================================================================
-// Regression: the issue's own scenario
-// ===========================================================================
+// ===== Regression: the issue's own scenario =====
 
 describe("POST /api/family/:id/join recovery after a self-leave (#263 regression)", () => {
   it("should refuse the leaver's recovery join with 409 RECOVERY_NOT_MEMBER and write nothing", async () => {
@@ -314,9 +304,7 @@ describe("POST /api/family/:id/join recovery after a self-leave (#263 regression
   });
 });
 
-// ===========================================================================
-// The departures themselves are unchanged
-// ===========================================================================
+// ===== The departures themselves are unchanged =====
 
 describe("Departure write trails carry no recovery bookkeeping", () => {
   it("should write exactly the family put, then the revoke, on a self-leave", async () => {
@@ -375,9 +363,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
   });
 });
 
-// ===========================================================================
-// Owner kick: the tombstone gate answers first
-// ===========================================================================
+// ===== Owner kick: the tombstone gate answers first =====
 
 describe("POST /api/family/:id/join recovery after an owner kick", () => {
   it("should answer MEMBER_REMOVED while the tombstone lives, then RECOVERY_NOT_MEMBER, while a manual join is admitted", async () => {
@@ -407,9 +393,7 @@ describe("POST /api/family/:id/join recovery after an owner kick", () => {
   });
 });
 
-// ===========================================================================
-// Unlisted users in general
-// ===========================================================================
+// ===== Unlisted users in general =====
 
 describe("POST /api/family/:id/join recovery by an unlisted user", () => {
   it("should refuse a user who was never a member", async () => {
@@ -485,9 +469,7 @@ describe("POST /api/family/:id/join recovery by an unlisted user", () => {
   });
 });
 
-// ===========================================================================
-// Manual joins and listed reconnects are unaffected
-// ===========================================================================
+// ===== Manual joins and listed reconnects are unaffected =====
 
 describe("POST /api/family/:id/join manual joins and listed reconnects", () => {
   it.each([
@@ -530,9 +512,7 @@ describe("POST /api/family/:id/join manual joins and listed reconnects", () => {
   });
 });
 
-// ===========================================================================
-// Verification gate ordering
-// ===========================================================================
+// ===== Verification gate ordering =====
 
 describe("POST /api/family/:id/join recovery vs the verification gate", () => {
   it("should answer the verification error, identically for listed and unlisted users", async () => {
@@ -583,9 +563,7 @@ describe("POST /api/family/:id/join recovery vs the verification gate", () => {
   });
 });
 
-// ===========================================================================
-// `recovery` boundary validation
-// ===========================================================================
+// ===== `recovery` boundary validation =====
 
 describe("POST /api/family/:id/join recovery flag validation", () => {
   it.each([

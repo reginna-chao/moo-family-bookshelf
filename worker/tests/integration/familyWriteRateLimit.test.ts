@@ -18,32 +18,120 @@ import {
 import { FAMILY_WRITE_LIMIT } from "../../src/routes/family";
 import { VERIFY_WRITE_LIMIT } from "../../src/routes/verify";
 
-// ===========================================================================
-// Per-userId write ceiling on the family-domain write handlers
-//
-// The five AUTHENTICATED write handlers — DELETE /api/family/:id/member/:uid,
-// PUT /api/family/:id/member/:uid/displayName, PATCH /api/family/:id/member/:uid,
-// PUT /api/family/:id/transfer and PUT /api/family/:id/endpoint — share ONE
-// per-userId counter, so a single account cannot drain the Worker's daily KV
-// write quota by rotating source addresses. The public onboarding routes
-// (POST /api/family, POST /api/family/:id/join) and the read-only
-// GET /api/family/:id/members are deliberately NOT on this ceiling.
-//
-// Two properties this suite exists to pin, beyond the raw limit:
-// - the counter is charged to the AUTHENTICATED CALLER, never to the `:uid`
-//   path param — a counter keyed on someone else's id would be a victim-facing
-//   DoS lever (the defect that got join's standalone per-userId counter
-//   removed);
-// - every rejection that happens BEFORE the charge site (401 / 403 / malformed
-//   uid 400) leaves the account's budget untouched, and keeps answering with the
-//   same status once the window is spent, so a 429 never leaks the existence or
-//   state of an account to a caller who is not it.
-//
-// Everything here runs WITHOUT DEV_MODE, which the other family suites set:
-// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
-// fire. Setup that must not spend the live budget goes through the DEV_MODE
-// helper (`devRequest`) on purpose.
-// ===========================================================================
+/**
+ * Per-userId write ceiling on the family-domain write handlers.
+ *
+ * The AUTHENTICATED write handlers — DELETE /api/family/:id/member/:uid,
+ * PUT /api/family/:id/member/:uid/displayName, PATCH /api/family/:id/member/:uid,
+ * PUT /api/family/:id/transfer and PUT /api/family/:id/endpoint, driven here,
+ * plus the un-kick DELETE /api/family/:id/kicked/:uid, covered in
+ * clearKicked.test.ts (six `FAMILY_WRITE_LIMIT` call sites in
+ * `src/routes/family.ts`) — share ONE per-userId counter, so a single account
+ * cannot drain the Worker's daily KV write quota by rotating source addresses.
+ * The public onboarding routes (POST /api/family, POST /api/family/:id/join)
+ * and the read-only GET /api/family/:id/members are deliberately NOT on this
+ * ceiling.
+ *
+ * Two properties this suite exists to pin, beyond the raw limit:
+ * - the counter is charged to the AUTHENTICATED CALLER, never to the `:uid`
+ *   path param — a counter keyed on someone else's id would be a victim-facing
+ *   DoS lever (the defect that got join's standalone per-userId counter
+ *   removed);
+ * - every rejection that happens BEFORE the charge site (401 / 403 / malformed
+ *   uid 400) leaves the account's budget untouched, and keeps answering with the
+ *   same status once the window is spent, so a 429 never leaks the existence or
+ *   state of an account to a caller who is not it.
+ *
+ * Everything here runs WITHOUT DEV_MODE, which the other family suites set:
+ * DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
+ * fire. Setup that must not spend the live budget goes through the DEV_MODE
+ * helper (`devRequest`) on purpose.
+ *
+ * Ceiling constants: `FAMILY_WRITE_LIMIT` is the very options object the
+ * `enforcePerUserRateLimit` call sites in `src/routes/family.ts` spread,
+ * imported rather than copied — so the boundary cases (last write admitted,
+ * next one refused) track any change to the ceiling instead of silently
+ * drifting from it. The counter KEY is likewise always derived through the
+ * production key builder (`peekPerUserRateLimit`), and `counterPrefix` cuts a
+ * production-built key at the userId it embeds rather than spelling the shape
+ * out, so the key shape stays owned by `peekPerUserRateLimit` alone.
+ * `PINNED_NOW` is exactly mid-window, so the counter cannot roll over mid-test
+ * AND the back-off hint is deterministic; it is derived from the production
+ * window length rather than hard-coded, so a changed window keeps the pin exact.
+ *
+ * Live requests: `prodRequest` has no DEV_MODE, so both limiters run — and it
+ * carries the Rate Limiting bindings a production deploy carries, so the
+ * per-IP tier is counted by the platform rather than falling back to its KV
+ * counter. The ceiling under test is hourly, which has no binding at all and
+ * stays on KV by design; the bindings only keep the per-IP layer out of the KV
+ * assertions.
+ *
+ * Seeding: `seedFamily` writes OWNER + MEMBER + EXTRA with one free seat, so
+ * the "join is not on this ceiling" case has capacity. It goes straight to KV
+ * rather than through create/join, because those two routes are exactly the
+ * ones left OUT of the ceiling — driving setup through them would blur what the
+ * assertions prove. The record is typed as the production `FamilyRecord` and
+ * keyed through `kvKeys`, so a schema or key change breaks compilation instead
+ * of seeding a dead key.
+ *
+ * Endpoint tables: `WRITE_ENDPOINTS` holds the five driven write endpoints,
+ * each shaped so the OWNER's call is admitted against the seeded family;
+ * driving all of them from one table is what proves the limit is a property of
+ * the SCOPE, not of a single handler. Each entry's `callWithMalformedFamilyId`
+ * is built from the one path template `call` uses, so the two can never drift
+ * into exercising different handlers. `MALFORMED_UID_ENDPOINTS` covers the
+ * THREE handlers that carry a `:uid` path param (transfer and endpoint address
+ * no member at all); each entry is the normal call with only the target id
+ * replaced by a malformed one, so the sole difference under test is the format
+ * rejection. `renameSelf` is the one cheap, repeatable write used wherever the
+ * endpoint is arbitrary: renaming yourself needs no ownership and mutates
+ * nothing another case depends on.
+ *
+ * Raw limit: the one case that seeds NOTHING drives the counter entirely
+ * through the HTTP path, so the pre-spent-counter shortcut every other case
+ * uses cannot become a self-fulfilling prophecy. It stays well under the per-IP
+ * standard tier (60/min), which would otherwise refuse these first.
+ *
+ * Charge before the permission check: MEMBER is not the owner, so transfer
+ * refuses them — but the ceiling sits above that check on purpose: charging
+ * BEFORE the handler's body parse and permission checks is what stops a
+ * rejected-request loop from retrying for free. Moving the ceiling below them
+ * must fail here.
+ *
+ * The counter follows the CALLER, not the target: every one of these handlers
+ * takes a `:uid` (or a `newOwnerId`) that is some OTHER account. Charging the
+ * ceiling to that id instead of to the authenticated caller would hand an
+ * owner — or anyone who can reach the route — a lever to exhaust a member's
+ * own write budget. This is the exact defect that got the join endpoint's
+ * standalone per-userId counter removed.
+ *
+ * Rejections BEFORE the charge site: the charge sits after every zero-I/O
+ * guard, uniformly across the five handlers — the placement rule itself is
+ * documented at the first charge site (`src/routes/family.ts`, the DELETE
+ * member handler). Concretely, before a slot can be spent: all five reject a
+ * malformed `:id` (400 INVALID_FAMILY_ID) and an unauthenticated caller (401);
+ * the three that take a `:uid` — DELETE member, displayName, PATCH member
+ * settings — also reject a malformed target id (400 INVALID_USER_ID); and
+ * displayName additionally answers its pure self-only 403. A caller refused at
+ * any of those must be able neither to SPEND the account's write budget nor to
+ * OBSERVE it: a 429 where a 401 / 403 / 400 belongs would confirm the account
+ * exists and is active.
+ *
+ * Routes left OUT: onboarding (create / join) is public and already bounded by
+ * the sensitive per-IP tier plus the verification gate's charge-on-failure
+ * attempt ceiling; putting it on a per-userId write counter would let a spent
+ * window lock a user out of forming a family at all. The members list is a
+ * read.
+ *
+ * Cross-scope isolation: "family-write" is deliberately its own scope,
+ * distinct from the verify-domain write ceiling ("verify-write", same 30/hr
+ * shape in `routes/verify.ts`). Sharing one counter would let a burst of
+ * family administration lock the owner out of their PWA verification settings,
+ * and vice versa — both directions are covered. With the same userId and the
+ * same window length, the scope segment is the ONLY thing keeping the two
+ * counters apart — and neither prefix may be a prefix of the other, or a
+ * `startsWith` scan would sweep up both.
+ */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -65,13 +153,8 @@ const OWNER_TOKEN = tokenFor(OWNER_ID);
 const MEMBER_TOKEN = tokenFor(MEMBER_ID);
 const EXTRA_TOKEN = tokenFor(EXTRA_ID);
 
-/**
- * The very options object the five `enforcePerUserRateLimit` call sites in
- * `src/routes/family.ts` spread, imported rather than copied — so the boundary
- * cases below (last write admitted, next one refused) track any change to the
- * ceiling instead of silently drifting from it. The counter KEY is likewise
- * always derived through the production key builder (`peekPerUserRateLimit`).
- */
+/** The production ceiling options, imported rather than copied.
+ *  See the header → "Ceiling constants". */
 const {
   scope: WRITE_SCOPE,
   max: WRITE_MAX,
@@ -80,11 +163,8 @@ const {
 
 const WRITE_WINDOW_MS = WRITE_WINDOW_SECONDS * 1000;
 
-/**
- * Exactly mid-window, so the counter cannot roll over mid-test AND the back-off
- * hint is deterministic. Derived from the production window length rather than
- * hard-coded, so a changed window keeps the pin exact.
- */
+/** Exactly mid-window (no rollover, deterministic back-off), derived from the
+ *  production window. See the header → "Ceiling constants". */
 const PINNED_NOW =
   Math.floor(Date.parse("2026-01-01T00:00:00.000Z") / WRITE_WINDOW_MS) *
     WRITE_WINDOW_MS +
@@ -120,13 +200,8 @@ async function buildRequest(
   return app.request(path, init, env);
 }
 
-/**
- * Live request: no DEV_MODE, so both limiters run — and WITH the Rate Limiting
- * bindings a production deploy carries, so the per-IP tier is counted by the
- * platform rather than falling back to its KV counter. The ceiling under test
- * here is hourly, which has no binding at all and stays on KV by design; the
- * bindings only keep the per-IP layer out of the KV assertions below.
- */
+/** Live request: no DEV_MODE, production bindings injected (per-IP stays off KV).
+ *  See the header → "Live requests". */
 function prodRequest(
   method: string,
   path: string,
@@ -149,16 +224,8 @@ function devRequest(
 
 // --- Seeding -------------------------------------------------------------
 
-/**
- * The family every test starts from: OWNER + MEMBER + EXTRA, with one free seat
- * so the "join is not on this ceiling" case has capacity.
- *
- * Written straight to KV rather than through create/join, because those two
- * routes are exactly the ones this change leaves OUT of the ceiling — driving
- * setup through them would blur what the assertions prove. The record is typed
- * as the production `FamilyRecord` and keyed through `kvKeys`, so a schema or
- * key change breaks compilation here instead of seeding a dead key.
- */
+/** OWNER + MEMBER + EXTRA with one free seat, written straight to KV.
+ *  See the header → "Seeding". */
 async function seedFamily(): Promise<void> {
   const record: FamilyRecord = {
     familyId: FAMILY_ID,
@@ -204,11 +271,8 @@ const writeCounterKey = (userId: string) =>
 const verifyWriteCounterKey = (userId: string) =>
   counterKey(userId, VERIFY_WRITE_LIMIT);
 
-/**
- * The scope-carrying prefix of a counter key, cut at the userId it embeds —
- * derived from a production-built key rather than spelled out here, so the key
- * shape stays owned by `peekPerUserRateLimit` alone.
- */
+/** The scope-carrying prefix of a production-built counter key, cut at the userId
+ *  it embeds. See the header → "Ceiling constants". */
 function counterPrefix(key: string, userId: string): string {
   return key.slice(0, key.indexOf(userId));
 }
@@ -266,11 +330,8 @@ interface EndpointCall {
 }
 
 interface WriteEndpoint extends EndpointCall {
-  /**
-   * The same route and body, addressed with a MALFORMED `:id`. Built from the
-   * one path template `call` uses, so the two can never drift into exercising
-   * different handlers.
-   */
+  /** The same route and body with a MALFORMED `:id`, from `call`'s own path
+   *  template. See the header → "Endpoint tables". */
   callWithMalformedFamilyId: (token?: string) => Promise<Response>;
 }
 
@@ -294,12 +355,8 @@ function writeEndpoint(
   };
 }
 
-/**
- * The five authenticated write endpoints that share the ceiling, each shaped so
- * the OWNER's call is admitted against the seeded family. Driving all of them
- * from one table is what proves the limit is a property of the SCOPE, not of a
- * single handler.
- */
+/** The five driven write endpoints, each admitting the OWNER's call; one table
+ *  proves the limit belongs to the SCOPE. See the header → "Endpoint tables". */
 const WRITE_ENDPOINTS: WriteEndpoint[] = [
   writeEndpoint(
     "DELETE member",
@@ -332,12 +389,8 @@ const WRITE_ENDPOINTS: WriteEndpoint[] = [
   ),
 ];
 
-/**
- * The THREE handlers that carry a `:uid` path param — the two remaining write
- * endpoints (transfer, endpoint) address no member at all. Each entry is the
- * endpoint's normal call with only the target id replaced by a malformed one,
- * so the sole difference under test is the format rejection.
- */
+/** The THREE `:uid` handlers, each with only the target id malformed.
+ *  See the header → "Endpoint tables". */
 const MALFORMED_UID_ENDPOINTS: EndpointCall[] = [
   {
     label: "DELETE member",
@@ -368,11 +421,8 @@ const MALFORMED_UID_ENDPOINTS: EndpointCall[] = [
   },
 ];
 
-/**
- * One cheap, repeatable write — used wherever the endpoint is arbitrary.
- * Renaming yourself needs no ownership and mutates nothing another case
- * depends on.
- */
+/** One cheap, repeatable write (renaming yourself needs no ownership and mutates
+ *  nothing another case depends on). */
 function renameSelf(token?: string, name = "Renamed"): Promise<Response> {
   return prodRequest(
     "PUT",
@@ -443,10 +493,8 @@ describe("Family-domain per-userId write ceiling", () => {
   );
 
   it("admits exactly WRITE_MAX real requests in a window and refuses the next", async () => {
-    // The one case that seeds NOTHING: it drives the counter entirely through
-    // the HTTP path, so the pre-spent-counter shortcut every other case uses
-    // cannot become a self-fulfilling prophecy. Well under the per-IP standard
-    // tier (60/min), which would otherwise refuse these first.
+    // The one case that seeds NOTHING: the counter is driven purely over HTTP.
+    // See the header → "Raw limit".
     for (let i = 0; i < WRITE_MAX; i++) {
       const res = await renameSelf(OWNER_TOKEN, `Name ${i}`);
       expect(res.status).toBe(200);
@@ -528,10 +576,8 @@ describe("Family-domain per-userId write ceiling", () => {
   });
 
   it("charges the shared window even when the handler then rejects the request", async () => {
-    // MEMBER is not the owner, so transfer refuses them — but the ceiling sits
-    // above that check on purpose: charging BEFORE the handler's body parse and
-    // permission checks is what stops a rejected-request loop from retrying for
-    // free. Moving the ceiling below them must fail here.
+    // Transfer refuses MEMBER, but the ceiling sits above that check on purpose.
+    // See the header → "Charge before the permission check".
     const res = await prodRequest("PUT", `/api/family/${FAMILY_ID}/transfer`, {
       body: { newOwnerId: EXTRA_ID },
       token: MEMBER_TOKEN,
@@ -601,15 +647,8 @@ describe("Family-domain per-userId write ceiling", () => {
   });
 });
 
-// ===========================================================================
-// The counter follows the CALLER, not the target
-//
-// Every one of these handlers takes a `:uid` (or a `newOwnerId`) that is some
-// OTHER account. Charging the ceiling to that id instead of to the
-// authenticated caller would hand an owner — or anyone who can reach the
-// route — a lever to exhaust a member's own write budget. This is the exact
-// defect that got the join endpoint's standalone per-userId counter removed.
-// ===========================================================================
+// ===== The counter follows the CALLER, not the target =====
+// See the header → "The counter follows the CALLER, not the target".
 
 describe("Family-domain write ceiling — the caller pays, never the target", () => {
   it("spends only the owner's budget when the owner writes against a member's uid", async () => {
@@ -663,22 +702,8 @@ describe("Family-domain write ceiling — the caller pays, never the target", ()
   });
 });
 
-// ===========================================================================
-// Rejections that happen BEFORE the charge site
-//
-// The charge sits after every zero-I/O guard, uniformly across the five
-// handlers — the placement rule itself is documented at the first charge site
-// (`src/routes/family.ts`, the DELETE member handler). Concretely, before a
-// slot can be spent: all five reject a malformed `:id` (400 INVALID_FAMILY_ID)
-// and an unauthenticated caller (401); the three that take a `:uid` — DELETE
-// member, displayName, PATCH member settings — also reject a malformed target
-// id (400 INVALID_USER_ID); and displayName additionally answers its pure
-// self-only 403.
-//
-// A caller refused at any of those must be able neither to SPEND the account's
-// write budget nor to OBSERVE it: a 429 where a 401 / 403 / 400 belongs would
-// confirm the account exists and is active.
-// ===========================================================================
+// ===== Rejections that happen BEFORE the charge site =====
+// See the header → "Rejections BEFORE the charge site".
 
 describe("Family-domain write ceiling — rejections that must not charge", () => {
   it.each(WRITE_ENDPOINTS)(
@@ -787,14 +812,8 @@ describe("Family-domain write ceiling — rejections that must not charge", () =
   );
 });
 
-// ===========================================================================
-// Family routes deliberately left OUT of the ceiling
-//
-// Onboarding (create / join) is public and already bounded by the sensitive
-// per-IP tier plus the verification gate's charge-on-failure attempt ceiling;
-// putting it on a per-userId write counter would let a spent window lock a user
-// out of forming a family at all. The members list is a read.
-// ===========================================================================
+// ===== Family routes deliberately left OUT of the ceiling =====
+// See the header → "Routes left OUT".
 
 describe("Family-domain write ceiling — routes outside it", () => {
   it("serves GET members with the window spent and charges no counter", async () => {
@@ -840,15 +859,8 @@ describe("Family-domain write ceiling — routes outside it", () => {
   });
 });
 
-// ===========================================================================
-// Cross-scope isolation
-//
-// "family-write" is deliberately its own scope, distinct from the verify-domain
-// write ceiling ("verify-write", same 30/hr shape in `routes/verify.ts`).
-// Sharing one counter would let a burst of family administration lock the owner
-// out of their PWA verification settings, and vice versa — both directions are
-// covered below.
-// ===========================================================================
+// ===== Cross-scope isolation =====
+// See the header → "Cross-scope isolation".
 
 describe("Family-domain write ceiling — isolation from the verify-write ceiling", () => {
   it("keys the two ceilings under prefixes that cannot alias each other", async () => {
@@ -858,9 +870,8 @@ describe("Family-domain write ceiling — isolation from the verify-write ceilin
     const verifyKey = await verifyWriteCounterKey(OWNER_ID);
     expect(familyKey).not.toBe(verifyKey);
 
-    // Same userId and same window length, so the scope segment is the ONLY
-    // thing keeping the two counters apart — and neither prefix may be a prefix
-    // of the other, or a `startsWith` scan would sweep up both.
+    // Only the scope segment separates them; neither prefix may prefix the other.
+    // See the header → "Cross-scope isolation".
     const familyPrefix = counterPrefix(familyKey, OWNER_ID);
     const verifyPrefix = counterPrefix(verifyKey, OWNER_ID);
     expect(familyPrefix.startsWith(verifyPrefix)).toBe(false);

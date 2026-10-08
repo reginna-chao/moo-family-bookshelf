@@ -49,19 +49,14 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// DELETE /api/user/:id — delete user account
-// ===========================================================================
+// --- DELETE /api/user/:id — delete user account ---
 
 describe("DELETE /api/user/:id", () => {
   it("should successfully delete account when user is not in any family", async () => {
     await createFamilyAndGetToken(USER1);
 
-    // Leave family first by removing member key (simulate no family)
-    // Instead, create a user with books but no family membership
-    // We need a token, so create family, then remove from family manually
-    // Simpler: use user1 who owns a family — but owner can't delete.
-    // Let's create a second user who joins then leaves, keeping their token.
+    // Goal: a user with a token and books but no family. First attempt: join then leave
+    // (abandoned below — the KV is reset because leaving deletes the token).
 
     // Create family with owner, join as user2, then user2 leaves family
     const { familyId } = await createFamilyAndGetToken(OWNER1);
@@ -83,10 +78,8 @@ describe("DELETE /api/user/:id", () => {
       user2Token,
     );
 
-    // Now user2 has no family but has books and auth token
-    // Re-generate token since leaving family deletes it
-    // Actually, leaving family deletes the auth token. We need a fresh token.
-    // Let's use a different approach: create user2's own family, transfer ownership, leave, then delete.
+    // User2 now has no family and books, but leaving the family deleted the auth token.
+    // Second attempt: user2's own family, then transfer ownership and leave.
 
     // Simpler approach: directly set up KV state
     kv = createMockKV();
@@ -100,10 +93,8 @@ describe("DELETE /api/user/:id", () => {
       freshToken,
     );
 
-    // Transfer ownership is not possible with single member. Let's just test with a user
-    // who was never in a family — but they need an auth token.
-    // The token comes from creating/joining a family. So let's create, add a second member,
-    // transfer ownership, leave, then create fresh token.
+    // Ownership cannot be transferred with a single member, and a token only comes from
+    // create / join — so a never-in-a-family user with a token is seeded into KV below.
 
     // Actually the simplest: create family as owner, add member, transfer, then leave.
     // But we can also just directly manipulate KV for the "no family" case.

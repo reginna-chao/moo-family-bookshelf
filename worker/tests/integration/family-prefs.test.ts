@@ -17,6 +17,58 @@ import { generateAuthToken } from "../../src/middleware/auth";
 import { maxBodySizeFor } from "../../src/utils/bodyLimit";
 import { USER1, USER2 } from "../helpers/ids";
 
+/**
+ * PUT /api/user/:id/family-prefs — validation, carry-over, the lazy URL
+ * cleanups and the hourly `family-prefs` ceiling.
+ *
+ * Max entries: MAX_FAMILY_PREF_ENTRIES (3000) is sized so that an over-limit
+ * unique set (MAX + 1 refs, ~77 bytes each ≈ 231KB) still fits under this
+ * route's 256KB body-size limit (the per-route default — only the books PUT
+ * gets more). The request therefore reaches the handler and trips its own
+ * over-max → 400 INVALID_PAYLOAD branch (rather than being pre-empted by the
+ * 413 body guard), keeping that branch reachable over real HTTP.
+ *
+ * Carry-over covers: both seeded covers must be on the Readmoo cover-host
+ * whitelist — this handler scrubs every carried-over coverUrl (see the
+ * lazy-cleanup suite), so an arbitrary host would test blanking, not
+ * byte-identical carry-over.
+ *
+ * coverUrl lazy cleanup (P0 privacy): a book cover is fetched by every family
+ * member and every public-shelf visitor, so an attacker-chosen cover host acts
+ * as a tracking beacon. The books write paths block new ones at the boundary;
+ * this handler additionally SCRUBS records written before that guard existed.
+ * The cleanup is opportunistic on purpose: it rides the record write this
+ * handler performs anyway and never forces one — in particular it publishes
+ * no snapshot, so a stale snapshot stays poisoned until the owner's next books
+ * write. The record write is the handler's ONLY mutation; it never becomes a
+ * snapshot write of its own. DEV_MODE elides the rate-limit counter put, so
+ * the write trail is the handler's own writes (see the scope caveat in
+ * `helpers/kvOps.ts`). Validation runs before the record read/rebuild, so a
+ * refused request performs no handler write at all — the cleanup rides an
+ * accepted save only.
+ *
+ * readmooUrl lazy cleanup (P0 privacy): twin of the coverUrl cleanup for the
+ * other attacker-controlled URL field. `readmooUrl` is rendered as a clickable
+ * `<a href>`, so a value written before the whitelist existed is a phishing /
+ * arbitrary-redirect lure sitting under a legitimate book title. This handler
+ * rebuilds the books array anyway, so it scrubs while it is there — and,
+ * exactly as with covers, it must touch nothing else on the record.
+ *
+ * Legacy fixtures: each cleanup suite's `seedLegacyRecord` seeds `user:{USER1}`
+ * DIRECTLY (the file's `seedUser` writes to KV without going through a
+ * handler). A poisoned URL can only be in KV because it was written BEFORE the
+ * whitelist existed — the books write paths sanitize on the way in, so they
+ * cannot produce this fixture. Likewise the poisoned public snapshot (a
+ * migrated owner with one live shelf whose snapshot was published BEFORE the
+ * whitelist existed) is seeded raw rather than through the production writer
+ * (`writePublicSnapshot`), which sanitizes covers and so cannot mint one.
+ *
+ * Rate-limit requests: no DEV_MODE, so the per-user rate limit is enforced.
+ * The Rate Limiting bindings a production deploy carries are injected too, so
+ * the per-IP tier is the platform's business and cannot answer 429 in place of
+ * the hourly `family-prefs` ceiling the suite is about.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -108,9 +160,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — auth & validation
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — auth & validation =====
 
 describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   it("returns 401 UNAUTHORIZED when no auth token is provided", async () => {
@@ -205,12 +255,8 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1);
 
-    // MAX_FAMILY_PREF_ENTRIES (3000) is sized so that an over-limit unique set
-    // (MAX + 1 refs, ~77 bytes each ≈ 231KB) still fits under this route's
-    // 256KB body-size limit (the per-route default — only the books PUT gets
-    // more). The request therefore reaches the handler and trips its own
-    // over-max → 400 INVALID_PAYLOAD branch (rather than being pre-empted by
-    // the 413 body guard), keeping that branch reachable over real HTTP.
+    // MAX + 1 refs (~231KB) still fit the 256KB limit, so the handler's own 400 is
+    // reached instead of the 413 guard. See the header → "Max entries".
     const hidden = Array.from({ length: MAX_FAMILY_PREF_ENTRIES + 1 }, (_, i) =>
       ref(`book-${i}`),
     );
@@ -247,9 +293,7 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — behavior (write / read-back / overwrite)
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — behavior (write / read-back / overwrite) =====
 
 describe("PUT /api/user/:id/family-prefs — behavior", () => {
   it("writes familyShelfPrefs and GET /books reads back the deduped set", async () => {
@@ -343,9 +387,8 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
   it("preserves books, displayName, and lastUpdated (byte-identical) untouched", async () => {
     const { authToken } = await createFamilyAndGetToken(USER1);
     const KNOWN_LAST_UPDATED = "2021-06-15T08:30:00.000Z";
-    // Both covers must be on the Readmoo cover-host whitelist: this handler
-    // scrubs every carried-over coverUrl (see the lazy-cleanup suite below), so
-    // an arbitrary host here would test blanking, not byte-identical carry-over.
+    // Whitelisted covers, or this would test blanking, not carry-over.
+    // See the header → "Carry-over covers".
     const seededBooks = [
       {
         bookId: "b1",
@@ -398,9 +441,7 @@ describe("PUT /api/user/:id/family-prefs — behavior", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — favorites & merge semantics (Wave F)
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — favorites & merge semantics (Wave F) =====
 
 describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () => {
   it("response shape is { data: { ok, hidden, favorites } } with both lists", async () => {
@@ -589,17 +630,8 @@ describe("PUT /api/user/:id/family-prefs — favorites & merge semantics", () =>
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — coverUrl lazy cleanup (P0 privacy)
-//
-// A book cover is fetched by every family member and every public-shelf
-// visitor, so an attacker-chosen cover host acts as a tracking beacon. The
-// books write paths block new ones at the boundary; this handler additionally
-// SCRUBS records written before that guard existed. The cleanup is
-// opportunistic on purpose: it rides the record write this handler performs
-// anyway and never forces one — in particular it publishes no snapshot, so a
-// stale snapshot stays poisoned until the owner's next books write.
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — coverUrl lazy cleanup (P0 privacy) =====
+// See the header → "coverUrl lazy cleanup".
 
 describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
   const POISONED_COVER = "https://evil.example.com/beacon.gif";
@@ -633,12 +665,8 @@ describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
     ];
   }
 
-  /**
-   * Seed `user:{USER1}` DIRECTLY (the file's `seedUser` writes to KV without
-   * going through a handler). A poisoned coverUrl can only be in KV because it
-   * was written BEFORE the whitelist existed — the books write paths sanitize
-   * on the way in, so they cannot produce this fixture.
-   */
+  /** Seed a pre-whitelist poisoned `user:{USER1}` DIRECTLY, bypassing every handler.
+   *  See the header → "Legacy fixtures". */
   async function seedLegacyRecord(): Promise<string> {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1, { books: legacyBooks() });
@@ -704,10 +732,8 @@ describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
 
   it("writes only the user record — the cleanup publishes no snapshot", async () => {
     const authToken = await seedLegacyRecord();
-    // A migrated owner with one live shelf whose snapshot was published BEFORE
-    // the whitelist existed. Seeded raw rather than through the production
-    // writer (`writePublicSnapshot`), which sanitizes covers and so cannot mint
-    // a poisoned snapshot.
+    // A pre-whitelist poisoned snapshot, seeded raw (`writePublicSnapshot` can't mint
+    // one). See the header → "Legacy fixtures".
     const pointer: PublicShelvesRecord = {
       shelves: [
         {
@@ -736,10 +762,8 @@ describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
     const res = await savePrefs(authToken);
     expect(res.status).toBe(200);
 
-    // The record write is the handler's ONLY mutation: the cleanup rides a write
-    // that was going to happen anyway and must never become a snapshot write of
-    // its own. (DEV_MODE elides the rate-limit counter put, so this trail is the
-    // handler's own writes — see the scope caveat in `helpers/kvOps.ts`.)
+    // The record write is the handler's ONLY mutation — never a snapshot write.
+    // See the header → "coverUrl lazy cleanup".
     expect(ops.writeTrail()).toEqual([`put ${kvKeys.user(USER1)}`]);
     // No pointer read either — this path publishes nothing, so it needs no
     // shelf list (`.claude/rules/backend.md`, single-writer public-shelf domain).
@@ -756,25 +780,16 @@ describe("PUT /api/user/:id/family-prefs — coverUrl lazy cleanup", () => {
     const res = await savePrefs(authToken, { hidden: ["not-a-valid-ref"] });
     expect(res.status).toBe(400);
 
-    // Validation runs before the record read/rebuild, so a refused request
-    // performs no handler write at all — the cleanup rides an accepted save
-    // only. (Rate-limit counter puts are elided by DEV_MODE.)
+    // A refused request writes nothing: the cleanup rides an accepted save only.
+    // See the header → "coverUrl lazy cleanup".
     expect(ops.putKeys()).toEqual([]);
     const record = await storedRecord();
     expect(record?.books[0].coverUrl).toBe(POISONED_COVER);
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup (P0 privacy)
-//
-// Twin of the coverUrl cleanup above for the other attacker-controlled URL
-// field. `readmooUrl` is rendered as a clickable `<a href>`, so a value written
-// before the whitelist existed is a phishing / arbitrary-redirect lure sitting
-// under a legitimate book title. This handler rebuilds the books array anyway,
-// so it scrubs while it is there — and, exactly as with covers, it must touch
-// nothing else on the record.
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup (P0 privacy) =====
+// See the header → "readmooUrl lazy cleanup".
 
 describe("PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup", () => {
   const PHISHING_HOST = "phish.example.com";
@@ -806,11 +821,8 @@ describe("PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup", () => {
     ];
   }
 
-  /**
-   * Seed `user:{USER1}` DIRECTLY. A poisoned readmooUrl can only be in KV
-   * because it was written BEFORE the whitelist existed — the books write paths
-   * sanitize on the way in, so they cannot produce this fixture.
-   */
+  /** Seed a pre-whitelist poisoned `user:{USER1}` DIRECTLY, bypassing every handler.
+   *  See the header → "Legacy fixtures". */
   async function seedLegacyRecord(): Promise<string> {
     const { authToken } = await createFamilyAndGetToken(USER1);
     await seedUser(USER1, {
@@ -891,18 +903,15 @@ describe("PUT /api/user/:id/family-prefs — readmooUrl lazy cleanup", () => {
     const res = await savePrefs(authToken, { hidden: ["not-a-valid-ref"] });
     expect(res.status).toBe(400);
 
-    // Validation runs before the record read/rebuild, so a refused request
-    // performs no handler write at all — the cleanup rides an accepted save
-    // only. (Rate-limit counter puts are elided by DEV_MODE.)
+    // A refused request writes nothing: the cleanup rides an accepted save only.
+    // See the header → "coverUrl lazy cleanup".
     expect(ops.putKeys()).toEqual([]);
     const record = await storedRecord();
     expect(record?.books[0].readmooUrl).toBe(POISONED_LINK);
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/family-prefs — per-user rate limit (non-dev mode)
-// ===========================================================================
+// ===== PUT /api/user/:id/family-prefs — per-user rate limit (non-dev mode) =====
 
 describe("PUT /:id/family-prefs per-user rate limit", () => {
   const TEST_USER = "f".repeat(64);
@@ -921,10 +930,8 @@ describe("PUT /:id/family-prefs per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    // No DEV_MODE → per-user rate limit is enforced. The Rate Limiting
-    // bindings a production deploy carries are injected too, so the per-IP
-    // tier is the platform's business and cannot answer 429 in place of the
-    // hourly `family-prefs` ceiling this suite is about.
+    // No DEV_MODE, production bindings injected: only `family-prefs` can 429.
+    // See the header → "Rate-limit requests".
     return app.request(path, init, {
       KV: kv,
       ...createRateLimitBindings().bindings,

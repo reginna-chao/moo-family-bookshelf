@@ -22,6 +22,24 @@
  * The mock is `createMockKV()`, so the KV TTL floor stays enforced: an accessor
  * that computed a sub-60s `expirationTtl` would throw here rather than only
  * against real KV.
+ *
+ * One operation per accessor (`opCount`): the accessor layer's whole
+ * justification is that it is THIN — one function, one operation — so an
+ * accessor that grew a read-before-write (or a second read for validation)
+ * fails here, where the cost is attributable, instead of showing up as a
+ * diffuse `kv_ops` rise spread across every route budget test.
+ *
+ * Stored-value rows: the `member:` pointer is a PLAIN STRING, not JSON — the
+ * value is read back with a bare `get` and compared to a familyId directly, so
+ * a stray JSON.stringify would store `"abcd-1234"` (quotes included) and every
+ * membership comparison would silently stop matching. The `borrow:` row stores
+ * a POINTER, not the whole request: the family index owns the record, and
+ * storing a full BorrowRequest there would resurrect the per-entry read cost
+ * #162 removed.
+ *
+ * TTL rows: `undefined` = the accessor passed no TTL at all. Persistent keys
+ * must stay persistent (Invariant 5 for `user:`), and self-expiring keys must
+ * keep the TTL that is their ONLY expiry mechanism — nothing sweeps them.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
@@ -84,9 +102,7 @@ const SHARE_TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
 const QR_TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const REQUEST_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
-// ---------------------------------------------------------------------------
-// Fixtures — minimal but SHAPE-VALID records, one per key family.
-// ---------------------------------------------------------------------------
+// --- Fixtures — minimal but SHAPE-VALID records, one per key family. ---
 
 const FAMILY_RECORD: FamilyRecord = {
   familyId: FAMILY_ID,
@@ -150,13 +166,8 @@ const KICKED_RECORD: KickedRecord = {
   removedBy: OWNER1,
 };
 
-/**
- * Total KV operations observed. The accessor layer's whole justification is
- * that it is THIN — one function, one operation — so an accessor that grew a
- * read-before-write (or a second read for validation) fails here, where the
- * cost is attributable, instead of showing up as a diffuse `kv_ops` rise
- * spread across every route budget test.
- */
+// Total KV operations observed — every accessor must cost exactly one.
+// See the header → "One operation per accessor (`opCount`)".
 function opCount(log: KvOpLog): number {
   return log.getKeys().length + log.putKeys().length + log.deleteKeys().length;
 }
@@ -165,9 +176,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// Reads that parse JSON
-// ===========================================================================
+// --- Reads that parse JSON ---
 
 interface JsonReadCase {
   /** Accessor name, for the test title. */
@@ -248,9 +257,7 @@ describe("KV data access — JSON reads", () => {
   );
 });
 
-// ===========================================================================
-// The reads that are deliberately NOT JSON
-// ===========================================================================
+// --- The reads that are deliberately NOT JSON ---
 
 describe("getMemberFamilyId", () => {
   it("reads member:{userId} once and returns the plain familyId string", async () => {
@@ -289,9 +296,8 @@ describe("hasKickedTombstone", () => {
   });
 
   it("still reports true for a corrupted (unparseable) tombstone value", async () => {
-    // The join gate never parses this value, so corruption must NOT reopen the
-    // door — a `"json"` read here would throw or yield null and let the removed
-    // member back in.
+    // The join gate never parses this value, so corruption must NOT reopen the door — a `"json"`
+    // read here would throw or yield null and let the removed member back in.
     const kv = createMockKV();
     await kv.put(kvKeys.kicked(FAMILY_ID, USER1), "{not json");
 
@@ -317,9 +323,7 @@ describe("hasKickedTombstone", () => {
   });
 });
 
-// ===========================================================================
-// Writes — exact key, exact bytes, exact TTL
-// ===========================================================================
+// --- Writes — exact key, exact bytes, exact TTL ---
 
 interface PutCase {
   label: string;
@@ -342,10 +346,8 @@ const PUT_CASES: PutCase[] = [
   {
     label: "putMemberFamilyId",
     key: kvKeys.member(USER1),
-    // PLAIN STRING, not JSON: the value is read back with a bare `get` and
-    // compared to a familyId directly. A stray JSON.stringify would store
-    // `"abcd-1234"` (quotes included) and every membership comparison would
-    // silently stop matching.
+    // PLAIN STRING, not JSON (compared to a familyId directly).
+    // See the header → "Stored-value rows".
     expected: FAMILY_ID,
     ttl: undefined,
     write: (kv) => putMemberFamilyId(kv, USER1, FAMILY_ID),
@@ -396,8 +398,7 @@ const PUT_CASES: PutCase[] = [
     label: "writeBorrowPointer",
     key: kvKeys.borrow(REQUEST_ID),
     // A POINTER, not the whole request: the family index owns the record.
-    // Storing a full BorrowRequest here would resurrect the per-entry read
-    // cost #162 removed.
+    // See the header → "Stored-value rows".
     expected: JSON.stringify({ familyId: FAMILY_ID }),
     ttl: undefined,
     write: (kv) => writeBorrowPointer(kv, REQUEST_ID, FAMILY_ID),
@@ -425,17 +426,14 @@ describe("KV data access — writes", () => {
       const kv = createMockKV();
       await write(kv);
 
-      // `undefined` = the accessor passed no TTL at all. Persistent keys must
-      // stay persistent (Invariant 5 for `user:`), and self-expiring keys must
-      // keep the TTL that is their ONLY expiry mechanism — nothing sweeps them.
+      // `undefined` = the accessor passed no TTL at all.
+      // See the header → "TTL rows".
       expect(getPutTtl(kv, key)).toBe(ttl);
     },
   );
 });
 
-// ===========================================================================
-// Deletes
-// ===========================================================================
+// --- Deletes ---
 
 interface DeleteCase {
   label: string;
@@ -512,9 +510,7 @@ describe("KV data access — deletes", () => {
   );
 });
 
-// ===========================================================================
-// Round trips across an accessor pair
-// ===========================================================================
+// --- Round trips across an accessor pair ---
 
 describe("borrow pointer round trip", () => {
   it("writeBorrowPointer stores a pointer readBorrowPointer resolves", async () => {

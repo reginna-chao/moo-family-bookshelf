@@ -16,6 +16,17 @@
  *
  * Every refused case also pins "no KV write" via `watchKvOps`: a refusal must
  * leave the index byte-identical, not merely answer 403.
+ *
+ * LENT fixture: `seedLentRecord` has Alice own a family, Bob join, Bob borrow
+ * Alice's book and Alice approve it, so the record is LENT — the state whose
+ * only exit is the terminal RETURNED that #159 is about. When Bob then leaves
+ * by himself, `settleDepartingBorrower` cancels his PENDING and purges his
+ * TERMINAL records, but a LENT one stays — the book may still be out — so the
+ * record is still there to be attacked.
+ *
+ * Orphan setup: a dissolve whose fail-open `deleteBorrowIndex` did not land is
+ * simulated by deleting only the family record, leaving the index (and
+ * pointer). Setup-only surgery; every assertion goes through HTTP.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -102,10 +113,8 @@ function patchStatus(requestId: string, status: BorrowStatus, token: string) {
   return request("PATCH", `/api/borrow/${requestId}`, { status }, token);
 }
 
-/**
- * Resolve a record the way production does: pointer → family index. Returns
- * `null` when either half is gone.
- */
+/** Resolve a record the way production does: pointer → family index; `null` when
+ *  either half is gone. */
 async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
   const pointer = await kv.get<BorrowPointer>(kvKeys.borrow(requestId), "json");
   if (!pointer?.familyId) return null;
@@ -116,11 +125,8 @@ async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
   return index?.find((r) => r.requestId === requestId) ?? null;
 }
 
-/**
- * Alice owns a family, Bob joins, Bob borrows Alice's book and Alice approves
- * it, so the record is LENT — the state whose only exit is the terminal
- * RETURNED that #159 is about.
- */
+/** Alice's family, Bob borrows her book and she approves: a LENT record.
+ *  See the header → "LENT fixture". */
 async function seedLentRecord() {
   const { familyId, authToken: aliceToken } = await createFamilyAndGetToken(
     ALICE,
@@ -216,9 +222,8 @@ describe("PATCH /api/borrow/:requestId — family membership re-check", () => {
   it("refuses a member who left on their own and joined another family with 403 NOT_FAMILY_MEMBER", async () => {
     const { familyId, bobToken, requestId } = await seedLentRecord();
 
-    // Bob leaves by himself. `settleDepartingBorrower` cancels his PENDING and
-    // purges his TERMINAL records, but a LENT one stays — the book may still be
-    // out — so the record is still there to be attacked.
+    // Bob leaves by himself; his LENT record survives the settlement.
+    // See the header → "LENT fixture".
     const leave = await request(
       "DELETE",
       `/api/family/${familyId}/member/${BOB}`,
@@ -266,9 +271,8 @@ describe("PATCH /api/borrow/:requestId — family membership re-check", () => {
       "Charlie",
     );
 
-    // Simulate a dissolve whose fail-open `deleteBorrowIndex` did not land:
-    // family record gone, index (and pointer) still there. Setup-only surgery;
-    // every assertion below goes through HTTP.
+    // A dissolve whose `deleteBorrowIndex` did not land: family record gone, index
+    // and pointer kept. See the header → "Orphan setup".
     await kv.delete(kvKeys.family(familyId));
     const before = await readBorrow(requestId);
     expect(before?.status).toBe(BorrowStatus.LENT);

@@ -30,10 +30,8 @@ async function readJson(res: Response): Promise<ResponseData> {
   return body.data;
 }
 
-/**
- * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
- * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
- */
+// Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
+// another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
 const B1 = "210439468000101";
 const B2 = "210439468000102";
 
@@ -87,9 +85,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Fix A: PUT /api/family/:id/member/:uid/displayName syncs user record
-// ===========================================================================
+// --- Fix A: PUT /api/family/:id/member/:uid/displayName syncs user record ---
 
 describe("PUT displayName syncs user record", () => {
   it("should update user record displayName when user record exists", async () => {
@@ -251,9 +247,7 @@ describe("PUT displayName syncs user record", () => {
   });
 });
 
-// ===========================================================================
-// Fix B: PUT /api/user/:id/books uses family record's displayName
-// ===========================================================================
+// --- Fix B: PUT /api/user/:id/books uses family record's displayName ---
 
 describe("PUT books uses family displayName over client displayName", () => {
   it("should use family record displayName instead of client-supplied stale name", async () => {

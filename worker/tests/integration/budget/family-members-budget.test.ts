@@ -15,21 +15,22 @@
  *
  * PER-KEY CLASSIFICATION
  * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
- *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   by Cloudflare's native Rate Limiting binding (the `rateLimit` middleware): zero KV
  *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone. On THIS endpoint it
  *   was the only write of the whole request, so `putKeys()` is now the empty
  *   array. The binding call it was replaced by is pinned in `calls` below.
  * - NO per-userId counter here, unlike every other endpoint in this directory:
- *   the members handler (routes/family.ts:792-827) never calls
+ *   the members handler (routes/family.ts, `listMembersRoute`) never calls
  *   `enforcePerUserRateLimit`. So `calls` below holds exactly ONE entry, the
  *   per-IP one, and no `ratelimit:user:*` key may appear in either array. If a
  *   second binding call ever shows up, a rate limit was added to a read-only
  *   endpoint — treat that as the change to justify, not as drift to absorb.
- * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `member:{userId}` (routes/family.ts:810) and `family:{familyId}` (:815) —
- *   membership check then the record itself. Real cost, and FLAT in the member
- *   count: the response is the family record, so there is no per-member
- *   fan-out to remove (contrast the bookshelf aggregation).
+ * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `member:{userId}` (routes/family.ts, `getMemberFamilyId`) and
+ *   `family:{familyId}` (`getFamilyRecord`) — membership check then the record
+ *   itself. Real cost, and FLAT in the member count: the response is the
+ *   family record, so there is no per-member fan-out to remove (contrast the
+ *   bookshelf aggregation).
  *
  * THE RATE LIMITING BINDINGS ARE INJECTED, deliberately: every production
  * deploy carries all four (worker/wrangler.toml), and a request sent without
@@ -37,7 +38,7 @@
  * Worker produces. See tests/helpers/rateLimitBindings.ts.
  *
  * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: the per-IP rate-limit
- * layer short-circuits under it (rateLimit.ts:415) ahead of the binding lookup,
+ * layer short-circuits under it (`rateLimit`) ahead of the binding lookup,
  * which would hide the fixed cost pinned in `calls`. See the scope caveat at
  * the end of tests/helpers/kvOps.ts.
  */
@@ -123,9 +124,9 @@ describe("KV budget: GET /api/family/:id/members", () => {
     expect(body.data.members).toHaveLength(2);
 
     expect(ops.getKeys()).toEqual([
-      // auth middleware, auth.ts:46
+      // auth middleware, `authMiddleware`
       kvKeys.authToken(token),
-      // handler, family.ts:810 / :815 — no per-userId counter on this route
+      // handler, `getMemberFamilyId` / `getFamilyRecord` — no per-userId counter on this route
       kvKeys.member(USER1),
       kvKeys.family(FAMILY_ID),
     ]);
@@ -135,9 +136,8 @@ describe("KV budget: GET /api/family/:id/members", () => {
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
 
-    // The whole fixed rate-limit cost of this endpoint: ONE per-IP binding
-    // call. A second entry here would mean a per-userId ceiling was added to a
-    // read-only route.
+    // The whole fixed rate-limit cost: ONE per-IP binding call; a second entry
+    // means a read-only route gained a ceiling. See the header → "PER-KEY CLASSIFICATION".
     expect(calls).toEqual([
       { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
     ]);

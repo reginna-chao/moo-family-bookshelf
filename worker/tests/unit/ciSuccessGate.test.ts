@@ -72,6 +72,149 @@
  * No YAML library is used: neither `yaml` nor `js-yaml` is resolvable in this
  * workspace, and a new dependency is a non-goal (`.claude/rules/change-triage.md`).
  * Same grep-shaped house style as `worker/tests/unit/kvAccessBoundary.test.ts`.
+ *
+ * MUTATION-CHECK SEAM (`WORKFLOW_PATH`; same device as
+ * `kvAccessBoundary.test.ts`'s scan roots and `nodeEngineFloor.test.ts`'s
+ * package.json paths). The path is overridable through `MOO_CI_WORKFLOW_PATH`
+ * purely so these guards can be driven RED against a throwaway COPY of the
+ * workflow at authoring time, WITHOUT editing the live `.github/workflows/`
+ * file. CI sets no such variable. A seam value pointing at NOTHING throws
+ * loudly in `readWorkflow`; a seam value pointing at a VALID copy is the
+ * intended mutation-check use, and the guards then read that copy rather than
+ * the repo's workflow, undetected. Resolved from THIS file, not
+ * `process.cwd()`: vitest runs with the `worker/` package as its cwd, and the
+ * workflow sits two levels above it.
+ *
+ * THE SCAN HELPERS.
+ *  - `jobsRegion` is everything after the top-level `jobs:` key. Scoping
+ *    matters: the `on:` block above it holds `  push:` and `  pull_request:` at
+ *    the SAME two-space indentation as a job id, and neither is a job — picking
+ *    them up would mean the scan is not scoped to the jobs region and the CI/CD
+ *    partition is meaningless. `preJobsRegion` is everything BEFORE it —
+ *    `name:`, `on:` and the top-level `permissions:` block live there; as the
+ *    complement of `jobsRegion` it inherits that helper's loud throw when the
+ *    anchor is gone.
+ *  - `keyBlock` returns the body of `<key>:` indented by `indent` spaces, up to
+ *    the first non-blank line indented no further than the key itself. A
+ *    trailing `|` (block scalar, as in `filters: |`) is tolerated so the same
+ *    helper reads those too. It returns `null` when the key is absent — callers
+ *    decide how loudly that matters, since "the block does not exist" IS the
+ *    finding for some of them.
+ *  - `outputBindings` parses the `changes` job's `outputs:` block WHOLE — key,
+ *    source step and source output. Reading only the key left of the colon is
+ *    not enough: the value is a second, independent spelling of the same name,
+ *    and a typo there (`steps.filter.outputs.extensoin`) resolves to the empty
+ *    string, skips the job, and shows up nowhere. `pathFilters` reads the
+ *    `dorny/paths-filter` `filters:` block as `name -> globs`. Both are
+ *    deliberately STRICT: an unrecognised line throws rather than being
+ *    skipped, because a silently dropped glob would make the "every filter
+ *    lists the workflow file" assertion pass over an incomplete list.
+ *  - `checkoutSteps` returns EVERY `actions/checkout` step slice in `source`,
+ *    in file order — each from its `- uses:` line to the next step at the same
+ *    indentation. Deliberately ALL of them, not the first: a job may check out
+ *    twice, and the second checkout is exactly where an opt-out gets
+ *    forgotten. Pass a job block to scope it to one job, or the whole workflow
+ *    to count them. `CHECKOUT_USES_LINES` is every line that USES
+ *    actions/checkout, in EITHER step spelling — the `- uses:` form
+ *    `checkoutSteps` slices, and the `- name:` + next-line `uses:` form it
+ *    cannot see. Comment lines never match (the `#` precedes `uses:`).
+ *  - `JOBS_WITH_OWN_PERMISSIONS` are the checkout jobs that declare their OWN
+ *    `permissions:` block, and so no longer inherit the top-level
+ *    `contents: read`. A job without a block is exempt by construction: it gets
+ *    the top-level scope unchanged.
+ *
+ * THE POSITIVE COMPANIONS (each a floor or a containment check, never an
+ * equality, so a legitimate addition stays green and is covered by the rule):
+ *  - `EXPECTED_CI_JOB_IDS` — the jobs the scan MUST see. Without it, a regex
+ *    that matched nothing would make the "every CI job is in the gate"
+ *    assertions pass over an empty list. A new job is caught by the gate
+ *    assertions, which is where the decision belongs.
+ *  - `EXPECTED_FILTER_NAMES` — three EMPTY sets compare equal to one another,
+ *    so at least these names must be present; adding a package is legitimate,
+ *    and the three-way set equality is what then forces it to be spelled
+ *    consistently in all three places.
+ *  - `EXPECTED_CHECKOUT_COUNT` (13) — how many `actions/checkout` steps the
+ *    scan must find: one in each of the six CI jobs, plus one in each of the
+ *    seven CD jobs (deploy-worker-dev, deploy-pwa-dev, deploy-pages,
+ *    deploy-worker-prod, deploy-pwa-prod, release-extension,
+ *    release-extension-firefox). A drifted step regex matching nothing would
+ *    otherwise satisfy "every checkout opts out" over an empty list (both
+ *    counts being zero satisfies the step-vs-line equality — the floor is what
+ *    catches that). The per-job credential cases are driven off the jobs that
+ *    actually check out, not a hard-coded list: a new job — CI or CD — inherits
+ *    the rule automatically, and the floor is what stops that list from
+ *    silently shrinking to nothing.
+ *  - `EXPECTED_JOBS_WITH_OWN_PERMISSIONS` — the checkout jobs that override the
+ *    token scope today. A `keyBlock` that stopped matching a job-level
+ *    `permissions:` would empty the list and the "restate contents:" rule would
+ *    run zero cases while staying green.
+ *
+ * GATE ENFORCEMENT, in detail (property 1).
+ *  - `always()` is the second pillar of the design: `needs` decides which jobs
+ *    the gate waits for, `always()` decides that it reports at all. Weakened to
+ *    `success()` — or to the look-alike `!cancelled()` the check jobs use — the
+ *    gate skips itself in exactly the runs it exists to report on, and its own
+ *    `cancelled` branch becomes unreachable. The four-space indent pins the
+ *    JOB-level `if:`; a step's `if:` sits at eight, so a step-level always()
+ *    elsewhere in the block cannot satisfy it.
+ *  - Reading the results is not enforcing them. The COMBINED condition is
+ *    pinned as one whole line, not as two fragments that happen to be present:
+ *    `||` silently rewritten to `&&` leaves both comparisons in the file and
+ *    satisfies any fragment match, while no result is ever both `failure` and
+ *    `cancelled`, so the gate can never exit non-zero. Dropping either branch,
+ *    or turning `exit 1` into `exit 0`, has the same effect with `needs` and
+ *    `results` still perfectly correct. Whitespace is tolerated only where the
+ *    shell allows it — inside the test brackets, around the `=`, around the
+ *    `||`, and around the `;`.
+ *  - `continue-on-error` reports the job as SUCCESS whatever the step's exit
+ *    code, so the condition assertion would keep passing over a gate that can
+ *    no longer fail anything. Nothing in the gate's block may carry it —
+ *    job-level or step-level. Its positive companion: the AMO-listed submission
+ *    step of release-extension-firefox is deliberately non-blocking, so the
+ *    token exists in the file; if it ever disappears entirely, the negative
+ *    assertion would be proving nothing and the companion says so out loud.
+ *
+ * NAME CONSISTENCY, in detail (property 2).
+ *  - A workflow edit that does not match a filter leaves that package's checks
+ *    unrun on the very PR that rewrote them — and the gate reads the resulting
+ *    `skipped` as a pass. Every filter therefore lists the workflow file
+ *    (`WORKFLOW_SELF_GLOB`), so any change to cicd.yml runs the whole pipeline,
+ *    including the jobs the edit changed.
+ *  - Output keys, filter names and `needs.changes.outputs.<name>` references
+ *    are three independent spellings, validated by nothing in Actions: a
+ *    mismatch yields the empty string, `== 'true'` is false, and the job SKIPS
+ *    with no error — which the gate accepts as path filtering.
+ *  - The set equality compares only the names LEFT of the colon. The value is a
+ *    fourth spelling: `${{ steps.filter.outputs.extension }}`. A typo on that
+ *    side (`…outputs.extensoin`, or a step id that no step carries) resolves to
+ *    the empty string, so the output is published as "" and every job gated on
+ *    it skips — with nothing red anywhere.
+ *
+ * TOKEN PERMISSIONS, in detail (property 3).
+ *  - Absent the top-level block the GITHUB_TOKEN of every job inherits the
+ *    repository default, which can be read-write — a compromised dependency in
+ *    any job could then push. It must sit in the region ABOVE `jobs:`: the same
+ *    key inside a job grants that one job only and leaves the default
+ *    untouched.
+ *  - Once the top-level block zeroes everything else, `dorny/paths-filter`
+ *    still needs `pull-requests: read` on pull_request events to list the
+ *    changed files. Without it the action fails, outputs are empty, and every
+ *    check job skips — the exact vacuous-green shape this file exists to stop.
+ *  - A job-level block REPLACES the top-level one wholesale, so `changes` — and
+ *    in general any job that declares only what it additionally needs
+ *    (`pages: write`, `contents: write`, …) — must restate `contents:`, or it
+ *    silently drops to `contents: none` and its checkout then works only
+ *    because this repository is public. On a private repo, or a fork made
+ *    private, the same workflow fails at checkout. `write` satisfies the rule:
+ *    it implies read, and the two release jobs legitimately need it.
+ *  - actions/checkout stores the token in .git/config by default, where every
+ *    later step of the job — including third-party actions and anything
+ *    `pnpm install` runs — can read it. No job in this workflow runs a git
+ *    network command after checkout, and the two `gh` calls (release create /
+ *    release upload) take GH_TOKEN from their own step env, so nothing here
+ *    needs the credential to outlive the checkout. EVERY checkout of the job is
+ *    checked, not just the first: a second checkout without the opt-out
+ *    re-persists the token.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -80,19 +223,8 @@ import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/**
- * MUTATION-CHECK SEAM (same device as `kvAccessBoundary.test.ts`'s scan roots
- * and `nodeEngineFloor.test.ts`'s package.json paths). The path is overridable
- * purely so these guards can be driven RED against a throwaway COPY of the
- * workflow at authoring time, WITHOUT editing the live `.github/workflows/`
- * file. CI sets no such variable. A seam value pointing at NOTHING throws
- * loudly in `readWorkflow` below; a seam value pointing at a VALID copy is the
- * intended mutation-check use, and the guards then read that copy rather than
- * the repo's workflow, undetected.
- *
- * Resolved from THIS file, not `process.cwd()`: vitest runs with the `worker/`
- * package as its cwd, and the workflow sits two levels above it.
- */
+// Mutation-check seam (`MOO_CI_WORKFLOW_PATH`; CI sets none), resolved from THIS file, not the cwd.
+// See the header → "MUTATION-CHECK SEAM".
 const WORKFLOW_PATH =
   process.env.MOO_CI_WORKFLOW_PATH ??
   resolve(HERE, "../../../.github/workflows/cicd.yml");
@@ -106,15 +238,11 @@ const CHANGES_JOB_ID = "changes";
 /** Job-id prefixes that are CD, and correctly sit outside the CI gate. */
 const CD_JOB_PREFIXES = ["deploy-", "release-"];
 
-/**
- * The workflow's own path, as a path-filter glob. Every filter lists it so a
- * workflow edit runs the whole pipeline — including the jobs that edit changed.
- */
+// The workflow's own path, as a path-filter glob. Every filter lists it so a
+// workflow edit runs the whole pipeline — including the jobs that edit changed.
 const WORKFLOW_SELF_GLOB = ".github/workflows/cicd.yml";
 
-// ===========================================================================
-// A minimal, anchor-checked workflow reader
-// ===========================================================================
+// --- A minimal, anchor-checked workflow reader ---
 
 /** Reads the workflow as UTF-8, CRLF-normalised; throws loudly when absent. */
 function readWorkflow(path: string): string {
@@ -130,11 +258,8 @@ function readWorkflow(path: string): string {
 
 const WORKFLOW = readWorkflow(WORKFLOW_PATH);
 
-/**
- * Everything after the top-level `jobs:` key. Scoping matters: the `on:` block
- * above it holds `  push:` and `  pull_request:` at the SAME two-space
- * indentation as a job id, and neither is a job.
- */
+// Everything after the top-level `jobs:` key (the `on:` block's `  push:` is not a job).
+// See the header → "THE SCAN HELPERS".
 function jobsRegion(workflow: string): string {
   const match = /^jobs:[ \t]*$/m.exec(workflow);
   if (!match) {
@@ -143,11 +268,8 @@ function jobsRegion(workflow: string): string {
   return workflow.slice(match.index + match[0].length);
 }
 
-/**
- * Everything BEFORE the top-level `jobs:` key — `name:`, `on:` and the
- * top-level `permissions:` block live here. The complement of `jobsRegion`,
- * so it inherits that helper's loud throw when the anchor is gone.
- */
+// Everything BEFORE the top-level `jobs:` key; the complement of `jobsRegion`, so it
+// inherits that helper's loud throw when the anchor is gone.
 function preJobsRegion(workflow: string): string {
   return workflow.slice(0, workflow.length - jobsRegion(workflow).length);
 }
@@ -181,13 +303,8 @@ function jobBlock(workflow: string, jobId: string): string {
   return next ? rest.slice(0, next.index) : rest;
 }
 
-/**
- * The body of `<key>:` indented by `indent` spaces, up to the first non-blank
- * line indented no further than the key itself. A trailing `|` (block scalar,
- * as in `filters: |`) is tolerated so the same helper reads those too.
- * Returns `null` when the key is absent — callers decide how loudly that
- * matters, since "the block does not exist" IS the finding for some of them.
- */
+// The body of `<key>:` at `indent` spaces (block scalars tolerated); `null` when the key is absent.
+// See the header → "THE SCAN HELPERS".
 function keyBlock(source: string, indent: number, key: string): string | null {
   const pad = " ".repeat(indent);
   const start = new RegExp(`^${pad}${key}:[ \\t]*\\|?[ \\t]*$`, "m").exec(
@@ -238,9 +355,7 @@ function resultRefs(block: string): string[] {
   return [...refs].map((ref) => ref[1]);
 }
 
-// ===========================================================================
-// The `changes` job: outputs, path filters, and how they are referenced
-// ===========================================================================
+// --- The `changes` job: outputs, path filters, and how they are referenced ---
 
 /** One `<key>: ${{ steps.<stepId>.outputs.<name> }}` line of a job's outputs. */
 interface OutputBinding {
@@ -252,14 +367,8 @@ interface OutputBinding {
   name: string;
 }
 
-/**
- * The `changes` job's `outputs:` block, parsed WHOLE — key, source step and
- * source output. Reading only the key left of the colon is not enough: the
- * value is a second, independent spelling of the same name, and a typo there
- * (`steps.filter.outputs.extensoin`) resolves to the empty string, skips the
- * job, and shows up nowhere. Deliberately STRICT, like `pathFilters`: an
- * unparsable line throws instead of being skipped.
- */
+// The `changes` job's `outputs:` block parsed WHOLE (key, source step, source output); STRICT.
+// See the header → "THE SCAN HELPERS".
 function outputBindings(changesBlock: string): OutputBinding[] {
   const block = keyBlock(changesBlock, 4, "outputs");
   if (block === null) {
@@ -319,12 +428,8 @@ function pathsFilterStepId(changesBlock: string): string {
   return id[1];
 }
 
-/**
- * The `dorny/paths-filter` `filters:` block as `name -> globs`. Deliberately
- * STRICT: an unrecognised line throws rather than being skipped, because a
- * silently dropped glob would make the "every filter lists the workflow file"
- * assertion below pass over an incomplete list.
- */
+// The `dorny/paths-filter` `filters:` block as `name -> globs`; STRICT (unknown lines throw).
+// See the header → "THE SCAN HELPERS".
 function pathFilters(changesBlock: string): Map<string, string[]> {
   const block = keyBlock(changesBlock, 10, "filters");
   if (block === null) {
@@ -402,17 +507,10 @@ function nameSetDiff(
   );
 }
 
-// ===========================================================================
-// Steps: every actions/checkout in the file
-// ===========================================================================
+// --- Steps: every actions/checkout in the file ---
 
-/**
- * EVERY `actions/checkout` step slice in `source`, in file order — each from
- * its `- uses:` line to the next step at the same indentation. Deliberately
- * ALL of them, not the first: a job may check out twice, and the second
- * checkout is exactly where an opt-out gets forgotten. Pass a job block to
- * scope it to one job, or the whole workflow to count them.
- */
+// EVERY `actions/checkout` step slice in `source`, in file order (a second checkout counts).
+// See the header → "THE SCAN HELPERS".
 function checkoutSteps(source: string): string[] {
   const starts = [...source.matchAll(/^ {6}- uses: actions\/checkout@.*$/gm)];
   return starts.map((start) => {
@@ -422,9 +520,7 @@ function checkoutSteps(source: string): string[] {
   });
 }
 
-// ===========================================================================
-// Derived values
-// ===========================================================================
+// --- Derived values ---
 
 const JOB_IDS = jobIds(WORKFLOW);
 const CI_JOB_IDS = ciJobIds(JOB_IDS);
@@ -433,11 +529,8 @@ const GATE_NEEDS = needsList(GATE_BLOCK);
 const GATE_RESULT_REFS = resultRefs(GATE_BLOCK);
 
 const CHECKOUT_STEPS = checkoutSteps(WORKFLOW);
-/**
- * Every line that USES actions/checkout, in EITHER step spelling — the
- * `- uses:` form `checkoutSteps` slices, and the `- name:` + next-line `uses:`
- * form it cannot see. Comment lines never match (the `#` precedes `uses:`).
- */
+// Every line that USES actions/checkout, in EITHER step spelling; comment lines never match.
+// See the header → "THE SCAN HELPERS".
 const CHECKOUT_USES_LINES = [
   ...WORKFLOW.matchAll(/^[ \t]*(?:- )?uses: actions\/checkout@/gm),
 ];
@@ -446,11 +539,8 @@ const JOB_IDS_WITH_CHECKOUT = JOB_IDS.filter(
   (id) => checkoutSteps(jobBlock(WORKFLOW, id)).length > 0,
 );
 
-/**
- * The checkout jobs that declare their OWN `permissions:` block, and so no
- * longer inherit the top-level `contents: read`. A job without a block is
- * exempt by construction: it gets the top-level scope unchanged.
- */
+// Checkout jobs declaring their OWN `permissions:` block (no longer inheriting `contents: read`);
+// a job without a block is exempt by construction.
 const JOBS_WITH_OWN_PERMISSIONS = JOB_IDS_WITH_CHECKOUT.filter(
   (id) => keyBlock(jobBlock(WORKFLOW, id), 4, "permissions") !== null,
 );
@@ -463,12 +553,8 @@ const OUTPUT_KEYS = nameSet(OUTPUT_BINDINGS.map((binding) => binding.key));
 const PATHS_FILTER_STEP_ID = pathsFilterStepId(CHANGES_BLOCK);
 const OUTPUT_REF_NAMES = nameSet(outputRefNames(WORKFLOW));
 
-/**
- * The jobs the scan MUST see. Positive companion to the "every CI job is in
- * the gate" assertions: without it, a regex that matched nothing would make
- * them pass over an empty list. Deliberately containment, not equality — a new
- * job is caught by the gate assertions, which is where the decision belongs.
- */
+// The jobs the scan MUST see (containment) — companion to the "every CI job is in the gate" cases.
+// See the header → "THE POSITIVE COMPANIONS".
 const EXPECTED_CI_JOB_IDS = [
   "changes",
   "extension-check",
@@ -479,31 +565,16 @@ const EXPECTED_CI_JOB_IDS = [
 ];
 const EXPECTED_CD_JOB_IDS = ["deploy-worker-dev", "release-extension"];
 
-/**
- * Positive companion to the three-way set equality: three EMPTY sets compare
- * equal to one another, so at least these names must be present. Containment,
- * not equality — adding a package is a legitimate change, and the set equality
- * is what then forces it to be spelled consistently in all three places.
- */
+// Companion to the three-way set equality (three EMPTY sets compare equal); containment.
+// See the header → "THE POSITIVE COMPANIONS".
 const EXPECTED_FILTER_NAMES = ["extension", "pwa", "worker"];
 
-/**
- * How many `actions/checkout` steps the scan must find: one in each of the six
- * CI jobs, plus one in each of the seven CD jobs (deploy-worker-dev,
- * deploy-pwa-dev, deploy-pages, deploy-worker-prod, deploy-pwa-prod,
- * release-extension, release-extension-firefox). Positive companion to the
- * workflow-wide rule below — a drifted step regex matching nothing would
- * otherwise satisfy "every checkout opts out" over an empty list. A floor,
- * not an equality: adding a job is legitimate, and the rule then covers it.
- */
+// A floor on `actions/checkout` steps: one per CI job (6) plus one per CD job (7).
+// See the header → "THE POSITIVE COMPANIONS".
 const EXPECTED_CHECKOUT_COUNT = 13;
 
-/**
- * The checkout jobs that override the token scope today. Positive companion to
- * the "restate contents:" rule — a `keyBlock` that stopped matching would
- * empty the list and the rule would assert nothing. Containment, not equality:
- * a new job may legitimately declare a block, and the rule then covers it.
- */
+// The checkout jobs that override the token scope today — companion to "restate contents:".
+// See the header → "THE POSITIVE COMPANIONS".
 const EXPECTED_JOBS_WITH_OWN_PERMISSIONS = [
   "changes",
   "deploy-pages",
@@ -521,9 +592,8 @@ describe("ci-success gate in .github/workflows/cicd.yml", () => {
     for (const id of [...EXPECTED_CI_JOB_IDS, ...EXPECTED_CD_JOB_IDS]) {
       expect(JOB_IDS).toContain(id);
     }
-    // `  push:` / `  pull_request:` live in the `on:` block at the same
-    // indentation as a job key; picking them up would mean the scan is not
-    // scoped to the jobs region and the CI/CD partition is meaningless.
+    // `  push:` / `  pull_request:` sit in `on:` at job-key indentation; picking them up means the
+    // scan is not scoped to the jobs region and the CI/CD partition is meaningless.
     expect(JOB_IDS).not.toContain("push");
     expect(JOB_IDS).not.toContain("pull_request");
   });
@@ -550,28 +620,16 @@ describe("ci-success gate in .github/workflows/cicd.yml", () => {
   });
 
   it("runs the gate unconditionally via always()", () => {
-    // The second pillar of the design: `needs` decides which jobs the gate
-    // waits for, `always()` decides that it reports at all. Weakened to
-    // `success()` — or to the look-alike `!cancelled()` the check jobs use —
-    // the gate skips itself in exactly the runs it exists to report on, and
-    // its own `cancelled` branch becomes unreachable. The four-space indent
-    // pins the JOB-level `if:`; a step's `if:` sits at eight, so a step-level
-    // always() elsewhere in the block cannot satisfy this.
+    // `always()` decides the gate reports at all; four-space indent = the JOB-level `if:`.
+    // See the header → "GATE ENFORCEMENT, in detail".
     expect(GATE_BLOCK).toMatch(/^ {4}if:\s*\$\{\{\s*always\(\)\s*\}\}[ \t]*$/m);
   });
 });
 
 describe("ci-success gate enforcement step", () => {
   it("fails the run on a failure or cancelled result", () => {
-    // Reading the results is not enforcing them. The COMBINED condition is
-    // pinned as one whole line, not as two fragments that happen to be
-    // present: `||` silently rewritten to `&&` leaves both comparisons in the
-    // file and satisfies any fragment match, while no result is ever both
-    // `failure` and `cancelled`, so the gate can never exit non-zero. Dropping
-    // either branch, or turning `exit 1` into `exit 0`, has the same effect
-    // with `needs` and `results` still perfectly correct above. Whitespace is
-    // tolerated only where the shell allows it — inside the test brackets,
-    // around the `=`, around the `||`, and around the `;`.
+    // The COMBINED condition pinned as one whole line (`||` → `&&` would pass a fragment match).
+    // See the header → "GATE ENFORCEMENT, in detail".
     expect(GATE_BLOCK).toMatch(
       /^[ \t]*if[ \t]+\[[ \t]+"\$r"[ \t]+=[ \t]+"failure"[ \t]+\][ \t]*\|\|[ \t]*\[[ \t]+"\$r"[ \t]+=[ \t]+"cancelled"[ \t]+\][ \t]*;[ \t]*then[ \t]*$/m,
     );
@@ -579,18 +637,14 @@ describe("ci-success gate enforcement step", () => {
   });
 
   it("never marks the gate or its step continue-on-error", () => {
-    // `continue-on-error` reports the job as SUCCESS whatever the step's exit
-    // code, so the assertion above would keep passing over a gate that can no
-    // longer fail anything. Nothing in the gate's block may carry it —
-    // job-level or step-level.
+    // `continue-on-error` reports SUCCESS whatever the exit code; nothing in the gate's block
+    // may carry it, job-level or step-level.
     expect(GATE_BLOCK).not.toContain("continue-on-error");
   });
 
   it("still finds continue-on-error elsewhere in the workflow", () => {
-    // Positive companion to the negative above: the AMO-listed submission step
-    // of release-extension-firefox is deliberately non-blocking. If that token
-    // ever disappears from the file entirely, the negative assertion would be
-    // proving nothing and this case says so out loud.
+    // Positive companion: release-extension-firefox's AMO-listed step is deliberately non-blocking.
+    // See the header → "GATE ENFORCEMENT, in detail".
     expect(WORKFLOW).toContain("continue-on-error");
   });
 });
@@ -599,10 +653,8 @@ describe("changes job path filters", () => {
   it.each(FILTER_NAMES)(
     "makes a change to the workflow itself trigger the %s filter",
     (filterName) => {
-      // A workflow edit that does not match a filter leaves that package's
-      // checks unrun on the very PR that rewrote them — and the gate reads the
-      // resulting `skipped` as a pass. Every filter therefore lists the
-      // workflow file, so any change to cicd.yml runs the whole pipeline.
+      // Every filter lists the workflow file, so any change to cicd.yml runs the whole pipeline.
+      // See the header → "NAME CONSISTENCY, in detail".
       const globs = PATH_FILTERS.get(filterName);
       expect(globs).toBeDefined();
       expect(globs).toContain(WORKFLOW_SELF_GLOB);
@@ -622,9 +674,8 @@ describe("changes job name consistency", () => {
   });
 
   it("spells every filter name identically in outputs, filters and references", () => {
-    // Three independent spellings, validated by nothing in Actions: a mismatch
-    // yields the empty string, `== 'true'` is false, and the job SKIPS with no
-    // error — which the gate accepts as path filtering.
+    // Three independent spellings, validated by nothing in Actions: a mismatch yields "",
+    // `== 'true'` is false, and the job SKIPS with no error — which the gate accepts.
     expect(
       OUTPUT_KEYS,
       nameSetDiff(
@@ -644,11 +695,8 @@ describe("changes job name consistency", () => {
   });
 
   it("wires every output to the paths-filter step's matching output", () => {
-    // The set equality above compares only the names LEFT of the colon. The
-    // value is a fourth spelling: `${{ steps.filter.outputs.extension }}`. A
-    // typo on that side (`…outputs.extensoin`, or a step id that no step
-    // carries) resolves to the empty string, so the output is published as ""
-    // and every job gated on it skips — with nothing red anywhere.
+    // The output VALUE is a fourth spelling; a typo there publishes "" and every gated job skips.
+    // See the header → "NAME CONSISTENCY, in detail".
     expect(
       PATHS_FILTER_STEP_ID.length,
       "No usable `id:` on the dorny/paths-filter step; the assertions below " +
@@ -673,10 +721,8 @@ describe("changes job name consistency", () => {
 
 describe("workflow token permissions", () => {
   it("declares a read-only default at the top level, above jobs:", () => {
-    // Absent this block the GITHUB_TOKEN of every job inherits the repository
-    // default, which can be read-write — a compromised dependency in any job
-    // could then push. It must sit in the region ABOVE `jobs:`: the same key
-    // inside a job grants that one job only and leaves the default untouched.
+    // Absent it, every job's GITHUB_TOKEN inherits the (possibly read-write) default; it must sit
+    // ABOVE `jobs:`. See the header → "TOKEN PERMISSIONS, in detail".
     const block = keyBlock(preJobsRegion(WORKFLOW), 0, "permissions");
     expect(
       block,
@@ -687,10 +733,8 @@ describe("workflow token permissions", () => {
   });
 
   it("grants the changes job the pull-requests read it needs", () => {
-    // Once the top-level block zeroes everything else, `dorny/paths-filter`
-    // still needs `pull-requests: read` on pull_request events to list the
-    // changed files. Without it the action fails, outputs are empty, and every
-    // check job skips — the exact vacuous-green shape this file exists to stop.
+    // `dorny/paths-filter` needs `pull-requests: read`, or every check job skips (vacuous green).
+    // See the header → "TOKEN PERMISSIONS, in detail".
     const block = keyBlock(CHANGES_BLOCK, 4, "permissions");
     expect(
       block,
@@ -699,16 +743,14 @@ describe("workflow token permissions", () => {
         "top-level default.",
     ).not.toBeNull();
     expect(block).toMatch(/^ {6}pull-requests:[ \t]*read[ \t]*$/m);
-    // A job-level block REPLACES the top-level one rather than extending it,
-    // so `contents: read` has to be restated here — without it this job has
-    // no read access to the repository at all and the checkout above fails.
+    // A job-level block REPLACES the top-level one, so `contents: read` is restated here —
+    // without it this job has no repository read and the checkout fails.
     expect(block).toMatch(/^ {6}contents:[ \t]*read[ \t]*$/m);
   });
 
   it("finds the checkout jobs that declare their own permissions block", () => {
-    // Positive companion to the rule below: if `keyBlock` stopped matching a
-    // job-level `permissions:`, the list would empty and the rule would run
-    // zero cases while staying green.
+    // Positive companion: if `keyBlock` stopped matching a job-level `permissions:`, the rule
+    // below would run zero cases while staying green.
     for (const jobId of EXPECTED_JOBS_WITH_OWN_PERMISSIONS) {
       expect(JOBS_WITH_OWN_PERMISSIONS).toContain(jobId);
     }
@@ -717,13 +759,8 @@ describe("workflow token permissions", () => {
   it.each(JOBS_WITH_OWN_PERMISSIONS)(
     "keeps repository read in %s's own permissions block",
     (jobId) => {
-      // The general form of the `changes` case above. A job-level block
-      // REPLACES the top-level one wholesale, so a job that declares only what
-      // it additionally needs (`pages: write`, `contents: write`, …) silently
-      // drops to `contents: none` — and its checkout then works only because
-      // this repository is public. On a private repo, or a fork made private,
-      // the same workflow fails at checkout. `write` satisfies this: it
-      // implies read, and the two release jobs legitimately need it.
+      // General form of the `changes` case: restate `contents:` (`write` satisfies it).
+      // See the header → "TOKEN PERMISSIONS, in detail".
       const block = keyBlock(jobBlock(WORKFLOW, jobId), 4, "permissions");
       expect(block).not.toBeNull();
       expect(block).toMatch(/^ {6}contents:[ \t]*(read|write)[ \t]*$/m);
@@ -740,10 +777,8 @@ describe("workflow token permissions", () => {
         "persist-credentials rule silently skips it. Teach checkoutSteps that " +
         "spelling rather than leaving the step unchecked.",
     ).toBe(CHECKOUT_USES_LINES.length);
-    // Positive companion to the workflow-wide rule below: a step regex that
-    // matched nothing would make "every checkout opts out" vacuously true.
-    // (Both counts being zero satisfies the equality above — this is what
-    // catches that.)
+    // Positive companion: a step regex matching nothing makes "every checkout opts out" vacuous
+    // (both counts zero satisfy the equality above — this floor catches that).
     expect(CHECKOUT_STEPS.length).toBeGreaterThanOrEqual(
       EXPECTED_CHECKOUT_COUNT,
     );
@@ -754,20 +789,13 @@ describe("workflow token permissions", () => {
     }
   });
 
-  // Driven off the jobs that actually check out, not a hard-coded list: a new
-  // job — CI or CD — inherits the rule automatically, and the case above is
-  // what stops that list from silently shrinking to nothing.
+  // Driven off the jobs that actually check out, so a new CI or CD job inherits the rule;
+  // the case above stops that list from silently shrinking to nothing.
   it.each(JOB_IDS_WITH_CHECKOUT)(
     "checks out %s without persisting credentials",
     (jobId) => {
-      // actions/checkout stores the token in .git/config by default, where
-      // every later step of the job — including third-party actions and
-      // anything `pnpm install` runs — can read it. No job in this workflow
-      // runs a git network command after checkout, and the two `gh` calls
-      // (release create / release upload) take GH_TOKEN from their own step
-      // env, so nothing here needs the credential to outlive the checkout.
-      // EVERY checkout of the job is checked, not just the first: a second
-      // checkout without the opt-out re-persists the token.
+      // actions/checkout persists the token in .git/config by default; EVERY checkout is checked.
+      // See the header → "TOKEN PERMISSIONS, in detail".
       const steps = checkoutSteps(jobBlock(WORKFLOW, jobId));
       expect(steps.length).toBeGreaterThan(0);
       for (const step of steps) {

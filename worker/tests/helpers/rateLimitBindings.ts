@@ -1,5 +1,61 @@
+/** Stub Cloudflare native Rate Limiting bindings for tests — when and why to inject
+ *  them is in `createRateLimitBindings`'s JSDoc. */
+
+import type { RateLimitBindingName } from "../../src/utils/env";
+
+/** One `limit()` call a stub observed. */
+export interface RateLimitBindingCall {
+  /** Which binding the Worker resolved for the (max, window) pair. */
+  name: RateLimitBindingName;
+  /** The exact key the Worker charged — the counter's identity. */
+  key: string;
+}
+
 /**
- * Stub Cloudflare native Rate Limiting bindings for tests.
+ * One set of binding stubs plus their shared call log.
+ *
+ * `bindings` is typed as the exhaustive `Record<RateLimitBindingName,
+ * RateLimit>`, so a new name added to the production union is a compile error
+ * here until this helper provides a stub for it.
+ *
+ * `calls` holds every `limit()` call across ALL four stubs, in the order they
+ * happened. Assert it with `toEqual` to pin the fixed per-request rate-limit
+ * cost the KV counters used to represent.
+ */
+export interface RateLimitBindingStubs {
+  /** Spread into the env of a request: `{ KV: kv, ...bindings }`. Exhaustive by
+   *  type — see {@link RateLimitBindingStubs}. */
+  bindings: Record<RateLimitBindingName, RateLimit>;
+  /** Every `limit()` call across ALL four stubs, in call order — the fixed
+   *  per-request rate-limit cost; assert with `toEqual`. */
+  calls: RateLimitBindingCall[];
+}
+
+/** Decides one `limit()` outcome. Default (omitted): admit everything. */
+export type RateLimitDecider = (
+  name: RateLimitBindingName,
+  key: string,
+) => boolean;
+
+function makeStub(
+  name: RateLimitBindingName,
+  calls: RateLimitBindingCall[],
+  decide?: RateLimitDecider,
+): RateLimit {
+  return {
+    limit: async ({ key }) => {
+      calls.push({ name, key });
+      return { success: decide?.(name, key) ?? true };
+    },
+  };
+}
+
+/**
+ * Build one fresh set of binding stubs plus their shared call log.
+ *
+ * Create a set per request (or per test) rather than sharing one at module
+ * scope: `calls` is append-only and a shared log would accumulate across cases
+ * and make `toEqual` assertions depend on execution order.
  *
  * WHY A TEST HAS TO INJECT THESE. Production deploys carry all four bindings
  * (`worker/wrangler.toml`, top level AND `[env.production]`), so every
@@ -30,60 +86,6 @@
  * call log. Simulating the platform's own accounting is the caller's job via
  * `decide` — the Worker no longer counts per-minute traffic itself, so a test
  * that wants a refusal asks for one.
- */
-
-import type { RateLimitBindingName } from "../../src/utils/env";
-
-/** One `limit()` call a stub observed. */
-export interface RateLimitBindingCall {
-  /** Which binding the Worker resolved for the (max, window) pair. */
-  name: RateLimitBindingName;
-  /** The exact key the Worker charged — the counter's identity. */
-  key: string;
-}
-
-export interface RateLimitBindingStubs {
-  /**
-   * Spread into the env of a request: `{ KV: kv, ...bindings }`.
-   *
-   * Typed as the exhaustive `Record<RateLimitBindingName, RateLimit>`, so a new
-   * name added to the production union is a compile error here until this
-   * helper provides a stub for it.
-   */
-  bindings: Record<RateLimitBindingName, RateLimit>;
-  /**
-   * Every `limit()` call across ALL four stubs, in the order they happened.
-   * Assert it with `toEqual` to pin the fixed per-request rate-limit cost the
-   * KV counters used to represent.
-   */
-  calls: RateLimitBindingCall[];
-}
-
-/** Decides one `limit()` outcome. Default (omitted): admit everything. */
-export type RateLimitDecider = (
-  name: RateLimitBindingName,
-  key: string,
-) => boolean;
-
-function makeStub(
-  name: RateLimitBindingName,
-  calls: RateLimitBindingCall[],
-  decide?: RateLimitDecider,
-): RateLimit {
-  return {
-    limit: async ({ key }) => {
-      calls.push({ name, key });
-      return { success: decide?.(name, key) ?? true };
-    },
-  };
-}
-
-/**
- * Build one fresh set of binding stubs plus their shared call log.
- *
- * Create a set per request (or per test) rather than sharing one at module
- * scope: `calls` is append-only and a shared log would accumulate across cases
- * and make `toEqual` assertions depend on execution order.
  */
 export function createRateLimitBindings(
   decide?: RateLimitDecider,

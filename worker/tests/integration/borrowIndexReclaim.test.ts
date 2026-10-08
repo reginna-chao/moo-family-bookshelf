@@ -30,6 +30,16 @@
  *
  * The settlement's own rules (what is cancelled, what is purged, what survives)
  * live in tests/integration/borrowDeparture.test.ts.
+ *
+ * Member ceiling: `raiseMaxMembers` is setup-only KV surgery — no route exposes
+ * it — applied to BOTH loops so the departing and non-departing runs differ in
+ * exactly one thing: whether the account leaves. `runLoop` runs `CYCLES`
+ * throwaway accounts, each opening `REQUESTS_PER_CYCLE` PENDING requests
+ * against the family owner's books.
+ *
+ * Seed health: the requests really were created, so the reclaim is reclaiming
+ * something. Each cycle peaks at baseline + REQUESTS_PER_CYCLE and never
+ * carries residue from an earlier cycle.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
@@ -54,10 +64,8 @@ const REQUESTS_PER_CYCLE = 3;
 
 let kv: KVNamespace;
 
-/**
- * A production-shaped request: no DEV_MODE, native rate-limit bindings present,
- * one fixed caller IP.
- */
+/** A production-shaped request: no DEV_MODE, native rate-limit bindings present,
+ *  one fixed caller IP. */
 function prodRequest(
   method: string,
   path: string,
@@ -90,11 +98,8 @@ async function createFamily(): Promise<{ familyId: string; token: string }> {
   };
 }
 
-/**
- * Raise the member ceiling. Setup-only KV surgery — no route exposes it — and
- * it is applied to BOTH loops so the departing and non-departing runs differ in
- * exactly one thing: whether the account leaves.
- */
+/** Raise the member ceiling — setup-only KV surgery applied to BOTH loops.
+ *  See the header → "Member ceiling". */
 async function raiseMaxMembers(familyId: string, max: number): Promise<void> {
   const raw = await kv.get<RawFamilyRecord>(kvKeys.family(familyId), "json");
   await kv.put(
@@ -166,10 +171,8 @@ interface LoopResult {
   createdIds: string[];
 }
 
-/**
- * Run the loop: `CYCLES` throwaway accounts, each opening
- * `REQUESTS_PER_CYCLE` PENDING requests against the family owner's books.
- */
+/** Run the loop: `CYCLES` throwaway accounts, each opening `REQUESTS_PER_CYCLE`
+ *  PENDING requests against the family owner's books. */
 async function runLoop(depart: boolean): Promise<LoopResult> {
   const { familyId } = await createFamily();
   await raiseMaxMembers(familyId, 1 + CYCLES);
@@ -205,9 +208,8 @@ describe("Borrow index reclaim across a join → borrow → leave loop", () => {
   it("returns the index to its pre-join length after every cycle and leaves no pointer behind", async () => {
     const { baseline, peaks, settled, createdIds } = await runLoop(true);
 
-    // Seed health: the requests really were created, so the reclaim below is
-    // reclaiming something. Each cycle peaks at baseline + REQUESTS_PER_CYCLE
-    // and never carries residue from an earlier cycle.
+    // Seed health: every request was created and each cycle peaks at baseline +
+    // REQUESTS_PER_CYCLE. See the header → "Seed health".
     expect(baseline).toBe(0);
     expect(createdIds).toHaveLength(CYCLES * REQUESTS_PER_CYCLE);
     expect(new Set(createdIds).size).toBe(createdIds.length);

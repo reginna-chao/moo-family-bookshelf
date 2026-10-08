@@ -31,6 +31,113 @@
  *
  * The un-migrated read path also has coverage in `publicShelf.test.ts`, whose
  * liveness suite seeds exclusively through the legacy field.
+ *
+ * Fixtures and tables: `seedSnapshot` seeds a stored snapshot through the
+ * PRODUCTION writer, so its shape (shared books only, TTL derived from
+ * `expiresAt`) can never drift from what the handlers actually publish.
+ * `BOOKS_SAVES` holds the two books-save endpoints; both leave
+ * `ROTATED_SHARED_IDS` behind, so one table can assert identical snapshot /
+ * record outcomes for either. `SNAPSHOT_REBUILDING_WRITES` holds the two write
+ * handlers that must REBUILD a snapshot, so they read `user:{id}` for
+ * `record.books` and answer 404 without it; they are also the handlers that
+ * migrate an un-migrated owner while keeping the shelf, which is the other
+ * property the tables drive them for. DELETE is deliberately absent:
+ * revocation rebuilds nothing, so it must not inherit the books precondition.
+ * `expectAnsweredLikeUnknownToken` asserts a public read was refused
+ * byte-identically to a token that never existed — an orphan must not confirm
+ * that its token was ever real.
+ *
+ * §1, end to end: driven through the real delete handler, which empties the
+ * pointer key and leaves `user:{id}` untouched, so the legacy field survives
+ * as exactly the stale list a racing save would otherwise restore.
+ *
+ * Read-cost tripwires: on the public read path `user:{id}` is seeded and would
+ * satisfy the guard on its own, so only the read trail catches a handler that
+ * keeps consulting it — one needless KV read on every public hit. The DELETE
+ * counterpart (§8): `user:{id}` IS seeded and its legacy field would resolve
+ * the same shelf, so only the read trail catches a handler that goes back to
+ * requiring the books record.
+ *
+ * §3, expiresAt is MONOTONIC: after an expiresDays update the shelf and
+ * snapshot are rewritten by the same handler call, so both deadlines stay
+ * equal — the regression guarded is a guard that 404s the owner's own shelf
+ * right after they edited it. `EXPIRY_CASES` lists every way a snapshot's
+ * deadline can relate to the shelf backing it, and what the MONOTONIC liveness
+ * rule answers (`null` = permanent = +∞). The asymmetry IS the rule: a
+ * snapshot may never promise a LONGER lifetime than the shelf currently
+ * grants — that is the only direction that hands out more access than the
+ * owner allowed — while promising a SHORTER one is harmless and stays readable
+ * until its own earlier deadline. The dangerous direction taken to its extreme
+ * is a permanent snapshot behind a time-limited shelf: no KV TTL and no
+ * deadline would ever retire it, so it outlives the limit the owner has since
+ * imposed. The deliberate FAIL-SAFE direction, and the reason the rule is not
+ * strict equality, is a snapshot deadline EARLIER than the shelf's: exactly
+ * what an EXTEND-deadline race leaves behind — a snapshot republished from a
+ * ~60s-stale pointer read just after the owner pushed the deadline out. Strict
+ * equality 404'd a live link at the moment its owner granted MORE access; it
+ * now keeps serving and simply retires at the earlier deadline it carries. The
+ * end-to-end version: the owner extends 30 → 90 days (the pointer key now
+ * carries the later deadline), then a books save running on a stale cross-colo
+ * read of the shelf list republishes the snapshot with the OLD deadline. The
+ * republish goes through the production writer, so the snapshot is
+ * byte-identical to what such a save produces.
+ *
+ * §4, legacy revoke: revoking an un-migrated owner's legacy shelf is the third
+ * migrating write, and the ONLY delete branch the pointer-first read path
+ * added: revocation resolves the shelf list through `readPublicShelves`, so an
+ * un-migrated owner can only reach their shelf via its `user:{id}` fallback.
+ * Without this pin, removing that fallback would leave such owners unable to
+ * revoke a still-readable link while every other test stayed green. The revoke
+ * itself migrates: an empty list is the MIGRATED "no shelves" state and
+ * outranks the stale legacy field the record still carries, so no later books
+ * save can re-list the shelf.
+ *
+ * §6, family-prefs: the other read-modify-write of `user:{id}`. It may carry
+ * the inert legacy field along in its `...existing` spread, which is harmless
+ * precisely because it publishes nothing — pinned so a future snapshot refresh
+ * added to that handler would reopen the lost-update hole loudly. It reads no
+ * pointer either (the `token:` read is the auth middleware): a handler that
+ * writes no snapshot cannot revive a revoked token, so it deliberately pays
+ * nothing for the shelf list.
+ *
+ * §7, account deletion residual: a snapshot no live shelf list points at is
+ * not reclaimed. It is unreadable either way — with both keys gone the
+ * liveness guard resolves an empty shelf list.
+ *
+ * §8, revocation without a books record: the account-deletion cleanup is not
+ * atomic: it can fail partway and leave the pointer key (and its snapshots)
+ * behind with `user:{id}` already gone. Revocation reads no `record.books`, so
+ * it resolves the shelf list pointer-first and must stay possible in that
+ * state — otherwise a live public link would have no remaining way to be
+ * killed.
+ *
+ * §9, revocation write ORDER: with the read-side liveness guard in place, the
+ * POINTER write IS the revocation and the snapshot delete is merely cleanup —
+ * so the pointer write has to be the step that lands FIRST. Both partial
+ * failures are then fail-closed:
+ *   - pointer write fails  ⇒ nothing happened at all (shelf still listed AND
+ *     its snapshot still there — consistent; the owner sees a 5xx and retries);
+ *   - snapshot delete fails ⇒ an orphan the liveness guard already refuses.
+ * Deleting the snapshot FIRST — the order DELETE used to have — left a third,
+ * OPEN failure mode: snapshot gone but the shelf STILL listed, so the owner's
+ * next ordinary books save rebuilt a snapshot under the very token they had
+ * just revoked and the dead link came back READABLE — indefinitely, for a
+ * permanent shelf. Only a cross-op trail can catch a regression here: swap the
+ * two writes back and `putKeys()` / `deleteKeys()` both stay green, because
+ * each list is correct on its own. Hence `writeTrail()`, which pins the
+ * handler's COMPLETE mutation sequence — DEV_MODE keeps the pipeline's per-IP
+ * counter out of the trail, so the two writes are all of it. Reset-token
+ * follows the rule DELETE was aligned to, pinned so the two cannot drift
+ * apart: the NEW token's snapshot goes up first (a reader who already sees the
+ * new list never 404s on it), the pointer write then commits the rotation, and
+ * the old snapshot — which the guard refuses either way — is cleaned up last.
+ *
+ * §10, a corrupted pointer record fails closed: both shelf lists reach the
+ * resolver as unvalidated `kv.get(..., "json")` casts. A pointer whose
+ * `shelves` is not an array still WINS — falling past it would resurrect the
+ * legacy list, i.e. the revoked token the key exists to bury — but degrades to
+ * "no shelves" instead of throwing a TypeError, which on the PUBLIC path a
+ * stranger could otherwise turn into a 500.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -175,11 +282,8 @@ async function seedPointer(shelves: PublicShelf[]): Promise<void> {
   await kv.put(kvKeys.publicShelves(USER), JSON.stringify(record));
 }
 
-/**
- * Seed a stored snapshot through the PRODUCTION writer, so its shape (shared
- * books only, TTL derived from `expiresAt`) can never drift from what the
- * handlers actually publish.
- */
+/** Seed a stored snapshot through the PRODUCTION writer, so its shape cannot drift.
+ *  See the header → "Fixtures and tables". */
 function seedSnapshot(entry: PublicShelf, books = baselineBooks()) {
   return writePublicSnapshot(kv, USER, entry, books);
 }
@@ -231,22 +335,15 @@ function patchToRotated() {
   });
 }
 
-/**
- * The two books-save endpoints. Both leave `ROTATED_SHARED_IDS` behind, so one
- * table can assert identical snapshot / record outcomes for either.
- */
+/** The two books-save endpoints; both leave `ROTATED_SHARED_IDS` behind, so one
+ *  table asserts identical outcomes for either. */
 const BOOKS_SAVES: { label: string; save: () => Promise<Response> }[] = [
   { label: "PUT", save: () => putBooks(rotatedBooks()) },
   { label: "PATCH", save: () => patchToRotated() },
 ];
 
-/**
- * The two write handlers that must REBUILD a snapshot, so they read `user:{id}`
- * for `record.books` and answer 404 without it. They are also the handlers that
- * migrate an un-migrated owner while keeping the shelf, which is the other
- * property the tables below drive them for. DELETE is deliberately absent:
- * revocation rebuilds nothing, so it must not inherit the books precondition.
- */
+/** The two writes that REBUILD a snapshot (404 without `user:{id}`); DELETE is
+ *  deliberately absent. See the header → "Fixtures and tables". */
 const SNAPSHOT_REBUILDING_WRITES: {
   label: string;
   call: (shelfId: string) => Promise<Response>;
@@ -268,10 +365,8 @@ const SNAPSHOT_REBUILDING_WRITES: {
   },
 ];
 
-/**
- * Assert a public read was refused byte-identically to a token that never
- * existed — an orphan must not confirm that its token was ever real.
- */
+/** Assert a public read was refused byte-identically to a never-existing token —
+ *  an orphan must not confirm its token was ever real. */
 async function expectAnsweredLikeUnknownToken(res: Response): Promise<void> {
   const unknown = await request("GET", `/api/public/${UNKNOWN_TOKEN}`);
 
@@ -347,9 +442,8 @@ describe("Books save against a stale legacy shelf list", () => {
   });
 
   it("keeps a deleted shelf deleted when a later books save carries a stale read", async () => {
-    // End-to-end version, driven through the real delete handler: it empties the
-    // pointer key and leaves `user:{id}` untouched, so the legacy field survives
-    // as exactly the stale list a racing save would otherwise restore.
+    // End to end through the real delete handler; the legacy field is the stale list.
+    // See the header → "§1, end to end".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, REVOKED_TOKEN)] });
     await seedSnapshot(shelf(SHELF_ID, REVOKED_TOKEN));
 
@@ -417,9 +511,8 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
   );
 
   it("reads the snapshot and the pointer key only for a migrated owner", async () => {
-    // Read-cost tripwire. `user:{id}` is seeded and would satisfy the guard on
-    // its own, so only the read trail catches a handler that keeps consulting it
-    // — one needless KV read on every public hit.
+    // Read-cost tripwire: `user:{id}` is seeded, so only the read trail catches it.
+    // See the header → "Read-cost tripwires".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedPointer([shelf(SHELF_ID, LIVE_TOKEN)]);
     await seedSnapshot(shelf(SHELF_ID, LIVE_TOKEN));
@@ -477,9 +570,8 @@ describe("GET /api/public/:shareToken — expiresAt vs the shelf's", () => {
   });
 
   it("keeps serving after an expiresDays update moves the deadline", async () => {
-    // Shelf and snapshot are rewritten by the same handler call, so both
-    // deadlines stay equal — the regression this guards is a guard that 404s
-    // the owner's own shelf right after they edited it.
+    // One handler call rewrites both deadlines; no 404 right after an edit.
+    // See the header → "§3, expiresAt is MONOTONIC".
     const created = await createTimedShelf(30);
 
     const updated = await request(
@@ -517,15 +609,8 @@ describe("GET /api/public/:shareToken — expiresAt vs the shelf's", () => {
     expect(json.data.expiresAt).toBe(created.expiresAt);
   });
 
-  /**
-   * Every way a snapshot's deadline can relate to the shelf backing it, and
-   * what the MONOTONIC liveness rule answers (`null` = permanent = +∞).
-   *
-   * The asymmetry IS the rule: a snapshot may never promise a LONGER lifetime
-   * than the shelf currently grants — that is the only direction that hands out
-   * more access than the owner allowed — while promising a SHORTER one is
-   * harmless and stays readable until its own earlier deadline.
-   */
+  /** Every snapshot-vs-shelf deadline relation and the MONOTONIC rule's answer
+   *  (`null` = permanent = +∞). See the header → "§3, expiresAt is MONOTONIC". */
   const EXPIRY_CASES: {
     label: string;
     shelfExpiresAt: () => number | null;
@@ -540,9 +625,8 @@ describe("GET /api/public/:shareToken — expiresAt vs the shelf's", () => {
       status: 200,
     },
     {
-      // The dangerous direction taken to its extreme: no KV TTL and no deadline
-      // would ever retire this snapshot, so it outlives the limit the owner has
-      // since imposed on the shelf.
+      // The dangerous direction at its extreme: nothing would ever retire it.
+      // See the header → "§3, expiresAt is MONOTONIC".
       label: "a time-limited shelf backs a permanent snapshot",
       shelfExpiresAt: () => Date.now() + 7 * DAY_MS,
       snapshotExpiresAt: () => null,
@@ -557,12 +641,8 @@ describe("GET /api/public/:shareToken — expiresAt vs the shelf's", () => {
       status: 404,
     },
     {
-      // The deliberate FAIL-SAFE direction, and the reason the rule is not
-      // strict equality: this is exactly what an EXTEND-deadline race leaves
-      // behind — a snapshot republished from a ~60s-stale pointer read just
-      // after the owner pushed the deadline out. Strict equality 404'd a live
-      // link at the moment its owner granted MORE access; it now keeps serving
-      // and simply retires at the earlier deadline it carries.
+      // The deliberate FAIL-SAFE direction (an EXTEND-deadline race's leftover).
+      // See the header → "§3, expiresAt is MONOTONIC".
       label: "the snapshot's deadline is EARLIER than the shelf's",
       shelfExpiresAt: () => Date.now() + 30 * DAY_MS,
       snapshotExpiresAt: () => Date.now() + 7 * DAY_MS,
@@ -597,11 +677,8 @@ describe("GET /api/public/:shareToken — expiresAt vs the shelf's", () => {
   );
 
   it("keeps serving a link whose snapshot a stale read left at the pre-extension deadline", async () => {
-    // The fail-safe row above, driven end to end: the owner extends 30 → 90
-    // days (the pointer key now carries the later deadline), then a books save
-    // running on a stale cross-colo read of the shelf list republishes the
-    // snapshot with the OLD deadline. The republish goes through the production
-    // writer, so the snapshot is byte-identical to what such a save produces.
+    // The fail-safe row end to end: extend 30 → 90 days, then a stale-read save
+    // republishes the OLD deadline. See the header → "§3, expiresAt is MONOTONIC".
     const created = await createTimedShelf(30);
 
     const extended = await request(
@@ -667,12 +744,8 @@ describe("Lazy migration to the pointer key", () => {
   );
 
   it("revokes an un-migrated owner's legacy shelf and migrates the pointer key", async () => {
-    // The third migrating write, and the ONLY delete branch the pointer-first
-    // read path added: revocation resolves the shelf list through
-    // `readPublicShelves`, so an un-migrated owner can only reach their shelf
-    // via its `user:{id}` fallback. Without this pin, removing that fallback
-    // would leave such owners unable to revoke a still-readable link while
-    // every other test stayed green.
+    // The third migrating write: revoking via the `user:{id}` fallback.
+    // See the header → "§4, legacy revoke".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedSnapshot(shelf(SHELF_ID, LIVE_TOKEN));
     expect(await pointerRecord()).toBeNull();
@@ -685,9 +758,8 @@ describe("Lazy migration to the pointer key", () => {
 
     expect(res.status).toBe(204);
     expect(await storedSnapshot(LIVE_TOKEN)).toBeNull();
-    // The revoke itself migrated: an empty list is the MIGRATED "no shelves"
-    // state and outranks the stale legacy field the record still carries, so
-    // no later books save can re-list the shelf.
+    // The revoke migrated: an empty list outranks the stale legacy field.
+    // See the header → "§4, legacy revoke".
     expect(await pointerRecord()).toEqual({ shelves: [] });
     expect((await userRecord())?.publicSharing?.shelves).toHaveLength(1);
 
@@ -761,10 +833,8 @@ describe("Books save for an un-migrated owner", () => {
 
 describe("PUT /api/user/:id/family-prefs", () => {
   it("writes no snapshot and reads no shelf list", async () => {
-    // The other read-modify-write of `user:{id}`. It may carry the inert legacy
-    // field along in its `...existing` spread, which is harmless precisely
-    // because it publishes nothing — pinned here so a future snapshot refresh
-    // added to this handler would reopen the lost-update hole loudly.
+    // The other read-modify-write of `user:{id}`: harmless only while it publishes
+    // nothing. See the header → "§6, family-prefs".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, REVOKED_TOKEN)] });
     await seedPointer([shelf(SHELF_ID, LIVE_TOKEN)]);
     const ops = watchKvOps(kv);
@@ -781,9 +851,8 @@ describe("PUT /api/user/:id/family-prefs", () => {
     expect(writtenKeys).toEqual([kvKeys.user(USER)]);
     expect(await storedSnapshot(REVOKED_TOKEN)).toBeNull();
     expect(await storedSnapshot(LIVE_TOKEN)).toBeNull();
-    // No pointer read either (the `token:` read is the auth middleware): a
-    // handler that writes no snapshot cannot revive a revoked token, so it
-    // deliberately pays nothing for the shelf list.
+    // No pointer read either (`token:` is the auth middleware's read).
+    // See the header → "§6, family-prefs".
     expect(readKeys).toEqual([kvKeys.authToken(authToken), kvKeys.user(USER)]);
     expect(await pointerRecord()).toEqual({
       shelves: [shelf(SHELF_ID, LIVE_TOKEN)],
@@ -811,9 +880,8 @@ describe("DELETE /api/user/:id — public-shelf cleanup", () => {
     expect(await kv.get(kvKeys.user(USER))).toBeNull();
     expect(await storedSnapshot(LIVE_TOKEN)).toBeNull();
 
-    // Documented residual: a snapshot no live shelf list points at is not
-    // reclaimed. It is unreadable either way — with both keys gone the liveness
-    // guard resolves an empty shelf list.
+    // Documented residual: an unlisted snapshot is not reclaimed, but unreadable.
+    // See the header → "§7, account deletion residual".
     expect(await storedSnapshot(REVOKED_TOKEN)).not.toBeNull();
     const orphan = await request("GET", `/api/public/${REVOKED_TOKEN}`);
     await expectAnsweredLikeUnknownToken(orphan);
@@ -834,12 +902,7 @@ describe("DELETE /api/user/:id — public-shelf cleanup", () => {
 });
 
 // ── 8. Revocation does not depend on the books record ─────────
-//
-// The account-deletion cleanup above is not atomic: it can fail partway and
-// leave the pointer key (and its snapshots) behind with `user:{id}` already
-// gone. Revocation reads no `record.books`, so it resolves the shelf list
-// pointer-first and must stay possible in that state — otherwise a live public
-// link would have no remaining way to be killed.
+// See the header → "§8, revocation without a books record".
 
 describe("DELETE /api/user/:id/public-shelf/:shelfId — without a books record", () => {
   function deleteShelf(shelfId: string): Promise<Response> {
@@ -897,10 +960,8 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId — without a books record"
   );
 
   it("reads no user:{id} at all for a migrated owner's delete", async () => {
-    // Read-cost tripwire, the DELETE counterpart of the public read path's:
-    // `user:{id}` IS seeded here and its legacy field would resolve the same
-    // shelf, so only the read trail catches a handler that goes back to
-    // requiring the books record.
+    // Read-cost tripwire, the DELETE counterpart: only the read trail catches it.
+    // See the header → "Read-cost tripwires".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedPointer([shelf(SHELF_ID, LIVE_TOKEN)]);
     await seedSnapshot(shelf(SHELF_ID, LIVE_TOKEN));
@@ -923,23 +984,7 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId — without a books record"
 });
 
 // ── 9. Revocation write ORDER ─────────────────────────────────
-//
-// With the read-side liveness guard in place, the POINTER write IS the
-// revocation and the snapshot delete is merely cleanup — so the pointer write
-// has to be the step that lands FIRST. Both partial failures are then
-// fail-closed:
-//   - pointer write fails  ⇒ nothing happened at all (shelf still listed AND
-//     its snapshot still there — consistent; the owner sees a 5xx and retries);
-//   - snapshot delete fails ⇒ an orphan the liveness guard already refuses.
-// Deleting the snapshot FIRST — the order DELETE used to have — left a third,
-// OPEN failure mode: snapshot gone but the shelf STILL listed, so the owner's
-// next ordinary books save rebuilt a snapshot under the very token they had
-// just revoked and the dead link came back READABLE — indefinitely, for a
-// permanent shelf.
-//
-// Only a cross-op trail can catch a regression here: swap the two writes back
-// and `putKeys()` / `deleteKeys()` both stay green, because each list is
-// correct on its own. Hence `writeTrail()`.
+// See the header → "§9, revocation write ORDER".
 
 describe("Public-shelf revocation write order", () => {
   it("writes the pointer key BEFORE deleting the snapshot on DELETE", async () => {
@@ -955,9 +1000,8 @@ describe("Public-shelf revocation write order", () => {
     );
     expect(res.status).toBe(204);
 
-    // The handler's COMPLETE mutation sequence, order included. DEV_MODE keeps
-    // the pipeline's per-IP counter out of the trail, so these two writes are
-    // all of it.
+    // The handler's COMPLETE mutation sequence (DEV_MODE keeps the counter out).
+    // See the header → "§9, revocation write ORDER".
     expect(ops.writeTrail()).toEqual([
       `put ${kvKeys.publicShelves(USER)}`,
       `delete ${kvKeys.publicShelf(LIVE_TOKEN)}`,
@@ -965,11 +1009,8 @@ describe("Public-shelf revocation write order", () => {
   });
 
   it("deletes the superseded snapshot LAST on reset-token, after publishing the new one", async () => {
-    // The rule DELETE was aligned to, pinned so the two cannot drift apart: the
-    // NEW token's snapshot goes up first (a reader who already sees the new
-    // list never 404s on it), the pointer write then commits the rotation, and
-    // the old snapshot — which the guard refuses either way — is cleaned up
-    // last.
+    // New snapshot → pointer write → old snapshot delete, the rule DELETE follows.
+    // See the header → "§9, revocation write ORDER".
     await seedUser();
     await seedPointer([shelf(SHELF_ID, REVOKED_TOKEN)]);
     await seedSnapshot(shelf(SHELF_ID, REVOKED_TOKEN));
@@ -993,12 +1034,7 @@ describe("Public-shelf revocation write order", () => {
 });
 
 // ── 10. A corrupted pointer record fails closed ───────────────
-//
-// Both shelf lists reach the resolver as unvalidated `kv.get(..., "json")`
-// casts. A pointer whose `shelves` is not an array still WINS — falling past it
-// would resurrect the legacy list, i.e. the revoked token the key exists to
-// bury — but degrades to "no shelves" instead of throwing a TypeError, which on
-// the PUBLIC path a stranger could otherwise turn into a 500.
+// See the header → "§10, a corrupted pointer record fails closed".
 
 describe("A corrupted pointer record", () => {
   /** Write a pointer record whose `shelves` did not survive as an array. */

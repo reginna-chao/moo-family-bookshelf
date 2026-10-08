@@ -15,6 +15,66 @@ import {
 import { generateAuthToken } from "../../src/middleware/auth";
 import { USER1, USER2 } from "../helpers/ids";
 
+/**
+ * GET /api/family/:id/bookshelf — what the family aggregation may and may not
+ * hand to other members, and the per-user rate limit on it.
+ *
+ * Request helpers: `prodRequest` is a non-dev request (rate limits active)
+ * with the Rate Limiting bindings a production deploy carries — without them
+ * the per-minute limits fall back to their KV counters, which is not the world
+ * this suite is about. Its `decide` lets a case simulate the platform refusing
+ * a particular counter; omitted, every call is admitted.
+ *
+ * Seeding: `seedFamily` writes a family plus one `user:{id}` books record per
+ * member DIRECTLY to KV; `members[0]` is the owner and the caller whose auth
+ * token is returned. A `SeededBook` is a book as it can sit in KV: the
+ * coverless variant models a record written before `coverUrl` was always
+ * populated; it is unreachable through a write handler (`parseBooks` always
+ * emits the field), so it can only be seeded raw. `COVERLESS_BOOK` is typed as
+ * an `Omit` of the production entry so it still breaks if `BookEntry` gains a
+ * required field.
+ *
+ * TEST-1 (privacy filter): unshared books MUST be excluded from aggregation.
+ * This fails if someone deletes the `.filter(... === BoolFlag.TRUE)` line.
+ *
+ * Read-side coverUrl sanitize (P0 privacy): the aggregation is the read-side
+ * twin of the `buildSnapshot` chokepoint. A `user:{id}` record poisoned BEFORE
+ * the whitelist existed, whose owner never syncs again, would otherwise beacon
+ * every family member on every shelf open — the dialog renders these covers
+ * under Readmoo's page CSP, so there is no client-side lever. The write paths
+ * cannot fix such a record (they only sanitize what they are asked to write),
+ * so the scrub happens on the way out. Read-side ONLY: no repair write.
+ *
+ * Read-side readmooUrl sanitize (P0 privacy): the same read-side twin argument
+ * as the covers, applied to the OTHER attacker-controlled URL field. A
+ * `user:{id}` record poisoned BEFORE the whitelist existed, whose owner never
+ * syncs again, would otherwise hand every family member a clickable phishing /
+ * arbitrary-redirect link under a legitimate book title. This is the case that
+ * matters most for a DORMANT account: no write path can ever reach such a
+ * record, and a CSP cannot help — `img-src` never constrained a navigation. So
+ * the scrub happens on the way out, response-only, with no repair write.
+ *
+ * Response transform: for both fields the scrub is a response transform, not a
+ * lazy repair — the response is clean because THIS handler scrubbed it, not
+ * because something repaired KV first (anti-tautology anchor). An aggregation
+ * read must never mutate another member's record. DEV_MODE elides the
+ * rate-limit counter put, so the write trail is the handler's own writes — see
+ * the scope caveat in `helpers/kvOps.ts`.
+ *
+ * BE-3: per-user rate limit on the bookshelf endpoint (max 30 / 60s window),
+ * mirroring the borrow-list per-user rate-limit guard. Since #160 item 1 the
+ * COUNTING is Cloudflare's, not ours: the handler hands the platform a key and
+ * renders whatever verdict comes back. So the stub plays the platform — it
+ * counts calls on the bookshelf key and refuses the 31st — and what is under
+ * test is what the Worker still owns: that every request charges the SAME key
+ * (or the platform could not accumulate a count at all), that the key is the
+ * AUTHENTICATED caller's own id, and that a refusal is rendered as 429
+ * RATE_LIMITED with a Retry-After. Security-ux Invariant 6: a counter that can
+ * deny service must never be chargeable on a caller-supplied target id; with
+ * the KV key gone, the "charges the authenticated caller" case is the
+ * assertion that keeps that honest for this route.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -35,14 +95,8 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/**
- * Non-dev request (rate limits active), with the Rate Limiting bindings a
- * production deploy carries — without them the per-minute limits fall back to
- * their KV counters, which is not the world this suite is about.
- *
- * `decide` lets a case simulate the platform refusing a particular counter;
- * omitted, every call is admitted.
- */
+/** Non-dev request with the production bindings; `decide` simulates a refusal.
+ *  See the header → "Request helpers". */
 function prodRequest(
   method: string,
   path: string,
@@ -75,11 +129,8 @@ function book(
   };
 }
 
-/**
- * A book as it can sit in KV. The coverless variant models a record written
- * before `coverUrl` was always populated; it is unreachable through a write
- * handler (`parseBooks` always emits the field), so it can only be seeded raw.
- */
+/** A book as it can sit in KV, including the raw-seeded coverless legacy shape.
+ *  See the header → "Seeding". */
 type SeededBook = BookEntry | Omit<BookEntry, "coverUrl">;
 
 interface MemberSeed {
@@ -88,10 +139,8 @@ interface MemberSeed {
   books: SeededBook[];
 }
 
-/**
- * Seed a family plus one `user:{id}` books record per member, written DIRECTLY
- * to KV. `members[0]` is the owner and the caller whose auth token is returned.
- */
+/** Seed a family + one books record per member DIRECTLY to KV; `members[0]` is the
+ *  owner and the caller whose token is returned. */
 async function seedFamily(
   members: MemberSeed[],
 ): Promise<{ familyId: string; token: string }> {
@@ -144,10 +193,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// TEST-1: privacy filter — unshared books MUST be excluded from aggregation.
-// This fails if someone deletes the `.filter(... === BoolFlag.TRUE)` line.
-// ===========================================================================
+// ===== TEST-1: privacy filter — unshared books MUST be excluded =====
+// See the header → "TEST-1".
 
 describe("GET /api/family/:id/bookshelf — privacy filter", () => {
   it("returns ONLY shared books and omits every unshared book from a mixed shelf", async () => {
@@ -198,15 +245,8 @@ describe("GET /api/family/:id/bookshelf — privacy filter", () => {
   });
 });
 
-// ===========================================================================
-// Read-side coverUrl sanitize (P0 privacy): the aggregation is the read-side
-// twin of the `buildSnapshot` chokepoint. A `user:{id}` record poisoned BEFORE
-// the whitelist existed, whose owner never syncs again, would otherwise beacon
-// every family member on every shelf open — the dialog renders these covers
-// under Readmoo's page CSP, so there is no client-side lever. The write paths
-// cannot fix such a record (they only sanitize what they are asked to write),
-// so the scrub happens on the way out. Read-side ONLY: no repair write.
-// ===========================================================================
+// ===== Read-side coverUrl sanitize (P0 privacy) =====
+// See the header → "Read-side coverUrl sanitize".
 
 describe("GET /api/family/:id/bookshelf — coverUrl read-side sanitize", () => {
   /** An attacker-chosen cover host — a tracking beacon once rendered. */
@@ -215,11 +255,8 @@ describe("GET /api/family/:id/bookshelf — coverUrl read-side sanitize", () => 
   /** On the Readmoo cover-host whitelist (`isAllowedCoverUrl`), so it survives. */
   const CLEAN_COVER = "https://cdn.readmoo.com/clean.jpg";
 
-  /**
-   * A shared book stored with NO `coverUrl` key at all — the other legacy shape
-   * the aggregation has to survive. Typed as an `Omit` of the production entry
-   * so it still breaks if `BookEntry` gains a required field.
-   */
+  /** A shared book stored with NO `coverUrl` key — the other legacy shape the
+   *  aggregation must survive. See the header → "Seeding". */
   const COVERLESS_BOOK: Omit<BookEntry, "coverUrl"> = {
     bookId: "coverless",
     title: "Title coverless",
@@ -316,10 +353,8 @@ describe("GET /api/family/:id/bookshelf — coverUrl read-side sanitize", () => 
 
     await fetchShelf(familyId, token);
 
-    // The scrub is a response transform, not a lazy repair: an aggregation read
-    // must never mutate another member's record. (DEV_MODE elides the
-    // rate-limit counter put, so this trail is the handler's own writes — see
-    // the scope caveat in `helpers/kvOps.ts`.)
+    // A response transform, not a lazy repair: no write to another member's record.
+    // See the header → "Response transform".
     expect(ops.writeTrail()).toEqual([]);
     const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
     expect(stored?.books.map((b) => b.coverUrl)).toEqual([
@@ -377,16 +412,8 @@ describe("GET /api/family/:id/bookshelf — coverUrl read-side sanitize", () => 
   });
 });
 
-// ===========================================================================
-// Read-side readmooUrl sanitize (P0 privacy): the same read-side twin argument
-// as the covers above, applied to the OTHER attacker-controlled URL field. A
-// `user:{id}` record poisoned BEFORE the whitelist existed, whose owner never
-// syncs again, would otherwise hand every family member a clickable phishing /
-// arbitrary-redirect link under a legitimate book title. This is the case that
-// matters most for a DORMANT account: no write path can ever reach such a
-// record, and a CSP cannot help — `img-src` never constrained a navigation. So
-// the scrub happens on the way out, response-only, with no repair write.
-// ===========================================================================
+// ===== Read-side readmooUrl sanitize (P0 privacy) =====
+// See the header → "Read-side readmooUrl sanitize".
 
 describe("GET /api/family/:id/bookshelf — readmooUrl read-side sanitize", () => {
   /** An attacker-chosen destination — a phishing lure once clicked. */
@@ -483,10 +510,8 @@ describe("GET /api/family/:id/bookshelf — readmooUrl read-side sanitize", () =
 
     await fetchShelf(familyId, token);
 
-    // Anti-tautology anchor: the response is clean because THIS handler
-    // scrubbed it, not because something repaired KV first. An aggregation read
-    // must never mutate another member's record. (DEV_MODE elides the
-    // rate-limit counter put — see the scope caveat in `helpers/kvOps.ts`.)
+    // Anti-tautology anchor: clean because THIS handler scrubbed it, KV untouched.
+    // See the header → "Response transform".
     expect(ops.writeTrail()).toEqual([]);
     const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
     expect(stored?.books.map((b) => b.readmooUrl)).toEqual([
@@ -517,18 +542,8 @@ describe("GET /api/family/:id/bookshelf — readmooUrl read-side sanitize", () =
   });
 });
 
-// ===========================================================================
-// BE-3: per-user rate limit on the bookshelf endpoint (max 30 / 60s window).
-// Mirrors the borrow-list per-user rate-limit guard.
-//
-// Since #160 item 1 the COUNTING is Cloudflare's, not ours: the handler hands
-// the platform a key and renders whatever verdict comes back. So the stub
-// below plays the platform — it counts calls on the bookshelf key and refuses
-// the 31st — and what is under test here is what the Worker still owns: that
-// every request charges the SAME key (or the platform could not accumulate a
-// count at all), that the key is the AUTHENTICATED caller's own id, and that a
-// refusal is rendered as 429 RATE_LIMITED with a Retry-After.
-// ===========================================================================
+// ===== BE-3: per-user rate limit on the bookshelf endpoint (30 / 60s) =====
+// The stub plays the platform. See the header → "BE-3".
 
 /** The counter key routes/bookshelf.ts must charge, spelled out as an oracle. */
 const BOOKSHELF_LIMIT_KEY = `ratelimit:user:bookshelf:${USER1}`;
@@ -567,9 +582,8 @@ describe("GET /api/family/:id/bookshelf — per-user rate limit", () => {
   });
 
   it("charges the ceiling to the authenticated caller, not to the family in the path", async () => {
-    // security-ux Invariant 6: a counter that can deny service must never be
-    // chargeable on a caller-supplied target id. With the KV key gone, this is
-    // the assertion that keeps that honest for this route.
+    // security-ux Invariant 6: never chargeable on a caller-supplied target id.
+    // See the header → "BE-3".
     const { familyId, token } = await seedSoloFamily([
       book("shared-1", BoolFlag.TRUE),
     ]);

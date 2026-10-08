@@ -103,6 +103,93 @@
  * `dependabot.yml` from the fixture's parent goes RED on the companion, and a
  * fixture whose FIRST job carries the condition while `claude-review:` does
  * not goes RED — the case that anchoring to the job by name is what fixes.
+ *
+ * MUTATION-CHECK SEAM (`WORKFLOWS_DIR`; same device as `ciSuccessGate.test.ts`'s
+ * `MOO_CI_WORKFLOW_PATH` and `nodeEngineFloor.test.ts`'s package.json paths).
+ * The directory is overridable through `MOO_WORKFLOWS_DIR` purely so this guard
+ * can be driven RED against throwaway fixture workflows at authoring time,
+ * WITHOUT editing the live `.github/workflows/` files. CI sets no such
+ * variable. A seam value pointing at NOTHING throws loudly in
+ * `listWorkflowFiles`; a seam value pointing at a VALID fixture directory is
+ * the intended mutation-check use, and the guard then scans those fixtures
+ * rather than the repo's workflows, undetected. Resolved from THIS file, not
+ * `process.cwd()`: vitest runs with the `worker/` package as its cwd, and
+ * `.github/` sits two levels above it. `DEPENDABOT_CONFIG` sits beside the
+ * workflows directory rather than inside it, and is resolved from
+ * `WORKFLOWS_DIR` so the seam reaches it too.
+ *
+ * THE FLOORS (positive companions to the per-reference rule):
+ *  - `EXPECTED_WORKFLOW_FILES` — the workflows that exist today. Containment,
+ *    not equality — a new workflow file is legitimate and the rule covers it
+ *    automatically. Without it, a seam or a rename that emptied the scan would
+ *    make every per-reference assertion vacuously true.
+ *  - `EXPECTED_USES_COUNT` — how many `uses:` references the scan must find:
+ *    42 in `cicd.yml`, 2 in `claude-code-review.yml`, 2 in `claude.yml`. A
+ *    FLOOR, not an equality — adding a step is legitimate, and the pin rule
+ *    then covers it. This is what catches a drifted `uses:` pattern that
+ *    matches nothing (the per-reference rule is trivially satisfied by an empty
+ *    list).
+ *  - `REQUIRED_ACTIONS` — actions the pipeline is built on, aimed at a
+ *    PARTIALLY drifted pattern rather than a fully dead one:
+ *    `dorny/paths-filter` and `pnpm/action-setup` are only ever written in the
+ *    `- uses:` list form, `anthropics/claude-code-action` only in the
+ *    `name:`-then-`uses:` form, so a pattern that lost either spelling drops one
+ *    of these and goes red instead of quietly skipping those references.
+ *  - The per-reference cases are driven off the references actually parsed out
+ *    of the directory, not a hard-coded list: a new step — in any workflow
+ *    file, including one added later — inherits the rule automatically, and the
+ *    companions are what stop that list from silently shrinking to nothing.
+ *  - The exemption is pinned in both directions so the first local action
+ *    added does not go red for the wrong reason, and so widening it later
+ *    cannot quietly excuse a real third-party action.
+ *
+ * THE PATTERNS.
+ *  - `USES_LINE_PATTERN` — a `uses:` step line, in both spellings the workflows
+ *    use: `- uses: x` (the first key of a step) and `uses: x` (a later key,
+ *    after `name:` / `if:`). Group 1 is the reference, group 2 the remainder of
+ *    the line — where the version comment must be. Anchored at the indent so a
+ *    key merely ENDING in `uses:` (`reuses:`) cannot match.
+ *  - `VERSION_COMMENT_PATTERN` — the tag the SHA was resolved from, as a
+ *    trailing comment. Group 1 is the tag alone — a PREFIX match, so trailing
+ *    prose (`# v5.1.0 — bumped 2026-09`) is allowed and the cross-reference
+ *    rule can compare tags rather than whole comments.
+ *  - `DEPENDABOT_SKIP_PATTERN` — the author condition, tolerant of spacing and
+ *    of either quote style — the spelling is what matters, not the formatting a
+ *    future edit lands on.
+ *
+ * CROSS-REFERENCE CHECK, in detail. A half-finished bump — SHA moved but the
+ * comment did not, or 10 of 11 occurrences updated — leaves exactly this shape:
+ * the same ref carrying two different version comments, or one (action,
+ * version) resolving to two SHAs. Neither is reachable from the per-reference
+ * rule, and both make the `# v<tag>` comment a lie, which is what the comment
+ * exists to prevent. Compared on the version TAG (`versionTag`), not the raw
+ * comment: prose after the tag is allowed, so two lines pinning one SHA as
+ * `# v5.1.0` and `# v5.1.0 (dependabot)` agree and must not be called a
+ * contradiction. A comment with no tag at all falls back to itself — it is
+ * already red in the per-reference rule, so nothing is masked.
+ *
+ * THE DEPENDABOT HALF, in detail.
+ *  - Positive companion first: the rule only matters while Dependabot actually
+ *    opens github-actions PRs. Drop the config — or switch its ecosystem — and
+ *    the condition is dead code that nobody would notice rotting.
+ *  - `readScannedWorkflow` throws when the file is not in the scan: a renamed
+ *    or deleted workflow must surface as a broken guard, not as a rule with
+ *    nothing left to check. `listWorkflowFiles` likewise throws rather than
+ *    returning an empty list: "the directory is gone" is a broken guard, not a
+ *    satisfied one.
+ *  - `reviewJobBlock` returns the lines of the review job, from its key up to
+ *    the next 2-space job key (or EOF). Anchoring to the job by NAME is what
+ *    stops the `if:` lookup from reading some OTHER job's condition: "the first
+ *    block-scalar `if:` in the file" is only the review job's while the review
+ *    job happens to be first, and a workflow that later grows a preflight job in
+ *    front of it would go on passing while the review job itself lost the
+ *    condition.
+ *  - `jobLevelIfBlock` returns the block-scalar `if:` of one job — its
+ *    condition — with the commentary stripped. Both halves matter: scoping to
+ *    the block keeps the commented-out `# if: |` example that sits BELOW it out
+ *    of the match, and dropping `#` lines keeps a commented copy of the
+ *    condition from satisfying the rule. The block ends at the first non-blank
+ *    line indented no further than the `if:` key itself.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -111,50 +198,25 @@ import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/**
- * MUTATION-CHECK SEAM (same device as `ciSuccessGate.test.ts`'s
- * `MOO_CI_WORKFLOW_PATH` and `nodeEngineFloor.test.ts`'s package.json paths).
- * The directory is overridable purely so this guard can be driven RED against
- * throwaway fixture workflows at authoring time, WITHOUT editing the live
- * `.github/workflows/` files. CI sets no such variable. A seam value pointing
- * at NOTHING throws loudly in `listWorkflowFiles` below; a seam value pointing
- * at a VALID fixture directory is the intended mutation-check use, and the
- * guard then scans those fixtures rather than the repo's workflows, undetected.
- *
- * Resolved from THIS file, not `process.cwd()`: vitest runs with the `worker/`
- * package as its cwd, and `.github/` sits two levels above it.
- */
+// Mutation-check seam (`MOO_WORKFLOWS_DIR`; CI sets none), resolved from THIS file, not the cwd.
+// See the header → "MUTATION-CHECK SEAM".
 const WORKFLOWS_DIR =
   process.env.MOO_WORKFLOWS_DIR ?? resolve(HERE, "../../../.github/workflows");
 
-/**
- * The workflows that exist today. Containment, not equality — a new workflow
- * file is legitimate and the rule covers it automatically. Positive companion:
- * without this, a seam or a rename that emptied the scan would make every
- * per-reference assertion vacuously true.
- */
+// The workflows that exist today (containment, not equality) — a positive companion.
+// See the header → "THE FLOORS".
 const EXPECTED_WORKFLOW_FILES = [
   "cicd.yml",
   "claude-code-review.yml",
   "claude.yml",
 ];
 
-/**
- * How many `uses:` references the scan must find: 42 in `cicd.yml`, 2 in
- * `claude-code-review.yml`, 2 in `claude.yml`. A FLOOR, not an equality —
- * adding a step is legitimate, and the pin rule then covers it. This is what
- * catches a drifted `uses:` pattern that matches nothing.
- */
+// A FLOOR on `uses:` references: 42 in `cicd.yml`, 2 in `claude-code-review.yml`, 2 in `claude.yml`.
+// See the header → "THE FLOORS".
 const EXPECTED_USES_COUNT = 46;
 
-/**
- * Actions the pipeline is built on. Second positive companion, aimed at a
- * PARTIALLY drifted pattern rather than a fully dead one: `dorny/paths-filter`
- * and `pnpm/action-setup` are only ever written in the `- uses:` list form,
- * `anthropics/claude-code-action` only in the `name:`-then-`uses:` form, so a
- * pattern that lost either spelling drops one of these and goes red here
- * instead of quietly skipping those references.
- */
+// Actions the pipeline is built on — catches a PARTIALLY drifted `uses:` pattern.
+// See the header → "THE FLOORS".
 const REQUIRED_ACTIONS = [
   "actions/checkout",
   "pnpm/action-setup",
@@ -168,24 +230,15 @@ const WORKFLOW_FILE_PATTERN = /\.ya?ml$/;
 /** A line whose first non-space character is `#` — commentary, never a step. */
 const COMMENT_LINE_PATTERN = /^[ \t]*#/;
 
-/**
- * A `uses:` step line, in both spellings the workflows use: `- uses: x` (the
- * first key of a step) and `uses: x` (a later key, after `name:` / `if:`).
- * Group 1 is the reference, group 2 the remainder of the line — where the
- * version comment must be. Anchored at the indent so a key merely ENDING in
- * `uses:` (`reuses:`) cannot match.
- */
+// A `uses:` step line in both spellings; group 1 = reference, group 2 = rest of line.
+// See the header → "THE PATTERNS".
 const USES_LINE_PATTERN = /^[ \t]*(?:-[ \t]+)?uses:[ \t]*(\S+)[ \t]*(.*)$/;
 
 /** `<owner>/<repo>[/<path>]@<40 lowercase hex>` — the only accepted shape. */
 const PINNED_REF_PATTERN = /^[^@\s]+@[0-9a-f]{40}$/;
 
-/**
- * The tag the SHA was resolved from, as a trailing comment. Group 1 is the tag
- * alone — a PREFIX match, so trailing prose (`# v5.1.0 — bumped 2026-09`) is
- * allowed and the cross-reference rule below can compare tags rather than
- * whole comments.
- */
+// The tag the SHA was resolved from (group 1), a PREFIX match so trailing prose is allowed.
+// See the header → "THE PATTERNS".
 const VERSION_COMMENT_PATTERN = /^#[ \t]*(v\d+(?:\.\d+)*)\b/;
 
 /** An action stored in this repository — reviewed here, nothing to pin. */
@@ -194,10 +247,8 @@ const LOCAL_REF_PATTERN = /^\.{1,2}\//;
 /** A container image, not a git ref — this syntax has no SHA to carry. */
 const DOCKER_REF_PATTERN = /^docker:\/\//;
 
-/**
- * Dependabot's config, beside the workflows directory rather than inside it.
- * Resolved from `WORKFLOWS_DIR` so the mutation seam reaches it too.
- */
+// Dependabot's config, beside the workflows directory rather than inside it.
+// Resolved from `WORKFLOWS_DIR` so the mutation seam reaches it too.
 const DEPENDABOT_CONFIG = resolve(WORKFLOWS_DIR, "../dependabot.yml");
 
 /** The ecosystem whose monthly PRs the review job must skip. */
@@ -206,10 +257,8 @@ const GITHUB_ACTIONS_ECOSYSTEM = 'package-ecosystem: "github-actions"';
 /** The workflow whose job-level `if:` carries the author condition. */
 const REVIEW_WORKFLOW_FILE = "claude-code-review.yml";
 
-/**
- * The author condition, tolerant of spacing and of either quote style — the
- * spelling is what matters, not the formatting a future edit lands on.
- */
+// The author condition, tolerant of spacing and of either quote style — the
+// spelling is what matters, not the formatting a future edit lands on.
 const DEPENDABOT_SKIP_PATTERN = /user\.login\s*!=\s*['"]dependabot\[bot\]['"]/;
 
 /** A block-scalar `if:` key — `if: >-`, `if: |`, `if: >`. */
@@ -235,11 +284,8 @@ interface UsesReference {
   readonly comment: string;
 }
 
-/**
- * The workflow files in `dir`, sorted for a stable case order. Throws rather
- * than returning an empty list: "the directory is gone" is a broken guard, not
- * a satisfied one.
- */
+// The workflow files in `dir`, sorted for a stable case order. Throws rather than returning
+// an empty list: "the directory is gone" is a broken guard, not a satisfied one.
 function listWorkflowFiles(dir: string): string[] {
   if (!existsSync(dir)) {
     throw new Error(
@@ -294,24 +340,15 @@ function actionName(value: string): string {
   return value.split("@")[0];
 }
 
-/**
- * The version tag inside a `# v…` comment, ignoring any trailing prose. The
- * cross-reference rule compares THIS rather than the raw comment: the header
- * documents prose after the tag as allowed, so `# v5.1.0` and
- * `# v5.1.0 (dependabot)` on two lines pinning the same SHA agree and must not
- * be reported as a contradiction. A comment with no tag at all falls back to
- * itself — it is already red in the per-reference rule, so nothing is masked.
- */
+// The version tag inside a `# v…` comment, ignoring trailing prose; a tag-less comment is itself.
+// See the header → "CROSS-REFERENCE CHECK, in detail".
 function versionTag(comment: string): string {
   const match = VERSION_COMMENT_PATTERN.exec(comment);
   return match ? match[1] : comment;
 }
 
-/**
- * One of the scanned workflow files, as text. Throws when the file is not in
- * the scan: a renamed or deleted workflow must surface as a broken guard, not
- * as a rule with nothing left to check.
- */
+// One scanned workflow file as text; throws when it is not in the scan (a renamed or deleted
+// workflow must surface as a broken guard, not as a rule with nothing left to check).
 function readScannedWorkflow(file: string, scanned: string[]): string {
   if (!scanned.includes(file)) {
     throw new Error(
@@ -325,14 +362,8 @@ function readScannedWorkflow(file: string, scanned: string[]): string {
     .join("\n");
 }
 
-/**
- * The lines of the review job, from its key up to the next 2-space job key (or
- * EOF). Anchoring to the job by NAME is what stops the `if:` lookup below from
- * reading some OTHER job's condition: "the first block-scalar `if:` in the
- * file" is only the review job's while the review job happens to be first, and
- * a workflow that later grows a preflight job in front of it would go on
- * passing while the review job itself lost the condition.
- */
+// The review job's lines, from its key to the next 2-space job key (or EOF), anchored by NAME.
+// See the header → "THE DEPENDABOT HALF, in detail".
 function reviewJobBlock(text: string, file: string): string {
   const start = REVIEW_JOB_PATTERN.exec(text);
   if (!start) {
@@ -347,14 +378,8 @@ function reviewJobBlock(text: string, file: string): string {
   return next ? rest.slice(0, next.index) : rest;
 }
 
-/**
- * The block-scalar `if:` of one job — its condition — with the commentary
- * stripped. Both halves matter: scoping to the block keeps the commented-out
- * `# if: |` example that sits BELOW it out of the match, and dropping `#`
- * lines keeps a commented copy of the condition from satisfying the rule. The
- * block ends at the first non-blank line indented no further than the `if:`
- * key itself.
- */
+// A job's block-scalar `if:` condition with `#` lines stripped (commented copies never count).
+// See the header → "THE DEPENDABOT HALF, in detail".
 function jobLevelIfBlock(text: string, file: string): string {
   const start = BLOCK_IF_PATTERN.exec(text);
   if (!start) {
@@ -407,9 +432,8 @@ describe("action pins across .github/workflows", () => {
   });
 
   it("parses a non-vacuous number of uses: references", () => {
-    // Positive companion (test.md → "Guard tests must prove they can fail"):
-    // the per-reference rule below is trivially satisfied by an empty list, so
-    // a drifted USES_LINE_PATTERN would pin nothing while staying green.
+    // Positive companion (test.md → "Guard tests must prove they can fail"): an empty list
+    // trivially satisfies the per-reference rule, so a drifted pattern would stay green.
     expect(
       USES_REFERENCES.length,
       `Only ${USES_REFERENCES.length} uses: references were parsed across ` +
@@ -440,9 +464,8 @@ describe("action pins across .github/workflows", () => {
   });
 
   it("exempts local and docker:// references from the pin rule", () => {
-    // The exemption is pinned in both directions so the first local action
-    // added does not go red for the wrong reason, and so widening it later
-    // cannot quietly excuse a real third-party action.
+    // Pinned in both directions: the first local action does not go red for the wrong
+    // reason, and widening the exemption cannot quietly excuse a real third-party action.
     expect(isExemptReference("./.github/actions/setup")).toBe(true);
     expect(isExemptReference("../shared/action")).toBe(true);
     expect(isExemptReference("docker://alpine:3.20")).toBe(true);
@@ -450,10 +473,8 @@ describe("action pins across .github/workflows", () => {
     expect(isExemptReference(`actions/checkout@${"0".repeat(40)}`)).toBe(false);
   });
 
-  // Driven off the references actually parsed out of the directory, not a
-  // hard-coded list: a new step — in any workflow file, including one added
-  // later — inherits the rule automatically, and the two companions above are
-  // what stop that list from silently shrinking to nothing.
+  // Driven off the parsed references, not a hard-coded list, so a new step inherits the rule.
+  // See the header → "THE FLOORS".
   it.each(PINNED_REFERENCES)(
     "pins $file:$line ($value) to a commit SHA with a version comment",
     ({ file, line, value, comment }: UsesReference) => {
@@ -476,15 +497,8 @@ describe("action pins across .github/workflows", () => {
   );
 
   it("never spells one pin two ways", () => {
-    // A half-finished bump — SHA moved but the comment did not, or 10 of 11
-    // occurrences updated — leaves exactly this shape: the same ref carrying two
-    // different version comments, or one (action, version) resolving to two SHAs.
-    // Neither is reachable from the per-reference rule above, and both make the
-    // `# v<tag>` comment a lie, which is what the comment exists to prevent.
-    //
-    // Compared on the version TAG, not the raw comment: the header allows prose
-    // after the tag, so two lines pinning one SHA as `# v5.1.0` and
-    // `# v5.1.0 (dependabot)` agree and must not be called a contradiction.
+    // A half-finished bump: one ref under two tags, or one (action, tag) over two SHAs.
+    // Compared on the TAG. See the header → "CROSS-REFERENCE CHECK, in detail".
     const commentByRef = new Map<string, UsesReference>();
     const refByVersion = new Map<string, UsesReference>();
     for (const reference of PINNED_REFERENCES) {
@@ -518,10 +532,8 @@ describe("action pins across .github/workflows", () => {
 
 describe("dependabot and the review workflow", () => {
   it("keeps Dependabot pull requests out of the Claude review job", () => {
-    // Positive companion first (test.md → "Guard tests must prove they can
-    // fail"): the rule below only matters while Dependabot actually opens
-    // github-actions PRs. Drop the config — or switch its ecosystem — and the
-    // condition is dead code that nobody would notice rotting.
+    // Positive companion first: the rule matters only while Dependabot opens github-actions PRs.
+    // See the header → "THE DEPENDABOT HALF, in detail".
     expect(
       existsSync(DEPENDABOT_CONFIG),
       `No dependabot.yml at ${DEPENDABOT_CONFIG}. The SHA pins above are ` +

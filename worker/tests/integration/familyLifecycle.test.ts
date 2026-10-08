@@ -4,19 +4,45 @@ import { createMockKV } from "../helpers/mockKv";
 import { kvKeys } from "../../src/kv/schema";
 import { ALICE, BOB, NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 
+/**
+ * Family lifecycle end to end (create → join → query → leave), plus member
+ * removal, ownership transfer, personal books, the bookshelf aggregation and
+ * the displayName endpoint.
+ *
+ * Book ids: B1 / B2 are real-shaped Readmoo bookIds (12+ digits), because PUT
+ * /books drops any NEW bookId of another shape (`dropNewMalformedBookIds` in
+ * `src/routes/user.ts`).
+ *
+ * Raw bodies: `rawRequest` is needed wherever `request()` cannot express the
+ * payload — `request()` JSON-stringifies its argument and skips falsy ones
+ * entirely, so bodies like `0` or `""` never reach the handler through it.
+ *
+ * Info-hiding: a non-member gets 404 NOT_FOUND on another family's bookshelf,
+ * never 403. Returning 403 would confirm the family exists, letting an outsider
+ * probe which family ids are real; 404 keeps the family's very existence hidden
+ * from non-members.
+ *
+ * Non-object bodies (`NON_OBJECT_BODIES`): bodies that parse as JSON but are
+ * not a plain object. The truthy primitives are the regression: they survive a
+ * bare `!body` check, and `"displayName" in 5` throws a TypeError — which
+ * surfaced as a 500 instead of a client error. The falsy ones, JSON null and
+ * arrays were always handled; every class is pinned so the row set states the
+ * whole rule — any non-object body is MISSING_DISPLAY_NAME, never a server
+ * error. The object-shape half of the guard is shared (isJsonObject in
+ * src/utils/validation.ts); each handler keeps its own error code/message, so
+ * both sides still need their own rows. The PUT /api/family/:id/endpoint side
+ * is pinned in tests/unit/familyEndpoint.test.ts (MISSING_FIELD_BODIES).
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-/**
- * Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of
- * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`).
- */
+/** Real-shaped (12+ digit) bookIds — PUT /books drops new short ones.
+ *  See the header → "Book ids". */
 const B1 = "210439468000101";
 const B2 = "210439468000102";
 
-// ---------------------------------------------------------------------------
-// Shared helpers (DRY — Finding #14)
-// ---------------------------------------------------------------------------
+// ----- Shared helpers (DRY — Finding #14) -----
 
 let kv: KVNamespace;
 
@@ -40,13 +66,8 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/**
- * Shortcut to send a request with a raw string body.
- *
- * Needed wherever `request()` cannot express the payload: it JSON-stringifies
- * its argument and skips falsy ones entirely, so bodies like `0` or `""` never
- * reach the handler through it.
- */
+/** Send a request with a raw string body (`0`, `""` …) that `request()` cannot
+ *  express. See the header → "Raw bodies". */
 function rawRequest(
   method: string,
   path: string,
@@ -90,17 +111,13 @@ async function createFamilyWithTwoMembers() {
   return { familyId, token1, token2 };
 }
 
-// ---------------------------------------------------------------------------
-// Reset KV before every test
-// ---------------------------------------------------------------------------
+// ----- Reset KV before every test -----
 
 beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Family Lifecycle
-// ===========================================================================
+// ===== Family Lifecycle =====
 
 describe("Family Lifecycle", () => {
   it("should create a family with default empty displayName", async () => {
@@ -228,9 +245,7 @@ describe("Family Lifecycle", () => {
   });
 });
 
-// ===========================================================================
-// Family creation response fields
-// ===========================================================================
+// ===== Family creation response fields =====
 
 describe("Family creation response fields", () => {
   it("should include ownerId matching the creator", async () => {
@@ -248,9 +263,7 @@ describe("Family creation response fields", () => {
   });
 });
 
-// ===========================================================================
-// Family member limit
-// ===========================================================================
+// ===== Family member limit =====
 
 describe("Family member limit", () => {
   it("should allow joining when under maxMembers", async () => {
@@ -274,9 +287,7 @@ describe("Family member limit", () => {
   });
 });
 
-// ===========================================================================
-// DELETE /api/family/:id/member/:uid
-// ===========================================================================
+// ===== DELETE /api/family/:id/member/:uid =====
 
 describe("DELETE /api/family/:id/member/:uid", () => {
   it("should allow owner to remove other member and return updated record", async () => {
@@ -393,9 +404,7 @@ describe("DELETE /api/family/:id/member/:uid", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/family/:id/transfer
-// ===========================================================================
+// ===== PUT /api/family/:id/transfer =====
 
 describe("PUT /api/family/:id/transfer", () => {
   it("should transfer ownership and return updated record", async () => {
@@ -533,9 +542,7 @@ describe("PUT /api/family/:id/transfer", () => {
   });
 });
 
-// ===========================================================================
-// GET /api/family/:id/members response
-// ===========================================================================
+// ===== GET /api/family/:id/members response =====
 
 describe("GET /api/family/:id/members response", () => {
   it("should include ownerId in the response", async () => {
@@ -611,9 +618,7 @@ describe("GET /api/family/:id/members response", () => {
   });
 });
 
-// ===========================================================================
-// Join edge cases
-// ===========================================================================
+// ===== Join edge cases =====
 
 describe("Join edge cases", () => {
   it("should return 409 ALREADY_IN_FAMILY when user belongs to another family", async () => {
@@ -636,9 +641,7 @@ describe("Join edge cases", () => {
   });
 });
 
-// ===========================================================================
-// Input validation
-// ===========================================================================
+// ===== Input validation =====
 
 describe("Input validation", () => {
   it("should return INVALID_JSON for malformed request body", async () => {
@@ -689,9 +692,7 @@ describe("Input validation", () => {
   });
 });
 
-// ===========================================================================
-// Personal Books
-// ===========================================================================
+// ===== Personal Books =====
 
 describe("Personal Books", () => {
   it("should return null for user with no books", async () => {
@@ -762,9 +763,7 @@ describe("Personal Books", () => {
   });
 });
 
-// ===========================================================================
-// Family Bookshelf Aggregation
-// ===========================================================================
+// ===== Family Bookshelf Aggregation =====
 
 describe("Family Bookshelf Aggregation", () => {
   it("should aggregate books from all family members", async () => {
@@ -899,9 +898,8 @@ describe("Family Bookshelf Aggregation", () => {
   });
 
   it("should return 404 (not 403) for an authenticated user accessing another family's bookshelf — info-hiding", async () => {
-    // A non-member gets 404 NOT_FOUND, never 403. This is deliberate: returning
-    // 403 would confirm the family exists, letting an outsider probe which family
-    // ids are real. 404 keeps the family's very existence hidden from non-members.
+    // 404 NOT_FOUND, never 403, so an outsider cannot probe which family ids exist.
+    // See the header → "Info-hiding".
     const { authToken: token1 } = await createFamily(USER1);
 
     const res = await request(
@@ -969,9 +967,7 @@ describe("Family Bookshelf Aggregation", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/family/:id/member/:uid/displayName
-// ===========================================================================
+// ===== PUT /api/family/:id/member/:uid/displayName =====
 
 describe("PUT /api/family/:id/member/:uid/displayName", () => {
   it("should update own display name", async () => {
@@ -1071,16 +1067,8 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
     expect(json.error.code).toBe("MISSING_DISPLAY_NAME");
   });
 
-  // Bodies that parse as JSON but are not a plain object. The truthy primitives
-  // are the regression: they survive a bare `!body` check, and
-  // `"displayName" in 5` throws a TypeError — which surfaced as a 500 instead of
-  // a client error. The falsy ones, JSON null and arrays were always handled;
-  // every class is pinned so the row set states the whole rule — any non-object
-  // body is MISSING_DISPLAY_NAME, never a server error.
-  // The object-shape half of the guard is shared (isJsonObject in
-  // src/utils/validation.ts); each handler keeps its own error code/message, so
-  // both sides still need their own rows. The PUT /api/family/:id/endpoint side
-  // is pinned in tests/unit/familyEndpoint.test.ts (MISSING_FIELD_BODIES).
+  // Any JSON body that is not a plain object ⇒ MISSING_DISPLAY_NAME, never a 500.
+  // See the header → "Non-object bodies".
   const NON_OBJECT_BODIES: [label: string, rawBody: string][] = [
     ["a number body", "5"],
     ["a string body", '"hello"'],
@@ -1174,10 +1162,8 @@ describe("PUT /api/family/:id/member/:uid/displayName", () => {
       { displayName: "Test" },
       token2,
     );
-    // user2 != user2 would be caught as FORBIDDEN first since callerId != targetUserId
-    // Actually user2 is trying to update user2 (self) but not in this family
-    // Wait — callerId is user2, targetUserId is user2, so it passes the self-check
-    // Then it loads the family and checks membership — user2 is NOT in familyId
+    // callerId === targetUserId (user2) passes the self-check; the membership
+    // check then finds user2 is NOT in familyId.
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MEMBER_NOT_FOUND");

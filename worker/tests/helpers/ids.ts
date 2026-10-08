@@ -1,5 +1,13 @@
+/** Shared test userId fixtures — why they are 64-hex is in `USER1`'s JSDoc, which
+ *  covers every constant in this file. */
+
+/** Build a deterministic 64-hex id from a single hex nibble. */
+function hexId(nibble: string): string {
+  return nibble.repeat(64);
+}
+
 /**
- * Shared test userId fixtures.
+ * First of the fixed-nibble ids; this note applies to every constant below.
  *
  * Production userIds are SHA-256 hex digests derived from the account email
  * (see `shared/src/crypto/hash.ts`). Since BE-8, `isValidUserId` enforces
@@ -7,17 +15,11 @@
  * real 64-char lowercase-hex ids — the old non-hex placeholders ("user1",
  * "alice", …) are now rejected with 400 INVALID_USER_ID.
  *
- * Each constant below is a distinct, deterministic 64-hex value. They are
+ * Each constant is a distinct, deterministic 64-hex value. They are
  * intentionally human-readable (a repeated nibble pattern) so failures stay
  * easy to eyeball while remaining valid SHA-256-shaped ids. Keep distinctness
  * relationships intact (USER1 ≠ USER2, ALICE ≠ BOB, …).
  */
-
-/** Build a deterministic 64-hex id from a single hex nibble. */
-function hexId(nibble: string): string {
-  return nibble.repeat(64);
-}
-
 export const USER1 = hexId("1");
 export const USER2 = hexId("2");
 export const USER3 = hexId("3");
