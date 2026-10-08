@@ -17,9 +17,40 @@ import {
 } from "@/utils/retryMessage";
 
 /**
- * Remove-confirm question for 小明 + the shared rejoin-wait note, rendered in
- * one element. Literal pin: the "rejoin-wait note" suite below.
+ * PWA MemberList: remove / transfer confirmations, the rejoin-wait note, rate-limited and hostile
+ * write responses, and the removal report to the parent.
+ *
+ * Rate-limited family writes: the Worker rate-limits the family write endpoints (429 RATE_LIMITED,
+ * with an optional `retryAfter`). Its `message` is English, so every write path here renders the
+ * localized back-off copy instead — asserted against the production builders, whose literals are
+ * pinned in pwa/tests/unit/retryMessage.test.ts. Two shapes reach the component:
+ * `updateMemberSettings` THROWS an `ApiError` (the client unwraps its envelope), while `removeMember`
+ * / `transferOwnership` RESOLVE an envelope the component reads `res.error` off.
+ *
+ * Hostile error envelopes: `removeMember` / `transferOwnership` resolve the `{ data, error }`
+ * envelope through `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts), and
+ * the endpoint is user-configurable (BYO backend), so `error.message` is `unknown` at runtime. A
+ * non-string used to land in `error` state and render as a JSX child: React 19 throws on an
+ * object/array, and nothing above this list is an ErrorBoundary, so a refused removal blanked the
+ * Settings page instead of explaining itself. The quieter half of the same bug: the site took
+ * `res.error.message` verbatim, so an absent or empty message left `error` falsy and the alert never
+ * rendered — the removal simply appeared to do nothing. The guard sits UNDER the 429 rewrite
+ * (`rateLimitedEnvelopeMessage(…) ?? safeErrorText(…)`), so the last case pins the order: a
+ * rate-limited envelope keeps the localized back-off copy no matter what its `message` holds.
+ *
+ * Removal reporting: a removal writes a 6-hour server-side block on rejoining, and the entry to lift
+ * it (see `UnkickNotice`) belongs to the PARENT — it has to outlive the member refresh that unmounts
+ * this list. All this component owes the parent is an accurate report: the target's id plus a label
+ * resolved from the list that is about to be refreshed away. A report on a FAILED removal would offer
+ * to un-kick someone who was never kicked. An owner's retried kick after a half-failed first attempt
+ * (member list written, revoke failed) is answered 404 MEMBER_NOT_FOUND by the Worker — which has by
+ * then finished the kick server-side — so the client must treat it as a completed removal. The
+ * contrast case — a non-404 refusal still surfaces its message and reports nothing — is the FORBIDDEN
+ * test (and the SERVER_ERROR cases under "hostile error envelopes").
  */
+
+/** Remove-confirm question for 小明 + the shared rejoin-wait note, rendered in one element.
+ *  Literal pin: the "rejoin-wait note" suite below. */
 const REMOVE_CONFIRM_TEXT = `確定要移除成員 小明？${REJOIN_WAIT_NOTE}`;
 
 const mockRemoveMember = vi.fn();
@@ -163,10 +194,8 @@ describe("MemberList", () => {
     });
   });
 
-  /**
-   * #270: removing a member blocks their sync-code rejoin for 6 hours, so the
-   * owner's remove confirmation says so. Transfer has no such block.
-   */
+  /** #270: removing a member blocks their sync-code rejoin for 6 hours, so the owner's remove
+   *  confirmation says so. Transfer has no such block. */
   describe("rejoin-wait note", () => {
     it("pins the exact remove question with the 6-hour note at the render site", () => {
       render(
@@ -240,17 +269,8 @@ describe("MemberList", () => {
     expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2);
   });
 
-  /**
-   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
-   * an optional `retryAfter`). Its `message` is English, so every write path
-   * here renders the localized back-off copy instead — asserted against the
-   * production builders, whose literals are pinned in
-   * pwa/tests/unit/retryMessage.test.ts.
-   *
-   * Two shapes reach the component: `updateMemberSettings` THROWS an `ApiError`
-   * (the client unwraps its envelope), while `removeMember` /
-   * `transferOwnership` RESOLVE an envelope the component reads `res.error` off.
-   */
+  /** A 429 RATE_LIMITED on any family write renders the localized back-off copy, thrown or resolved.
+   *  See the header → "Rate-limited family writes". */
   describe("rate-limited family writes", () => {
     // Local client per test: the module-level `mockApiClient` is shared across
     // the whole file, and these cases assert on call counts.
@@ -396,23 +416,8 @@ describe("MemberList", () => {
     });
   });
 
-  /**
-   * `removeMember` / `transferOwnership` resolve the `{ data, error }` envelope
-   * through `readEnvelope`, which bare-casts `response.json()`
-   * (pwa/src/api/client.ts), and the endpoint is user-configurable (BYO
-   * backend), so `error.message` is `unknown` at runtime. A non-string used to
-   * land in `error` state and render as a JSX child: React 19 throws on an
-   * object/array, and nothing above this list is an ErrorBoundary, so a refused
-   * removal blanked the Settings page instead of explaining itself. The quieter
-   * half of the same bug: the site took `res.error.message` verbatim, so an
-   * absent or empty message left `error` falsy and the alert never rendered —
-   * the removal simply appeared to do nothing.
-   *
-   * The guard sits UNDER the 429 rewrite (`rateLimitedEnvelopeMessage(…) ??
-   * safeErrorText(…)`), so the last case pins the order: a rate-limited
-   * envelope keeps the localized back-off copy no matter what its `message`
-   * holds.
-   */
+  /** A non-string or empty `error.message` must neither crash the list nor hide the alert; a 429 keeps
+   *  its back-off copy. See the header → "Hostile error envelopes". */
   describe("hostile error envelopes", () => {
     // Local client + callbacks per test: the module-level mocks are shared
     // across the file, and these cases assert on "was never called".
@@ -462,9 +467,8 @@ describe("MemberList", () => {
         fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
         fireEvent.click(screen.getByRole("button", { name: "確定" }));
 
-        // Literal from MemberList.tsx (`handleConfirm`), read back off the
-        // production render path. `getByText` matches the node's whole text, so
-        // a hostile value that had reached state would fail here.
+        // Literal from MemberList.tsx (`handleConfirm`), read off the production render path; `getByText`
+        // matches the node's whole text, so a hostile value that had reached state would fail here.
         await waitFor(() => {
           expect(screen.getByText("移除成員失敗，請稍後再試")).toHaveAttribute(
             "role",
@@ -528,14 +532,8 @@ describe("MemberList", () => {
     });
   });
 
-  /**
-   * A removal writes a 6-hour server-side block on rejoining, and the entry to
-   * lift it (see `UnkickNotice`) belongs to the PARENT — it has to outlive the
-   * member refresh that unmounts this list. All this component owes the parent
-   * is an accurate report: the target's id plus a label resolved from the list
-   * that is about to be refreshed away. A report on a FAILED removal would
-   * offer to un-kick someone who was never kicked.
-   */
+  /** The parent owns the un-kick entry (UnkickNotice): a successful removal reports the id AND a label from
+   *  the list about to be refreshed away; reporting a FAILED removal would un-kick someone never kicked. */
   describe("onMemberRemoved reporting", () => {
     /** Confirm the pending removal and let the whole chain settle. */
     async function confirmRemoval() {
@@ -617,14 +615,8 @@ describe("MemberList", () => {
       expect(onMemberRemoved).not.toHaveBeenCalled();
     });
 
-    /**
-     * An owner's retried kick after a half-failed first attempt (member list
-     * written, revoke failed) is answered 404 MEMBER_NOT_FOUND by the Worker —
-     * which has by then finished the kick server-side. The client must treat it
-     * as a completed removal. The contrast case — a non-404 refusal still
-     * surfaces its message and reports nothing — is the FORBIDDEN test above
-     * (and the SERVER_ERROR cases under "hostile error envelopes").
-     */
+    /** A retried owner kick after a half-failed first attempt gets 404 MEMBER_NOT_FOUND once the Worker
+     *  finished it: a completed removal. See the header → "Removal reporting". */
     it("treats MEMBER_NOT_FOUND as a completed removal", async () => {
       mockRemoveMember.mockResolvedValue({
         error: { code: "MEMBER_NOT_FOUND", message: "目標使用者不是家庭成員" },

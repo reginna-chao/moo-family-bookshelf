@@ -24,13 +24,23 @@ import {
 } from "./helpers/patternGrid";
 
 /**
- * Only `decodeSyncCode` is stubbed — these tests drive the flow by dictating
- * what a pasted code decodes to. Everything else in the module stays REAL,
- * including `parseSyncCodeApiHost`: it feeds the `@host` disclosure note that
- * LandingPage renders on every keystroke, so replacing it would leave the note
- * (and the copy it carries) unverified — and a factory that simply forgets it
+ * LandingPage retry back-off: the VERIFICATION_LOCKED / RATE_LIMITED notices, with and without a
+ * retryAfter hint, under a PIN or pattern challenge, and their timer hygiene.
+ *
+ * Sync-code mock: only `decodeSyncCode` is stubbed — these tests drive the flow by dictating what a
+ * pasted code decodes to. Everything else in the module stays REAL, including `parseSyncCodeApiHost`:
+ * it feeds the `@host` disclosure note that LandingPage renders on every keystroke, so replacing it
+ * would leave the note (and the copy it carries) unverified — and a factory that simply forgets it
  * makes the whole page throw on render.
+ *
+ * Flushing under fake timers: flush yields with `advanceTimersByTimeAsync(0)`, which hands control
+ * to the real event loop, so Web Crypto hashing and the mocked API calls settle without advancing
+ * the countdown clock. flushUntil polls between flushes because RTL's `waitFor` is not usable here:
+ * it does not detect Vitest fake timers, so its own polling timer would never fire.
  */
+
+// Only decodeSyncCode is stubbed; parseSyncCodeApiHost stays real for the @host note.
+// See the header → "Sync-code mock".
 vi.mock("@/crypto/syncCode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
   decodeSyncCode: vi.fn(),
@@ -61,11 +71,8 @@ beforeAll(() => {
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 const mockOnAuth = vi.fn();
 
-/**
- * Flush pending promise chains (hashing + mocked API calls) without advancing
- * the countdown clock. `advanceTimersByTimeAsync(0)` yields to the real event
- * loop, so Web Crypto results settle without wall-clock time passing.
- */
+/** Flush pending promise chains (hashing + mocked API calls) without advancing the countdown clock.
+ *  See the header → "Flushing under fake timers". */
 async function flush(times = 5) {
   for (let i = 0; i < times; i++) {
     await act(async () => {
@@ -74,11 +81,8 @@ async function flush(times = 5) {
   }
 }
 
-/**
- * Poll `check` between flushes until it stops throwing. RTL's `waitFor` is not
- * usable here: it does not detect Vitest fake timers, so its own polling timer
- * would never fire.
- */
+/** Poll `check` between flushes until it stops throwing (RTL's `waitFor` cannot see fake timers).
+ *  See the header → "Flushing under fake timers". */
 async function flushUntil(check: () => void, attempts = 40) {
   let lastError: unknown = new Error("flushUntil: check never ran");
   for (let i = 0; i < attempts; i++) {
@@ -150,11 +154,8 @@ function alertText(): string {
   return screen.getByRole("alert").textContent ?? "";
 }
 
-/**
- * Assert both layers of a live back-off notice: the announced sentence is the
- * countdown-free twin (announced once instead of once per tick), while the
- * ticking sentence is visible but hidden from assistive tech.
- */
+/** Assert both layers of a live back-off notice: the announced sentence is the countdown-free twin
+ *  (announced once, not once per tick); the ticking sentence is visible but hidden from assistive tech. */
 function expectCountdownNotice(code: RetryErrorCode, remaining: number) {
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(alertText()).toBe(buildStaticRetryMessage(code));

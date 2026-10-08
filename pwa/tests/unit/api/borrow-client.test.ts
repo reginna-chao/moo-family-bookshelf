@@ -8,6 +8,27 @@ import {
   type FamilyMember,
 } from "@/api/client";
 
+/**
+ * ApiClient borrow methods (PWA): request wiring and the borrow-list payload
+ * validation.
+ *
+ * listBorrowRequests payload validation — runtime boundary validation of the
+ * borrow-list payload, driven through the public `listBorrowRequests` surface
+ * instead of importing `sanitizeBorrowRequests` directly: the contract is what a
+ * caller receives when a self-hosted (BYO) or hostile backend answers, not the
+ * shape of the helper. The same case tables live in
+ * `extension/tests/unit/api/borrow-client.test.ts` — the sanitizer itself is the
+ * shared implementation in `shared/src/borrow/validation.ts` that both apps
+ * import, so the mirrored tables no longer guard two copies against each other;
+ * they prove each app's own client still wires that implementation in.
+ *  - `unwrap` still owns the envelope contract and runs BEFORE the sanitizer: a
+ *    missing `data` is a protocol failure, not a malformed payload that degrades
+ *    to an empty list.
+ *  - Only `JSON.parse` can produce an OWN "__proto__" key (an object literal
+ *    would set the prototype instead) — exactly what a real `response.json()`
+ *    does with a hostile body — so the prototype fixture is parsed.
+ */
+
 // Mock fetch globally
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -146,18 +167,8 @@ describe("ApiClient borrow methods (PWA)", () => {
     });
   });
 
-  /**
-   * Runtime boundary validation of the borrow-list payload.
-   *
-   * Driven through the public `listBorrowRequests` surface instead of importing
-   * `sanitizeBorrowRequests` directly: the contract is what a caller receives
-   * when a self-hosted (BYO) or hostile backend answers, not the shape of the
-   * helper. The same case tables live in
-   * `extension/tests/unit/api/borrow-client.test.ts` — the sanitizer itself is
-   * the shared implementation in `shared/src/borrow/validation.ts` that both
-   * apps import, so the mirrored tables no longer guard two copies against each
-   * other; they prove each app's own client still wires that implementation in.
-   */
+  // Borrow-list boundary validation via the public surface (mirrored in the Extension).
+  // See the header → "listBorrowRequests payload validation".
   describe("listBorrowRequests payload validation", () => {
     /** Exactly the keys `BorrowRequest` declares — the sanitized result's key set. */
     const BORROW_REQUEST_KEYS = [
@@ -247,9 +258,8 @@ describe("ApiClient borrow methods (PWA)", () => {
       );
 
       it("throws EMPTY_RESPONSE without sanitizing when the envelope carries no data", async () => {
-        // `unwrap` still owns the envelope contract and runs BEFORE the
-        // sanitizer: a missing `data` is a protocol failure, not a malformed
-        // payload that degrades to an empty list.
+        // `unwrap` runs BEFORE the sanitizer: a missing `data` is a protocol
+        // failure, not a malformed payload that degrades to an empty list.
         mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
         await expect(client.listBorrowRequests(FAMILY_ID)).rejects.toThrow(
@@ -468,9 +478,8 @@ describe("ApiClient borrow methods (PWA)", () => {
       });
 
       it("drops a JSON-supplied __proto__ property instead of carrying or applying it", async () => {
-        // Only `JSON.parse` can produce an OWN "__proto__" key (an object
-        // literal would set the prototype instead) — which is exactly what a
-        // real `response.json()` does with a hostile body.
+        // Only `JSON.parse` yields an OWN "__proto__" key — as a real
+        // `response.json()` does with a hostile body.
         const hostile: unknown = JSON.parse(
           '{"requestId":"req-hostile","bookTitle":"Hostile","__proto__":{"polluted":"yes"},"evil":"x"}',
         );

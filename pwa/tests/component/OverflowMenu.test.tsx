@@ -156,9 +156,8 @@ describe("OverflowMenu", () => {
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
 
-  // The panel is portaled and `position: fixed`, so unlike the inline dropdowns
-  // it detaches from its trigger when the page moves — scroll and resize close
-  // it, and every dismissal path must report onOpenChange(false).
+  // The panel is portaled and `position: fixed`, so unlike the inline dropdowns it detaches from its
+  // trigger when the page moves — scroll and resize close it; every dismissal reports onOpenChange(false).
   it.each<{ name: string; fire: () => void }>([
     {
       name: "outside mousedown",
@@ -227,9 +226,8 @@ describe("OverflowMenu", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
-  // Focus starts on a menu item — where a keyboard user is while the menu is
-  // open — so a focus that is NOT moved falls to <body> when the portaled
-  // panel unmounts.
+  // Focus starts on a menu item — where a keyboard user is while the menu is open — so a focus
+  // that is NOT moved falls to <body> when the portaled panel unmounts.
   describe("focus after closing", () => {
     function openAndFocusItem(): HTMLElement {
       render(

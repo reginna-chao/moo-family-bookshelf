@@ -12,11 +12,40 @@ import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/sa
 
 import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
 
-// PersonalShelfPage (via hooks/usePersonalShelfSave.ts) pulls `refreshBookshelf`
-// from the FamilyData context to refresh the aggregated family shelf after a
-// save (replaces the removed `personalShelfSaved` window CustomEvent). Mock the
-// context hook to isolate the page and spy on the direct call — mirrors
-// BorrowPage.test.tsx's approach.
+/**
+ * PersonalShelfPage: loading, share toggles, save (PATCH vs PUT), filters, and error envelopes.
+ *
+ * FamilyData mock: the page (via hooks/usePersonalShelfSave.ts) pulls `refreshBookshelf` from the
+ * FamilyData context to refresh the aggregated family shelf after a save (replaces the removed
+ * `personalShelfSaved` window CustomEvent). The context hook is mocked to isolate the page and spy on
+ * the direct call — mirrors BorrowPage.test.tsx's approach.
+ *
+ * Boolean-true server books: b2 is stored as boolean `true` (an Extension-era record). The PWA
+ * normalizes it to BoolFlag.TRUE locally while the snapshot keeps the raw `true`, which the save
+ * strategy coerces to FALSE — so with `includePromoted: true` b2 would read as a promoted twin and be
+ * shared without an opt-in. The PWA must send the toggled book alone.
+ *
+ * Floating-bar padding: guards against drift between PersonalShelfPage's `showFloatingBar` and
+ * FloatingActionBar's internal visibility. If they desync, the last book row gets obscured by the
+ * fixed toolbar on mobile (no Playwright test catches this).
+ *
+ * Hostile error envelopes: `getPersonalBooks` / `patchPersonalBooks` resolve the `{ data, error }`
+ * envelope through `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts), and
+ * the endpoint is user-configurable (BYO backend), so `error.message` is `unknown` at runtime. Both
+ * the load and the save path put it into `errorMessage`, which the error view renders as a JSX child:
+ * React 19 throws on an object/array and the app mounts no ErrorBoundary, so a refused load/save
+ * blanked the page instead of offering 重試. The exhaustive value-domain proof lives in
+ * extension/tests/unit/safeErrorText.test.ts (shared helper, one copy); these pin the wiring and the
+ * copy.
+ *
+ * Oversized save: the Worker refuses an oversized upload with
+ * `413 { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds …" }`. The English byte-limit
+ * message must not reach the page; the shared too-large copy (imported from production) replaces it.
+ * The PWA's save goes out as a PATCH for server-known books, and PUT shares the same error branch.
+ */
+
+// The page calls refreshBookshelf from the FamilyData context after a save; mock the hook to spy on
+// it. See the header → "FamilyData mock".
 const mockRefreshBookshelf = vi.fn(async () => {});
 vi.mock("@/hooks/useFamilyData", () => ({
   useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
@@ -139,10 +168,8 @@ describe("PersonalShelfPage", () => {
   });
 
   it("clicking retry button re-fetches data", async () => {
-    // Both outcomes are queued BEFORE the render: the mount fetch takes the
-    // rejection, the retry takes the success. Swapping the success in after
-    // render would silently assume the mount fetch had already consumed the
-    // rejection — an effect-published fact that a DOM waiter cannot prove.
+    // Both outcomes queued BEFORE render (mount fetch → rejection, retry → success); swapping later would
+    // assume the mount fetch already consumed the rejection, which a DOM waiter cannot prove.
     mockGetPersonalBooks
       .mockRejectedValueOnce(new Error("Network error"))
       .mockResolvedValue({
@@ -436,11 +463,8 @@ describe("PersonalShelfPage", () => {
   });
 
   it("save PATCH carries exactly the toggled book, never a boolean-true server book as promoted", async () => {
-    // b2 is stored as boolean `true` (an Extension-era record). The PWA
-    // normalizes it to BoolFlag.TRUE locally while the snapshot keeps the raw
-    // `true`, which the save strategy coerces to FALSE — so with
-    // `includePromoted: true` b2 would read as a promoted twin and be shared
-    // without an opt-in. The PWA must send the toggled book alone.
+    // b2 is an Extension-era boolean `true`; with `includePromoted: true` it would be shared without an
+    // opt-in, so the PATCH must carry the toggled book alone. See the header → "Boolean-true server books".
     await renderWithBooks([
       {
         bookId: "b1",
@@ -531,9 +555,8 @@ describe("PersonalShelfPage", () => {
   });
 
   it("book list container padding tracks floating bar visibility", async () => {
-    // Guards against drift between PersonalShelfPage's `showFloatingBar` and
-    // FloatingActionBar's internal visibility. If they desync, the last book
-    // row gets obscured by the fixed toolbar on mobile (no Playwright catches this).
+    // Guards `showFloatingBar` against FloatingActionBar's own visibility; a desync hides the last row
+    // under the fixed toolbar on mobile. See the header → "Floating-bar padding".
     await renderWithBooks([
       {
         bookId: "b1",
@@ -785,18 +808,8 @@ describe("PersonalShelfPage", () => {
     });
   });
 
-  /**
-   * `getPersonalBooks` / `patchPersonalBooks` resolve the `{ data, error }`
-   * envelope through `readEnvelope`, which bare-casts `response.json()`
-   * (pwa/src/api/client.ts), and the endpoint is user-configurable (BYO
-   * backend), so `error.message` is `unknown` at runtime. Both the load and the
-   * save path put it into `errorMessage`, which the error view renders as a JSX
-   * child: React 19 throws on an object/array and the app mounts no
-   * ErrorBoundary, so a refused load/save blanked the page instead of offering
-   * 重試. The exhaustive value-domain proof lives in
-   * extension/tests/unit/safeErrorText.test.ts (shared helper, one copy); these
-   * pin the wiring and the copy.
-   */
+  /** A non-string `error.message` on the load or save path must not crash the page; it still offers
+   *  重試. See the header → "Hostile error envelopes". */
   describe("hostile error envelopes", () => {
     it("shows the local load-failure copy for an object message instead of crashing", async () => {
       mockGetPersonalBooks.mockResolvedValue({
@@ -847,13 +860,8 @@ describe("PersonalShelfPage", () => {
     });
   });
 
-  /**
-   * The Worker refuses an oversized upload with `413 { code:
-   * "PAYLOAD_TOO_LARGE", message: "Request body exceeds …" }`. The English
-   * byte-limit message must not reach the page; the shared too-large copy
-   * (imported from production) replaces it. The PWA's save goes out as a
-   * PATCH for server-known books, and PUT shares the same error branch.
-   */
+  /** A 413 PAYLOAD_TOO_LARGE shows the shared too-large copy, never the server's English byte-limit
+   *  message. See the header → "Oversized save". */
   describe("oversized save (413 PAYLOAD_TOO_LARGE)", () => {
     it("shows the too-large copy instead of the server's English message", async () => {
       await renderWithBooks([

@@ -9,6 +9,64 @@ import {
   act,
 } from "@testing-library/react";
 
+/**
+ * PWA App: routing between landing and signed-in pages, the ApiClient lifecycle, and the token
+ * refresher's recovery join (acquireNewToken) — its failures, a session change mid-join, and the
+ * user's own leave in flight.
+ *
+ * Session mirror: setMockSession sets the session the mocked useAuth returns AND mirrors production's
+ * synchronous storage write — login stores USER_ID_KEY, logout removes it. App's #258 guard
+ * (`isLiveSession`) reads that key after the recovery join, so the two must never disagree outside a
+ * test that splits them on purpose. Production logout() / forceLogout() drop the stored session, and
+ * mirroring that is what lets LandingPage render on the branches that DO log out; the mocks are
+ * registered per test, after vi.clearAllMocks() (afterEach's vi.restoreAllMocks() wipes them), so no
+ * implementation leaks between tests.
+ *
+ * Terminal codes: TERMINAL_CODES are the codes JOIN_BLOCKED_MESSAGES marks terminal — retrying the
+ * recovery join cannot succeed, so the stored session really is unrecoverable and the logout is
+ * earned. They are spelled out rather than derived from the map, so a NEW terminal code cannot ship
+ * without a rendered case (see the tripwire next to them).
+ *
+ * Terminal failure: App logs out AND hands LandingPage a reason, instead of dropping the user at a bare
+ * login form wondering why the session evaporated. MEMBER_REMOVED is the sharpest case — the owner
+ * removed this member, so the server's kicked tombstone refuses the recovery join. The mocked
+ * LandingPage is a pass-through for `externalError` (it renders whatever App hands it verbatim), and
+ * the expected copy is read from JOIN_BLOCKED_MESSAGES in `pwa/src/utils/joinErrorMessages.ts`, the
+ * very map App looks the code up in (with `.get`), so the assertion is production-anchored end to
+ * end: the code must resolve to THAT entry and reach the render site. The wording itself is
+ * additionally pinned verbatim on the manual-join side by `pwa/tests/component/LandingPage.test.tsx`.
+ *
+ * Prototype-chain codes: `error.code` arrives straight off the wire from a backend that may be
+ * self-hosted, buggy, or hostile, so a code naming an `Object.prototype` member is a reachable input.
+ * Looked up in a Map it is simply an unknown code — nothing to explain, session kept — i.e. it must
+ * behave exactly like INVALID_TOKEN. Regression guard for the object-literal table this Map replaced,
+ * where the lookup answered off the prototype chain: `__proto__` returned `Object.prototype`, and
+ * rendering that object as a React child took the whole PWA down (there is no ErrorBoundary); the
+ * function-valued members (`toString` / `constructor` / `valueOf` / `hasOwnProperty`) reached
+ * `setLandingError`, which treats a function as a state UPDATER — so they either threw inside the
+ * state update or put the updater's return value on screen as the "reason" for a logout that was
+ * never earned. The render itself is the crash assertion — `renderWithFailedJoin` renders inside
+ * `act`, so a React child error surfaces as a test failure there.
+ *
+ * Session change mid-join (#258): a 401 refresh awaits the recovery join. If the session ends
+ * (logout) or switches (another user) while that join is in flight, its result belongs to a session
+ * that no longer exists: a success must not re-login the old session, and a terminal failure must not
+ * log out — or explain a logout to — the session that replaced it. The same-session success path is
+ * pinned by "keeps the same ApiClient instance when a 401 refresh stores a new token". The window
+ * `isSameSession` alone misses: a logout issued after an await (leave family / delete account) removes
+ * USER_ID_KEY synchronously, but React re-renders one task later, so `authRef` still holds session A
+ * when the join answers; its positive companion (key present → login runs) is that same test.
+ *
+ * Own leave in flight (#263 REGRESSION): the server can revoke the user's token before it answers
+ * their own "leave family" request, so another request of theirs 401s while the leave is in flight —
+ * and App's silent recovery join then re-added them to the family they were leaving. The real
+ * `useLeaveFamily` drives the leave (its request held pending), and the refresher App registered on
+ * the session client is the path ApiClient takes on that 401. Review S1: the guarded leave 401s, its
+ * unguarded resend 401s too, and the recovery join that 401 triggers needs re-verification;
+ * ApiClient is mocked here, so the resend stub runs the registered refresher itself, mirroring
+ * `doRequest`'s 401 branch (refresher → null → the 401 envelope comes back).
+ */
+
 // Mock useAuth hook
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
@@ -16,9 +74,8 @@ const mockForceLogout = vi.fn();
 let mockAuth: Record<string, unknown> | null = null;
 let mockIsLoading = false;
 
-// Keep the module's real exports (REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY,
-// namespacedKey, ...) so App's sync-code-remember branch reads/writes the same
-// localStorage keys as production — only the hook itself is replaced.
+// Keep the module's real exports (REMEMBER_SYNC_CODE_KEY, REMEMBERED_LOGOUT_KEY, namespacedKey, ...)
+// so App's sync-code-remember branch uses production's localStorage keys; only the hook is replaced.
 vi.mock("@/hooks/useAuth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useAuth")>();
   return {
@@ -58,11 +115,8 @@ vi.mock("@/api/client", () => {
   return { ApiClient: MockApiClient };
 });
 
-// Mock pages.
-// LandingPage is a pass-through for `externalError`: it renders whatever App
-// hands it verbatim, so the terminal-failure tests below assert on the copy
-// produced by JOIN_BLOCKED_MESSAGES in `pwa/src/utils/joinErrorMessages.ts`
-// (App resolves it with `.get`) rather than on a string invented here.
+// Mock pages. LandingPage passes `externalError` through verbatim, so terminal-failure tests assert
+// on JOIN_BLOCKED_MESSAGES' copy, not an invented string. See the header → "Terminal failure".
 vi.mock("@/pages/LandingPage", () => ({
   LandingPage: ({
     onAuth,
@@ -153,9 +207,8 @@ import {
   markReauthPending,
 } from "@/utils/reauthPending";
 import { decodeSyncCode } from "@/crypto/syncCode";
-// The terminal-failure copy under test is production's own — App resolves it
-// from this map with `.get`, so the assertions below cannot drift from
-// `pwa/src/utils/joinErrorMessages.ts`.
+// The terminal-failure copy under test is production's own — App resolves it from this map with
+// `.get`, so the assertions cannot drift from `pwa/src/utils/joinErrorMessages.ts`.
 import {
   JOIN_BLOCKED_MESSAGES,
   REVERIFY_LOGOUT_MESSAGE,
@@ -178,12 +231,8 @@ function clearSuiteStorageKeys() {
   localStorage.removeItem(REAUTH_PENDING_KEY);
 }
 
-/**
- * Set the session the mocked useAuth returns, mirroring production's
- * synchronous storage write: login stores USER_ID_KEY, logout removes it.
- * App's #258 guard (`isLiveSession`) reads that key after the recovery join,
- * so the two must never disagree outside a test that splits them on purpose.
- */
+/** Set the session the mocked useAuth returns AND mirror production's synchronous USER_ID_KEY write.
+ *  See the header → "Session mirror". */
 function setMockSession(next: Record<string, unknown> | null): void {
   mockAuth = next;
   if (next) {
@@ -202,10 +251,8 @@ describe("App", () => {
     personalShelfClients.length = 0;
     vi.clearAllMocks();
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
-    // Production logout() / forceLogout() drop the stored session; mirroring
-    // that is what lets LandingPage render on the branches that DO log out.
-    // Registered per test, after vi.clearAllMocks() (afterEach's
-    // vi.restoreAllMocks() wipes it), so no implementation leaks between tests.
+    // Production logout() / forceLogout() drop the stored session; registered per test so no
+    // implementation leaks between tests. See the header → "Session mirror".
     mockLogout.mockImplementation(() => setMockSession(null));
     mockForceLogout.mockImplementation(() => setMockSession(null));
   });
@@ -368,12 +415,8 @@ describe("App", () => {
     );
   });
 
-  /**
-   * #256: a 401 refresh stores a new token via `login`. If that swapped the
-   * ApiClient instance, every `[apiClient]`-keyed page load would re-run and the
-   * personal shelf's reload would wipe unsaved share toggles. The token must be
-   * moved onto the SAME instance instead.
-   */
+  /** #256: a 401 refresh stores a new token via `login`; swapping the ApiClient would re-run every
+   *  `[apiClient]`-keyed load and wipe unsaved share toggles, so the token moves onto the SAME instance. */
   it("keeps the same ApiClient instance when a 401 refresh stores a new token", async () => {
     window.location.hash = "#personal-shelf";
     setMockSession({
@@ -419,11 +462,8 @@ describe("App", () => {
     expect(before.setAuthToken).toHaveBeenLastCalledWith("new-token");
   });
 
-  /**
-   * PR #260 review: nulling the session client's token on logout let the
-   * family-shelf prefs unmount flush go out unauthenticated. The client the
-   * pages held must keep its token; the logged-out view gets its own instance.
-   */
+  /** PR #260 review: nulling the session client's token on logout sent the family-shelf prefs unmount
+   *  flush unauthenticated. The pages' client keeps its token; the logged-out view gets its own. */
   it("does not clear the token on the ApiClient the pages held when the user logs out", async () => {
     window.location.hash = "#personal-shelf";
     setMockSession({
@@ -462,13 +502,8 @@ describe("App", () => {
       encryptionKey: "key-123",
     };
 
-    /**
-     * The codes JOIN_BLOCKED_MESSAGES marks terminal: retrying the recovery
-     * join cannot succeed, so the stored session really is unrecoverable and
-     * the logout is earned. Spelled out here rather than derived from the map,
-     * so a NEW terminal code cannot ship without a rendered case — see the
-     * tripwire below.
-     */
+    /** The codes JOIN_BLOCKED_MESSAGES marks terminal, spelled out so a new one cannot ship without a
+     *  rendered case (tripwire below). See the header → "Terminal codes". */
     const TERMINAL_CODES = [
       "FAMILY_FULL",
       "MEMBER_REMOVED",
@@ -478,12 +513,8 @@ describe("App", () => {
       "RECOVERY_NOT_MEMBER",
     ];
 
-    /**
-     * Render with a token-less auth — the auto-acquire effect fires
-     * acquireNewToken — and the recovery join stubbed to fail with `code`.
-     * `errorExtras` carries envelope fields only some branches read
-     * (`retryAfter`).
-     */
+    /** Render with a token-less auth (the auto-acquire effect fires acquireNewToken) and the recovery join
+     *  failing with `code`; `errorExtras` carries envelope fields only some branches read (`retryAfter`). */
     async function renderWithFailedJoin(
       code: string,
       errorExtras: Record<string, unknown> = {},
@@ -510,19 +541,8 @@ describe("App", () => {
       );
     });
 
-    /**
-     * Terminal failure: App logs out AND hands LandingPage a reason, instead of
-     * dropping the user at a bare login form wondering why the session
-     * evaporated. MEMBER_REMOVED is the sharpest case — the owner removed this
-     * member, so the server's kicked tombstone refuses the recovery join.
-     *
-     * The expected copy is read from JOIN_BLOCKED_MESSAGES in
-     * `pwa/src/utils/joinErrorMessages.ts`, the very map App looks the code up
-     * in, so the assertion is production-anchored end to end: this code must
-     * resolve to THAT entry and reach the render site. The wording itself is
-     * additionally pinned verbatim on the manual-join side by
-     * `pwa/tests/component/LandingPage.test.tsx`.
-     */
+    /** Terminal failure: App logs out AND hands LandingPage the reason from JOIN_BLOCKED_MESSAGES
+     *  (production-anchored end to end). See the header → "Terminal failure". */
     it.each(TERMINAL_CODES)(
       "logs out and explains %s on the landing page",
       async (code) => {
@@ -541,12 +561,8 @@ describe("App", () => {
       },
     );
 
-    /**
-     * Anything neither terminal nor a verification failure KEEPS the session
-     * (security-ux Invariant 2): a dropped connection, or a code this client
-     * does not know, is not a reason to drop the user's data — retrying can
-     * still succeed.
-     */
+    /** Anything neither terminal nor a verification failure KEEPS the session (security-ux Invariant 2): a
+     *  dropped connection or an unknown code is no reason to drop the user's data — a retry can succeed. */
     it.each(["INVALID_TOKEN", "NETWORK_ERROR"])(
       "keeps the session on %s (no logout, no landing message)",
       async (code) => {
@@ -560,25 +576,8 @@ describe("App", () => {
       },
     );
 
-    /**
-     * `error.code` arrives straight off the wire from a backend that may be
-     * self-hosted, buggy, or hostile, so a code naming an `Object.prototype`
-     * member is a reachable input. Looked up in a Map it is simply an unknown
-     * code — nothing to explain, session kept — i.e. it must behave exactly
-     * like INVALID_TOKEN above.
-     *
-     * Regression guard for the object-literal table this Map replaced, where
-     * the lookup answered off the prototype chain: `__proto__` returned
-     * `Object.prototype`, and rendering that object as a React child took the
-     * whole PWA down (there is no ErrorBoundary); the function-valued members
-     * (`toString` / `constructor` / `valueOf` / `hasOwnProperty`) reached
-     * `setLandingError`, which treats a function as a state UPDATER — so they
-     * either threw inside the state update or put the updater's return value on
-     * screen as the "reason" for a logout that was never earned.
-     *
-     * The render itself is the crash assertion — `renderWithFailedJoin` renders
-     * inside `act`, so a React child error surfaces as a test failure there.
-     */
+    /** A code naming an `Object.prototype` member is just an unknown code (session kept, like
+     *  INVALID_TOKEN); the render is the crash assertion. See the header → "Prototype-chain codes". */
     const PROTOTYPE_CHAIN_CODES = [
       "__proto__",
       "toString",
@@ -682,9 +681,8 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockLogout).toHaveBeenCalled();
       });
-      // Real encodeSyncCode ran — assert the remembered value decodes back
-      // to the session's familyId rather than pinning the format literal
-      // here (the format is pinned by tests/unit/crypto/syncCode.test.ts).
+      // Real encodeSyncCode ran — assert the remembered value decodes back to the session's familyId
+      // instead of pinning the format literal (pinned by tests/unit/crypto/syncCode.test.ts).
       const remembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY);
       expect(remembered).not.toBeNull();
       expect(decodeSyncCode(remembered as string).familyId).toBe("fam-001");
@@ -735,12 +733,8 @@ describe("App", () => {
       ).not.toBeInTheDocument();
     });
 
-    /**
-     * #266: the forced re-verification marks THIS identity, so the landing
-     * re-login can send `recovery: 1` and the server refuses a user who left
-     * the family on another device meanwhile. The write is awaited after
-     * `logout()`, hence the waitFor.
-     */
+    /** #266: forced re-verification marks THIS identity, so the landing re-login sends `recovery: 1` and the
+     *  server refuses a user who left on another device. The write is awaited after `logout()` (waitFor). */
     it.each([
       "VERIFICATION_REQUIRED",
       "VERIFICATION_FAILED",
@@ -792,11 +786,8 @@ describe("App", () => {
       });
     });
 
-    /**
-     * Only the verification branch writes the marker: a terminal code already
-     * explains itself, and a kept session never reaches the landing page.
-     * Positive companion (same key, same render path): the case above.
-     */
+    /** Only the verification branch writes the marker: a terminal code explains itself, a kept session
+     *  never reaches the landing page. Positive companion (same key, same render path): the case above. */
     it.each([
       ...TERMINAL_CODES,
       "INVALID_TOKEN",
@@ -824,14 +815,8 @@ describe("App", () => {
     });
   });
 
-  /**
-   * #258: a 401 refresh awaits the recovery join. If the session ends (logout)
-   * or switches (another user) while that join is in flight, its result belongs
-   * to a session that no longer exists: a success must not re-login the old
-   * session, and a terminal failure must not log out — or explain a logout to —
-   * the session that replaced it. The same-session success path is pinned by
-   * "keeps the same ApiClient instance when a 401 refresh stores a new token".
-   */
+  /** #258: a recovery join answering after the session ended or switched must neither re-login the old
+   *  session nor log out its replacement. See the header → "Session change mid-join". */
   describe("acquireNewToken when the session changes mid-join", () => {
     const SESSION_A = {
       userId:
@@ -854,10 +839,8 @@ describe("App", () => {
       );
     });
 
-    /**
-     * Render session A, start the refresher App registered on its client (the
-     * path ApiClient takes on a 401) and leave the join pending.
-     */
+    /** Render session A, start the refresher App registered on its client (the path ApiClient takes
+     *  on a 401) and leave the join pending. */
     async function renderWithPendingRefresh() {
       setMockSession({ ...SESSION_A });
       let view!: ReturnType<typeof render>;
@@ -896,13 +879,8 @@ describe("App", () => {
       expect(screen.getByTestId("landing-page")).toBeInTheDocument();
     });
 
-    /**
-     * The window `isSameSession` alone misses: a logout issued after an await
-     * (leave family / delete account) removes USER_ID_KEY synchronously, but
-     * React re-renders one task later, so `authRef` still holds session A when
-     * the join answers. Positive companion (key present → login runs): "keeps
-     * the same ApiClient instance when a 401 refresh stores a new token".
-     */
+    /** The window `isSameSession` alone misses: USER_ID_KEY is gone but `authRef` still holds session A
+     *  until React re-renders. See the header → "Session change mid-join". */
     it("does not log the session back in when logout cleared storage but has not re-rendered yet", async () => {
       const { pending } = await renderWithPendingRefresh();
 
@@ -955,14 +933,8 @@ describe("App", () => {
     });
   });
 
-  /**
-   * #263 REGRESSION: the server can revoke the user's token before it answers
-   * their own "leave family" request, so another request of theirs 401s while
-   * the leave is in flight — and App's silent recovery join then re-added them
-   * to the family they were leaving. The real `useLeaveFamily` drives the leave
-   * (its request held pending), and the refresher App registered on the
-   * session client is the path ApiClient takes on that 401.
-   */
+  /** #263 REGRESSION: a 401 during the user's own leave must not let the silent recovery join re-add
+   *  them to the family they are leaving. See the header → "Own leave in flight". */
   describe("acquireNewToken while the user's own leave is in flight (#263)", () => {
     const SESSION = {
       userId:
@@ -1031,11 +1003,8 @@ describe("App", () => {
       expect(isSelfDepartureActive()).toBe(false);
     });
 
-    /**
-     * Positive companion: the null above came from the departure mark, not from
-     * a refresher that never joins. A leave the server REFUSED keeps the
-     * session, and the very next refresh joins again — flagged as recovery.
-     */
+    /** Positive companion: the null above came from the departure mark, not a refresher that never joins;
+     *  a REFUSED leave keeps the session, and the next refresh joins again — flagged as recovery. */
     it("joins again, flagged as recovery, once a refused leave has settled", async () => {
       const { refresh, resolveLeave, leaving, flow } =
         await renderWithPendingLeave();
@@ -1068,12 +1037,8 @@ describe("App", () => {
       );
     });
 
-    /**
-     * Review S1: the guarded leave 401s, its unguarded resend 401s too, and the
-     * recovery join that 401 triggers needs re-verification. ApiClient is mocked
-     * here, so the resend stub runs the registered refresher itself, mirroring
-     * `doRequest`'s 401 branch (refresher → null → the 401 envelope comes back).
-     */
+    /** Review S1: leave and resend both 401 and the triggered recovery join needs re-verification; the
+     *  resend stub runs the refresher itself. See the header → "Own leave in flight". */
     it("explains the logout when the leave's recovery join needs re-verification", async () => {
       window.location.hash = "#personal-shelf";
       setMockSession({ ...SESSION });

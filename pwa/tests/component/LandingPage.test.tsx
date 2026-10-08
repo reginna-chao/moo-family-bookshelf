@@ -29,17 +29,77 @@ import {
 } from "../helpers/syncCodeHostFixtures";
 
 /**
- * Only `decodeSyncCode` is stubbed — these tests drive the flow by dictating
- * what a pasted code decodes to. Everything else in the module stays REAL,
- * including `parseSyncCodeApiHost`: it feeds the `@host` disclosure note that
- * LandingPage renders on every keystroke, so replacing it would leave the note
- * (and the copy it carries) unverified — and a factory that simply forgets it
- * makes the whole page throw on render.
+ * PWA LandingPage: the sync-code / email form, joins and their errors, the verification and QR
+ * flows, and every guard on a sync code's custom server (`@host`).
  *
- * `classifySyncCodeApiHost` (imported by LandingPage and LandingVerifyScreen
- * straight from `shared/`) is never mocked, so the endpoint-refusal guards run
- * the production rules.
+ * Sync-code mock: only `decodeSyncCode` is stubbed — these tests drive the flow by dictating what a
+ * pasted code decodes to. Everything else in the module stays REAL, including `parseSyncCodeApiHost`:
+ * it feeds the `@host` disclosure note that LandingPage renders on every keystroke, so replacing it
+ * would leave the note (and the copy it carries) unverified — and a factory that simply forgets it
+ * makes the whole page throw on render. `classifySyncCodeApiHost` (imported by LandingPage and
+ * LandingVerifyScreen straight from `shared/`) is never mocked, so the endpoint-refusal guards run the
+ * production rules.
+ *
+ * Refused @host: a sync code's `@host` decides where this device sends its auth token and, from that
+ * point on, its entire book list. The verdict comes from the real `classifySyncCodeApiHost`, i.e. the
+ * same rules `new ApiClient(...)` enforces. Both entry points must refuse BEFORE the first request:
+ * each one fires a `getVerifyMethod` probe at the sync code's server before any join happens, so "the
+ * join failed" is far too late — the address has already been contacted, and with it the fact that
+ * this userId exists. A QR arrival never typed the host, so nothing may be assumed about it.
+ *
+ * Custom-server disclosure: disclosure, not blocking — an acceptable `@host` is still someone else's
+ * server. The user is told which one BEFORE authenticating, at BOTH points where that decision is
+ * still theirs to make. A QR / invite arrival is auto-advanced past the form, so the verification
+ * screen is the ONLY place they can learn which server they are about to authenticate to; without a
+ * note there, entering a PIN would hand the secret to an undisclosed host. The note under test there
+ * is the one the CHALLENGE screen carries, which has to stand on its own: the consent gate's copy is
+ * long gone by the time the PIN is typed. No sync code is on that screen (nor on the consent gate), so
+ * the note drops the form's "此同步碼" lead-in (`variant="verify"`); that ABSENCE is the only thing
+ * pinning the variant — the join copy CONTAINS the verify copy, so a positive assertion passes either way.
+ *
+ * Warning timing — WHEN the warning may appear, as opposed to what it says. The warning used to be
+ * live, so it flashed through nearly every keystroke of a half-typed `@host` — and a warning that
+ * cries wolf during normal typing is one the user is trained to dismiss. That is fatal here: it is the
+ * last human-facing defence against a userinfo-spoofed endpoint, which would ship the auth token and
+ * the whole book list to the attacker. So it is DELAYED until the value settles, and never
+ * suppressed. Leaving the field is one of the settle triggers, which keeps the disclosure tests about
+ * the COPY rather than the timer. A code the user never typed (trigger 4) has no typing to flicker
+ * through, so it is settled from the very first render — the field is seeded straight from the prop
+ * for exactly this reason, which makes the PWA warn at the same moment as the Extension: an
+ * invite-link arrival is the one path where the user sees the address before touching the keyboard,
+ * so a delay there would be a warning that arrives after the decision. The hazard the mechanism must
+ * not create: if the delay were ever implemented by KEEPING the last rendered note, appending
+ * `@evil.com` to a host the user already saw named would leave a reassuring "will connect to
+ * api.moofamily.app" standing over a spoofed address — lending the spoof exactly the legitimacy the
+ * warning denies. Kept symmetric with the Extension's copy in
+ * extension/tests/component/OnboardingViews.test.tsx ("custom-server note timing") — the policy lives
+ * in `shared/` exactly so the two cannot drift.
+ *
+ * QR consent: disclosure is not enough on the QR path — it is auto-advanced past the form and has two
+ * ZERO-INTERACTION exits (a valid QR token, or an account with no verification configured), so a
+ * scanned code could adopt — and persist — somebody else's server with nothing ever on screen. So
+ * consent is taken BEFORE the first request, not before the join. The `getVerifyMethod` probe alone
+ * already tells that server this userId exists, from this device's IP and UA; "we only asked it a
+ * question" is not a meaningful distinction to a host the user never agreed to. The verdict still
+ * comes from the real `classifySyncCodeApiHost`, so what the gate shows is the canonical address the
+ * client would actually call. An address that fails validation is refused outright — there is nothing
+ * to agree to, and a button would let a user wave through exactly what the check exists to stop. A
+ * refusal has to survive the page re-rendering: the auto-join trigger is latched in a ref, so no later
+ * render may put the gate back up — let alone start, behind the user's back, the requests they just
+ * declined.
+ *
+ * QR progress screen: a QR arrival is auto-advanced past the form, so while its join runs there is no
+ * submit button left to carry a "處理中..." label — and showing the form would ask someone who just
+ * scanned (or just pressed 確認並加入) to type an email. The whole screen becomes the progress
+ * indicator instead. The screen belongs to THAT join and only to it: a flag that stayed latched after
+ * a failed QR join would hijack the user's next manual submit, which is why the page tracks WHICH
+ * entry point is in flight rather than a second boolean beside it. The verification screen is ordered
+ * ahead of it on purpose: a challenge raised while the QR join is in flight has to reach the user, or
+ * the join sits behind a progress screen nobody can answer.
  */
+
+// Only decodeSyncCode is stubbed; parseSyncCodeApiHost and classifySyncCodeApiHost stay real.
+// See the header → "Sync-code mock".
 vi.mock("@/crypto/syncCode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
   decodeSyncCode: vi.fn(),
@@ -70,19 +130,13 @@ beforeAll(() => {
 
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 
-/**
- * A self-hosted endpoint the client will ACCEPT. Fixtures carry full URLs
- * because that is what an app-generated sync code contains — a bare host has
- * never been adoptable (`new URL()` needs a scheme).
- */
+/** A self-hosted endpoint the client will ACCEPT. Full URLs, as an app-generated sync code contains — a
+ *  bare host has never been adoptable (`new URL()` needs a scheme). */
 const CUSTOM_ENDPOINT = "https://custom.api.com";
 const QR_ENDPOINT = "https://qr.host.com";
 
-/**
- * Mirrors src/utils/apiHostGuard.ts `UNSAFE_API_HOST_ERROR`. Asserted against
- * the page's own rendering of it, so a copy change here fails loudly rather
- * than leaving a stale duplicate green.
- */
+/** Mirrors src/utils/apiHostGuard.ts `UNSAFE_API_HOST_ERROR`, asserted against the page's own rendering,
+ *  so a copy change fails loudly rather than leaving a stale duplicate green. */
 const ABORT_MESSAGE = "此同步碼的伺服器位址無效或不安全，無法加入。";
 
 function fillInput(label: string, value: string) {
@@ -98,12 +152,8 @@ function submitForm() {
   fireEvent.submit(form);
 }
 
-/**
- * Drain the microtask queue so any request the page started has reached its
- * mock before a "nothing was called" assertion runs. Without this, a probe
- * hidden behind an `await` would slip through the gap between the screen
- * appearing and the assertion — the exact regression those tests guard.
- */
+/** Drain microtasks so any request the page started reaches its mock before a "nothing was called"
+ *  assertion — else a probe behind an `await` slips through the very gap those tests guard. */
 async function flushPendingRequests() {
   for (let i = 0; i < 3; i++) {
     await act(async () => {
@@ -303,10 +353,8 @@ describe("LandingPage", () => {
 
       await waitFor(() => {
         expect(mockOnAuth).toHaveBeenCalledWith({
-          // Literal cross-platform vector (= deriveUserId("  User@Example.com  ")
-          // in extension/tests/unit/hash.test.ts). Pins that the PWA login
-          // derives the SAME userId the Extension does — never compute this
-          // in the test by calling deriveUserId, that would be tautological.
+          // Literal cross-platform vector (deriveUserId("  User@Example.com  ") in extension/tests/unit/
+          // hash.test.ts): the PWA must derive the Extension's userId — computing it here is tautological.
           userId:
             "89f7e39cc90a4bf90502af2f6862d07bcd3dbe9f08cb6dcc96e8a0fd1f404da1",
           familyId: "fam-1",
@@ -339,9 +387,8 @@ describe("LandingPage", () => {
       });
     });
 
-    // #263: `recovery` belongs to App's silent token-recovery join only. A
-    // manual join must stay a plain join, or the server would refuse a user
-    // who is not (yet) listed in the family instead of adding them.
+    // #263: `recovery` belongs to App's silent token-recovery join only; a manual join stays plain, or
+    // the server would refuse a user not (yet) listed in the family instead of adding them.
     it("should send a manual join without the recovery flag", async () => {
       mockDecodeSyncCode.mockReturnValue({ familyId: "fam-1" });
 
@@ -485,11 +532,8 @@ describe("LandingPage", () => {
     });
   });
 
-  /**
-   * #270: a removed member's refused manual join says how long the block
-   * lasts, in the client's own copy (shared with the Extension) — the server
-   * message does not carry the 6 hours.
-   */
+  /** #270: a removed member's refused manual join says how long the block lasts, in the client's own copy
+   *  (shared with the Extension) — the server message does not carry the 6 hours. */
   describe("MEMBER_REMOVED error", () => {
     it("shows the shared rejoin-wait copy instead of the server message", async () => {
       mockDecodeSyncCode.mockReturnValue({
@@ -923,17 +967,8 @@ describe("LandingPage", () => {
     });
   });
 
-  /**
-   * A sync code's `@host` decides where this device sends its auth token and,
-   * from that point on, its entire book list. The verdict comes from the real
-   * `classifySyncCodeApiHost` (never mocked here), i.e. the same rules
-   * `new ApiClient(...)` enforces.
-   *
-   * Both entry points must refuse BEFORE the first request: each one fires a
-   * `getVerifyMethod` probe at the sync code's server before any join happens,
-   * so "the join failed" is far too late — the address has already been
-   * contacted, and with it the fact that this userId exists.
-   */
+  /** A refused `@host` must be refused BEFORE the first request on both entry points — the
+   *  `getVerifyMethod` probe already contacts it. See the header → "Refused @host". */
   describe("a sync code whose @host would be refused", () => {
     const REFUSED: Array<[string, string]> = [
       ["a userinfo masquerade", "https://real.example@evil.com"],
@@ -1058,9 +1093,8 @@ describe("LandingPage", () => {
           await waitFor(() => {
             expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
           });
-          // A QR arrival never typed this host, so nothing may be assumed about
-          // it — and the probe would confirm to that server that this userId
-          // exists before the user has agreed to anything.
+          // A QR arrival never typed this host, so nothing may be assumed about it — and the probe would
+          // confirm to that server that this userId exists before the user has agreed to anything.
           expect(mockGetVerifyMethod).not.toHaveBeenCalled();
           expect(mockJoinFamily).not.toHaveBeenCalled();
           expect(mockOnAuth).not.toHaveBeenCalled();
@@ -1116,11 +1150,8 @@ describe("LandingPage", () => {
     });
   });
 
-  /**
-   * Disclosure, not blocking: an acceptable `@host` is still someone else's
-   * server. The user is told which one BEFORE authenticating, at BOTH points
-   * where that decision is still theirs to make.
-   */
+  /** Disclosure, not blocking: an acceptable `@host` is still someone else's server, named BEFORE
+   *  authenticating at both decision points. See the header → "Custom-server disclosure". */
   describe("custom-server disclosure", () => {
     const QR_USER_ID = "b".repeat(64);
 
@@ -1149,10 +1180,8 @@ describe("LandingPage", () => {
         render(<LandingPage onAuth={mockOnAuth} />);
 
         fillInput("同步碼", "moo-fam1-key1@https://real.example@evil.com");
-        // The warning is held back until the value settles, so that a half-typed
-        // `@host` cannot flash it on every keystroke. Leaving the field is one of
-        // the settle triggers, and it keeps this test about the COPY rather than
-        // about the timer — the timing itself has its own block below.
+        // Blur is a settle trigger: it keeps this test about the COPY, not the timer (which has its own
+        // block below). See the header → "Warning timing".
         fireEvent.blur(screen.getByLabelText("同步碼"));
 
         const warning = screen.getByTestId("sync-code-host-note-invalid");
@@ -1186,20 +1215,8 @@ describe("LandingPage", () => {
       });
     });
 
-    /**
-     * WHEN the warning may appear, as opposed to what it says.
-     *
-     * The warning used to be live, so it flashed through nearly every keystroke
-     * of a half-typed `@host` — and a warning that cries wolf during normal
-     * typing is one the user is trained to dismiss. That is fatal here: it is
-     * the last human-facing defence against a userinfo-spoofed endpoint, which
-     * would ship the auth token and the whole book list to the attacker. So it
-     * is DELAYED until the value settles, and never suppressed.
-     *
-     * Kept symmetric with the Extension's copy in
-     * extension/tests/component/OnboardingViews.test.tsx — the policy lives in
-     * `shared/` exactly so the two cannot drift.
-     */
+    /** The warning is DELAYED until the value settles, never suppressed; symmetric with the Extension's
+     *  OnboardingViews.test.tsx. See the header → "Warning timing". */
     describe("timing of the warning", () => {
       function expectNoNote() {
         expect(
@@ -1240,9 +1257,8 @@ describe("LandingPage", () => {
           expectNoNote();
         }
 
-        // Anchor against a vacuous pass: the same field DOES speak once the
-        // value is a complete, adoptable endpoint, so the silence above is the
-        // delay doing its job — not a note that never renders at all.
+        // Anchor against a vacuous pass: the field DOES speak once the value is a complete, adoptable
+        // endpoint, so the silence above is the delay — not a note that never renders at all.
         fillInput("同步碼", LAN_CODE);
         expect(screen.getByTestId("sync-code-host-note")).toBeInTheDocument();
       });
@@ -1311,13 +1327,8 @@ describe("LandingPage", () => {
       });
 
       it("warns immediately for an invite-link prefill present at first render", () => {
-        // Trigger 4: a code the user never typed has no typing to flicker
-        // through, so it is settled from the very first render. The field is
-        // seeded straight from the prop for exactly this reason, which is what
-        // makes the PWA warn at the same moment as the Extension — an
-        // invite-link arrival is the one path where the user sees the address
-        // before they ever touch the keyboard, so a delay here would be a
-        // warning that arrives after the decision.
+        // Trigger 4: a code the user never typed is settled from the first render (the field is seeded
+        // from the prop). See the header → "Warning timing".
         render(
           <LandingPage onAuth={mockOnAuth} initialSyncCode={SPOOFED_CODE} />,
         );
@@ -1327,13 +1338,8 @@ describe("LandingPage", () => {
         expect(vi.getTimerCount()).toBe(0);
       });
 
-      /**
-       * The hazard this whole mechanism has to avoid creating. If the delay were
-       * ever implemented by KEEPING the last rendered note, appending
-       * `@evil.com` to a host the user already saw named would leave a
-       * reassuring "will connect to api.moofamily.app" standing over a spoofed
-       * address — lending the spoof exactly the legitimacy the warning denies.
-       */
+      /** If the delay KEPT the last rendered note, appending `@evil.com` would leave a reassuring line over
+       *  a spoofed address. See the header → "Warning timing". */
       it("drops the previously named host the instant the value turns invalid", () => {
         const { container } = render(<LandingPage onAuth={mockOnAuth} />);
 
@@ -1367,23 +1373,11 @@ describe("LandingPage", () => {
       });
     });
 
-    /**
-     * A QR / invite arrival is auto-advanced past the form, so the verification
-     * screen is the ONLY place they can learn which server they are about to
-     * authenticate to. Without a note here, entering a PIN would hand the
-     * secret to an undisclosed host.
-     *
-     * The copy follows what the user can see: no sync code is on this screen,
-     * so the note drops the form's "此同步碼" lead-in (`variant="verify"`).
-     */
+    /** The verification screen is a QR arrival's ONLY chance to learn the server before a PIN goes to it;
+     *  its note uses `variant="verify"`. See the header → "Custom-server disclosure". */
     describe("above the verification screen", () => {
-      /**
-       * Drive a QR arrival all the way to the PIN prompt. A code carrying an
-       * `@host` is parked at the consent gate first, so the helper answers it —
-       * the note under test here is the one the CHALLENGE screen carries, which
-       * has to stand on its own: the gate's copy is long gone by the time the
-       * PIN is typed.
-       */
+      /** Drive a QR arrival to the PIN prompt, answering the consent gate an `@host` code is parked at; the
+       *  note under test is the CHALLENGE screen's own. See the header → "Custom-server disclosure". */
       async function renderQrArrival(apiHost?: string) {
         mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
         mockGetVerifyMethod.mockResolvedValue({
@@ -1416,10 +1410,8 @@ describe("LandingPage", () => {
 
         const note = screen.getByTestId("sync-code-host-note");
         expect(note).toHaveTextContent("將連線至自訂伺服器：");
-        // A QR / invite arrival never saw a sync code, so the form's "此同步碼"
-        // lead-in would point at something that is not on screen. Its absence is
-        // the only thing pinning `variant="verify"`: the join copy CONTAINS the
-        // verify copy, so the positive assertion above passes either way.
+        // No "此同步碼" lead-in: its absence is the only thing pinning `variant="verify"` (the join copy
+        // CONTAINS the verify copy). See the header → "Custom-server disclosure".
         expect(note.textContent).not.toContain("此同步碼");
         expect(note).toHaveTextContent(QR_ENDPOINT);
       });
@@ -1445,32 +1437,15 @@ describe("LandingPage", () => {
     });
   });
 
-  /**
-   * Disclosure is not enough on the QR path: that path is auto-advanced past
-   * the form and has two ZERO-INTERACTION exits (a valid QR token, or an
-   * account with no verification configured), so a scanned code could adopt —
-   * and persist — somebody else's server with nothing ever on screen.
-   *
-   * So consent is taken BEFORE the first request, not before the join. The
-   * `getVerifyMethod` probe alone already tells that server this userId exists,
-   * from this device's IP and UA; "we only asked it a question" is not a
-   * meaningful distinction to a host the user never agreed to.
-   *
-   * The verdict still comes from the real `classifySyncCodeApiHost`, so what
-   * the gate shows is the canonical address the client would actually call.
-   */
+  /** The QR path has zero-interaction exits, so consent to a custom server is taken BEFORE the first
+   *  request, not before the join. See the header → "QR consent". */
   describe("consent before adopting a QR invite's custom server", () => {
     const QR_USER_ID = "c".repeat(64);
     const QR_TOKEN = "qr-token-123";
     const QR_SYNC_CODE = `moo-famqr-keyqr@${QR_ENDPOINT}`;
 
-    /**
-     * Mount the page as a QR arrival whose sync code carries `apiHost`.
-     *
-     * `rerenderWith` replays a parent re-render: a FRESH element (an identical
-     * one would be allowed to bail out of rendering entirely) carrying the same
-     * prop values, except for whatever the caller overrides.
-     */
+    /** Mount a QR arrival whose sync code carries `apiHost`. `rerenderWith` replays a parent re-render: a
+     *  FRESH element (an identical one may bail out entirely) with the same props bar the overrides. */
     function renderQrArrival(apiHost: string | undefined, qrToken = "") {
       mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
 
@@ -1528,10 +1503,8 @@ describe("LandingPage", () => {
         // the disclosure must not drift from where the request would go.
         const note = screen.getByTestId("sync-code-host-note");
         expect(note).toHaveTextContent("將連線至自訂伺服器：");
-        // Same reason as the verification screen above: nothing on this gate
-        // puts a sync code on screen, so it asks for `variant="verify"` and
-        // drops the "此同步碼" lead-in. Only that ABSENCE pins the variant —
-        // the join copy contains the verify copy.
+        // No sync code on this gate either, so `variant="verify"` drops "此同步碼"; only that ABSENCE pins
+        // the variant. See the header → "Custom-server disclosure".
         expect(note.textContent).not.toContain("此同步碼");
         expect(note).toHaveTextContent("https://qr.host.com/api");
         expect(note.textContent).not.toContain("QR.Host.com");
@@ -1557,9 +1530,8 @@ describe("LandingPage", () => {
           expect(screen.getByText(ABORT_MESSAGE)).toBeInTheDocument();
         });
         await flushPendingRequests();
-        // Deliberate: an address that fails validation is refused outright, so
-        // there is nothing to agree to. Offering a button would let a user
-        // wave through exactly what the check exists to stop.
+        // Deliberate: an address failing validation is refused outright, so there is nothing to agree to;
+        // a button would let a user wave through exactly what the check exists to stop.
         expect(
           screen.queryByTestId("custom-host-consent"),
         ).not.toBeInTheDocument();
@@ -1590,10 +1562,8 @@ describe("LandingPage", () => {
         );
         // A QR join is a manual join, never a silent recovery one (#263).
         expect(mockJoinFamily.mock.calls[0][2]).not.toHaveProperty("recovery");
-        // And the join is the ONLY request. Without this, "token still goes
-        // straight to the join" is indistinguishable from "probe first, then
-        // join": the latter would spend an extra round trip telling this
-        // server that this userId exists.
+        // And the join is the ONLY request: otherwise "probe first, then join" would pass too, spending an
+        // extra round trip telling this server that this userId exists.
         expect(mockGetVerifyMethod).not.toHaveBeenCalled();
       });
 
@@ -1696,11 +1666,8 @@ describe("LandingPage", () => {
         expect(screen.queryByTestId("qr-join-busy")).not.toBeInTheDocument();
       });
 
-      /**
-       * A refusal has to survive the page re-rendering. The auto-join trigger
-       * is latched in a ref, so no later render may put the gate back up — let
-       * alone start, behind the user's back, the requests they just declined.
-       */
+      /** A refusal survives re-renders: the auto-join trigger is latched in a ref, so no later render may
+       *  re-raise the gate or start the declined requests. See the header → "QR consent". */
       it.each([
         // Same values: the everyday parent re-render.
         ["nothing has changed", {}],
@@ -1732,17 +1699,8 @@ describe("LandingPage", () => {
     });
   });
 
-  /**
-   * A QR arrival is auto-advanced past the form, so while its join runs there
-   * is no submit button left to carry a "處理中..." label — and showing the
-   * form would ask someone who just scanned (or just pressed 確認並加入) to
-   * type an email. The whole screen becomes the progress indicator instead.
-   *
-   * The screen belongs to THAT join and only to it: a flag that stayed latched
-   * after a failed QR join would hijack the user's next manual submit, which is
-   * why the page tracks WHICH entry point is in flight rather than a second
-   * boolean beside it.
-   */
+  /** While a QR join runs the whole screen is the progress indicator, and it belongs to THAT join only.
+   *  See the header → "QR progress screen". */
   describe("progress screen while a QR join runs", () => {
     const QR_USER_ID = "d".repeat(64);
     const QR_TOKEN = "qr-token-123";
@@ -1797,11 +1755,8 @@ describe("LandingPage", () => {
       await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
     });
 
-    /**
-     * The verification screen is ordered ahead of this one on purpose: a
-     * challenge raised while the QR join is in flight has to reach the user,
-     * or the join sits behind a progress screen nobody can answer.
-     */
+    /** The verification screen is ordered ahead of this one on purpose: a challenge raised mid-join must
+     *  reach the user, or the join sits behind a progress screen nobody can answer. */
     it("yields to a challenge raised mid-join", async () => {
       // Server rejects the QR token, so the join falls back to verification.
       mockJoinFamily.mockResolvedValue({
@@ -1826,12 +1781,8 @@ describe("LandingPage", () => {
       expect(mockOnAuth).not.toHaveBeenCalled();
     });
 
-    /**
-     * The failure mode this whole shape exists to prevent: after a QR join
-     * fails, the next attempt is the USER's own form submit, and it must be
-     * reported on their submit button — not as a QR screen that swallows the
-     * form they are typing into.
-     */
+    /** The failure mode this shape prevents: after a failed QR join, the USER's own submit must report on
+     *  their submit button — not as a QR screen swallowing the form they are typing into. */
     it("does not carry over into a manual submit after a failed QR join", async () => {
       mockJoinFamily.mockResolvedValueOnce({
         error: { code: "NOT_FOUND", message: "Family not found" },
@@ -1864,11 +1815,8 @@ describe("LandingPage", () => {
       await waitFor(() => expect(mockOnAuth).toHaveBeenCalled());
     });
 
-    /**
-     * The default endpoint has nothing to disclose, so it keeps both halves of
-     * its promise: the screen changes, the interaction count does not. Neither
-     * case below fires a single event.
-     */
+    /** The default endpoint has nothing to disclose: the screen changes, the interaction count does not.
+     *  Neither case below fires a single event. */
     it.each([
       ["the QR carries a token that skips verification", QR_TOKEN],
       ["the account has no verification configured", ""],

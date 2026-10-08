@@ -39,6 +39,30 @@ import { READMOO_COVER_DOMAINS } from "moo-family-bookshelf-shared/config/readmo
  *
  * Reading the file is reading production — Cloudflare Pages serves `_headers`
  * verbatim from `public/`, so no build step can rewrite it in between.
+ *
+ * Non-host sources `img-src` may carry, and why each is there: `'self'` —
+ * same-origin assets shipped with the PWA (icons, PWA artwork); `data:` — the
+ * select-arrow background in `pwa/src/index.css` is a data URI. Anything beyond
+ * these two widens the whitelist and must be a deliberate edit to
+ * `EXPECTED_NON_HTTPS_SOURCES`, not something that arrives unnoticed with an
+ * unrelated header change.
+ *
+ * Reading `_headers`: an unindented line opens a block naming the path pattern
+ * it applies to; the indented `Name: value` lines below it are that block's
+ * headers. `headerValues` reads the block explicitly (rather than grepping the
+ * whole file), which is what proves the CSP is attached to the catch-all route
+ * and not to some subpath, and it returns a list rather than the last match so
+ * the caller can reject a duplicate declaration instead of silently reading one
+ * of two conflicting policies. `catchAllPolicy` throws instead of returning an
+ * empty policy on anything unexpected: a silently empty result would make every
+ * assertion pass vacuously, which is the exact failure mode this file exists to
+ * prevent. `directiveSources` reads directives in isolation and rejects a
+ * duplicate rather than resolving it to the first match: either would let an
+ * ambiguous policy answer as if it were unambiguous. `catchAllPolicy`
+ * deliberately reads one block, so on its own it cannot see a SECOND policy
+ * attached to a narrower pattern — which would override the catch-all one for
+ * those routes and could weaken `img-src` there while every assertion stayed
+ * green; `cspDeclarationCount` counts the policies across every path block.
  */
 
 const HEADERS_PATH = resolve(__dirname, "../../public/_headers");
@@ -52,28 +76,12 @@ const EXPECTED_HTTPS_SOURCES = READMOO_COVER_DOMAINS.flatMap((domain) => [
   `https://*.${domain}`,
 ]);
 
-/**
- * The non-host sources `img-src` may carry, and why each is there:
- *   `'self'` — same-origin assets shipped with the PWA (icons, PWA artwork);
- *   `data:`  — the select-arrow background in `pwa/src/index.css` is a data URI.
- * Anything beyond these two widens the whitelist and must be a deliberate edit
- * here, not something that arrives unnoticed with an unrelated header change.
- */
+/** Non-host `img-src` sources: `'self'` (shipped icons/artwork), `data:` (index.css
+ *  select arrow); any addition is a deliberate edit. See the header → "Non-host sources". */
 const EXPECTED_NON_HTTPS_SOURCES = ["'self'", "data:"];
 
-/**
- * Every value declared for `headerName` under one path block of a Cloudflare
- * Pages `_headers` file.
- *
- * Format: an unindented line opens a block naming the path pattern it applies
- * to; the indented `Name: value` lines below it are that block's headers.
- * Reading the block explicitly (rather than grepping the whole file) is what
- * proves the CSP is attached to the catch-all route and not to some subpath.
- *
- * Returns a list rather than the last match so the caller can reject a
- * duplicate declaration instead of silently reading one of two conflicting
- * policies.
- */
+/** Every value declared for `headerName` under one `_headers` path block (a list, so a
+ *  duplicate can be rejected). See the header → "Reading `_headers`". */
 function headerValues(
   headersText: string,
   pathPattern: string,
@@ -99,13 +107,8 @@ function headerValues(
   return values;
 }
 
-/**
- * The CSP served on every route.
- *
- * Throws instead of returning an empty policy on anything unexpected: a
- * silently empty result would make every assertion below pass vacuously, which
- * is the exact failure mode this file exists to prevent.
- */
+/** The CSP served on every route; throws rather than return an empty policy that
+ *  would pass vacuously. See the header → "Reading `_headers`". */
 function catchAllPolicy(headersText: string): string {
   const values = headerValues(
     headersText,
@@ -120,13 +123,8 @@ function catchAllPolicy(headersText: string): string {
   return values[0];
 }
 
-/**
- * Source list of one CSP directive, e.g. `img-src` → `["'self'", "data:"]`.
- *
- * Directives are read in isolation, and a duplicate is rejected rather than
- * resolved to the first match: either would let an ambiguous policy answer as
- * if it were unambiguous.
- */
+/** Source list of one CSP directive (`img-src` → `["'self'", "data:"]`), duplicates
+ *  rejected. See the header → "Reading `_headers`". */
 function directiveSources(policy: string, directive: string): string[] {
   const matches = policy
     .split(";")
@@ -144,15 +142,8 @@ function directiveSources(policy: string, directive: string): string[] {
 const imgSrcSourcesOf = (headersText: string): string[] =>
   directiveSources(catchAllPolicy(headersText), "img-src");
 
-/**
- * How many Content-Security-Policy headers the file declares in total, across
- * every path block.
- *
- * `catchAllPolicy` deliberately reads one block, so on its own it cannot see a
- * SECOND policy attached to a narrower pattern — which would override the
- * catch-all one for those routes and could weaken `img-src` there while every
- * assertion below stayed green.
- */
+/** CSP declarations across EVERY path block: a SECOND, narrower policy would override
+ *  the catch-all unseen. See the header → "Reading `_headers`". */
 const cspDeclarationCount = (headersText: string): number =>
   [...headersText.matchAll(/^[ \t]*content-security-policy[ \t]*:/gim)].length;
 
@@ -204,9 +195,8 @@ describe("pwa/public/_headers CSP", () => {
   });
 
   it("does not fall back to the bare https: scheme source", () => {
-    // Deliberately redundant with the cases above: `img-src 'self' https: data:`
-    // is the exact value this whitelist replaced, and it allows a cover fetch to
-    // ANY https host — i.e. no depth left behind the Worker's read-side scrub.
+    // Redundant on purpose: `img-src 'self' https: data:` is the value this whitelist
+    // replaced; it allows ANY https host — no depth behind the Worker's read-side scrub.
     expect(imgSrcSources).not.toContain("https:");
   });
 
@@ -217,10 +207,8 @@ describe("pwa/public/_headers CSP", () => {
   });
 
   it("parses each directive in isolation", () => {
-    // Guards the parser against its neighbours: `connect-src` legitimately
-    // carries the bare `https:` scheme source, so a parser that bled directives
-    // together would make the checks above pass on a policy that never
-    // restricted images.
+    // `connect-src` legitimately carries bare `https:`; a parser bleeding directives
+    // together would pass the checks above on a policy that never restricted images.
     expect(directiveSources(policy, "connect-src")).toContain("https:");
     expect(directiveSources(policy, "object-src")).toEqual(["'none'"]);
   });
@@ -239,9 +227,8 @@ describe("_headers parsing", () => {
   /** Catch-all policy plus a second, narrower one — legal, but a weakening. */
   const WITH_SUBPATH_POLICY = `${headersFile("img-src 'self'")}/admin/*\n  Content-Security-Policy: img-src 'none'\n`;
 
-  // The falsifiability probes: the assertions above only mean something if the
-  // extractor actually reports drift, so each direction of drift is fed through
-  // it in memory. `pwa/public/_headers` on disk is never modified.
+  // Falsifiability probes: each drift direction is fed through the extractor in
+  // memory; `pwa/public/_headers` on disk is never modified.
   it.each([
     {
       what: "a cover domain is missing from the header",

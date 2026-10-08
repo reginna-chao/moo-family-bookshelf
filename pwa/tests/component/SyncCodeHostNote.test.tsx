@@ -12,48 +12,70 @@ import {
 import { validateEndpointUrl } from "@/api/client";
 
 /**
- * Production copy, pinned as literals ON PURPOSE.
+ * PWA twin of the Extension's `SyncCodeHostNote`. It is the only thing telling a user that the code
+ * they pasted (or the QR they scanned) will send their auth token and full book list to somebody
+ * else's server.
  *
- * The strings themselves now live in `moo-family-bookshelf-shared/hostNote/
- * messages` and BOTH twins import them from there, so the cross-app drift this
- * pin used to be powerless against — Extension copy and PWA copy quietly
- * diverging, each suite green against its own string — is now impossible at the
- * source rather than watched for in review.
+ * Pinned copy: production copy is pinned as literals ON PURPOSE. The strings themselves now live in
+ * `moo-family-bookshelf-shared/hostNote/messages` and BOTH twins import them from there, so the
+ * cross-app drift this pin used to be powerless against — Extension copy and PWA copy quietly
+ * diverging, each suite green against its own string — is now impossible at the source rather than
+ * watched for in review. What the pins still buy is the other direction: importing the shared
+ * constants here would compare production with itself and let any reword sail through green.
+ * Pinned, a reword has to be made twice — once in shared/, once here — and the Extension twin
+ * (extension/tests/component/SyncCodeHostNote.test.tsx) pins the identical set, so it takes four
+ * deliberate edits, not a slip.
  *
- * What the pins still buy is the other direction: importing the shared constants
- * here would compare production with itself and let any reword sail through
- * green. Pinned, a reword has to be made twice — once in shared/, once here —
- * and the Extension twin (extension/tests/component/SyncCodeHostNote.test.tsx)
- * pins the identical set, so it takes four deliberate edits, not a slip.
+ * Security contract, identical to the Extension's so the two apps cannot disagree about the same code:
+ *
+ *   1. A `valid` verdict shows the CANONICAL endpoint — scheme and path included, never a bare host:
+ *      `http://nas.local` and `https://nas.local` are different trust decisions, and two families
+ *      sharing a host under different paths are different backends.
+ *   2. An `invalid` verdict warns instead, and never echoes the refused address — reassuring copy
+ *      attached to a spoofed address is worse than no copy at all.
+ *   3. `none` renders nothing, so the caller can mount it unconditionally.
+ *
+ * Presentational: the verdict is a prop, which is what lets one component serve both the typed-code
+ * form and the verification screen a QR arrival lands on. `variant` follows that same split and
+ * changes nothing but the valid branch's lead-in.
+ *
+ * Variants: the lead-in is the ONLY thing `variant` touches, and the boundary is what the user can
+ * actually see on the screen the note sits on:
+ *
+ *   - a sync code is on display (the landing form) → name it, "此同步碼…";
+ *   - none is (the verification screen a QR / invite arrival lands on, where the code was never
+ *     typed) → drop the mention;
+ *   - nothing has happened yet, the note just states the server in force (`onboarding`) → present
+ *     tense, "目前使用…".
+ *
+ * `onboarding` has no PWA call site today — it arrived with the shared copy map for the Extension's
+ * onboarding container. It is covered here anyway, because the component accepts it: the PWA must
+ * already render it the way the Extension does on the day a PWA screen starts passing it, and a
+ * variant that is only exercised on one side is exactly how the two apps would drift back apart.
+ * `join` is the DEFAULT so the form's call site needs no prop at all — that default is what the
+ * variant block pins. Three variants that render the same sentence would make `variant` decorative and hide a
+ * wrong key at a call site; pairwise inequality is the assertion that keeps holding after any one of
+ * them is reworded. The invalid branch is deliberately variant-independent — a decision, not an
+ * omission: the warning names the sync code because that is what carried the refused host, it must
+ * read identically wherever it appears, and a caller asking for `verify` copy must not get a softened
+ * version of a security refusal. The Extension twin pins the identical set —
+ * extension/tests/component/SyncCodeHostNote.test.tsx, "the valid-branch lead-in per variant". Keep
+ * the two in step.
+ *
+ * Real classifier: end to end through the real parseSyncCodeApiHost, what this note displays must
+ * equal the URL `validateEndpointUrl` would hand to the ApiClient. Derived from production rather
+ * than hard-coded, so the two cannot drift.
  */
+
+/** Production lead-ins, pinned as literals on purpose. See the header → "Pinned copy". */
 const JOIN_LEAD_IN = "此同步碼將連線至自訂伺服器：";
 const VERIFY_LEAD_IN = "將連線至自訂伺服器：";
 const ONBOARDING_LEAD_IN = "目前使用自訂伺服器：";
 /** Shared by every variant — deliberately, see the variant block below. */
 const INVALID_WARNING = "⚠️ 此同步碼的伺服器位址無效或不安全，請向分享者確認";
 
-/**
- * PWA twin of the Extension's `SyncCodeHostNote`. It is the only thing telling
- * a user that the code they pasted (or the QR they scanned) will send their
- * auth token and full book list to somebody else's server.
- *
- * Contract, identical to the Extension's so the two apps cannot disagree about
- * the same code:
- *
- *   1. A `valid` verdict shows the CANONICAL endpoint — scheme and path
- *      included, never a bare host: `http://nas.local` and `https://nas.local`
- *      are different trust decisions, and two families sharing a host under
- *      different paths are different backends.
- *   2. An `invalid` verdict warns instead, and never echoes the refused
- *      address — reassuring copy attached to a spoofed address is worse than
- *      no copy at all.
- *   3. `none` renders nothing, so the caller can mount it unconditionally.
- *
- * Presentational: the verdict is a prop, which is what lets one component serve
- * both the typed-code form and the verification screen a QR arrival lands on.
- * `variant` follows that same split and changes nothing but the valid branch's
- * lead-in — see "the valid-branch lead-in per variant" below.
- */
+/** Pins the note's security contract (canonical endpoint, warning on refusal, silence by default) and
+ *  its `variant` boundary. See the header → "Security contract" and "Variants". */
 describe("SyncCodeHostNote", () => {
   it("renders nothing when the code carries no custom host", () => {
     const { container } = render(
@@ -133,32 +155,8 @@ describe("SyncCodeHostNote", () => {
     });
   });
 
-  /**
-   * The lead-in is the ONLY thing `variant` touches, and the boundary is what
-   * the user can actually see on the screen the note sits on:
-   *
-   *   - a sync code is on display (the landing form) → name it, "此同步碼…";
-   *   - none is (the verification screen a QR / invite arrival lands on, where
-   *     the code was never typed) → drop the mention;
-   *   - nothing has happened yet, the note just states the server in force
-   *     (`onboarding`) → present tense, "目前使用…".
-   *
-   * `onboarding` has no PWA call site today — it arrived with the shared copy
-   * map for the Extension's onboarding container. It is covered here anyway,
-   * because the component accepts it: the PWA must already render it the way the
-   * Extension does on the day a PWA screen starts passing it, and a variant that
-   * is only exercised on one side is exactly how the two apps would drift back
-   * apart.
-   *
-   * `join` is the DEFAULT so the form's call site needs no prop at all — that
-   * default is what this block pins. The invalid branch is deliberately
-   * variant-independent: the warning is about the sync code that carried the bad
-   * host, and it must read identically wherever it appears.
-   *
-   * The Extension twin pins the identical set — extension/tests/component/
-   * SyncCodeHostNote.test.tsx, "the valid-branch lead-in per variant". Keep the
-   * two in step.
-   */
+  /** `variant` changes only the valid lead-in (join / verify / onboarding); `join` is the default and the
+   *  invalid warning is variant-independent. See the header → "Variants". */
   describe("the valid-branch lead-in per variant", () => {
     const VALID: SyncCodeApiHostResult = {
       kind: "valid",
@@ -195,11 +193,8 @@ describe("SyncCodeHostNote", () => {
       expect(textOf(VALID, "join")).toContain("此同步碼");
     });
 
-    /**
-     * Three variants that render the same sentence would make `variant`
-     * decorative and hide a wrong key at a call site; pairwise inequality is the
-     * assertion that keeps holding after any one of them is reworded.
-     */
+    /** Three variants rendering the same sentence would make `variant` decorative and hide a wrong key at
+     *  a call site; pairwise inequality is the assertion that survives any one reword. */
     it("gives each variant a lead-in no other variant produces", () => {
       const rendered = (["join", "verify", "onboarding"] as const).map(
         (variant) => textOf(VALID, variant),
@@ -213,11 +208,8 @@ describe("SyncCodeHostNote", () => {
       expect(textOf(VALID)).toContain(JOIN_LEAD_IN);
     });
 
-    /**
-     * A decision, not an omission: the warning names the sync code because that
-     * is what carried the refused host, and a caller asking for `verify` copy
-     * must not get a softened version of a security refusal.
-     */
+    /** A decision, not an omission: the warning names the sync code that carried the refused host, and a
+     *  `verify` caller must not get a softened version of a security refusal. */
     it("warns identically on every variant", () => {
       const onJoin = textOf(INVALID, "join");
 
@@ -251,11 +243,8 @@ describe("SyncCodeHostNote", () => {
     });
   });
 
-  /**
-   * End to end through the real classifier: what this note displays must equal
-   * the URL `validateEndpointUrl` would hand to the ApiClient. Derived from
-   * production rather than hard-coded, so the two cannot drift.
-   */
+  /** What this note displays must equal the URL `validateEndpointUrl` would hand to the ApiClient.
+   *  See the header → "Real classifier". */
   describe("driven by the real parseSyncCodeApiHost", () => {
     it.each([
       "https://custom.example.com",

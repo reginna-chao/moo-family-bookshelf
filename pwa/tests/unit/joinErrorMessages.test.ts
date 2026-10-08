@@ -8,8 +8,8 @@ import {
 } from "@/utils/joinErrorMessages";
 
 describe("JOIN_BLOCKED_MESSAGES", () => {
-  // 文案的唯一字面錨點：App.test.tsx 只驗「碼 → 對到哪一格 → 有送到 render site」，
-  // 期望值取自生產 map，因此無法固定內容本身；這裡逐字釘住。
+  // The copy's only literal anchor: App.test.tsx checks code → slot → render site with
+  // expectations read from the production map, so it cannot pin the text; this does.
   it.each([
     ["FAMILY_FULL", "家庭成員已達上限（每個家庭最多 2 位成員）"],
     [

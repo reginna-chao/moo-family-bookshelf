@@ -10,6 +10,22 @@ import {
   BLANK_TITLE_MESSAGE,
 } from "@/utils/publicShareMessages";
 
+/**
+ * PublicShareDialog: refused writes never advance the UI.
+ *
+ * Readiness: `findByLabelText` alone is not a readiness signal — DOM presence != effects flushed. It
+ * waits with the act environment disabled and ends on a bare `setTimeout(0)`, so React may still owe
+ * the passive effect that publishes the active shelfId, and a write fired in that window is silently
+ * dropped by the hook's shelfId guard; only `act` guarantees pending effects flush on exit.
+ * renderSettledDialog awaits real microtasks, so call it BEFORE any `vi.useFakeTimers()`.
+ *
+ * Refused writes: fail-open fix — a refused write must never advance the UI past what the server
+ * confirmed, and its reason must reach the user in 繁體中文. Copy is asserted through the production
+ * builders in `@/utils/publicShareMessages` (whose literals are pinned in
+ * `tests/unit/publicShareMessages.test.ts`), except the one production-literal assertion marked in
+ * that block.
+ */
+
 const SHELF: PublicShelf = {
   shelfId: "shelf-1",
   shareToken: "tok-abc",
@@ -44,24 +60,14 @@ function renderDialog(apiClient: ApiClient) {
   );
 }
 
-/**
- * Render, then settle the initial load — and hand back the 標題 input.
- *
- * `findByLabelText` alone is not a readiness signal: DOM presence != effects
- * flushed. It waits with the act environment disabled and ends on a bare
- * `setTimeout(0)`, so React may still owe the passive effect that publishes the
- * active shelfId; a write fired in that window is silently dropped by the
- * hook's shelfId guard. Only `act` guarantees pending effects flush on exit.
- * Call it BEFORE any `vi.useFakeTimers()` — it awaits real microtasks.
- */
+/** Render, settle the initial load inside `act`, and hand back the 標題 input. Call BEFORE any
+ *  `vi.useFakeTimers()`. See the header → "Readiness". */
 async function renderSettledDialog(apiClient: ApiClient): Promise<HTMLElement> {
   await act(async () => {
     renderDialog(apiClient);
   });
-  // getBy, not findBy: a load that failed to settle must fail loudly right here.
-  // The 標題 label exists in the create view too, so pin the ACTIVE view — a
-  // caller passing `{ shelves: [] }` must fail here, not silently drive the
-  // create form.
+  // getBy, not findBy: an unsettled load must fail loudly here. 標題 also exists in the create view, so
+  // pin the ACTIVE view — `{ shelves: [] }` must fail here, not silently drive the create form.
   expect(
     screen.getByRole("button", { name: "關閉公開分享" }),
   ).toBeInTheDocument();
@@ -77,15 +83,8 @@ function createDeferred<T>() {
   return { promise, resolve: (value: T) => settle(value) };
 }
 
-/**
- * Fail-open fix: a refused write must never advance the UI past what the server
- * confirmed, and its reason must reach the user in 繁體中文.
- *
- * Copy is asserted through the production builders in
- * `@/utils/publicShareMessages` (whose literals are pinned in
- * `tests/unit/publicShareMessages.test.ts`), except the one production-literal
- * assertion marked below.
- */
+/** Fail-open fix: a refused write never advances the UI past what the server confirmed, and its reason
+ *  reaches the user in 繁體中文. See the header → "Refused writes". */
 describe("PublicShareDialog · refused writes never advance the UI", () => {
   afterEach(() => {
     vi.useRealTimers();

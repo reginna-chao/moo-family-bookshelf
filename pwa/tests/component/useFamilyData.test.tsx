@@ -12,6 +12,20 @@ import type { ApiClient } from "@/api/client";
  *
  * Mock policy: only the ApiClient boundary is stubbed; the real provider and the
  * real `useFamilyData` / `useFamilyShelfPrefs` run.
+ *
+ * Hostile error envelopes: both load paths read the `{ data, error }` envelope through `readEnvelope`,
+ * which bare-casts `response.json()` (pwa/src/api/client.ts), and the endpoint is user-configurable
+ * (BYO backend via the sync code's `@host`), so `error.message` is `unknown` at runtime. Each path
+ * dropped it straight into React state the family shelf renders as a JSX child: React 19 throws on an
+ * object/array and the app mounts no ErrorBoundary, so a refused refresh used to blank the page until
+ * reload. The quieter half of the same bug: an absent or empty message left the error state blank, so
+ * a failed load reported nothing at all. This provider is where BOTH sites converge, so one table
+ * serves the hostile envelope to `getFamilyMembers` AND `getFamilyBookshelf` in the same render — a
+ * regression at either one fails here. The exhaustive value-domain proof for the coercion itself lives
+ * in extension/tests/unit/safeErrorText.test.ts (shared helper, one copy); these pin the wiring and
+ * the copy. StateProbe renders the two error strings as JSX children on purpose: that is the shape
+ * every real consumer uses (FamilyShelfPage renders them), and exactly where a non-string that slipped
+ * past the guard would make React 19 throw — so a regression fails the render, not just an assertion.
  */
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -32,14 +46,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/**
- * Surfaces the load states + the two error strings for assertions.
- *
- * The errors are rendered as JSX children on purpose: that is the shape every
- * real consumer uses (FamilyShelfPage renders them), and it is exactly where a
- * non-string that slipped past the guard would make React 19 throw. A
- * regression therefore fails the render, not just an assertion.
- */
+/** Surfaces the load states + the two error strings, rendered as JSX children like every real consumer,
+ *  so a non-string fails the render. See the header → "Hostile error envelopes". */
 function StateProbe() {
   const { membersState, bookshelfState, membersError, bookshelfError } =
     useFamilyData();
@@ -61,23 +69,8 @@ function renderProvider(apiClient: ApiClient) {
   );
 }
 
-/**
- * Both load paths read the `{ data, error }` envelope through `readEnvelope`,
- * which bare-casts `response.json()` (pwa/src/api/client.ts), and the endpoint
- * is user-configurable (BYO backend via the sync code's `@host`), so
- * `error.message` is `unknown` at runtime. Each path drops it straight into
- * React state the family shelf renders as a JSX child: React 19 throws on an
- * object/array and the app mounts no ErrorBoundary, so a refused refresh used
- * to blank the page until reload. The quieter half of the same bug: an absent
- * or empty message left the error state blank, so a failed load reported
- * nothing at all.
- *
- * This provider is where BOTH sites converge, so one table serves the hostile
- * envelope to `getFamilyMembers` AND `getFamilyBookshelf` in the same render —
- * a regression at either one fails here. The exhaustive value-domain proof for
- * the coercion itself lives in extension/tests/unit/safeErrorText.test.ts
- * (shared helper, one copy); these pin the wiring and the copy.
- */
+/** A non-string or empty `error.message` on either load path must neither crash the page nor blank
+ *  the error state. See the header → "Hostile error envelopes". */
 describe("FamilyDataProvider hostile error envelopes", () => {
   /** Literal from pwa/src/hooks/useFamilyData.tsx — same copy at both sites. */
   const LOAD_FAILED = "載入失敗，請稍後再試";
@@ -136,9 +129,8 @@ describe("FamilyDataProvider hostile error envelopes", () => {
   );
 
   it("keeps a usable provider tree after a hostile envelope", async () => {
-    // What the regression is really about: React 19 throwing on the error
-    // string tears the subtree down, so the page goes white. A probe still on
-    // screen with both states readable proves the tree survived intact.
+    // The regression proper: React 19 throwing on the error string tears the subtree down (white
+    // page). A probe still on screen with both states readable proves the tree survived intact.
     renderProvider(clientFailingBothPathsWith(["壞掉了"]));
 
     await waitFor(() => {

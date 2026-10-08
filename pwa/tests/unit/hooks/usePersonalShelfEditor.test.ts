@@ -2,15 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 
-// The save refreshes the aggregated family shelf through the FamilyData
-// context; isolate the hook from it (same approach as PersonalShelfPage.test).
-const mockRefreshBookshelf = vi.fn(async () => {});
-vi.mock("@/hooks/useFamilyData", () => ({
-  useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
-}));
-
-import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
-
 /**
  * #250: a share change made while a save is in flight used to lose its unsaved
  * mark when that save succeeded — the success path cleared the WHOLE dirty set,
@@ -20,6 +11,15 @@ import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
  * Each case holds the save's PATCH open, edits mid-flight, then releases it.
  * The 1500ms saved→ready timer is cleared by RTL's unmount.
  */
+
+// The save refreshes the aggregated family shelf through the FamilyData
+// context; isolate the hook from it (same approach as PersonalShelfPage.test).
+const mockRefreshBookshelf = vi.fn(async () => {});
+vi.mock("@/hooks/useFamilyData", () => ({
+  useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
+}));
+
+import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
 
 const A = "book-a";
 const B = "book-b";

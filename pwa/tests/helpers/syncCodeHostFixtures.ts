@@ -1,16 +1,5 @@
-/**
- * Sync-code fixtures for every `@host` disclosure test in this app — the
- * classifier unit tests, the settle-timing hook tests and the component tests
- * all draw their codes from here.
- *
- * Twin of extension/tests/helpers/syncCodeHostFixtures.ts.
- *
- * These constants used to be re-declared inline in each test file, and had
- * already drifted: HALF_TYPED_PREFIXES existed in three different lengths
- * (8 / 12 / 15 entries), so the two apps were no longer proving the same thing
- * about a security-facing warning. The twins are held identical by the copy of
- * tests/unit/useSyncCodeHostVerdict.parity.test.ts that each app's suite runs.
- */
+/** Sync-code fixtures for every `@host` disclosure test here (classifier, hook, component).
+ *  Twin of extension/tests/helpers/syncCodeHostFixtures.ts; why: see HALF_TYPED_PREFIXES's JSDoc. */
 
 /** A code with no `@host` at all — the app's default endpoint. */
 export const NO_HOST_CODE = "moo-ab12-cd34";
@@ -38,6 +27,14 @@ export const LAN_ENDPOINT = "http://192.168.1.50:8787";
  * The run stops at `…192.168.` deliberately — one character further and the
  * URL parses as an in-range LAN host, i.e. `valid`, which is a different
  * assertion. Callers may rely on every entry here being genuinely `invalid`.
+ *
+ * Why these fixtures live in one twin module: the classifier unit tests, the
+ * settle-timing hook tests and the component tests used to re-declare them
+ * inline, and they had already drifted — this list existed in three different
+ * lengths (8 / 12 / 15 entries), so the two apps were no longer proving the
+ * same thing about a security-facing warning. The Extension and PWA copies of
+ * this module are held identical by the copy of
+ * tests/unit/useSyncCodeHostVerdict.parity.test.ts that each app's suite runs.
  */
 export const HALF_TYPED_PREFIXES = [
   "moo-ab12-cd34@h",

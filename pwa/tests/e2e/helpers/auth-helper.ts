@@ -1,8 +1,5 @@
-/**
- * E2E test helpers for PWA auth state management.
- *
- * Imports key format from production useAuth to prevent drift.
- */
+/** E2E test helpers for PWA auth state management; key formats are imported from production
+ *  useAuth to prevent drift. */
 
 import type { Page } from "@playwright/test";
 import { USER_ID_KEY, namespacedKey } from "@/hooks/useAuth";

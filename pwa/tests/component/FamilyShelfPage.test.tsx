@@ -83,10 +83,8 @@ function renderWithProvider(
   );
 }
 
-/**
- * Opens the custom member dropdown and clicks the option whose label matches.
- * Options render as `label + count`, so we match the label substring.
- */
+/** Opens the custom member dropdown and clicks the option whose label matches.
+ *  Options render as `label + count`, so we match the label substring. */
 function selectMemberOption(optionLabel: string) {
   fireEvent.click(memberFilterTrigger());
   const listbox = screen.getByRole("listbox", { name: "成員選單" });
@@ -603,9 +601,8 @@ describe("FamilyShelfPage", () => {
       },
     });
 
-    // Drive the update through the real context method (the direct-call path
-    // that replaced the removed `displayNameChanged` CustomEvent). A settings
-    // display-name save calls exactly this: updateMemberDisplayName(userId, name).
+    // Drive the update through the real context method — the direct-call path that replaced the removed
+    // `displayNameChanged` CustomEvent; a settings display-name save calls exactly this.
     function RenameTrigger() {
       const { updateMemberDisplayName } = useFamilyData();
       return (

@@ -41,6 +41,18 @@ import { describe, it, expect } from "vitest";
  * depth (<app>/tests/unit/), which is what lets them be literally identical
  * rather than merely equivalent: every path below is repo-relative, and
  * REPO_ROOT resolves the same way from either copy.
+ *
+ * What normalize() erases — the three differences the twins are ALLOWED to
+ * have, and nothing else:
+ *   1. the directory each app keeps its own module in — the FILE NAME after it
+ *      is left intact, so a rename on one side still fails this test;
+ *   2. how each app resolves its crypto module (`../` vs the `@/` alias);
+ *   3. line wrapping — JSDoc leaders and whitespace runs collapse, so prose
+ *      re-flowed to fit 80 columns is not mistaken for a behaviour change.
+ * A JSDoc leader is a `*` followed by whitespace or by end of line, and nothing
+ * else: Prettier also prints a generator method with `*` at line start
+ * (`*next()`), and eating that would let real code compare equal to code that
+ * lacks it.
  */
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -77,9 +89,8 @@ const TWINS: TwinPair[] = [
     what: "this cross-app comparison itself",
     extension: "extension/tests/unit/useSyncCodeHostVerdict.parity.test.ts",
     pwa: "pwa/tests/unit/useSyncCodeHostVerdict.parity.test.ts",
-    // This pair has no permitted difference at all. The marker also appears as
-    // data in this very row, which still proves normalisation left the file
-    // standing; the row's real anchor is the comparison below.
+    // No permitted difference at all. The marker is also data in this row, which
+    // still proves normalisation left the file standing; the real anchor is the compare.
     marker: "function normalize(source: string): string {",
     stake:
       "Each suite runs only its own copy — that is the whole point of duplicating this file — so a copy left un-updated does not run for that app's PRs, and the guarantee holds in one direction only. Apply the same edit to both copies.",
@@ -90,20 +101,8 @@ const TWINS: TwinPair[] = [
 const TWIN_DIR = "<twin-dir>";
 const CRYPTO_MODULE = "<crypto/syncCode>";
 
-/**
- * Erase the three differences the twins are ALLOWED to have, and nothing else:
- *
- *   1. the directory each app keeps its own module in — the FILE NAME after it
- *      is left intact, so a rename on one side still fails this test;
- *   2. how each app resolves its crypto module (`../` vs the `@/` alias);
- *   3. line wrapping — JSDoc leaders and whitespace runs collapse, so prose
- *      re-flowed to fit 80 columns is not mistaken for a behaviour change.
- *
- * A JSDoc leader is a `*` followed by whitespace or by end of line, and nothing
- * else: Prettier also prints a generator method with `*` at line start
- * (`*next()`), and eating that would let real code compare equal to code that
- * lacks it.
- */
+/** Erase the three differences the twins are ALLOWED to have, and nothing else.
+ *  See the header → "What normalize() erases". */
 function normalize(source: string): string {
   return source
     .replace(
@@ -172,8 +171,7 @@ describe("Extension / PWA twin modules", () => {
     );
 
     // But a leading `*` with code right behind it is a generator method, not a
-    // leader: stripping it would normalise away a real difference between the
-    // twins, which is the one failure mode this whole file exists to prevent.
+    // leader: stripping it would hide a real twin difference, this file's one failure mode.
     expect(normalize("class A {\n  *next() {}\n}")).not.toBe(
       normalize("class A {\n  next() {}\n}"),
     );

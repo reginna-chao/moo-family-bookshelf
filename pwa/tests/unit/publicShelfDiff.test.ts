@@ -195,9 +195,8 @@ describe("reconcileTitle", () => {
     expect(reconcileTitle(current, sent, stored)).toBe(expected);
   });
 
-  // Why the server-adoption branch exists: the server strips characters
-  // `trim()` does not, so without adopting its value the field would read as
-  // permanently unsaved on a title the user can never retype.
+  // Server-adoption branch: the server strips characters `trim()` does not, so without
+  // it the field reads as permanently unsaved on a title the user can never retype.
   it("clears the divergence that a server-side sanitization would otherwise strand", () => {
     const stored = { title: "書櫃", expiresDays: 30 };
 

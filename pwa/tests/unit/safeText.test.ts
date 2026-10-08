@@ -31,13 +31,66 @@ import {
  * `extension/tests/unit/safeText.test.ts` for the same reason `publicShelfDiff`
  * is: each app bundles the source itself, and each CI job runs only its own
  * suite.
+ *
+ * safeText / safeNullableText:
+ *  - `DEGRADING_VALUES` are all producible by `JSON.parse`, plus `undefined` for
+ *    the likeliest case of all — the backend simply omitted the field.
+ *  - There is no fallback parameter on purpose: fallback copy belongs at the call
+ *    sites that already carry it (`displayName || userId.slice(0, 8)`), and `""`
+ *    is falsy so those `||` chains keep supplying it. A helper that substituted
+ *    copy for `""` would break that contract.
+ *  - `apiEndpoint: null` means "this family uses the default endpoint", not
+ *    "missing" — the tri-state has to survive intact or a family record starts
+ *    claiming a custom endpoint it never had.
+ *
+ * sanitizeRecord — the record half of the container tier. THREE branches, and
+ * the split between the last two is the whole point:
+ *   - a plain object is sanitized field by field;
+ *   - `null` / `undefined` pass through UNCHANGED, because a missing payload has
+ *     to STAY missing. `checkVersion`'s `if (data === null) return null` and
+ *     `sanitizeEnvelope`'s `if (res.data === undefined) return res` (both in
+ *     `pwa/src/api/client.ts`) are load-bearing on that, and fabricating an
+ *     entity here would turn "the backend sent nothing" into "the backend sent
+ *     an empty family" — a different and worse lie;
+ *   - anything ELSE — a primitive, an array — walks straight past those very
+ *     guards (`[]` and `"x"` are both truthy) and would then crash the first
+ *     field read, so it degrades to a fully materialized EMPTY entity instead
+ *     (FAIL-CLOSED: no TypeError one render later).
+ * PR #149's review is why the last branch exists: `data: []` and `data: "x"`
+ * from `GET /api/family/:id/members` reach `setMembers(response.data.members)`
+ * (`pwa/src/hooks/useFamilyData.tsx:205`) as `undefined`, and `members.length`
+ * (`pwa/src/components/MemberList.tsx:70`) then throws from RENDER — where no
+ * caller `try/catch` can reach it, and with no ErrorBoundary in either app that
+ * is a permanent white screen. An array is garbage here and is never SPREAD:
+ * `{ ...arr, title: "" }` would carry the array's numeric keys and dress a
+ * malformed payload up as a valid entity. Excluding arrays is also what keeps
+ * the predicate identical to `isRecord` in `shared/src/borrow/validation.ts`.
+ *
+ * sanitizeList — the list half of the container tier, FAIL-CLOSED with no
+ * pass-through escape hatch at all: where `sanitizeRecord` still lets `null` /
+ * `undefined` reach the caller's own guard, a MISSING list materializes as `[]`
+ * here, because a list is consumed differently — it goes straight into React
+ * state and is read back with `.map` / `.length` from render. PR #149's review
+ * filed the two reproductions it pins: `GET /api/family/:id/members` answering
+ * `members: [null]` used to be stored verbatim by `setMembers`
+ * (`pwa/src/hooks/useFamilyData.tsx:205`, outside any `try`) and detonate on the
+ * NEXT render at `members.map` + `member.displayName`
+ * (`pwa/src/components/MemberList.tsx:153` / `:9`); `members: "oops"` is a
+ * non-array string, so it reaches `members.map` (`:153`) and throws there, while
+ * `undefined` already throws at `members.length`
+ * (`pwa/src/components/MemberList.tsx:70`). A throw
+ * from render is unreachable to every caller `try/catch`, and with no
+ * ErrorBoundary in either app it is a permanent white screen. An element that
+ * cannot carry fields is therefore DROPPED, never passed through — a single
+ * `null` row used to be enough to throw `member.displayName` out of `.map` and
+ * take the whole family shelf down. Losing a hostile element is affordable here
+ * in a way it is not for a record: "no members" / "no books" is a state the UI
+ * already renders. The stricter precedent is `shared/src/borrow/validation.ts`
+ * (PR #144), which this layer is now aligned to.
  */
 
-/**
- * Hostile values a real JSON body can carry in a field declared `string`.
- * Everything here is producible by `JSON.parse`, plus `undefined` for the
- * likeliest case of all — the backend simply omitted the field.
- */
+/** Hostile values for a `string` field: all `JSON.parse`-producible, plus
+ *  `undefined` (the backend omitted the field). */
 const DEGRADING_VALUES: readonly { name: string; value: unknown }[] = [
   { name: "a plain object", value: { message: "boom" } },
   { name: "a nested object", value: { i18n: { "zh-TW": "標題" } } },
@@ -79,12 +132,8 @@ describe("safeText", () => {
     expect(safeText(value)).toBe(value);
   });
 
-  /**
-   * There is no fallback parameter on purpose: fallback copy belongs at the
-   * call sites that already carry it (`displayName || userId.slice(0, 8)`), and
-   * `""` is falsy so those `||` chains keep supplying it. A helper that
-   * substituted copy for `""` would break that contract.
-   */
+  // No fallback parameter on purpose: call sites' `||` chains supply the copy.
+  // See the header → "safeText / safeNullableText".
   it("passes the empty string through instead of substituting a fallback", () => {
     expect(safeText("")).toBe("");
   });
@@ -122,11 +171,8 @@ describe("safeNullableText", () => {
     expect(safeNullableText(value)).toBeNull();
   });
 
-  /**
-   * `apiEndpoint: null` means "this family uses the default endpoint", not
-   * "missing" — the tri-state has to survive intact or a family record starts
-   * claiming a custom endpoint it never had.
-   */
+  // `apiEndpoint: null` means "default endpoint", not "missing": the tri-state
+  // must survive.
   it("keeps an explicit null as null", () => {
     expect(safeNullableText(null)).toBeNull();
   });
@@ -154,28 +200,8 @@ const emptyTitle = (record: LooseRecord): LooseRecord => ({
   title: "",
 });
 
-/**
- * The record half of the container tier. THREE branches, and the split between
- * the last two is the whole point:
- *
- *   - a plain object is sanitized field by field;
- *   - `null` / `undefined` pass through UNCHANGED, because a missing payload has
- *     to STAY missing. `checkVersion`'s `if (data === null) return null` and
- *     `sanitizeEnvelope`'s `if (res.data === undefined) return res` (both in
- *     `pwa/src/api/client.ts`) are load-bearing on that, and fabricating an
- *     entity here would turn "the backend sent nothing" into "the backend sent
- *     an empty family" — a different and worse lie;
- *   - anything ELSE — a primitive, an array — walks straight past those very
- *     guards (`[]` and `"x"` are both truthy) and would then crash the first
- *     field read, so it degrades to a fully materialized EMPTY entity instead.
- *
- * PR #149's review is why the last branch exists: `data: []` and `data: "x"`
- * from `GET /api/family/:id/members` reach `setMembers(response.data.members)`
- * (`pwa/src/hooks/useFamilyData.tsx:206`) as `undefined`, and `members.length`
- * (`pwa/src/components/MemberList.tsx:86`) then throws from RENDER — where no
- * caller `try/catch` can reach it, and with no ErrorBoundary in either app that
- * is a permanent white screen.
- */
+// Object → sanitized; null/undefined → unchanged; anything else → EMPTY entity
+// (PR #149). See the header → "sanitizeRecord".
 describe("sanitizeRecord", () => {
   it("applies the sanitizer to a non-null object", () => {
     const sanitize = vi.fn(emptyTitle);
@@ -202,9 +228,8 @@ describe("sanitizeRecord", () => {
     expect(sanitize).not.toHaveBeenCalled();
   });
 
-  // FAIL-CLOSED: garbage that is neither a record nor absent slips past the
-  // callers' truthiness guards, so it becomes a fully materialized empty
-  // entity rather than a TypeError one render later.
+  // FAIL-CLOSED: garbage slips past truthiness guards, so it becomes an empty
+  // entity, not a TypeError one render later.
   it.each([
     { name: "a string", value: "not an object" },
     { name: "the empty string", value: "" },
@@ -223,10 +248,8 @@ describe("sanitizeRecord", () => {
     expect(sanitize).toHaveBeenCalledWith({});
   });
 
-  // An array is garbage here and is never SPREAD: `{ ...arr, title: "" }` would
-  // carry the array's numeric keys and dress a malformed payload up as a valid
-  // entity. Excluding arrays is also what keeps the predicate identical to
-  // `isRecord` in `shared/src/borrow/validation.ts`.
+  // An array is never SPREAD (its numeric keys would dress up garbage). See the
+  // header → "sanitizeRecord".
   it("does not spread an array's numeric keys into the result", () => {
     const result = sanitizeRecord(
       ["first", "second"] as unknown as LooseRecord,
@@ -248,28 +271,8 @@ describe("sanitizeRecord", () => {
   });
 });
 
-/**
- * The list half of the container tier, FAIL-CLOSED with no pass-through escape
- * hatch at all — where `sanitizeRecord` still lets `null` / `undefined` reach
- * the caller's own guard, a MISSING list materializes as `[]` here, because a
- * list is consumed differently: it goes straight into React state and is read
- * back with `.map` / `.length` from render.
- *
- * PR #149's review filed the two reproductions this block pins:
- * `GET /api/family/:id/members` answering `members: [null]` used to be stored
- * verbatim by `setMembers` (`pwa/src/hooks/useFamilyData.tsx:206`, outside any
- * `try`) and detonate on the NEXT render at `members.map` +
- * `member.displayName` (`pwa/src/components/MemberList.tsx:166` / `:7`);
- * `members: "oops"` did the same at `members.length`
- * (`pwa/src/components/MemberList.tsx:86`). A throw from render is unreachable
- * to every caller `try/catch`, and with no ErrorBoundary in either app it is a
- * permanent white screen.
- *
- * Losing a hostile element is affordable here in a way it is not for a record:
- * "no members" / "no books" is a state the UI already renders. The stricter
- * precedent is `shared/src/borrow/validation.ts` (PR #144), which this layer is
- * now aligned to.
- */
+// FAIL-CLOSED lists: a MISSING list is `[]`, fieldless elements are dropped
+// (PR #149 repros). See the header → "sanitizeList".
 describe("sanitizeList", () => {
   it("sanitizes every element of a real array", () => {
     const list: LooseRecord[] = [
@@ -305,9 +308,8 @@ describe("sanitizeList", () => {
     expect(sanitize).not.toHaveBeenCalled();
   });
 
-  // An element that cannot carry fields is DROPPED, never passed through: a
-  // single `null` row used to be enough to throw `member.displayName` out of
-  // `.map` and take the whole family shelf down.
+  // A fieldless element is DROPPED: one `null` row used to take the whole family
+  // shelf down via `member.displayName`.
   it.each([
     { name: "null", value: null },
     { name: "a string", value: "plain" },

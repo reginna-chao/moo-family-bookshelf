@@ -19,6 +19,41 @@ import { BoolFlag, type ApiClient } from "@/api/client";
 import { buildRetryMessage } from "@/utils/retryMessage";
 import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 
+/**
+ * PWA SettingsPage: sync-code sharing, members (with the un-kick entry), leave / logout / delete, and
+ * display-name saves, rendered inside the real FamilyDataProvider.
+ *
+ * Un-kick entry: removing a member writes a 6-hour server-side block on rejoining, so the owner gets
+ * an entry to lift it again (see `UnkickNotice`). This page — not `MemberList` — owns that entry,
+ * precisely so it survives the member refresh the removal triggers: a failed refresh unmounts the
+ * list, and swallowing the entry with it would leave the owner no way to undo a mis-click. The
+ * removal — and the block it wrote — already happened, so a member refresh failing afterwards must not
+ * take the only way to undo it down with the list.
+ *
+ * Pinned clock: `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the real clock
+ * can put two removals of the same member in the same millisecond. It is pinned so the
+ * second-removal regression actually exercises the remount instead of passing or failing on timing
+ * luck.
+ *
+ * Second removal: once the block is lifted the member can rejoin, and may be removed a second time —
+ * the backend then writes a new tombstone, and the notice must return to idle and hand the
+ * 「解除移除限制」 entry back to the owner. A card stuck on the previous success copy would make the
+ * owner believe the second block had been lifted too.
+ *
+ * Half-failed self-leave: a retried, half-failed self-leave has the Worker finish the cleanup and
+ * answer 404 MEMBER_NOT_FOUND. That is a completed leave — keeping the session would let the next
+ * request's recovery re-join it. 404 FAMILY_NOT_FOUND is the same outcome: a sole-owner dissolve that
+ * half-failed after deleting the family record answers it on every retry, and keeping the session
+ * would strand the user on a family that no longer exists. The opposite case (a real refusal renders
+ * its error and does NOT call onLogout) is pinned by "shows the localized back-off copy when leave
+ * family is rate limited".
+ *
+ * Rate-limited writes: the Worker rate-limits the family write endpoints (429 RATE_LIMITED, with an
+ * optional `retryAfter`). Its `message` is English, so both write paths here render the localized
+ * back-off copy instead — asserted against the production builder, whose literals are pinned in
+ * pwa/tests/unit/retryMessage.test.ts.
+ */
+
 // Mock syncCode module
 const { mockEncodeSyncCode } = vi.hoisted(() => ({
   mockEncodeSyncCode: vi.fn().mockReturnValue("moo-fam1-key1"),
@@ -70,12 +105,8 @@ function renderWithProvider(props = defaultProps) {
   );
 }
 
-/**
- * A bare consumer of the FamilyData context. Renders the members the provider
- * currently holds so a test can assert what `updateMemberDisplayName` pushed
- * into the shared context (the direct-call replacement for the removed
- * `displayNameChanged` CustomEvent), independent of SettingsPage's own UI.
- */
+/** Bare FamilyData consumer: shows what `updateMemberDisplayName` (which replaced the removed
+ *  `displayNameChanged` CustomEvent) pushed into the context, independent of SettingsPage's own UI. */
 function MembersProbe() {
   const { members } = useFamilyData();
   return (
@@ -149,9 +180,8 @@ describe("SettingsPage", () => {
   });
 
   it("copy sync code changes button text to '已複製'", async () => {
-    // act is the readiness barrier: on exit the member-load effects have been
-    // flushed. A `queryByText("載入中...")` waiter only proves the spinner left
-    // the DOM, which is not the same as the load's effects having committed.
+    // act is the readiness barrier (member-load effects flushed on exit); a `queryByText("載入中...")`
+    // waiter only proves the spinner left the DOM, not that the load's effects committed.
     await act(async () => {
       renderWithProvider();
     });
@@ -167,10 +197,8 @@ describe("SettingsPage", () => {
         expect.stringContaining("moo-fam1-key1"),
       );
     });
-    // `handleCopy` (hooks/useSyncCodeShare.ts) awaits clipboard.writeText, so
-    // `setCopied(true)` commits a microtask after the click — the waitFor above
-    // only proves writeText was CALLED. This must stay findBy*: an
-    // eventual-state assertion, not getBy*.
+    // `handleCopy` (hooks/useSyncCodeShare.ts) awaits writeText, so `setCopied(true)` commits a microtask
+    // later than the CALL the waitFor saw: this must stay findBy* (eventual state), not getBy*.
     expect(
       await screen.findByRole("button", { name: "已複製" }),
     ).toBeInTheDocument();
@@ -217,13 +245,8 @@ describe("SettingsPage", () => {
 
   // --- Un-kick entry after a removal ---
 
-  /**
-   * Removing a member writes a 6-hour server-side block on rejoining, so the
-   * owner gets an entry to lift it again (see `UnkickNotice`). This page — not
-   * `MemberList` — owns that entry, precisely so it survives the member refresh
-   * the removal triggers: a failed refresh unmounts the list, and swallowing the
-   * entry with it would leave the owner no way to undo a mis-click.
-   */
+  /** This page, not MemberList, owns the un-kick entry so it survives the member refresh a removal
+   *  triggers. See the header → "Un-kick entry". */
   describe("un-kick entry after a removal", () => {
     const SELF_ID = defaultProps.userId;
     const REMOVED_ID =
@@ -250,12 +273,8 @@ describe("SettingsPage", () => {
       mockUnkickMember.mockResolvedValue({ data: { cleared: BoolFlag.TRUE } });
     });
 
-    /**
-     * `removedAt` is what makes the notice's `key` unique PER REMOVAL, and the
-     * real clock can put two removals of the same member in the same
-     * millisecond. Pin it so the second-removal regression below actually
-     * exercises the remount instead of passing or failing on timing luck.
-     */
+    /** `removedAt` keys the notice PER REMOVAL; the clock is pinned so the second-removal case
+     *  exercises the remount, not timing luck. See the header → "Pinned clock". */
     let restoreClock: (() => void) | null = null;
 
     function controlClock(startMs: number) {
@@ -270,20 +289,16 @@ describe("SettingsPage", () => {
     }
 
     afterEach(() => {
-      // The outer `clearAllMocks` only clears calls, not implementations, and
-      // these two mocks are set up nowhere else — drop them so no later test in
-      // this file inherits a removal/un-kick that silently succeeds.
+      // The outer `clearAllMocks` keeps implementations and these mocks are set up nowhere else — reset
+      // them so no later test inherits a removal/un-kick that silently succeeds.
       mockRemoveMember.mockReset();
       mockUnkickMember.mockReset();
       restoreClock?.();
       restoreClock = null;
     });
 
-    /**
-     * Mount and settle the initial member load. `act` is the readiness signal
-     * rather than `findBy*`: the interactions below depend on state published by
-     * the provider's mount effect, and only `act` guarantees it has committed.
-     */
+    /** Mount and settle the initial member load inside `act` (not `findBy*`): the interactions depend on
+     *  state the provider's mount effect publishes, and only `act` guarantees it has committed. */
     async function renderSettled() {
       await act(async () => {
         renderWithProvider();
@@ -293,11 +308,8 @@ describe("SettingsPage", () => {
       });
     }
 
-    /**
-     * Remove 大明 — the first member the owner can act on. The confirm click is
-     * wrapped in `act` so the whole chain it starts (removal → report to this
-     * page → member/bookshelf refresh) has settled before the caller asserts.
-     */
+    /** Remove 大明, the first member the owner can act on; the confirm click runs in `act` so removal →
+     *  report to this page → member/bookshelf refresh has settled before the caller asserts. */
     async function removeDaMing() {
       fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]);
       await act(async () => {
@@ -345,11 +357,8 @@ describe("SettingsPage", () => {
       ).toBeInTheDocument();
     });
 
-    /**
-     * 解除限制後對方可以重新加入，也可能再被移除一次——這時後端寫了一個新的
-     * tombstone，通知卡必須回到 idle 把「解除移除限制」入口交還給管理者。若卡片
-     * 停在上一次的成功文案，管理者會以為第二次的限制也已經解除。
-     */
+    /** A second removal writes a new tombstone, so the notice must return to idle and offer
+     *  「解除移除限制」 again. See the header → "Second removal". */
     it("returns the entry to idle when the same member is removed again", async () => {
       // The refreshed list still holds 大明 (see this describe's beforeEach) —
       // standing in for them rejoining once the first block was lifted.
@@ -385,11 +394,8 @@ describe("SettingsPage", () => {
       expect(mockUnkickMember).toHaveBeenCalledTimes(1);
     });
 
-    /**
-     * The reason the state lives on this page: the removal — and the block it
-     * wrote — already happened, so a member refresh failing afterwards must not
-     * take the only way to undo it down with the list.
-     */
+    /** The reason the state lives on this page: a refresh failing after the removal must not take the
+     *  only way to undo it down with the list. See the header → "Un-kick entry". */
     it("keeps the entry when the member-list refresh fails afterwards", async () => {
       mockGetFamilyMembers.mockReset();
       mockGetFamilyMembers
@@ -531,17 +537,8 @@ describe("SettingsPage", () => {
     });
   });
 
-  /**
-   * A retried, half-failed self-leave: the Worker finishes the cleanup and
-   * answers 404 MEMBER_NOT_FOUND. That is a completed leave — keeping the
-   * session would let the next request's recovery re-join it. 404
-   * FAMILY_NOT_FOUND is the same outcome: a sole-owner dissolve that
-   * half-failed after deleting the family record answers it on every retry,
-   * and keeping the session would strand the user on a family that no longer
-   * exists. The opposite case (a real refusal renders its error and does NOT
-   * call onLogout) is pinned by "shows the localized back-off copy when leave
-   * family is rate limited" below.
-   */
+  /** A retried, half-failed self-leave answered 404 MEMBER_NOT_FOUND / FAMILY_NOT_FOUND is a completed
+   *  leave: the session must end. See the header → "Half-failed self-leave". */
   it.each([
     ["MEMBER_NOT_FOUND", "目標使用者不是家庭成員"],
     ["FAMILY_NOT_FOUND", "Family not found"],
@@ -572,13 +569,8 @@ describe("SettingsPage", () => {
 
   // --- Rate-limited writes ---
 
-  /**
-   * The Worker rate-limits the family write endpoints (429 RATE_LIMITED, with
-   * an optional `retryAfter`). Its `message` is English, so both write paths
-   * here render the localized back-off copy instead — asserted against the
-   * production builder, whose literals are pinned in
-   * pwa/tests/unit/retryMessage.test.ts.
-   */
+  /** A 429 RATE_LIMITED renders the localized back-off copy, not the Worker's English message.
+   *  See the header → "Rate-limited writes". */
   it("shows the localized back-off copy when leave family is rate limited", async () => {
     mockLeaveFamily.mockResolvedValue({
       error: {
@@ -779,9 +771,8 @@ describe("SettingsPage", () => {
 
   it("pushes the trimmed name into the family context after a successful save", async () => {
     mockUpdateDisplayName.mockResolvedValue({ data: { ok: true } });
-    // Mount load returns "Alice"; the post-save reload is left pending so it
-    // cannot clobber the optimistic context update. Any change the probe shows
-    // therefore comes from `updateMemberDisplayName`, not the reload.
+    // Mount load returns "Alice"; the post-save reload stays pending so it cannot clobber the optimistic
+    // update — any change the probe shows comes from `updateMemberDisplayName`, not the reload.
     mockGetFamilyMembers.mockReset();
     mockGetFamilyMembers
       .mockResolvedValueOnce({

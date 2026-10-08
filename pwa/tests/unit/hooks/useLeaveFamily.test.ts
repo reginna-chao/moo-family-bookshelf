@@ -71,10 +71,8 @@ describe("useLeaveFamily", () => {
     expect(isSelfDepartureActive()).toBe(false);
   });
 
-  /**
-   * Self-leave: both codes mean there is nothing left to leave, so keeping the
-   * session would let recovery re-join (or strand the user on a dead family).
-   */
+  // Self-leave: both codes mean nothing is left to leave; keeping the session would
+  // let recovery re-join (or strand the user on a dead family).
   it.each(["MEMBER_NOT_FOUND", "FAMILY_NOT_FOUND"])(
     "treats %s as already left and logs out",
     async (code) => {
@@ -155,11 +153,8 @@ describe("useLeaveFamily", () => {
     },
   );
 
-  /**
-   * This device's token was replaced elsewhere: the mark blocked the recovery
-   * join, so the guarded send comes back 401. It is resent once with the mark
-   * lifted and the user still ends logged out after the leave lands.
-   */
+  // Token replaced elsewhere: the mark blocked recovery, so the guarded send gets a
+  // 401; it is resent once with the mark lifted, and the user still ends logged out.
   it("resends once after its own 401 and ends logged out", async () => {
     const responses: LeaveRes[] = [
       { error: { code: "UNAUTHORIZED", message: "revoked" } },

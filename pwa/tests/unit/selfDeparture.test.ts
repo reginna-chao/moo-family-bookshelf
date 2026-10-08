@@ -190,11 +190,8 @@ describe("selfDeparture", () => {
       expect(isSelfDepartureActive()).toBe(false);
     });
 
-    /**
-     * Own 401: the mark blocked the recovery join, so the request is resent
-     * ONCE with the mark lifted — letting the client's normal 401 → recovery
-     * join path run — and settled with the mark armed again.
-     */
+    // Own 401: the mark blocked recovery, so the request is resent ONCE with the mark
+    // lifted (the normal 401 → recovery join runs), then settled with it re-armed.
     it("lifts the mark for exactly one resend after UNAUTHORIZED, then re-arms it for settle", async () => {
       const activeDuringSend: boolean[] = [];
       const send = vi

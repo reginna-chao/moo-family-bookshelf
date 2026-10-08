@@ -13,6 +13,42 @@ import {
   markReauthPending,
 } from "@/utils/reauthPending";
 
+/**
+ * useAuth (PWA): session restore, login / logout, the remembered sync code and
+ * the re-auth marker.
+ *
+ * Stored endpoints. A stored `apiHost` is fed straight into
+ * `new ApiClient(apiHost)` inside a `useMemo` at the top of the tree, so useAuth
+ * runs it through the SAME validation the join paths use. Fixtures therefore
+ * carry full, adoptable endpoint URLs — a bare host is not something the app can
+ * ever hold, and seeding one would test a state that cannot exist. The hardened
+ * validator throws on values an older build happily persisted (embedded
+ * credentials, plain HTTP on a public host), and a throw there takes the WHOLE
+ * app down — a white screen the user cannot recover from without clearing site
+ * data. So a stored endpoint the client would now refuse is treated as "no
+ * session": the user lands on the login form and re-enters a sync code.
+ *
+ * Refused login endpoints are ALL-OR-NOTHING behind LandingPage's own guards:
+ * whatever reaches `login()`, an endpoint the ApiClient would refuse must not
+ * start a session AT ALL. Keeping the rest of the session was the worse
+ * half-state: `new ApiClient(auth.apiHost)` at the top of the tree throws on the
+ * raw value (white screen), and after a reload the session would silently come
+ * back against the DEFAULT endpoint — a family's books fetched from, and a
+ * remembered sync code rebuilt for, a server nobody chose. An existing session
+ * stays untouched: what is already stored passed the same validation when it
+ * was written, so it is a safe address, and a login this hook never accepted is
+ * no reason to tear down the session the user still has. An accepted endpoint
+ * is kept in its canonical form: the live session drives
+ * `new ApiClient(auth.apiHost)`, and a raw spelling would talk to the same
+ * server through a different string than the one stored — and diverge from it
+ * after a reload.
+ *
+ * Re-auth marker (#266): the forced-re-verification marker must survive the
+ * logout that follows it (App writes it right after `logout()`, and the landing
+ * re-login reads it), but a full wipe — `forceLogout` / `forceClearStorage` —
+ * drops it.
+ */
+
 // Mock syncCode module
 vi.mock("@/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn(),
@@ -31,12 +67,8 @@ vi.mock("@/crypto/syncCode", () => ({
 import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 
-/**
- * A stored `apiHost` is fed straight into `new ApiClient(...)`, so useAuth now
- * runs it through the SAME validation the join paths use. Fixtures therefore
- * carry full, adoptable endpoint URLs — a bare host is not something the app
- * can ever hold, and seeding one would test a state that cannot exist.
- */
+/** A full, adoptable endpoint URL: a bare host is a state the app can never hold.
+ *  See the header → "Stored endpoints". */
 const CUSTOM_HOST = "https://custom.host.com";
 
 // Helper to set up localStorage with auth data (using namespaced keys)
@@ -137,16 +169,8 @@ describe("useAuth", () => {
     });
   });
 
-  /**
-   * A stored endpoint is handed to `new ApiClient(apiHost)` inside a `useMemo`
-   * at the top of the tree. The hardened validator throws on values an older
-   * build happily persisted (embedded credentials, plain HTTP on a public
-   * host), and a throw there takes the WHOLE app down — a white screen the user
-   * cannot recover from without clearing site data.
-   *
-   * So a stored endpoint the client would now refuse is treated as "no
-   * session": the user lands on the login form and re-enters a sync code.
-   */
+  // A stored endpoint the client would now refuse means "no session" (else a white
+  // screen at the top of the tree). See the header → "Stored endpoints".
   describe("a stored endpoint the client now refuses", () => {
     it.each([
       ["a userinfo masquerade", "https://real.example@evil.com"],
@@ -545,15 +569,8 @@ describe("useAuth", () => {
       ).toBeNull();
     });
 
-    /**
-     * ALL-OR-NOTHING behind LandingPage's own guards: whatever reaches
-     * `login()`, an endpoint the ApiClient would refuse must not start a
-     * session AT ALL. Keeping the rest of the session was the worse half-state:
-     * `new ApiClient(auth.apiHost)` at the top of the tree throws on the raw
-     * value (white screen), and after a reload the session would silently come
-     * back against the DEFAULT endpoint — a family's books fetched from, and a
-     * remembered sync code rebuilt for, a server nobody chose.
-     */
+    // ALL-OR-NOTHING: an endpoint the ApiClient would refuse starts no session at
+    // all. See the header → "Refused login endpoints".
     it.each([
       ["a userinfo masquerade", "https://real.example@evil.com"],
       ["plain HTTP on a public host", "http://evil.example.com"],
@@ -583,9 +600,8 @@ describe("useAuth", () => {
     });
 
     it("should leave an existing session untouched when the new endpoint is refused", () => {
-      // What is already stored passed the same validation when it was written,
-      // so it is a safe address. A login this hook never accepted is no reason
-      // to tear down the session the user still has.
+      // What is stored passed the same validation when written; a login this hook
+      // never accepted is no reason to tear down the session the user still has.
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       seedStorage({
         userId: "user-old",
@@ -650,9 +666,8 @@ describe("useAuth", () => {
         });
       });
 
-      // The live session drives `new ApiClient(auth.apiHost)`; a raw spelling
-      // here would talk to the same server through a different string than the
-      // one stored — and diverge from it after a reload.
+      // Canonical, not the raw spelling: the live `ApiClient` and the stored value
+      // must name the server identically, before and after a reload.
       expect(result.current.auth).toEqual({
         userId: "user-new",
         familyId: "fam-new",
@@ -901,10 +916,8 @@ describe("useAuth", () => {
     });
 
     it("should not auto-login on second refresh after remembered logout", () => {
-      // After remembered logout, REMEMBERED_LOGOUT_KEY has the sync code
-      // but all auth data is cleared. Simulate a second refresh where
-      // REMEMBERED_LOGOUT_KEY was already consumed on first refresh.
-      // No auth data remains, so no auto-login should occur.
+      // Second refresh after remembered logout: `REMEMBERED_LOGOUT_KEY` was consumed
+      // on the first, all auth data is cleared, so no auto-login may occur.
 
       // localStorage is empty — no userId, no familyId, nothing
       const { result } = renderHook(() => useAuth());
@@ -992,11 +1005,8 @@ describe("useAuth", () => {
     });
   });
 
-  /**
-   * #266: the forced-re-verification marker must survive the logout that
-   * follows it (App writes it right after `logout()`, and the landing re-login
-   * reads it), but a full wipe — `forceLogout` / `forceClearStorage` — drops it.
-   */
+  // #266: the marker survives the `logout()` that follows it, not a full wipe.
+  // See the header → "Re-auth marker".
   describe("re-auth marker", () => {
     const IDENTITY = { familyId: "fam-1", userId: "user-1" };
 

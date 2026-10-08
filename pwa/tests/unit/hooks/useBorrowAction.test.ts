@@ -24,6 +24,37 @@ import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
  * `extension/tests/unit/borrowMessages.test.ts` (the shared copy table has no
  * test script of its own) and reached here through `buildBorrowFailureText`
  * (`.claude/rules/test.md` → Anti-Drift).
+ *
+ * Only the `code` may influence what the user reads: the API endpoint is
+ * user-configurable (BYO backend / sync-code @host), so an envelope's `message`
+ * is attacker-controlled.
+ *
+ * A created request whose list refresh then fails is NOT a borrow failure: the
+ * request really was created, and a failed refresh only means the on-screen
+ * list is stale — reporting it as a failure would tell the user the opposite of
+ * the truth.
+ *
+ * failureKey — the repeat-failure remount signal. The counter exists for ONE
+ * reason: a repeat of the same failure writes an identical `failureText`, React
+ * bails out on the unchanged string, and a live region that never re-mounts
+ * never re-announces — "pressed it, nothing happened", the exact symptom this
+ * banner was added to remove. The DOM half of the proof (the alert really is a
+ * NEW node) lives in `pwa/tests/component/FamilyShelfPage.borrow.test.tsx`. A
+ * success must not rewind the counter: the third attempt would then reuse the
+ * first attempt's key and the banner would silently reappear on a recycled node.
+ *
+ * No synthesized-error passthrough (deliberate asymmetry): the Extension's hook
+ * passes a CLIENT-SYNTHESIZED `AUTH_REFRESH_RATE_LIMITED` message through
+ * verbatim (proved in `extension/tests/unit/dialog/useBorrowAction.test.ts`).
+ * This client deliberately does NOT: `pwa/src` has no synthesize path and no
+ * such constant, so the only thing a passthrough here could ever render is
+ * server-supplied text. `ApiError.synthesized` exists on this side too (kept in
+ * sync so the classes cannot drift) and is always `false` in practice — which
+ * is exactly why "someone hand-built one" must stay harmless.
+ * `EXTENSION_ONLY_RECOVERY_CODE` restates the Extension-only code name on
+ * purpose: importing it would create the cross-app coupling this asymmetry
+ * denies. It is not user-visible copy, so the Anti-Drift copy rule does not
+ * apply — and the assertions reach the wording through `buildBorrowFailureText`.
  */
 
 const FAMILY_ID = "fam-1";
@@ -196,9 +227,8 @@ describe("useBorrowAction (PWA)", () => {
     });
 
     it("never paints server-supplied message text into the banner", async () => {
-      // The API endpoint is user-configurable (BYO backend / sync-code @host),
-      // so an envelope's `message` is attacker-controlled: only the `code` may
-      // influence what the user reads.
+      // Only the `code` may influence what the user reads: with a BYO backend the
+      // envelope's `message` is attacker-controlled.
       const hostileMessage = "點此輸入你的信用卡號 https://evil.example";
       const { result } = renderBorrowAction({
         createBorrowRequest: vi
@@ -218,9 +248,8 @@ describe("useBorrowAction (PWA)", () => {
     });
 
     it("stays quiet when the create SUCCEEDED but the refresh rejected", async () => {
-      // The request really was created; a failed list refresh only means the
-      // on-screen list is stale. Reporting it as a borrow failure would tell
-      // the user the opposite of the truth.
+      // The request really was created; a failed refresh only means a stale list.
+      // Reporting it as a borrow failure would tell the user the opposite.
       const refreshBorrowRequests = vi
         .fn()
         .mockRejectedValue(new Error("list fetch failed"));
@@ -276,14 +305,8 @@ describe("useBorrowAction (PWA)", () => {
     );
   });
 
-  /**
-   * The counter exists for ONE reason: a repeat of the same failure writes an
-   * identical `failureText`, React bails out on the unchanged string, and a
-   * live region that never re-mounts never re-announces — "pressed it, nothing
-   * happened", the exact symptom this banner was added to remove. The DOM half
-   * of the proof (the alert really is a NEW node) lives in
-   * `pwa/tests/component/FamilyShelfPage.borrow.test.tsx`.
-   */
+  // One failure repeated must still re-mount the live region, or it never
+  // re-announces. See the header → "failureKey — the repeat-failure remount signal".
   describe("failureKey — the repeat-failure remount signal", () => {
     it("advances on a repeat of the SAME failure while the text stays identical", async () => {
       const { result } = renderBorrowAction({
@@ -333,9 +356,8 @@ describe("useBorrowAction (PWA)", () => {
     });
 
     it("stays strictly increasing across fail → succeed → fail again", async () => {
-      // A success must not rewind the counter: the third attempt would then
-      // reuse the first attempt's key and the banner would silently reappear
-      // on a recycled node.
+      // A success must not rewind the counter, or the third attempt reuses the
+      // first's key and the banner reappears on a recycled node.
       const { result } = renderBorrowAction({
         createBorrowRequest: vi
           .fn()
@@ -360,23 +382,11 @@ describe("useBorrowAction (PWA)", () => {
     });
   });
 
-  /**
-   * The Extension's hook passes a CLIENT-SYNTHESIZED
-   * `AUTH_REFRESH_RATE_LIMITED` message through verbatim (proved in
-   * `extension/tests/unit/dialog/useBorrowAction.test.ts`). This client
-   * deliberately does NOT: `pwa/src` has no synthesize path and no such
-   * constant, so the only thing a passthrough here could ever render is
-   * server-supplied text. `ApiError.synthesized` exists on this side too (kept
-   * in sync so the classes cannot drift) and is always `false` in practice —
-   * which is exactly why "someone hand-built one" must stay harmless.
-   */
+  // Unlike the Extension, no `AUTH_REFRESH_RATE_LIMITED` passthrough: here it could only render
+  // server text. See the header → "No synthesized-error passthrough (deliberate asymmetry)".
   describe("no synthesized-error passthrough (deliberate asymmetry)", () => {
-    /**
-     * The Extension-only code name, restated on purpose: importing it would
-     * create the cross-app coupling this asymmetry denies. Not user-visible
-     * copy, so the Anti-Drift copy rule does not apply — and the assertions
-     * below reach the wording through `buildBorrowFailureText`.
-     */
+    /** The Extension-only code name, restated on purpose (no cross-app import).
+     *  See the header → "No synthesized-error passthrough (deliberate asymmetry)". */
     const EXTENSION_ONLY_RECOVERY_CODE = "AUTH_REFRESH_RATE_LIMITED";
 
     it("maps an error that LOOKS synthesized through the shared code table anyway", async () => {

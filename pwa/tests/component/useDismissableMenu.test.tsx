@@ -11,11 +11,8 @@ interface HarnessProps {
   returnFocusOnEscape?: boolean;
 }
 
-/**
- * Drives the hook with real DOM refs. The menu is rendered only while open,
- * like every PWA consumer; the "outside" node is a sibling scroll container
- * that lives outside both the trigger and the menu subtree.
- */
+/** Drives the hook with real DOM refs. The menu renders only while open, like every PWA consumer; the
+ *  "outside" node is a sibling scroll container outside both the trigger and the menu subtree. */
 function Harness({
   isOpen,
   onClose,
@@ -302,9 +299,8 @@ describe("useDismissableMenu", () => {
     });
   });
 
-  // Focus starts on an option inside the menu (where a keyboard user is while
-  // the menu is open). onClose is a mock, so the menu stays mounted and a
-  // focus that was NOT moved remains observable on that option.
+  // Focus starts on an option inside the menu (where a keyboard user is). onClose is a mock, so the
+  // menu stays mounted and focus that was NOT moved remains observable on that option.
   describe("returnFocusOnEscape", () => {
     function focusMenuItem(): HTMLElement {
       const item = screen.getByTestId("menu-item");
@@ -342,9 +338,8 @@ describe("useDismissableMenu", () => {
       expect(screen.getByTestId("trigger")).not.toHaveFocus();
     });
 
-    // Escape reclaims focus the menu owned (an option inside it) or focus that
-    // already fell to the document (the focused option unmounted, or nothing
-    // was focused). Each target is where a real keydown lands in that state.
+    // Escape reclaims focus the menu owned (an option) or focus that already fell to the document (the
+    // option unmounted, or nothing was focused); each target is where a real keydown lands then.
     it.each<{ name: string; target: () => Element; focusFirst: boolean }>([
       {
         name: "an option inside the menu",
@@ -376,9 +371,8 @@ describe("useDismissableMenu", () => {
       },
     );
 
-    // A control the user moved to while the menu stayed open (e.g. Shift+Tab
-    // back to a search box) keeps focus: Escape still closes the menu but must
-    // not pull focus away to the trigger.
+    // A control the user moved to while the menu stayed open (e.g. Shift+Tab back to a search box)
+    // keeps focus: Escape still closes the menu but must not pull focus to the trigger.
     it("closes on an Escape fired at an outside control but leaves focus on that control", () => {
       const onClose = vi.fn();
       render(<Harness isOpen onClose={onClose} />);

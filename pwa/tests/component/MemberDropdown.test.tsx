@@ -354,9 +354,8 @@ describe("MemberDropdown", () => {
     });
   });
 
-  // The aria-label replaces the button text for assistive tech, so it must
-  // announce the same label and count the trigger shows. Literal strings pin the
-  // production copy (memberFilterAccessibleName in shared/src/familyShelf/).
+  // The aria-label replaces the button text for assistive tech, so it announces the trigger's label and
+  // count. Literals pin production copy (memberFilterAccessibleName in shared/src/familyShelf/).
   describe("trigger accessible name", () => {
     it("announces the default selection's label and count, not the bare prefix", () => {
       renderDropdown();
