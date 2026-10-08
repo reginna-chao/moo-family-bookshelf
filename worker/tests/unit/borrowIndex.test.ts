@@ -7,9 +7,100 @@
  * module directly; the HTTP-level consequences live in
  * tests/integration/borrowIndexMigration.test.ts and the budget suites.
  *
- * `BORROW_HISTORY_KEEP` is imported, never spelled as `20`: the cap is a
- * product decision that may move, and a hard-coded 20 here would turn a
- * deliberate change into a test failure that says nothing.
+ * `BORROW_HISTORY_KEEP` is imported, never spelled as a literal (today 50, in
+ * `shared/src/borrow/history.ts`): the cap is a product decision that may move,
+ * and a hard-coded number here would turn a deliberate change into a test
+ * failure that says nothing.
+ *
+ * Fixtures:
+ *  - `MALFORMED_FAMILY_IDS` are values a corrupted `borrow:{requestId}` could
+ *    carry that are non-empty strings yet not well-formed familyIds. The second
+ *    one (`../x`) is the reason the check is a FORMAT check and not a
+ *    truthiness check: it is what a key-shaping value looks like. Kept honest
+ *    by the `isValidFamilyId` assertion in the `readBorrowPointer` block rather
+ *    than by this comment.
+ *  - `BORROWER_A` / `BORROWER_B` are two borrowers in ONE family. The history
+ *    cap is per `borrowerId`, so every case that claims "A's overflow does not
+ *    touch B" needs both, and the family total in those cases deliberately
+ *    exceeds `BORROW_HISTORY_KEEP` — a family-wide cap would evict there and
+ *    the test would go red.
+ *  - `makeRecord` builds one record whose timestamps INCREASE with `index`, so
+ *    "newest" is always the highest index and the recency ordering under test
+ *    is readable at the call site. Both stamps are ISO-8601 UTC, matching what
+ *    production writes.
+ *  - `makeRecordsFor` builds `count` records of one status for ONE borrower,
+ *    oldest first. `from` also seeds the requestId and the timestamps, so two
+ *    borrowers must be given disjoint ranges or their records would collide on
+ *    both.
+ *
+ * readBorrowPointer: a non-empty string is NOT enough. The value read is
+ * interpolated straight into the `borrows:family:{familyId}` key that PATCH
+ * then reads AND rewrites, so a corrupted pointer must not be able to aim that
+ * read-modify-write at an arbitrary key. The fixtures are derived, not asserted
+ * from memory: FAMILY_ID is the guaranteed-accepted companion and
+ * MALFORMED_FAMILY_IDS the guaranteed-rejected examples, so if the format rule
+ * ever widens to admit one of them the suite fails there rather than leaving
+ * the other cases passing vacuously. On a rejected value only the pointer is
+ * touched and nothing is written: the value never reaches a key. The positive
+ * half of that assertion (the pointer key IS read) stops the negative half
+ * from passing because no KV call happened at all.
+ *
+ * trimBorrowIndex:
+ *  - Only the three TERMINAL statuses may ever be evicted; PENDING / LENT stay
+ *    at any count, and an unrecognised status value counts as non-terminal
+ *    (fail-safe: an unknown state is not provably finished, so it is not
+ *    silently discarded).
+ *  - The cap is PER borrowerId, not per family. A family-wide cap would let the
+ *    most active member's finished borrows evict everyone else's history — one
+ *    member silently destroying another's records on a shared value. Every
+ *    per-borrower case therefore holds a family total ABOVE BORROW_HISTORY_KEEP
+ *    while each borrower's own group stays at or below it, which is exactly
+ *    where the two rules disagree.
+ *
+ * writeBorrowIndex:
+ *  - Write order is load-bearing: the index is the truth, so it must land
+ *    first. A pointer delete that runs first and is then followed by a failed
+ *    index put would leave an index entry whose PATCH can never resolve its
+ *    family.
+ *  - FAIL-OPEN cleanup. The index put has already landed by the time the
+ *    evicted pointers are deleted, so letting a rejected delete propagate would
+ *    turn a persisted, successful write into a 500 and tell the caller their
+ *    borrow failed when it did not. The cost of swallowing it is one orphan
+ *    `borrow:{id}` key whose record is out of the index either way.
+ *
+ * settleDepartingBorrower: two steps in one call — CANCEL every PENDING request
+ * the departing member is either side of, then PURGE from the index every
+ * TERMINAL record they BORROWED — the just-cancelled ones included — and delete
+ * those pointers. The purge is security finding F-1's fix: the history cap is
+ * keyed on `borrowerId` and a borrowerId is free to mint, so a leaver's
+ * finished records would otherwise sit in the shared index under an id that
+ * never writes again and can never be trimmed. The line it must NOT cross is
+ * the OWNER side: those records belong to the member who stays, and purging by
+ * `ownerId` would hand a leaver a lever to delete someone else's history on
+ * the way out.
+ *  - By status, for the leaver's OWN borrow: PENDING is cancelled and then
+ *    purged in the same pass; the other terminal states were already finished;
+ *    LENT is the one active state that survives, because the book may still
+ *    physically be out on loan and the owner must be able to close it.
+ *  - Write order matches the module's standing rule: the index lands first.
+ *  - When nothing involves the leaver, an un-migrated (legacy) family must not
+ *    be rewritten for no reason — a write per departure would migrate families
+ *    that had no borrow activity at all. Its companion flips who borrowed, so
+ *    the same call has work to do and "legacy stays legacy" is about the
+ *    fixture rather than about a function that never writes.
+ *  - FAIL-OPEN, same rule as the trim's evictions: a rejected pointer delete
+ *    after the index write would turn a persisted, successful settlement into a
+ *    500 — and, on the member-removal route, refuse a removal that in fact
+ *    happened.
+ *
+ * deleteBorrowIndex: the dissolve path (sole-owner leave, sole-member account
+ * deletion). The family key is going away, so the index would otherwise become
+ * an orphan no write path ever visits again. Pointer deletes come FIRST here —
+ * the inverse of every other write in the module — because the "never leave an
+ * index entry without its pointer" rule protects readers of a LIVE index, and
+ * this call is removing the index outright. A legacy index ALREADY is the id
+ * list, so it must not spend a KV read per record to rediscover ids it is
+ * holding — the reason it deliberately does not go through `readBorrowIndex`.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createMockKV } from "../helpers/mockKv";
@@ -37,23 +128,10 @@ const FAMILY_ID = "abcd-1234";
 const OTHER_FAMILY_ID = "wxyz-9876";
 const BASE_MS = Date.parse("2026-03-01T12:00:00.000Z");
 
-/**
- * Values a corrupted `borrow:{requestId}` could carry that are non-empty
- * strings yet not well-formed familyIds. The second one is the reason the
- * check is a FORMAT check and not a truthiness check: it is what a key-shaping
- * value looks like.
- *
- * Kept honest by the `isValidFamilyId` assertion in the `readBorrowPointer`
- * block below rather than by this comment.
- */
+// Non-empty, yet not well-formed familyIds a corrupted pointer could carry. See the header → "Fixtures".
 const MALFORMED_FAMILY_IDS = ["not-a-family", "../x"];
 
-/**
- * Two borrowers in ONE family. The history cap is per `borrowerId`, so every
- * case that claims "A's overflow does not touch B" needs both, and the family
- * total in those cases deliberately exceeds `BORROW_HISTORY_KEEP` — a
- * family-wide cap would evict there and the test would go red.
- */
+// Two borrowers in ONE family — the history cap is per `borrowerId`. See the header → "Fixtures".
 const BORROWER_A = USER1;
 const BORROWER_B = USER3;
 
@@ -64,11 +142,8 @@ function requestIdAt(index: number): string {
   return `aaaaaaaa-bbbb-4ccc-8ddd-${String(index).padStart(12, "0")}`;
 }
 
-/**
- * One record whose timestamps INCREASE with `index`, so "newest" is always the
- * highest index and the recency ordering under test is readable at the call
- * site. Both stamps are ISO-8601 UTC, matching what production writes.
- */
+// One record whose ISO-8601 UTC timestamps INCREASE with `index` (newest = highest index).
+// See the header → "Fixtures".
 function makeRecord(
   index: number,
   overrides: Partial<BorrowRequest> = {},
@@ -102,12 +177,8 @@ function makeRecords(
   );
 }
 
-/**
- * `count` records of one status for ONE borrower, oldest first.
- *
- * `from` also seeds the requestId and the timestamps, so two borrowers must be
- * given disjoint ranges or their records would collide on both.
- */
+// `count` records of one status for ONE borrower, oldest first; give two borrowers disjoint
+// `from` ranges or their requestIds and timestamps collide.
 function makeRecordsFor(
   borrowerId: string,
   count: number,
@@ -153,9 +224,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// isLegacyBorrowIndex
-// ===========================================================================
+// --- isLegacyBorrowIndex ---
 
 describe("isLegacyBorrowIndex", () => {
   it.each([
@@ -180,9 +249,7 @@ describe("isLegacyBorrowIndex", () => {
   });
 });
 
-// ===========================================================================
-// readBorrowIndex
-// ===========================================================================
+// --- readBorrowIndex ---
 
 describe("readBorrowIndex", () => {
   it("returns an empty non-legacy read when the index key is absent", async () => {
@@ -277,9 +344,7 @@ describe("readBorrowIndex", () => {
   });
 });
 
-// ===========================================================================
-// readBorrowPointer
-// ===========================================================================
+// --- readBorrowPointer ---
 
 describe("readBorrowPointer", () => {
   const REQUEST_ID = requestIdAt(0);
@@ -317,14 +382,10 @@ describe("readBorrowPointer", () => {
     expect(await readBorrowPointer(kv, REQUEST_ID)).toBeNull();
   });
 
-  // A non-empty string is NOT enough. The value read here is interpolated
-  // straight into the `borrows:family:{familyId}` key that PATCH then reads AND
-  // rewrites, so a corrupted pointer must not be able to aim that
-  // read-modify-write at an arbitrary key.
+  // A non-empty string is NOT enough: the value becomes the key PATCH reads AND rewrites.
+  // See the header → "readBorrowPointer".
   it("uses the production familyId format rule, so these fixtures cannot go stale", () => {
-    // Derived, not asserted from memory: FAMILY_ID is the guaranteed-accepted
-    // companion and MALFORMED_FAMILY_IDS the guaranteed-rejected examples. If
-    // the format rule ever widens to admit one of them, this fails here rather
+    // Derived, not asserted from memory: if the format rule widens, this fails here rather
     // than leaving the cases below passing vacuously.
     expect(isValidFamilyId(FAMILY_ID)).toBe(true);
     for (const familyId of MALFORMED_FAMILY_IDS) {
@@ -350,24 +411,18 @@ describe("readBorrowPointer", () => {
     const ops = watchKvOps(kv);
     expect(await readBorrowPointer(kv, REQUEST_ID)).toBeNull();
 
-    // Only the pointer is touched, and nothing is written: the rejected value
-    // never reaches a key. The positive half of the assertion (the pointer key
-    // IS read) stops the negative half from passing because no KV call
-    // happened at all.
+    // Only the pointer is read and nothing is written; the positive half (the pointer IS read)
+    // keeps the negative half from passing on zero KV calls.
     expect(ops.getKeys()).toEqual([kvKeys.borrow(REQUEST_ID)]);
     expect(ops.writeTrail()).toEqual([]);
   });
 });
 
-// ===========================================================================
-// trimBorrowIndex
-// ===========================================================================
+// --- trimBorrowIndex ---
 
 describe("trimBorrowIndex", () => {
-  // One record per status, repeated past the cap. Only the three TERMINAL
-  // statuses may ever be evicted; PENDING / LENT stay at any count, and an
-  // unrecognised status value counts as non-terminal (fail-safe: an unknown
-  // state is not provably finished, so it is not silently discarded).
+  // One record per status, past the cap: only TERMINAL statuses evict (unknown = non-terminal).
+  // See the header → "trimBorrowIndex".
   it.each([
     { label: "PENDING", status: BorrowStatus.PENDING, droppable: false },
     { label: "LENT", status: BorrowStatus.LENT, droppable: false },
@@ -450,20 +505,12 @@ describe("trimBorrowIndex", () => {
     expect(ids(kept)).toEqual(expect.arrayContaining(ids(active)));
   });
 
-  // -------------------------------------------------------------------------
-  // The cap is PER borrowerId, not per family
-  // -------------------------------------------------------------------------
-  //
-  // A family-wide cap would let the most active member's finished borrows
-  // evict everyone else's history — one member silently destroying another's
-  // records on a shared value. Every case below therefore holds a family total
-  // ABOVE BORROW_HISTORY_KEEP while each borrower's own group stays at or
-  // below it, which is exactly where the two rules disagree.
+  // --- The cap is PER borrowerId, not per family ---
+  // See the header → "trimBorrowIndex".
 
   it("evicts the overflowing borrower's oldest record and leaves the other borrower alone", () => {
-    // A is one over its own cap; B holds 5. Family total is
-    // BORROW_HISTORY_KEEP + 6 — well over a family-wide cap, which would evict
-    // 6 records here (and reach into B's).
+    // A is one over its own cap; B holds 5. Family total BORROW_HISTORY_KEEP + 6 — a family-wide
+    // cap would evict 6 records here (and reach into B's).
     const aRecords = makeRecordsFor(
       BORROWER_A,
       BORROW_HISTORY_KEEP + 1,
@@ -575,9 +622,7 @@ describe("trimBorrowIndex", () => {
   });
 });
 
-// ===========================================================================
-// writeBorrowIndex
-// ===========================================================================
+// --- writeBorrowIndex ---
 
 describe("writeBorrowIndex", () => {
   it("stores the trimmed index and reports nothing dropped under the cap", async () => {
@@ -611,9 +656,8 @@ describe("writeBorrowIndex", () => {
     const { dropped } = await writeBorrowIndex(kv, FAMILY_ID, requests);
 
     expect(ids(dropped)).toEqual([requests[0].requestId]);
-    // Order is load-bearing: the index is the truth, so it must land first. A
-    // delete that runs first and is then followed by a failed index put would
-    // leave an index entry whose PATCH can never resolve its family.
+    // Order is load-bearing: the index is the truth, so it lands first.
+    // See the header → "writeBorrowIndex".
     expect(ops.writeTrail()).toEqual([
       `put ${kvKeys.borrowsByFamily(FAMILY_ID)}`,
       `delete ${kvKeys.borrow(requests[0].requestId)}`,
@@ -642,11 +686,8 @@ describe("writeBorrowIndex", () => {
     expect(ops.deleteKeys()).toHaveLength(5);
   });
 
-  // FAIL-OPEN cleanup. The index put has already landed by the time the
-  // evicted pointers are deleted, so letting a rejected delete propagate would
-  // turn a persisted, successful write into a 500 and tell the caller their
-  // borrow failed when it did not. The cost of swallowing it is one orphan
-  // `borrow:{id}` key whose record is out of the index either way.
+  // FAIL-OPEN cleanup: the index put has already landed, so a rejected delete must not 500.
+  // See the header → "writeBorrowIndex".
   it("still resolves when an evicted pointer's delete rejects, and logs it", async () => {
     const requests = makeRecords(
       BORROW_HISTORY_KEEP + 2,
@@ -725,20 +766,8 @@ describe("writeBorrowIndex", () => {
   });
 });
 
-// ===========================================================================
-// settleDepartingBorrower
-// ===========================================================================
-//
-// Two steps in one call: CANCEL every PENDING request the departing member is
-// either side of, then PURGE from the index every TERMINAL record they
-// BORROWED — the just-cancelled ones included — and delete those pointers.
-//
-// The purge is security finding F-1's fix: the history cap is keyed on
-// `borrowerId` and a borrowerId is free to mint, so a leaver's finished records
-// would otherwise sit in the shared index under an id that never writes again
-// and can never be trimmed. The line it must NOT cross is the OWNER side: those
-// records belong to the member who stays, and purging by `ownerId` would hand a
-// leaver a lever to delete someone else's history on the way out.
+// --- settleDepartingBorrower (cancel PENDING, then purge the leaver's TERMINAL borrows) ---
+// See the header → "settleDepartingBorrower".
 
 /** The departing member — `makeRecord` already borrows as USER1 from USER2. */
 const LEAVER = USER1;
@@ -759,10 +788,8 @@ describe("settleDepartingBorrower", () => {
     expect(ops.writeTrail()).toEqual([]);
   });
 
-  // The leaver's OWN borrow, one record, by status. PENDING is cancelled and
-  // then purged in the same pass; the other terminal states were already
-  // finished; LENT is the one active state that survives, because the book may
-  // still physically be out on loan and the owner must be able to close it.
+  // The leaver's OWN borrow by status: PENDING is cancelled then purged; LENT survives (the
+  // book may still be out). See the header → "settleDepartingBorrower".
   it.each([
     {
       label: "PENDING",
@@ -877,9 +904,8 @@ describe("settleDepartingBorrower", () => {
       evicted: 2,
     });
 
-    // Order is load-bearing and matches the module's standing rule: the index
-    // is the truth, so it lands first. Deleting first and then failing to write
-    // would leave index entries whose PATCH can never resolve their family.
+    // Order is load-bearing, the module's standing rule: the index lands first.
+    // See the header → "writeBorrowIndex".
     expect(ops.writeTrail()).toEqual([
       `put ${kvKeys.borrowsByFamily(FAMILY_ID)}`,
       ...ids(purged).map((id) => `delete ${kvKeys.borrow(id)}`),
@@ -891,9 +917,8 @@ describe("settleDepartingBorrower", () => {
   });
 
   it("leaves a legacy index legacy when it changes nothing", async () => {
-    // Nothing here involves the leaver, so an un-migrated family must not be
-    // rewritten for no reason — a write per departure would migrate families
-    // that had no borrow activity at all.
+    // Nothing involves the leaver, so an un-migrated family is not rewritten (a write per
+    // departure would migrate families with no borrow activity at all).
     const records = [
       makeRecord(0, { borrowerId: STAYER, ownerId: USER2 }),
       makeRecord(1, {
@@ -915,9 +940,8 @@ describe("settleDepartingBorrower", () => {
   });
 
   it("migrates a legacy index on the departure that does change something", async () => {
-    // Companion to the case above: flip who borrowed and the same call now has
-    // work to do, so "legacy stays legacy" is about the fixture rather than
-    // about a function that never writes.
+    // Companion: flip who borrowed and the call has work to do, so "legacy stays legacy" is about
+    // the fixture rather than a function that never writes.
     const purged = makeRecord(0, { status: BorrowStatus.RETURNED });
     const kept = makeRecord(1, {
       borrowerId: STAYER,
@@ -937,10 +961,8 @@ describe("settleDepartingBorrower", () => {
     expect(await kv.get(kvKeys.borrow(purged.requestId))).toBeNull();
   });
 
-  // FAIL-OPEN, same rule as the trim's evictions: the index write has already
-  // landed, so letting a rejected pointer delete propagate would turn a
-  // persisted, successful settlement into a 500 — and, on the member-removal
-  // route, refuse a removal that in fact happened.
+  // FAIL-OPEN, same rule as the trim's evictions (no 500 after the index write landed).
+  // See the header → "settleDepartingBorrower".
   it("still resolves when an evicted pointer's delete rejects, and logs it", async () => {
     const purged = [
       makeRecord(0, { status: BorrowStatus.RETURNED }),
@@ -974,16 +996,8 @@ describe("settleDepartingBorrower", () => {
   });
 });
 
-// ===========================================================================
-// deleteBorrowIndex
-// ===========================================================================
-//
-// The dissolve path (sole-owner leave, sole-member account deletion): the
-// family key is going away, so the index would otherwise become an orphan no
-// write path ever visits again. Pointer deletes come FIRST here — the inverse
-// of every other write in the module — because the "never leave an index entry
-// without its pointer" rule protects readers of a LIVE index, and this call is
-// removing the index outright.
+// --- deleteBorrowIndex (the dissolve path; pointer deletes come FIRST here) ---
+// See the header → "deleteBorrowIndex".
 
 describe("deleteBorrowIndex", () => {
   it("does nothing when the family has no index", async () => {
@@ -1018,9 +1032,8 @@ describe("deleteBorrowIndex", () => {
   });
 
   it("deletes a LEGACY string[] index's pointers without fanning out", async () => {
-    // A legacy index ALREADY is the id list, so this must not spend a KV read
-    // per record to rediscover ids it is holding — the reason it deliberately
-    // does not go through `readBorrowIndex`.
+    // A legacy index ALREADY is the id list: no KV read per record to rediscover ids it holds —
+    // the reason it deliberately does not go through `readBorrowIndex`.
     const records = makeRecords(3, BorrowStatus.RETURNED);
     await seedLegacyIndex(records);
 

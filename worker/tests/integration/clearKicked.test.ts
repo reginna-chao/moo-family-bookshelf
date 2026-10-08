@@ -26,6 +26,75 @@
  * Expiry is modelled by DELETING the key: `createMockKV` keeps an accepted put
  * readable forever (see the mock's own doc comment), so "the tombstone expired"
  * and "the tombstone was already cleared" are the same observable state.
+ *
+ * Copy constants: `NOT_OWNER_MESSAGE` is the production 繁中 copy of the
+ * un-kick ownership refusal (`routes/family.ts`), asserted through
+ * `app.request`, so it hits the real throw site rather than a test-local
+ * duplicate (test.md, "User-visible copy needs a production-anchored
+ * assertion"). It is deliberately distinct from the remove-member NOT_OWNER
+ * copy ("只有管理者可以移除其他成員") — same code, different action.
+ *
+ * Helpers run the real app on a mock KV with DEV_MODE, so the limiters never
+ * interfere with the behaviour under test; the ceiling gets its own suite.
+ *
+ * Invariant 4: removal is immediate and only reversible by an explicit rejoin.
+ * Un-kick lifts the ban, nothing more — the family record is byte-identical,
+ * the membership and auth keys stay torn down.
+ *
+ * Owner-only fixtures: `twoFamiliesBanningTheSameUser` builds two unrelated
+ * households that both removed the SAME userId. Family A keeps its vacated
+ * seat FREE on purpose: a family created through the API holds two members,
+ * and the last case has to prove that lifting A's ban really re-admits the
+ * user — a full family would answer 409 FAMILY_FULL and prove nothing about
+ * the tombstone. B's refusal is asserted first: once KICKED rejoins A they
+ * hold a membership, so a later join of B would answer 409 ALREADY_IN_FAMILY
+ * and stop proving anything about B's tombstone. After an ownership transfer,
+ * authority is re-read from `record.ownerId` on every request, never carried
+ * by the token: the founder's token is still perfectly valid — it simply no
+ * longer belongs to an owner — and the ban they placed survives their loss of
+ * authority.
+ *
+ * Idempotent, read-free, and never an oracle: the handler deletes the key
+ * WITHOUT reading it first. That is what makes a retry after a failed call
+ * safe, and it is also what keeps the response from disclosing whether the
+ * target was ever kicked — a property worth pinning even though the caller is
+ * an owner who is entitled to know: it means no future change can turn this
+ * route into a membership probe. A repeat call on the same target sees the
+ * state an EXPIRED tombstone leaves behind (the mock never expires anything,
+ * so deleting is the expiry model). A `get` of the key would let the response
+ * depend on whether it existed — the oracle the idempotent contract rules out
+ * — and would cost a KV read the handler does not need.
+ *
+ * Shared per-userId write ceiling ("family-write", 30/hr): un-kick joins the
+ * family-domain write handlers on ONE counter, charged to the AUTHENTICATED
+ * CALLER and never to the `:uid` path param — a counter keyed on someone
+ * else's id would be a victim-facing DoS lever (charging `:uid` would let an
+ * owner drain the budget of an account that is not even in the family — the
+ * defect that got join's per-userId counter removed). The charge sits after
+ * every zero-I/O guard (family-id format, 401, uid format) and before the
+ * first KV read, so the ownership 403 and the 404 — both of which need that
+ * read — land AFTER it and do cost a slot. Everything there runs WITHOUT
+ * DEV_MODE, which short-circuits the limiter; setup that must not spend the
+ * budget goes through `devRequest`.
+ *
+ * Ceiling fixtures: `PINNED_NOW` is exactly mid-window, so the counter cannot
+ * roll over mid-test and the back-off hint is deterministic; it is derived
+ * from the production window length rather than hard-coded, so a changed
+ * window keeps the pin exact. `EXTRA` is a second removable member, so the
+ * shared-window case has a real target — deliberately its OWN id rather than
+ * an alias of `STRANGER`: that constant is documented as never joined and
+ * never removed, and the idempotency suite relies on exactly that; seeding the
+ * same id as a member would make one constant carry two mutually exclusive
+ * roles. `prodRequest` has no DEV_MODE, so both limiters run — and it carries
+ * the Rate Limiting bindings a production deploy carries, so the per-IP tier
+ * is counted by the platform rather than falling back to its KV counter; the
+ * ceiling under test is hourly, which has no binding at all and stays on KV by
+ * design, so the bindings only keep the per-IP layer out of the KV assertions.
+ * `seedFamilyWithBannedUser` writes the family straight to KV rather than
+ * through create/join: those two routes are deliberately OFF this ceiling, so
+ * driving setup through them would blur what the assertions prove. It is typed
+ * as the production `FamilyRecord` and keyed through `kvKeys`, so a schema
+ * change breaks compilation instead of seeding a dead key.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -63,13 +132,8 @@ const OTHER_OWNER = USER4;
 /** A userId with no relation to anything — never joined, never removed. */
 const STRANGER = USER5;
 
-/**
- * The production 繁中 copy of the un-kick ownership refusal (`routes/family.ts`).
- * Asserted through `app.request`, so it hits the real throw site rather than a
- * test-local duplicate (test.md, "User-visible copy needs a production-anchored
- * assertion"). Deliberately distinct from the remove-member NOT_OWNER copy
- * ("只有管理者可以移除其他成員") — same code, different action.
- */
+/** Production copy of the un-kick ownership refusal, distinct from remove-member's.
+ *  See the header → "Copy constants". */
 const NOT_OWNER_MESSAGE = "只有管理者可以解除移除限制";
 
 /** The production 繁中 copy of the join-side tombstone refusal. */
@@ -78,10 +142,7 @@ const MEMBER_REMOVED_MESSAGE = "你已被管理者移出此家庭，暫時無法
 /** The exact success envelope: `{ cleared: 1 }` with the BoolFlag convention. */
 const CLEARED_BODY = JSON.stringify({ data: { cleared: BoolFlag.TRUE } });
 
-// ---------------------------------------------------------------------------
-// Helpers — real app, mock KV, DEV_MODE so the limiters never interfere with
-// the behaviour under test (the ceiling gets its own suite at the bottom).
-// ---------------------------------------------------------------------------
+// ----- Helpers — real app, mock KV, DEV_MODE (see the header) -----
 
 function request(
   method: string,
@@ -172,9 +233,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// Lifting the ban
-// ===========================================================================
+// ===== Lifting the ban =====
 
 describe("DELETE /api/family/:id/kicked/:uid — lifting the removal ban", () => {
   it("should answer 200 { cleared: 1 } and drop the tombstone key", async () => {
@@ -214,9 +273,8 @@ describe("DELETE /api/family/:id/kicked/:uid — lifting the removal ban", () =>
 
     expect((await clearKicked(familyId, KICKED, ownerToken)).status).toBe(200);
 
-    // security-ux Invariant 4: removal is immediate and only reversible by an
-    // explicit rejoin. Un-kick lifts the ban, nothing more — the family record
-    // is byte-identical, the membership and auth keys stay torn down.
+    // Inv-4: un-kick lifts the ban, nothing more — record byte-identical, keys torn
+    // down. See the header → "Invariant 4".
     expect(await kv.get(kvKeys.family(familyId))).toBe(recordBefore);
     expect(await memberIds(familyId, ownerToken)).toEqual([OWNER]);
     expect(await kv.get(kvKeys.member(KICKED))).toBeNull();
@@ -243,19 +301,11 @@ describe("DELETE /api/family/:id/kicked/:uid — lifting the removal ban", () =>
   });
 });
 
-// ===========================================================================
-// Owner-only, and scoped to the owner's OWN family
-// ===========================================================================
+// ===== Owner-only, and scoped to the owner's OWN family =====
 
 describe("DELETE /api/family/:id/kicked/:uid — owner-only", () => {
-  /**
-   * Two unrelated households that both removed the SAME userId.
-   *
-   * Family A keeps its vacated seat FREE on purpose: a family created through
-   * the API holds two members, and the last case has to prove that lifting A's
-   * ban really re-admits the user — a full family would answer 409 FAMILY_FULL
-   * and prove nothing about the tombstone.
-   */
+  /** Two unrelated households that both removed the SAME userId; A keeps a free
+   *  seat. See the header → "Owner-only fixtures". */
   async function twoFamiliesBanningTheSameUser() {
     const { familyId: familyA, ownerToken: tokenA } =
       await familyWithRemovedMember();
@@ -318,9 +368,8 @@ describe("DELETE /api/family/:id/kicked/:uid — owner-only", () => {
     expect(await readTombstone(familyA, KICKED)).toBeNull();
     expect(await readTombstone(familyB, KICKED)).not.toBeNull();
 
-    // Asserted in this order: once KICKED rejoins A they hold a membership, so
-    // a later join of B would answer 409 ALREADY_IN_FAMILY and stop proving
-    // anything about B's tombstone.
+    // B first: after rejoining A, a B join would answer 409 ALREADY_IN_FAMILY.
+    // See the header → "Owner-only fixtures".
     const stillBannedInB = await join(familyB, KICKED);
     expect(stillBannedInB.status).toBe(403);
     expect(((await stillBannedInB.json()) as Json).error.code).toBe(
@@ -345,10 +394,8 @@ describe("DELETE /api/family/:id/kicked/:uid — owner-only", () => {
     );
     expect(transfer.status).toBe(200);
 
-    // Authority is re-read from `record.ownerId` on every request, never carried
-    // by the token: the founder's token is still perfectly valid — it simply no
-    // longer belongs to an owner — and the ban they placed survives their loss
-    // of authority.
+    // Authority comes from `record.ownerId`, not the (still valid) token.
+    // See the header → "Owner-only fixtures".
     const refused = await clearKicked(familyId, KICKED, ownerToken);
     expect(refused.status).toBe(403);
     const refusedJson = (await refused.json()) as Json;
@@ -365,15 +412,8 @@ describe("DELETE /api/family/:id/kicked/:uid — owner-only", () => {
   });
 });
 
-// ===========================================================================
-// Idempotent, read-free, and never an oracle
-//
-// The handler deletes the key WITHOUT reading it first. That is what makes a
-// retry after a failed call safe, and it is also what keeps the response from
-// disclosing whether the target was ever kicked — a property worth pinning even
-// though the caller is an owner who is entitled to know: it means no future
-// change can turn this route into a membership probe.
-// ===========================================================================
+// ===== Idempotent, read-free, and never an oracle =====
+// See the header → "Idempotent, read-free, and never an oracle".
 
 describe("DELETE /api/family/:id/kicked/:uid — idempotent and read-free", () => {
   it("should answer identically whether the tombstone is live, already gone, or never existed", async () => {
@@ -381,9 +421,8 @@ describe("DELETE /api/family/:id/kicked/:uid — idempotent and read-free", () =
 
     // (1) a live tombstone
     const live = await clearKicked(familyId, KICKED, ownerToken);
-    // (2) the same target again — the key is gone now, which is exactly the
-    //     state an EXPIRED tombstone leaves behind (the mock never expires
-    //     anything, so deleting is the expiry model).
+    // (2) the same target again — the key is gone, the state an EXPIRED tombstone
+    //     leaves (deleting is the mock's expiry model).
     const alreadyGone = await clearKicked(familyId, KICKED, ownerToken);
     // (3) a userId this family never removed at all
     const neverKicked = await clearKicked(familyId, STRANGER, ownerToken);
@@ -419,9 +458,8 @@ describe("DELETE /api/family/:id/kicked/:uid — idempotent and read-free", () =
 
     expect((await clearKicked(familyId, KICKED, ownerToken)).status).toBe(200);
 
-    // A `get` here would let the response depend on whether the key existed —
-    // the oracle the idempotent contract rules out — and would cost a KV read
-    // the handler does not need.
+    // A `get` would make the response an oracle and cost a needless read.
+    // See the header → "Idempotent, read-free, and never an oracle".
     expect(ops.getKeys()).not.toContain(kickedKey);
     // The delete is the handler's ONLY mutation: no family-record write, no
     // membership write. Un-kick lifts the ban, it re-adds nobody.
@@ -447,9 +485,7 @@ describe("DELETE /api/family/:id/kicked/:uid — idempotent and read-free", () =
   });
 });
 
-// ===========================================================================
-// Guards that run before anything is deleted
-// ===========================================================================
+// ===== Guards that run before anything is deleted =====
 
 /** Fails `^[a-z0-9]{4}-[a-z0-9]{4}$`, which the handler checks first. */
 const MALFORMED_FAMILY_ID = "not-a-family-id";
@@ -524,29 +560,15 @@ describe("DELETE /api/family/:id/kicked/:uid — input and auth guards", () => {
   );
 });
 
-// ===========================================================================
-// Shared per-userId write ceiling ("family-write", 30/hr)
-//
-// Un-kick joins the family-domain write handlers on ONE counter, charged to the
-// AUTHENTICATED CALLER and never to the `:uid` path param — a counter keyed on
-// someone else's id would be a victim-facing DoS lever. The charge sits after
-// every zero-I/O guard (family-id format, 401, uid format) and before the first
-// KV read, so the ownership 403 and the 404 — both of which need that read —
-// land AFTER it and do cost a slot.
-//
-// Everything here runs WITHOUT DEV_MODE, which short-circuits the limiter;
-// setup that must not spend the budget goes through `devRequest`.
-// ===========================================================================
+// ===== Shared per-userId write ceiling ("family-write", 30/hr) =====
+// See the header → "Shared per-userId write ceiling".
 
 const { max: WRITE_MAX, windowSec: WRITE_WINDOW_SECONDS } = FAMILY_WRITE_LIMIT;
 
 const WRITE_WINDOW_MS = WRITE_WINDOW_SECONDS * 1000;
 
-/**
- * Exactly mid-window, so the counter cannot roll over mid-test and the back-off
- * hint is deterministic. Derived from the production window length rather than
- * hard-coded, so a changed window keeps the pin exact.
- */
+/** Exactly mid-window (no rollover, deterministic back-off), derived from the
+ *  production window. See the header → "Ceiling fixtures". */
 const PINNED_NOW =
   Math.floor(Date.parse("2026-01-01T00:00:00.000Z") / WRITE_WINDOW_MS) *
     WRITE_WINDOW_MS +
@@ -556,14 +578,8 @@ const PINNED_NOW =
 const EXPECTED_RETRY_AFTER = Math.ceil(WRITE_WINDOW_SECONDS / 2);
 
 const FAMILY_ID = "abcd-1234";
-/**
- * A second removable member, so the shared-window case has a real target.
- *
- * Deliberately its OWN id rather than an alias of `STRANGER`: that constant is
- * documented as never joined and never removed, and the idempotency suite above
- * relies on exactly that. Seeding the same id as a member here would make one
- * constant carry two mutually exclusive roles.
- */
+/** A second removable member — its OWN id, never an alias of `STRANGER`.
+ *  See the header → "Ceiling fixtures". */
 const EXTRA = OUTSIDER;
 
 const OWNER_TOKEN = tokenFor(OWNER);
@@ -586,13 +602,8 @@ async function buildRequest(
   return app.request(path, { method, headers }, env);
 }
 
-/**
- * Live request: no DEV_MODE, so both limiters run — and WITH the Rate Limiting
- * bindings a production deploy carries, so the per-IP tier is counted by the
- * platform rather than falling back to its KV counter. The ceiling under test
- * here is hourly, which has no binding at all and stays on KV by design; the
- * bindings only keep the per-IP layer out of the KV assertions below.
- */
+/** Live request: no DEV_MODE, production bindings injected (per-IP stays off KV).
+ *  See the header → "Ceiling fixtures". */
 function prodRequest(
   method: string,
   path: string,
@@ -627,13 +638,8 @@ async function seedTombstone(familyId: string, userId: string): Promise<void> {
   });
 }
 
-/**
- * The family the ceiling cases start from, written straight to KV rather than
- * through create/join: those two routes are deliberately OFF this ceiling, so
- * driving setup through them would blur what the assertions prove. Typed as the
- * production `FamilyRecord` and keyed through `kvKeys`, so a schema change
- * breaks compilation instead of seeding a dead key.
- */
+/** The ceiling cases' family, written straight to KV (create/join are off this
+ *  ceiling). See the header → "Ceiling fixtures". */
 async function seedFamilyWithBannedUser(): Promise<void> {
   const record: FamilyRecord = {
     familyId: FAMILY_ID,
@@ -719,9 +725,8 @@ describe("DELETE /api/family/:id/kicked/:uid — per-userId write ceiling", () =
       token: OWNER_TOKEN,
     });
 
-    // Charging `:uid` would let an owner drain the budget of an account that is
-    // not even in the family — the defect that got join's per-userId counter
-    // removed. Exactly one counter exists, and it is the caller's.
+    // Exactly one counter exists, and it is the caller's — never `:uid`'s.
+    // See the header → "Shared per-userId write ceiling".
     expect(await writesCharged(KICKED)).toBeNull();
     expect(await writeCounterKeys()).toEqual([await writeCounterKey(OWNER)]);
   });

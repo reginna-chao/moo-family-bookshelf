@@ -26,6 +26,22 @@
  * from `paramErrorFor`: these pairs are the API contract clients already match
  * on, and a test built from the production registry would pass by construction
  * if the registry were reworded.
+ *
+ * SENTINEL: a distinctive malformed value that fails every param pattern
+ * (uppercase letters and `_` fit none of them, not even the case-insensitive
+ * request-id one) and must never come back in a response body.
+ *
+ * `send`: one request against a fresh production-shaped env (no DEV_MODE, all
+ * four Rate Limiting bindings stubbed and recorded), with USER1's token seeded
+ * and the KV watcher installed AFTER seeding. `withToken: false` omits the
+ * Authorization header entirely.
+ *
+ * OpenAPI patterns: an OpenAPI `pattern` is a bare ECMA-262 source with no
+ * flags. zod-to-openapi serializes a zod regex via `RegExp#toString()` and
+ * strips only the slashes, so a FLAGGED RegExp leaks into the document as
+ * `…$/i` — a pattern no value can ever match. The documented pattern is then
+ * checked behaviourally rather than as a pinned literal: it must accept the
+ * kind's valid sample and reject the sentinel.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
@@ -46,9 +62,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// Contract copy (pre-#227 handler responses — never reword)
-// ===========================================================================
+// ===== Contract copy (pre-#227 handler responses — never reword) =====
 
 interface ErrorCopy {
   code: string;
@@ -84,15 +98,10 @@ const PARAM_CODES = [
   TOKEN_COPY,
 ].map((copy) => copy.code);
 
-// ===========================================================================
-// Param kinds and the route table
-// ===========================================================================
+// ===== Param kinds and the route table =====
 
-/**
- * Distinctive malformed value: fails every param pattern (uppercase letters
- * and `_` fit none of them, not even the case-insensitive request-id one) and
- * must never come back in a response body.
- */
+/** Malformed value failing every param pattern; never reflected in a response.
+ *  See the header → "SENTINEL". */
 const SENTINEL = "SENTINEL_9c4e_Reflect";
 
 type ParamKind = "family" | "user" | "shelf" | "request" | "token";
@@ -330,10 +339,8 @@ interface MalformedRow {
   expected: ErrorCopy;
 }
 
-/**
- * One row per former handler check: exactly ONE param malformed, the others
- * well-formed, so each row isolates the code of the param it names.
- */
+/** One row per former handler check: exactly ONE param malformed, the others
+ *  well-formed, so each row isolates the code of the param it names. */
 const MALFORMED_ROWS: MalformedRow[] = ROUTES.flatMap((route) =>
   route.params.map(({ name, kind }) => ({
     label: `${route.method} ${route.template} (bad {${name}})`,
@@ -347,9 +354,7 @@ const MULTI_PARAM_ROUTES = ROUTES.filter((route) => route.params.length > 1);
 const PROTECTED_ROWS = MALFORMED_ROWS.filter((row) => row.route.auth);
 const PUBLIC_ROWS = MALFORMED_ROWS.filter((row) => !row.route.auth);
 
-// ===========================================================================
-// Request plumbing
-// ===========================================================================
+// ===== Request plumbing =====
 
 let ipCounter = 0;
 
@@ -361,12 +366,8 @@ interface Sent {
   bindingCalls: ReturnType<typeof createRateLimitBindings>["calls"];
 }
 
-/**
- * Send one request against a fresh production-shaped env (no DEV_MODE, all
- * four Rate Limiting bindings stubbed and recorded), with USER1's token seeded
- * and the KV watcher installed AFTER seeding. `withToken: false` omits the
- * Authorization header entirely.
- */
+/** One request against a fresh production-shaped env, token seeded, watcher after
+ *  seeding. See the header → "`send`". */
 async function send(
   method: Method,
   path: string,
@@ -402,9 +403,7 @@ function perUserCharges(sent: Sent): string[] {
   return [...kvWrites, ...bindingKeys];
 }
 
-// ===========================================================================
-// Tests
-// ===========================================================================
+// ===== Tests =====
 
 describe("path-param validation — route table", () => {
   it("covers all 35 former handler checks across 28 routes", () => {
@@ -667,9 +666,7 @@ describe("near-miss values are rejected per param kind", () => {
   });
 });
 
-// ===========================================================================
-// OpenAPI document (#227's own failing check)
-// ===========================================================================
+// ===== OpenAPI document (#227's own failing check) =====
 
 async function fetchOpenApiDoc(): Promise<Json> {
   const res = await app.request(
@@ -726,14 +723,10 @@ describe("OpenAPI document describes every path-param format", () => {
         const param = pathParams.find((p) => p.name === name);
         const pattern: unknown = param?.schema?.pattern;
         expect(typeof pattern).toBe("string");
-        // An OpenAPI `pattern` is a bare ECMA-262 source with no flags.
-        // zod-to-openapi serializes a zod regex via `RegExp#toString()` and
-        // strips only the slashes, so a FLAGGED RegExp leaks into the document
-        // as `…$/i` — a pattern no value can ever match.
+        // No leaked regex flags (`…$/i` would match nothing).
+        // See the header → "OpenAPI patterns".
         expect(pattern).not.toMatch(/\/[dgimsuvy]*$/);
-        // Behavioural check of the documented pattern rather than a pinned
-        // literal: it must accept the kind's valid sample and reject the
-        // sentinel.
+        // Behavioural: accepts the kind's valid sample, rejects the sentinel.
         const re = new RegExp(pattern as string);
         expect(re.test(KINDS[kind].valid)).toBe(true);
         expect(re.test(SENTINEL)).toBe(false);

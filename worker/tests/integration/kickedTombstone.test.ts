@@ -20,6 +20,67 @@
  * TTLs are asserted via `getPutTtl`, never simulated: `createMockKV` keeps an
  * accepted put readable forever, so "the tombstone expired" is modelled by
  * deleting the key (see the mock's own doc comment).
+ *
+ * Copy constants: `MEMBER_REMOVED_MESSAGE` is the production 繁中 copy of the
+ * tombstone refusal and `MEMBER_NOT_FOUND_MESSAGE` that of the "target is not
+ * a member" refusal (both `routes/family.ts`). Every assertion on them runs
+ * through `app.request`, so it hits the real throw site — a copy change fails
+ * here instead of passing against a test-local duplicate (test.md,
+ * "User-visible copy needs a production-anchored assertion"). The not-a-member
+ * copy is pinned because the re-kick branch must leave that response
+ * completely untouched — the tombstone it writes on the way out is a side
+ * effect the caller must not be able to detect.
+ *
+ * `KICKED_KEY_PREFIX` (`"kicked:"`) is taken FROM the production key builder
+ * instead of typed out, so the "no tombstone anywhere" assertions cannot keep
+ * passing after a key rename. The placeholders are only markers to slice on.
+ *
+ * Helpers have the same shape as familyLifecycle.test.ts: real app, mock KV,
+ * DEV_MODE so the rate limiters never interfere with the behaviour under test.
+ *
+ * `failPutFor` swaps `kv` for a wrapper that throws on `put` for ONE key and
+ * calls straight through for everything else, so only the tombstone write
+ * fails — the same trick `verificationGate.test.ts` uses to observe KV without
+ * replacing it. It returns a `restore()` that puts the plain mock back. The
+ * retry case needs it (its SECOND attempt must be allowed to write), and
+ * `getPutTtl` needs it too: the TTL registry is keyed on the instance
+ * `createMockKV()` returned, never on this wrapper. Tests that only ever fail
+ * can ignore the return — `beforeEach` builds a fresh mock, so there is
+ * nothing to clean up.
+ *
+ * Ordering is a safety property, not a style choice (#213, Fix Cycle 3): the
+ * join reads `member:{uid}` BEFORE it checks the tombstone, so only a tombstone
+ * that lands ahead of the pointer delete guarantees that a join seeing the
+ * pointer gone is refused rather than healing it back. The accepted cost — a
+ * kick that fails after this write leaves a still-listed member banned — is
+ * pinned in familyPartialWrite.test.ts.
+ *
+ * Re-kick on MEMBER_NOT_FOUND: a member can be gone from the family record
+ * with NO tombstone in place — the removal's tombstone put is fail-open, so it
+ * can fail while the revoke and the family put still land, and a tombstone
+ * also expires or is lifted by the owner. The owner's retry then finds nobody
+ * to remove and, before this branch existed, 404'd AHEAD of the tombstone
+ * block — the ban became unappliable and the silent auto-rejoin loop stayed
+ * open. Writing the tombstone on the way out of the 404 makes a kick
+ * re-assertable; the RESPONSE stays exactly as it was. The ban must actually
+ * bite: the re-kicked target in that case never joined, which also pins the
+ * accepted consequence — an owner may pre-tombstone a userId, scoped to their
+ * own family and squarely inside the authority they already have to remove
+ * anyone from it. The self-targeted case uses a caller holding a live token
+ * who is not in THIS family — a stale client retrying its own leave after it
+ * already moved on; owning another family is simply the cheapest way through
+ * the public API to hold such a token.
+ *
+ * Fail open: both call sites swallow a failed tombstone put, log it, and answer
+ * as though it had never been attempted: after a successful removal, reporting
+ * the DELETE as failed would be a lie (the member IS gone); on the
+ * MEMBER_NOT_FOUND path the response is already an error. A missing tombstone
+ * only degrades to the previous, weaker behaviour — and the owner's next
+ * DELETE re-attempts the write through the idempotent re-kick path, so the ban
+ * is recoverable rather than lost for good. The documented consequence — with
+ * no tombstone the removed client can rejoin again — is pinned so the
+ * trade-off stays visible rather than being mistaken for enforcement that
+ * silently never ran.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -37,33 +98,19 @@ type Json = any;
 
 let kv: KVNamespace;
 
-/**
- * The production 繁中 copy of the tombstone refusal (`routes/family.ts`).
- * Every assertion on it runs through `app.request`, so it hits the real throw
- * site — a copy change fails here instead of passing against a test-local
- * duplicate (test.md, "User-visible copy needs a production-anchored assertion").
- */
+/** Production copy of the tombstone refusal (`routes/family.ts`), asserted on real
+ *  responses only. See the header → "Copy constants". */
 const MEMBER_REMOVED_MESSAGE = "你已被管理者移出此家庭，暫時無法重新加入";
 
-/**
- * The production 繁中 copy of the "target is not a member" refusal
- * (`routes/family.ts`). Pinned here because the re-kick branch must leave that
- * response completely untouched — the tombstone it writes on the way out is a
- * side effect the caller must not be able to detect.
- */
+/** Production copy of the "target is not a member" refusal, which the re-kick must
+ *  leave untouched. See the header → "Copy constants". */
 const MEMBER_NOT_FOUND_MESSAGE = "目標使用者不是家庭成員";
 
-/**
- * `"kicked:"`, taken FROM the production key builder instead of typed out, so
- * the "no tombstone anywhere" assertions cannot keep passing after a key
- * rename. The placeholders are only markers to slice on.
- */
+/** `"kicked:"`, taken FROM the production key builder so a key rename cannot leave
+ *  the "no tombstone" assertions passing. See the header. */
 const KICKED_KEY_PREFIX = kvKeys.kicked("{familyId}", "{userId}").split("{")[0];
 
-// ---------------------------------------------------------------------------
-// Helpers (same shape as familyLifecycle.test.ts: real app, mock KV, DEV_MODE
-// so the rate limiters never interfere with the behaviour under test)
-// ---------------------------------------------------------------------------
+// ----- Helpers (real app, mock KV, DEV_MODE — see the header) -----
 
 function request(
   method: string,
@@ -128,17 +175,8 @@ async function allTombstoneKeys(): Promise<string[]> {
     .filter((name) => name.startsWith(KICKED_KEY_PREFIX));
 }
 
-/**
- * Swap `kv` for a wrapper that throws on `put` for ONE key and calls straight
- * through for everything else, so only the tombstone write fails — the same
- * trick `verificationGate.test.ts` uses to observe KV without replacing it.
- *
- * Returns a `restore()` that puts the plain mock back. The retry case needs it
- * (its SECOND attempt must be allowed to write), and `getPutTtl` needs it too:
- * the TTL registry is keyed on the instance `createMockKV()` returned, never on
- * this wrapper. Tests that only ever fail can ignore the return — `beforeEach`
- * builds a fresh mock, so there is nothing to clean up.
- */
+/** Make `put` throw for ONE key only; returns `restore()` for the retry and
+ *  `getPutTtl` cases. See the header → "`failPutFor`". */
 function failPutFor(failingKey: string): () => void {
   const base = kv;
   const put = base.put.bind(base) as (
@@ -182,9 +220,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// DELETE /api/family/:id/member/:uid — what the removal writes
-// ===========================================================================
+// ===== DELETE /api/family/:id/member/:uid — what the removal writes =====
 
 describe("DELETE /api/family/:id/member/:uid tombstone write", () => {
   it("should record who removed the member, and when, under the kicked key", async () => {
@@ -222,12 +258,8 @@ describe("DELETE /api/family/:id/member/:uid tombstone write", () => {
 
     await removeMember(familyId, USER2, ownerToken);
 
-    // Ordering is a safety property, not a style choice (#213, Fix Cycle 3):
-    // the join reads `member:{uid}` BEFORE it checks the tombstone, so only a
-    // tombstone that lands ahead of the pointer delete guarantees that a join
-    // seeing the pointer gone is refused rather than healing it back. The
-    // accepted cost — a kick that fails after this write leaves a still-listed
-    // member banned — is pinned in familyPartialWrite.test.ts.
+    // Tombstone before the pointer delete is a safety property (#213).
+    // See the header → "Ordering is a safety property".
     const trail = ops.writeTrail();
     const kickedAt = trail.indexOf(`put ${kvKeys.kicked(familyId, USER2)}`);
     const familyAt = trail.indexOf(`put ${kvKeys.family(familyId)}`);
@@ -304,9 +336,7 @@ describe("DELETE /api/family/:id/member/:uid tombstone write", () => {
   });
 });
 
-// ===========================================================================
-// POST /api/family/:id/join — what the tombstone refuses
-// ===========================================================================
+// ===== POST /api/family/:id/join — what the tombstone refuses =====
 
 describe("POST /api/family/:id/join kicked tombstone gate", () => {
   it("should refuse the removed member's plain rejoin with 403 MEMBER_REMOVED", async () => {
@@ -388,17 +418,8 @@ describe("POST /api/family/:id/join kicked tombstone gate", () => {
   });
 });
 
-// ===========================================================================
-// DELETE /api/family/:id/member/:uid — idempotent re-kick on MEMBER_NOT_FOUND
-//
-// A member can be gone from the family record with NO tombstone in place: the
-// removal's tombstone put is fail-open, so it can fail while the revoke and the
-// family put still land — and a tombstone also expires or is lifted by the
-// owner. The owner's retry then finds nobody to remove and, before this branch
-// existed, 404'd AHEAD of the tombstone block — the ban became unappliable and
-// the silent auto-rejoin loop stayed open. Writing the tombstone on the way out
-// of the 404 makes a kick re-assertable; the RESPONSE stays exactly as it was.
-// ===========================================================================
+// ===== DELETE /api/family/:id/member/:uid — idempotent re-kick on MEMBER_NOT_FOUND =====
+// See the header → "Re-kick on MEMBER_NOT_FOUND".
 
 describe("DELETE /api/family/:id/member/:uid re-kick when the target is not a member", () => {
   it("should tombstone the target while still answering 404 MEMBER_NOT_FOUND", async () => {
@@ -432,10 +453,8 @@ describe("DELETE /api/family/:id/member/:uid re-kick when the target is not a me
     const { familyId, ownerToken } = await createFamilyWithTwoMembers();
     expect((await removeMember(familyId, USER3, ownerToken)).status).toBe(404);
 
-    // The whole point of writing on the 404 path: the ban must actually bite.
-    // USER3 never joined here, which also pins the accepted consequence — an
-    // owner may pre-tombstone a userId, scoped to their own family and squarely
-    // inside the authority they already have to remove anyone from it.
+    // The ban must actually bite; USER3 never joined (accepted pre-tombstone).
+    // See the header → "Re-kick on MEMBER_NOT_FOUND".
     const joinRes = await join(familyId, USER3);
 
     expect(joinRes.status).toBe(403);
@@ -448,9 +467,8 @@ describe("DELETE /api/family/:id/member/:uid re-kick when the target is not a me
 
   it("should write NO tombstone when a non-member targets themselves", async () => {
     const { familyId } = await createFamilyWithTwoMembers();
-    // A caller holding a live token who is not in THIS family — a stale client
-    // retrying its own leave after it already moved on. Owning another family
-    // is simply the cheapest way through the public API to hold such a token.
+    // A live-token caller outside THIS family (a stale client retrying its leave).
+    // See the header → "Re-kick on MEMBER_NOT_FOUND".
     const { authToken: outsiderToken } = await createFamily(USER3);
 
     const res = await removeMember(familyId, USER3, outsiderToken);
@@ -463,17 +481,8 @@ describe("DELETE /api/family/:id/member/:uid re-kick when the target is not a me
   });
 });
 
-// ===========================================================================
-// Tombstone write failure — fail open
-//
-// Both call sites swallow a failed put, log it, and answer as though it had
-// never been attempted: after a successful removal, reporting the DELETE as
-// failed would be a lie (the member IS gone); on the MEMBER_NOT_FOUND path the
-// response is already an error. A missing tombstone only degrades to the
-// previous, weaker behaviour — and the owner's next DELETE re-attempts the
-// write through the idempotent re-kick path, so the ban is recoverable rather
-// than lost for good.
-// ===========================================================================
+// ===== Tombstone write failure — fail open =====
+// See the header → "Fail open".
 
 describe("Tombstone write failure", () => {
   it("should still remove the member and answer 200 when the tombstone write throws", async () => {
@@ -505,9 +514,8 @@ describe("Tombstone write failure", () => {
     failPutFor(kvKeys.kicked(familyId, USER2));
     await removeMember(familyId, USER2, ownerToken);
 
-    // Documented consequence of failing open: with no tombstone the removed
-    // client can rejoin again. Pinned so the trade-off stays visible rather
-    // than being mistaken for enforcement that silently never ran.
+    // Documented fail-open consequence: with no tombstone the client can rejoin.
+    // See the header → "Fail open".
     const rejoinRes = await join(familyId, USER2);
 
     expect(rejoinRes.status).toBe(200);

@@ -15,12 +15,12 @@
  *
  * PER-KEY CLASSIFICATION
  * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
- *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   by Cloudflare's native Rate Limiting binding (the `rateLimit` middleware): zero KV
  *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone from both arrays.
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-list` counter — REMOVED by #160 item 1 for the same
- *   reason (rateLimit.ts:608); scope "borrow-list", ceiling 60 per 60s
- *   (routes/borrow.ts:437-442), which is what selects RATE_LIMIT_60_PER_MIN —
+ *   reason (`enforcePerUserRateLimit`); scope "borrow-list", ceiling 60 per 60s
+ *   (routes/borrow.ts, `listBorrowRoute`), which is what selects RATE_LIMIT_60_PER_MIN —
  *   the same binding the per-IP standard tier uses, kept apart by the KEY.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
@@ -28,7 +28,7 @@
  * - `borrow:{requestId}` — REMOVED by #160 item 2. The listing used to read one
  *   key PER INDEX ENTRY, so its cost grew linearly with the family's borrow
  *   history. `borrows:family:{familyId}` now carries the full records, so
- *   `readBorrowIndex` (routes/borrow.ts:467) answers the whole listing from the
+ *   `readBorrowIndex` (routes/borrow.ts) answers the whole listing from the
  *   ONE index read and the fan-out is gone from `getKeys()` below. The seed
  *   holds a 2-entry index precisely so a returning fan-out would show up as two
  *   extra reads. The growth RATE has its own acceptance test in
@@ -36,10 +36,10 @@
  *   ONE case where the fan-out legitimately survives: a family still on the
  *   legacy `string[]` index, because migration is write-path only and a GET
  *   never writes.
- * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `family:{familyId}` (routes/borrow.ts:446, membership check) and
- *   `borrows:family:{familyId}` (:467) — real cost of the listing.
- * - `member:{callerId}` (routes/borrow.ts:454, `isActiveMember`) — added by
+ * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `family:{familyId}` (routes/borrow.ts, `getFamilyRecord`, membership check) and
+ *   `borrows:family:{familyId}` (`readBorrowIndex`) — real cost of the listing.
+ * - `member:{callerId}` (routes/borrow.ts, `isActiveMember`) — added by
  *   #222. An AUTHORISATION read, not waste: the caller must be an ACTIVE
  *   member (listed AND pointed at this family), because a kicked member
  *   re-listed by a stale full-record write is listed but pointerless and must
@@ -53,9 +53,20 @@
  * Worker produces. See tests/helpers/rateLimitBindings.ts.
  *
  * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit layers
- * short-circuit under it (rateLimit.ts:415, :601) ahead of the binding lookup,
+ * short-circuit under it (`rateLimit`, `enforcePerUserRateLimit`) ahead of the binding lookup,
  * which would hide the fixed cost pinned in `calls`. See the scope caveat at
  * the end of tests/helpers/kvOps.ts.
+ *
+ * SEED: `seedFamilyWithBorrowIndex` builds a two-member family + a 2-entry
+ * borrow index in the CURRENT shape (#160 item 2): the index holds the full
+ * records and each `borrow:{id}` holds only a `{ familyId }` pointer. The
+ * caller (USER1) is a party to both records, so the response is non-empty. The
+ * pointers are seeded even though a listing never reads them — they are what a
+ * real create leaves behind, and their presence proves the 3 reads pinned below
+ * are the handler declining to touch them, not the fixture omitting them.
+ *
+ * BINDING CALLS: both land on RATE_LIMIT_60_PER_MIN because both ceilings are
+ * 60/min; only the KEY keeps them independent.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
@@ -90,17 +101,8 @@ type Json = any;
 
 let kv: KVNamespace;
 
-/**
- * Two-member family + a 2-entry borrow index in the CURRENT shape (#160
- * item 2): the index holds the full records and each `borrow:{id}` holds only
- * a `{ familyId }` pointer. The caller (USER1) is a party to both records, so
- * the response is non-empty.
- *
- * The pointers are seeded even though a listing never reads them — they are
- * what a real create leaves behind, and their presence proves the 3 reads
- * below are the handler declining to touch them, not the fixture omitting
- * them. Returns the caller's token.
- */
+/** Two-member family + a 2-entry current-shape borrow index (pointers included);
+ *  returns the caller's token. See the header → "SEED". */
 async function seedFamilyWithBorrowIndex(): Promise<string> {
   const family: FamilyRecord = {
     familyId: FAMILY_ID,
@@ -183,14 +185,14 @@ describe("KV budget: GET /api/family/:id/borrow", () => {
     expect(body.data).toHaveLength(EXISTING_IDS.length);
 
     expect(ops.getKeys()).toEqual([
-      // auth middleware, auth.ts:46
+      // auth middleware, `authMiddleware`
       kvKeys.authToken(token),
-      // handler, borrow.ts:446 — the family record
+      // handler, `getFamilyRecord` — the family record
       kvKeys.family(FAMILY_ID),
-      // handler, borrow.ts:454 — the caller's pointer, for the active-member
+      // handler, `isActiveMember` — the caller's pointer, for the active-member
       // check (#222)
       kvKeys.member(USER1),
-      // handler, borrow.ts:467 — the index
+      // handler, `readBorrowIndex` — the index
       kvKeys.borrowsByFamily(FAMILY_ID),
       // No `borrow:{requestId}` entries: the index carries the records (#160
       // item 2). The seeded pointers exist and are deliberately NOT read.
@@ -201,10 +203,8 @@ describe("KV budget: GET /api/family/:id/borrow", () => {
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
 
-    // The fixed per-request rate-limit cost, in the form it now takes: two
-    // binding calls, zero KV operations. Both land on RATE_LIMIT_60_PER_MIN
-    // because both ceilings are 60/min; only the KEY keeps them independent.
-    // The second one carries the AUTHENTICATED caller's id (Invariant 6).
+    // Fixed rate-limit cost: two binding calls, zero KV ops; the second keyed on the
+    // AUTHENTICATED caller (Inv-6). See the header → "BINDING CALLS".
     expect(calls).toEqual([
       { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
       {

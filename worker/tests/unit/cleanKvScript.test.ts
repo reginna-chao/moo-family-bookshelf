@@ -13,6 +13,18 @@
  * The shim is written to a temp dir at run time rather than checked in under
  * `tests/helpers/`: it must be plain `.mjs` for `node --import`, and the
  * typed ESLint parser rejects any file outside `tsconfig.json`'s project.
+ *
+ * Preload shim (`SHIM_SOURCE`): loaded via
+ * `node --import <shim> scripts/clean-kv.mjs <id>`. Replaces
+ * `child_process.execFileSync` BEFORE the script's own named ESM import binds;
+ * `syncBuiltinESMExports()` propagates the swap to that live binding, so the
+ * real script runs end to end while every wrangler call is captured here and
+ * none reaches Cloudflare (or the local Miniflare store). Each call's wrangler
+ * args (everything after `process.execPath`) is appended as one JSON line to
+ * `$CLEAN_KV_TRACE_FILE`. `kv key list` answers a non-empty key set so the
+ * script takes its delete branch; `kv bulk delete` answers nothing; any other
+ * command throws, so an unexpected wrangler call fails the run loudly instead
+ * of falling through to the real binary.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -32,19 +44,8 @@ const scriptTmpFile = resolve(repoRoot, "worker/.wrangler/.kv-delete-tmp.json");
 
 const NAMESPACE_ID = "0123456789abcdef0123456789abcdef";
 
-/**
- * Loaded via `node --import <shim> scripts/clean-kv.mjs <id>`. Replaces
- * `child_process.execFileSync` BEFORE the script's own named ESM import binds;
- * `syncBuiltinESMExports()` propagates the swap to that live binding, so the
- * real script runs end to end while every wrangler call is captured here and
- * none reaches Cloudflare (or the local Miniflare store).
- *
- * Each call's wrangler args (everything after `process.execPath`) is appended
- * as one JSON line to `$CLEAN_KV_TRACE_FILE`. `kv key list` answers a
- * non-empty key set so the script takes its delete branch; `kv bulk delete`
- * answers nothing; any other command throws, so an unexpected wrangler call
- * fails the run loudly instead of falling through to the real binary.
- */
+// `execFileSync` swap captured per call into `$CLEAN_KV_TRACE_FILE`; unexpected commands throw.
+// See the header → "Preload shim (`SHIM_SOURCE`)".
 const SHIM_SOURCE = `
 import child_process from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -93,9 +94,8 @@ describe("scripts/clean-kv.mjs", () => {
       },
     );
 
-    // The delete branch must have executed, or the flag assertions below
-    // would be vacuous. Not `toBe("")`: a future Node `ExperimentalWarning`
-    // would land on stderr too, and that is not the script failing.
+    // The delete branch must have run, or the flag assertions below are vacuous. Not `toBe("")`:
+    // a future Node `ExperimentalWarning` would land on stderr too, and that is not a failure.
     expect(run.stderr).not.toMatch(/Error|cleanKvShim/);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("Deleted 2 key(s)");

@@ -15,33 +15,33 @@
  *
  * PER-KEY CLASSIFICATION
  * - Per-IP counter — REMOVED by #160 item 1. The standard tier is now counted
- *   by Cloudflare's native Rate Limiting binding (rateLimit.ts:427): zero KV
+ *   by Cloudflare's native Rate Limiting binding (the `rateLimit` middleware): zero KV
  *   operations, so `ratelimit:{ip}:{minuteBucket}` is gone from both arrays.
  *   The binding call it was replaced by is pinned in `calls` below instead.
  * - Per-userId `borrow-update` counter — REMOVED by #160 item 1 for the same
- *   reason (rateLimit.ts:608); scope "borrow-update", ceiling 30 per 60s
- *   (routes/borrow.ts:529-534), which is what selects RATE_LIMIT_30_PER_MIN.
+ *   reason (`enforcePerUserRateLimit`); scope "borrow-update", ceiling 30 per 60s
+ *   (routes/borrow.ts, `updateBorrowRoute`), which is what selects RATE_LIMIT_30_PER_MIN.
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `token:{token}` — auth middleware (middleware/auth.ts:46). Real cost.
- * - `borrow:{requestId}` — 1 get (routes/borrow.ts:540, `readBorrowPointer`)
+ * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `borrow:{requestId}` — 1 get (routes/borrow.ts, `readBorrowPointer`)
  *   and NO put. Since #160 item 2 the key holds a `BorrowPointer`
  *   (`{ familyId }`); a bare requestId cannot name its family, so this read
  *   resolves which index owns the record. A status change cannot alter
  *   `familyId`, so the pointer is never rewritten — that is why `putKeys()`
  *   below no longer contains it.
- * - `family:{familyId}` — 1 get (routes/borrow.ts:551, `getFamilyRecord`),
+ * - `family:{familyId}` — 1 get (routes/borrow.ts, `getFamilyRecord`),
  *   NO put. Added by issue #159: the caller must be a CURRENT member of the
  *   record's family, not merely a frozen party id, so a kicked / departed
  *   member holding a fresh token from a new family cannot flip an old LENT
- *   record to RETURNED. Read in `Promise.all` with the index (:550-553), so
+ *   record to RETURNED. Read in `Promise.all` with the index (`readBorrowIndex`), so
  *   it costs one KV read but no extra round trip; the `Promise.all` argument
  *   order is what puts it BEFORE the index in `getKeys()` below.
- * - `borrows:family:{familyId}` — 1 get (:552) + 1 put (:643, via
+ * - `borrows:family:{familyId}` — 1 get (`readBorrowIndex`) + 1 put (via
  *   `writeBorrowIndex`): the index IS the record, so the read-modify-write
  *   that used to happen on `borrow:{requestId}` happens here instead.
- * - `member:{callerId}` — 1 get (routes/borrow.ts:597, `isActiveMember`), NO
+ * - `member:{callerId}` — 1 get (routes/borrow.ts, `isActiveMember`), NO
  *   put. Added by #222: "current member" now means ACTIVE — listed AND pointed
  *   at this family — because a kicked member re-listed by a stale full-record
  *   write is listed but pointerless. Read only when the family record exists
@@ -73,9 +73,19 @@
  * Worker produces. See tests/helpers/rateLimitBindings.ts.
  *
  * NO DEV_MODE ON THE MEASURED REQUEST, deliberately: both rate-limit layers
- * short-circuit under it (rateLimit.ts:415, :601) ahead of the binding lookup,
+ * short-circuit under it (`rateLimit`, `enforcePerUserRateLimit`) ahead of the binding lookup,
  * which would hide the fixed cost pinned in `calls`. See the scope caveat at
  * the end of tests/helpers/kvOps.ts.
+ *
+ * SEED: `seedPendingBorrow` writes one PENDING borrow record whose OWNER
+ * (USER2) is the caller, so PENDING → LENT is an allowed transition, in the
+ * CURRENT shape (#160 item 2): the record inside `borrows:family:{familyId}`,
+ * a `{ familyId }` pointer at `borrow:{requestId}`.
+ *
+ * DELETES: a status transition removes nothing at this index size. It CAN
+ * delete — `writeBorrowIndex` drops the pointers of terminal records evicted
+ * past BORROW_HISTORY_KEEP, which tests/integration/borrowIndexMigration.test.ts
+ * covers — but a 1-entry index is nowhere near the cap.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
@@ -103,12 +113,8 @@ const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
 
 let kv: KVNamespace;
 
-/**
- * One PENDING borrow record whose OWNER (USER2) is the caller, so
- * PENDING → LENT is an allowed transition, seeded in the CURRENT shape (#160
- * item 2): the record inside `borrows:family:{familyId}`, a `{ familyId }`
- * pointer at `borrow:{requestId}`. Returns the owner's token.
- */
+/** One current-shape PENDING record owned by the caller (USER2); returns the owner's
+ *  token. See the header → "SEED". */
 async function seedPendingBorrow(): Promise<string> {
   const family: FamilyRecord = {
     familyId: FAMILY_ID,
@@ -186,40 +192,32 @@ describe("KV budget: PATCH /api/borrow/:requestId", () => {
     expect(res.status).toBe(200);
 
     expect(ops.getKeys()).toEqual([
-      // auth middleware, auth.ts:46
+      // auth middleware, `authMiddleware`
       kvKeys.authToken(token),
-      // handler, borrow.ts:540 — the pointer, read for its `familyId` only
+      // handler, `readBorrowPointer` — the pointer, read for its `familyId` only
       kvKeys.borrow(REQUEST_ID),
-      // handler, borrow.ts:551 — the family record, for the membership
-      // re-check (#159). FIRST of the Promise.all pair, so it precedes the
-      // index here; a swap of the two arguments is a real change to pin.
+      // handler, `getFamilyRecord` — the family record for the #159 re-check; FIRST of
+      // the Promise.all pair, so a swap of the two arguments is a real change.
       kvKeys.family(FAMILY_ID),
-      // handler, borrow.ts:552 — the index that owns the record
+      // handler, `readBorrowIndex` — the index that owns the record
       kvKeys.borrowsByFamily(FAMILY_ID),
-      // handler, borrow.ts:597 — the caller's (USER2's) pointer, for the
-      // active-member re-check (#222). After the Promise.all pair: it needs
-      // the family record that pair returned.
+      // handler, `isActiveMember` — the caller's (USER2's) pointer for the #222 re-check;
+      // after the Promise.all pair because it needs the family record.
       kvKeys.member(USER2),
     ]);
 
     expect(ops.putKeys()).toEqual([
-      // handler, borrow.ts:643 — the index carrying the updated record. The
-      // pointer is deliberately NOT rewritten: it holds only `familyId`, which
-      // a status change cannot alter.
+      // handler, `writeBorrowIndex` — the index with the updated record; the pointer
+      // (only `familyId`, which a status change cannot alter) is NOT rewritten.
       kvKeys.borrowsByFamily(FAMILY_ID),
     ]);
 
-    // A status transition removes nothing at this index size. (It CAN delete —
-    // `writeBorrowIndex` drops the pointers of terminal records evicted past
-    // BORROW_HISTORY_KEEP — which tests/integration/borrowIndexMigration.test.ts
-    // covers; a 1-entry index is nowhere near the cap.)
+    // Removes nothing: a 1-entry index is nowhere near the cap.
+    // See the header → "DELETES".
     expect(ops.deleteKeys()).toEqual([]);
 
-    // The fixed per-request rate-limit cost, in the form it now takes: two
-    // binding calls, zero KV operations. The second key carries the
-    // AUTHENTICATED caller's id (Invariant 6) — USER2, the record's owner, not
-    // the `:requestId` path param — and the binding NAME encodes the ceiling
-    // routes/borrow.ts asked for.
+    // Two binding calls, zero KV ops; the second keyed on the AUTHENTICATED caller
+    // (Inv-6) — USER2, not the `:requestId` param — its NAME encoding the ceiling.
     expect(calls).toEqual([
       { name: "RATE_LIMIT_60_PER_MIN", key: `ratelimit:${CALLER_IP}` },
       {

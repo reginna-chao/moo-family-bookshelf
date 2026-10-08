@@ -1,5 +1,35 @@
+/** Shared auth-token seeding for tests — the rationale (two KV halves, `kvKeys`,
+ *  no TTL, one-half seeds) is in `seedAuthToken`'s JSDoc. */
+
+import { kvKeys, type AuthRecord } from "../../src/kv/schema";
+
 /**
- * Shared auth-token seeding for tests.
+ * Deterministic 64-char auth token derived from a 64-hex userId.
+ *
+ * Test convention only — production tokens are 32 random bytes hex-encoded
+ * (`crypto.getRandomValues` in `middleware/auth.ts`). Deriving keeps a suite's
+ * token readable next to its userId. Distinctness holds only while the FIRST
+ * 32 chars of two userIds differ — true for the fixed-nibble ids in
+ * `helpers/ids.ts`, but NOT for `makeUserId()` ids (they share an all-`0`
+ * prefix, so every derived token collides); pass an explicit `opts.token`
+ * when seeding several `makeUserId()` users.
+ */
+export function tokenFor(userId: string): string {
+  return userId.slice(0, 32).repeat(2);
+}
+
+/** Overrides for callers that need a specific token or a fixed issue time. */
+export interface SeedAuthTokenOptions {
+  /** Use this exact token instead of `tokenFor(userId)`. */
+  token?: string;
+  /** ISO `AuthRecord.createdAt`, default now; pass a fixed past value when the record's
+   *  age is under test (e.g. `/api/auth/refresh` replacing an old record). */
+  createdAt?: string;
+}
+
+/**
+ * Seed KV with a complete, valid auth-token pair for `userId` and return the
+ * token, ready to send as `Authorization: Bearer <token>`.
  *
  * An auth token has TWO KV halves with different consumers:
  * - `token:{token}` → userId — the ONLY key `middleware/auth.ts` reads to
@@ -27,40 +57,6 @@
  * Tests that deliberately seed only ONE half (only `token:{token}`, or an
  * `auth:` record with no matching token key) must keep doing that inline —
  * that asymmetry is the thing under test, not a case for this helper.
- */
-
-import { kvKeys, type AuthRecord } from "../../src/kv/schema";
-
-/**
- * Deterministic 64-char auth token derived from a 64-hex userId.
- *
- * Test convention only — production tokens are 32 random bytes hex-encoded
- * (`crypto.getRandomValues` in `middleware/auth.ts`). Deriving keeps a suite's
- * token readable next to its userId. Distinctness holds only while the FIRST
- * 32 chars of two userIds differ — true for the fixed-nibble ids in
- * `helpers/ids.ts`, but NOT for `makeUserId()` ids (they share an all-`0`
- * prefix, so every derived token collides); pass an explicit `opts.token`
- * when seeding several `makeUserId()` users.
- */
-export function tokenFor(userId: string): string {
-  return userId.slice(0, 32).repeat(2);
-}
-
-/** Overrides for callers that need a specific token or a fixed issue time. */
-export interface SeedAuthTokenOptions {
-  /** Use this exact token instead of `tokenFor(userId)`. */
-  token?: string;
-  /**
-   * ISO timestamp stored as `AuthRecord.createdAt`. Defaults to now; pass a
-   * fixed past value where the age of the record is what the test is about
-   * (e.g. proving `/api/auth/refresh` replaces an old record).
-   */
-  createdAt?: string;
-}
-
-/**
- * Seed KV with a complete, valid auth-token pair for `userId` and return the
- * token, ready to send as `Authorization: Bearer <token>`.
  */
 export async function seedAuthToken(
   kv: KVNamespace,

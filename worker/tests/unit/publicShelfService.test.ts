@@ -10,7 +10,32 @@
  *
  * Expiry here is decided by the PRODUCTION code's `Date.now()` comparison, not
  * by the KV mock: `createMockKV` VALIDATES the 60s floor on `expirationTtl`
- * but never expires anything it accepted.
+ * but never expires anything it accepted. Production computes the remaining
+ * TTL from `Date.now()`, so `beforeEach` pins the clock and every TTL
+ * assertion is exact; only Date is faked — nothing schedules a timer here —
+ * and `afterEach` restores the real clock either way.
+ *
+ * 1–59s band: real Cloudflare KV rejects `expirationTtl < 60`, so production
+ * deliberately treats a lifetime shorter than that minimum as already expired
+ * and deletes instead of putting a TTL KV would refuse. Those band cases are
+ * pinned in the expiry `it.each`; the TTL `it.each` has no case in the band by
+ * design, and its "one minute ahead" row is the lower valid bound.
+ *
+ * resolvePublicShelves — the lazy-migration fallback rule: one pure function
+ * decides, for EVERY caller (public read path, books PUT/PATCH, the four shelf
+ * write handlers, account deletion), which shelf list is authoritative. Its
+ * whole job is the precedence order, so it is pinned here rather than only
+ * through the HTTP suites — a wrong answer in the empty-pointer row is
+ * precisely the lost-update bug the pointer key exists to prevent.
+ *
+ * Corrupt `shelves`: both resolver inputs are `kv.get(..., "json")` casts that
+ * nothing validates, so `corruptPointer` / `corruptLegacy` force the type to
+ * reproduce what corrupted first-hand KV data actually hands the resolver.
+ * `CORRUPT_SHELVES` lists every shape a `shelves` field can take once the
+ * stored JSON is corrupted or written by an older/foreign writer. The resolver
+ * runs on the PUBLIC read path, so each must fail CLOSED (empty list ⇒ the
+ * liveness guard answers 404) rather than throw a TypeError that surfaces as a
+ * 500 to a stranger.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
@@ -88,9 +113,7 @@ function readSnapshot(
 
 beforeEach(() => {
   kv = createMockKV();
-  // Production computes the remaining TTL from `Date.now()`; pin the clock so
-  // every TTL assertion is exact. Only Date is faked — nothing schedules a
-  // timer here — and `afterEach` restores the real clock either way.
+  // Pin the clock (Date only) so every TTL assertion is exact; `afterEach` restores it.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
@@ -116,9 +139,8 @@ describe("writePublicSnapshot", () => {
     ["a millisecond in the past", -1],
     ["exactly the current instant", 0],
     ["less than one full second ahead", 999],
-    // 1–59s band: real Cloudflare KV rejects `expirationTtl < 60`, so a
-    // lifetime shorter than that minimum is deliberately treated as already
-    // expired rather than written with a TTL KV would refuse.
+    // 1–59s band: below KV's 60s minimum, so treated as already expired.
+    // See the header → "1–59s band".
     ["one second ahead — below the KV minimum TTL", 1_000],
     ["59 seconds ahead — just below the KV minimum TTL", 59_000],
     ["a millisecond under the 60s KV minimum", 59_999],
@@ -160,10 +182,8 @@ describe("writePublicSnapshot", () => {
     expect(getPutTtl(kv, SNAPSHOT_KEY)).toBeUndefined();
   });
 
-  // No case in the 1–59s band here by design: Cloudflare KV rejects
-  // `expirationTtl < 60`, so production treats such a lifetime as already
-  // expired and deletes instead of putting. Those band cases are pinned in the
-  // expiry `it.each` above; "one minute ahead" below is the lower valid bound.
+  // No 1–59s band case here by design; "one minute ahead" is the lower valid bound.
+  // See the header → "1–59s band".
   it.each([
     ["seven days ahead", 7 * DAY_MS, 7 * 86_400],
     ["one minute ahead", 60_000, 60],
@@ -216,15 +236,8 @@ describe("writePublicSnapshot", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// resolvePublicShelves — the lazy-migration fallback rule
-// ---------------------------------------------------------------------------
-//
-// One pure function decides, for EVERY caller (public read path, books
-// PUT/PATCH, the four shelf write handlers, account deletion), which shelf list
-// is authoritative. Its whole job is the precedence order, so it is pinned here
-// rather than only through the HTTP suites — a wrong answer in the empty-pointer
-// row is precisely the lost-update bug the pointer key exists to prevent.
+// --- resolvePublicShelves — the lazy-migration fallback rule ---
+// See the header → "resolvePublicShelves — the lazy-migration fallback rule".
 
 /** Shelf as the POINTER key would list it. */
 const POINTER_SHELF = makeNamedShelf(
@@ -256,13 +269,8 @@ function legacyRecord(
   return shelves ? { publicSharing: { shelves } } : {};
 }
 
-/**
- * A pointer / books record whose `shelves` did NOT survive as an array.
- *
- * Both inputs are `kv.get(..., "json")` casts that nothing validates, so the
- * type has to be forced here to reproduce what corrupted first-hand KV data
- * actually hands the resolver.
- */
+// A pointer / books record whose `shelves` did NOT survive as an array (type forced on purpose).
+// See the header → "Corrupt `shelves`".
 function corruptPointer(shelves: unknown): PublicShelvesRecord {
   return { shelves } as unknown as PublicShelvesRecord;
 }
@@ -341,12 +349,8 @@ describe("resolvePublicShelves", () => {
     expect(resolvePublicShelves(pointer, legacy)).toEqual({ shelves, source });
   });
 
-  /**
-   * Every shape a `shelves` field can take once the stored JSON is corrupted or
-   * written by an older/foreign writer. The resolver runs on the PUBLIC read
-   * path, so each must fail CLOSED (empty list ⇒ the liveness guard answers
-   * 404) rather than throw a TypeError that surfaces as a 500 to a stranger.
-   */
+  // Each corrupt `shelves` shape must fail CLOSED (empty list ⇒ 404), never throw a 500.
+  // See the header → "Corrupt `shelves`".
   const CORRUPT_SHELVES: { label: string; value: unknown }[] = [
     { label: "null", value: null },
     { label: "an absent field", value: undefined },

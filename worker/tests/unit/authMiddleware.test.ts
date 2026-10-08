@@ -30,9 +30,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Auth middleware — token validation branches
-// ===========================================================================
+// --- Auth middleware — token validation branches ---
 
 describe("Auth middleware token validation", () => {
   it("should return 401 when Authorization header has invalid format (not Bearer)", async () => {

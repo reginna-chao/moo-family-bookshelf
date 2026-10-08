@@ -52,9 +52,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// PATCH /api/family/:id/member/:uid — member settings (canLend, readmooName)
-// ===========================================================================
+// ===== PATCH /api/family/:id/member/:uid — member settings (canLend, readmooName) =====
 
 describe("PATCH /api/family/:id/member/:uid", () => {
   it("allows owner to update another member's canLend", async () => {
@@ -279,9 +277,7 @@ describe("PATCH /api/family/:id/member/:uid", () => {
     expect(res.status).toBe(401);
   });
 
-  // ---------------------------------------------------------------------------
-  // Wave J — readmooName: null semantic (delete the field)
-  // ---------------------------------------------------------------------------
+  // ----- Wave J — readmooName: null semantic (delete the field) -----
 
   it("readmooName: null removes the field from the stored member record", async () => {
     const { familyId, authToken: ownerToken } = await createFamilyAndGetToken(

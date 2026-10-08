@@ -22,6 +22,29 @@
  * tally maps method → billing class exactly, an attempted-but-failed write is
  * still counted, property READS never count, and the returned promise is the
  * double's own object rather than a re-wrapped one.
+ *
+ * HOW THE DOUBLE OBSERVES THE RECEIVER:
+ *  - `ReceiverCheckingKv` behaves like the platform binding in the ONE
+ *    dimension mockKv.ts cannot: its methods live on the prototype and reject a
+ *    foreign `this`. It stores nothing — every method answers with a fixed
+ *    value. Those fixed return values (`results`) have STABLE identities, so a
+ *    test can assert the Proxy handed back this very object and wrapped nothing
+ *    around it.
+ *  - `callLog` is module-level rather than a field on the double on purpose: a
+ *    call arriving with the WRONG receiver cannot reach any per-instance state,
+ *    and that is exactly the call this file must be able to observe. Emptied in
+ *    `beforeEach`, so nothing leaks between cases.
+ *  - `isOriginalReceiver` is true only for the double instance itself.
+ *    `originalSelf` is a plain data property, so reading it off a foreign
+ *    object yields `undefined` instead of throwing — and reading it THROUGH the
+ *    counting Proxy yields the instance while `receiver` is the proxy, which is
+ *    precisely the mismatch a real KV binding rejects.
+ *  - `record` records the call, THEN models the host-object receiver check.
+ *    Recording first is what lets the oracle self-test prove the check can
+ *    actually fire rather than passing vacuously.
+ *  - Real KV signals a failed write by REJECTING, never by throwing
+ *    synchronously, so the "billed even when it fails" case exercises the shape
+ *    production actually sees.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -36,24 +59,15 @@ interface CallRecord {
   thisWasOriginal: boolean;
 }
 
-/**
- * The call log is module-level rather than a field on the double on purpose: a
- * call arriving with the WRONG receiver cannot reach any per-instance state,
- * and that is exactly the call this file must be able to observe. Emptied in
- * `beforeEach`, so nothing leaks between cases.
- */
+// Module-level on purpose, so a WRONG-receiver call is still observed; emptied in `beforeEach`.
+// See the header → "HOW THE DOUBLE OBSERVES THE RECEIVER".
 const callLog: CallRecord[] = [];
 
 /** Value of the double's data property — read back through the Proxy below. */
 const DOUBLE_LABEL = "receiver-checking-double";
 
-/**
- * True only for the double instance itself. `originalSelf` is a plain data
- * property, so reading it off a foreign object yields `undefined` instead of
- * throwing — and reading it THROUGH the counting Proxy yields the instance
- * while `receiver` is the proxy, which is precisely the mismatch a real KV
- * binding rejects.
- */
+// True only for the double instance itself (a proxy receiver reads `originalSelf` as the instance).
+// See the header → "HOW THE DOUBLE OBSERVES THE RECEIVER".
 function isOriginalReceiver(receiver: unknown): boolean {
   return (
     typeof receiver === "object" &&
@@ -62,22 +76,16 @@ function isOriginalReceiver(receiver: unknown): boolean {
   );
 }
 
-/**
- * Records the call, THEN models the host-object receiver check. Recording
- * first is what lets the oracle self-test below prove the check can actually
- * fire rather than passing vacuously.
- */
+// Records the call, THEN models the host-object receiver check — recording first lets the
+// oracle self-test below prove the check can actually fire rather than passing vacuously.
 function record(method: string, args: unknown[], receiver: unknown): void {
   const thisWasOriginal = isOriginalReceiver(receiver);
   callLog.push({ method, args, thisWasOriginal });
   if (!thisWasOriginal) throw new TypeError("Illegal invocation");
 }
 
-/**
- * A KV stand-in that behaves like the platform binding in the ONE dimension
- * mockKv.ts cannot: its methods live on the prototype and reject a foreign
- * `this`. It stores nothing — every method answers with a fixed value.
- */
+// KV stand-in whose PROTOTYPE methods reject a foreign `this`, as the platform binding does;
+// it stores nothing. See the header → "HOW THE DOUBLE OBSERVES THE RECEIVER".
 class ReceiverCheckingKv {
   /** Identity witness for `isOriginalReceiver`. */
   readonly originalSelf: ReceiverCheckingKv;
@@ -85,10 +93,8 @@ class ReceiverCheckingKv {
   /** Non-function property, for the pass-through case. */
   readonly namespaceLabel = DOUBLE_LABEL;
 
-  /**
-   * Fixed return values with STABLE identities: a test can then assert the
-   * Proxy handed back this very object and wrapped nothing around it.
-   */
+  // Fixed return values with STABLE identities: a test can assert the Proxy
+  // handed back this very object and wrapped nothing around it.
   readonly results = {
     get: Promise.resolve("v"),
     getWithMetadata: Promise.resolve({
@@ -120,9 +126,8 @@ class ReceiverCheckingKv {
 
   put(...args: unknown[]): Promise<void> {
     record("put", args, this);
-    // Real KV signals a failed write by REJECTING, never by throwing
-    // synchronously, so the "billed even when it fails" case exercises the
-    // shape production actually sees.
+    // Real KV signals a failed write by REJECTING, never by throwing synchronously,
+    // so the "billed even when it fails" case exercises the shape production sees.
     if (this.putFailure !== null) return Promise.reject(this.putFailure);
     return this.results.put;
   }
@@ -195,9 +200,8 @@ const METHOD_CASES: MethodCase[] = [
     invoke: (kv) => kv.delete("k"),
   },
   {
-    // THE row the fix turns on: `list` is UNCOUNTED, and the old trap returned
-    // uncounted methods unwrapped — this call then ran with the proxy as `this`
-    // and threw `TypeError: Illegal invocation` against a real binding.
+    // THE row the fix turns on: the old trap returned the UNCOUNTED `list` unwrapped, so it ran
+    // with the proxy as `this` and threw `TypeError: Illegal invocation` against a real binding.
     label: "list — the UNCOUNTED method",
     method: "list",
     args: [{ prefix: "k" }],

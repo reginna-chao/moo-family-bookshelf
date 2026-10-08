@@ -19,6 +19,216 @@ import {
 } from "../../src/middleware/rateLimit";
 import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
 
+/**
+ * Public shelves: the four authenticated write handlers (create / update /
+ * reset-token / delete), the anonymous `GET /api/public/:shareToken` read, the
+ * URL sanitize on both sides, the per-userId write ceiling, the expiry
+ * backstop and snapshot liveness. The pointer-key regression suite is
+ * `publicShelfPointer.test.ts`.
+ *
+ * Cover fixtures: `BEACON_HOST` is an attacker-controlled cover host. Every
+ * anonymous public-shelf visitor's browser fetches the cover URLs a snapshot
+ * carries, so an off-whitelist host that reaches a snapshot is a tracking
+ * beacon — the P0 the sanitize chokepoint (`buildSnapshot` in
+ * `src/services/publicShelf.ts`) guards. `CONTROL_COVER` is the whitelisted
+ * cover of book3 (shared), the control in every sanitize case: the chokepoint
+ * must blank ONLY the off-whitelist value, never scrub covers wholesale.
+ *
+ * Legacy seeding: `seedUserWithShelves` seeds the LEGACY shelf list —
+ * `user:{userId}.publicSharing` — with no auth token, for the suites that only
+ * exercise the public read path. No `publicshelves:{userId}` pointer key is
+ * written, so every case seeded this way pins the UN-MIGRATED owner: the read
+ * paths must fall back to this field (`resolvePublicShelves`) and keep such an
+ * owner's existing public links working until their first public-shelf write
+ * migrates them. Omit `shelves` entirely to seed a record with NO
+ * `publicSharing` block (the shape every account carries before it ever
+ * creates a public shelf); pass `[]` for a record whose shelves were all
+ * removed. It is needed because a snapshot is served only while the owner's
+ * shelf list still carries its shelfId under the SAME share token, with a
+ * deadline the snapshot does not OUTLIVE — see the liveness suite. A
+ * hand-seeded snapshot with no matching shelf list is an orphan and answers
+ * 404. `pointerShelves` returns the shelves the AUTHORITATIVE
+ * `publicshelves:{userId}` pointer key lists, or `null` when the user has
+ * never been migrated to it: since the lost-update fix, this key — not
+ * `user:{userId}` — is what the four write handlers write and what every
+ * reader resolves first, so assertions about "the shelf list after a write
+ * handler ran" belong there. An EMPTY pointer list is the "migrated, no
+ * shelves" state — it outranks any legacy field, which is what stops a later
+ * books save from re-listing a deleted shelf.
+ *
+ * Write-side sanitize (coverUrl): a `user:{id}` record written BEFORE the
+ * cover-host whitelist shipped can still carry an attacker-chosen coverUrl.
+ * The books write paths scrub it only on the owner's NEXT sync — but the three
+ * snapshot-minting public-shelf handlers hand that raw record straight to the
+ * snapshot writer, so without the sanitize inside `buildSnapshot` any of them
+ * could publish a fresh beaconing `public:{shareToken}` snapshot for a record
+ * whose owner never syncs books again. One case per minting handler; the
+ * books-sync refresh path is covered under "PUT /api/user/:id/books
+ * side-effect". WRITE side only: every case starts from a poisoned
+ * `user:{id}` record and pins that the snapshot is MINTED clean; the READ
+ * side — a snapshot already STORED poisoned, which no write path can reach any
+ * more — is the read-side scrub suite that follows each write-side one.
+ * `poisonStoredCover` writes an off-whitelist cover DIRECTLY into the stored
+ * `user:{userId}` record, bypassing every books handler — the shape of a
+ * record poisoned before the whitelist existed. It targets book1, which is
+ * SHARED and therefore a candidate for publication; book3 keeps CONTROL_COVER.
+ *
+ * Write-side sanitize (readmooUrl): twin of the coverUrl chokepoint suite for
+ * the OTHER attacker-controlled URL field. A `user:{id}` record written BEFORE
+ * the Readmoo domain whitelist shipped can still carry an off-whitelist
+ * `readmooUrl`, which the PWA renders as a clickable `<a href>` — a phishing /
+ * arbitrary-redirect lure served to anonymous strangers under a legitimate
+ * book title. The three snapshot-minting handlers hand `buildSnapshot` a RAW
+ * record read, so without the sanitize inside it any of them would publish a
+ * fresh poisoned snapshot for a record whose owner never syncs books again.
+ * `poisonStoredReadmooUrl` mirrors `poisonStoredCover` for the link (book3
+ * keeps its whitelisted link). The chokepoint sanitizes the two URL fields
+ * independently: a blanked link must not take the book's legitimate cover
+ * down with it; the expected cover is read back off the shared fixture so the
+ * two cannot drift.
+ *
+ * Chokepoint proofs (both write-side suites): the handler writes no books
+ * record, so the poison is still sitting in `user:{id}` — the snapshot is
+ * clean because of the chokepoint, not because something scrubbed KV first.
+ * The update case checks the new title to prove the snapshot really was
+ * rebuilt from the poisoned record — a handler that skipped the rewrite would
+ * leave the pre-poison snapshot and pass the URL assertions for the wrong
+ * reason.
+ *
+ * Read-side scrub (coverUrl): read-side twin of the write-side suite, and not
+ * a duplicate of it: the write-side chokepoint only governs snapshots minted
+ * AFTER the whitelist shipped. One minted BEFORE it keeps its attacker-chosen
+ * coverUrl until the shelf is refreshed — and a PERMANENT snapshot has no TTL
+ * and may never be refreshed at all, so it would beacon every anonymous
+ * visitor indefinitely. The PWA's CSP `img-src` does not close that:
+ * `_headers` only takes effect on a host that parses it, and self-hosting the
+ * PWA elsewhere is a documented selling point. So the scrub happens on the way
+ * out, as a response transform: the handler keeps its zero-KV-write invariant
+ * and the stored snapshot is NOT repaired.
+ *
+ * Read-side scrub (readmooUrl): the same argument for the link — a PERMANENT
+ * snapshot minted before the whitelist would keep offering anonymous visitors
+ * a clickable lure indefinitely, and no CSP substitutes for this one:
+ * `img-src` never constrained a navigation.
+ *
+ * Read-side fixtures (both scrub suites): `storedBooks` is the books the
+ * STORED snapshot carries — one per URL shape the scrub has to answer for:
+ * book1 poisoned before the whitelist existed, book3 whitelisted (the control
+ * that must survive byte-identical), and a scraper placeholder with an empty
+ * value. It is derived from the shared fixture, so a `BookEntry` field change
+ * breaks there too. `seedPoisonedSnapshot` seeds the poisoned PERMANENT
+ * snapshot DIRECTLY into `public:{shareToken}`, bypassing every write path on
+ * purpose: `buildSnapshot` would have blanked the URL, so no handler alive
+ * today can produce this state — only a snapshot minted before the whitelist
+ * shipped carries it. The pointer key is seeded alongside it because the
+ * liveness guard 404s any snapshot the owner's CURRENT shelf list does not
+ * back; without it the request would stop at that guard and never reach the
+ * scrub, passing the "no beacon / phishing host in the body" assertions for
+ * entirely the wrong reason. Anti-tautology anchor: the response is clean
+ * because THIS handler scrubbed it, not because something rewrote KV first. A
+ * lazy repair write would also hand an anonymous stranger a key to have
+ * written. (DEV_MODE elides the per-IP counter put — see the scope caveat in
+ * `helpers/kvOps.ts`; the trail is the handler's own writes.)
+ *
+ * Per-userId write ceiling: the four authenticated write handlers share ONE
+ * per-userId counter, so a single account cannot drain the Worker's daily KV
+ * write quota by rotating source addresses — reset-token alone costs 4 KV
+ * operations per call. These cases run WITHOUT DEV_MODE, which every other
+ * case in this file sets: DEV_MODE short-circuits `enforcePerUserRateLimit`,
+ * so the ceiling would never fire. Setup that must not spend the budget still
+ * goes through the DEV_MODE helpers on purpose. `PUBLIC_SHELF_WRITE_LIMIT` is
+ * the very options object the four `enforcePerUserRateLimit` call sites in
+ * `src/routes/publicShelf.ts` spread, imported rather than copied — so the
+ * boundary cases (last write admitted, next one refused) track any change to
+ * the ceiling instead of silently drifting from it; the counter KEY is
+ * likewise always derived through the production key builder
+ * (`peekPerUserRateLimit`). The suite's `prodRequest` is `request` WITHOUT
+ * `DEV_MODE`, so the live limiters run — and WITH the Rate Limiting bindings
+ * a production deploy carries, so the per-IP tier is counted by the platform
+ * instead of falling back to a KV counter; the `public-shelf` ceiling under
+ * test is hourly, so it has no binding at all and stays on KV by design. Its
+ * `WRITE_ENDPOINTS` table holds the four write endpoints of USER_ID, each
+ * acting on an existing shelf; `token` is a parameter so the same table can
+ * drive the ceiling cases and the auth-ordering cases (no token → 401, someone
+ * else's token → 403).
+ *
+ * Non-object bodies (#239): a JSON body that parses but is not an object
+ * carries no fields, so create and update read it as `{}` — before that, a
+ * bare `null` threw on `body.title` and answered 500. The rows are the JSON
+ * spellings of every non-object value; the response must equal the `{}`
+ * body's, exactly.
+ *
+ * Expiry backstop: KV TTL is the primary expiry mechanism, but a snapshot can
+ * outlive its shelf (e.g. reset-token's final delete failed) — and this mock
+ * KV never expires a key at all, which is exactly the orphan situation the
+ * handler's own `expiresAt` check has to answer for. The suite's
+ * `seedSnapshot` seeds a snapshot AND the live shelf backing it, so every row
+ * isolates the `expiresAt` boundary: with a live shelf, a 404 can only come
+ * from the deadline, never from the liveness guard (which would 404 a
+ * permanent snapshot whose shelf is gone — see the liveness suite).
+ *
+ * Snapshot liveness (legacy owner): a snapshot can outlive the shelf it
+ * belongs to — its share token is rotated, its shelf deleted, or the whole
+ * account removed while the `public:` key survives a failed cleanup write. For
+ * a PERMANENT snapshot (`expiresAt: null`) nothing else can ever retire it —
+ * no KV TTL, no deadline — so it would stay publicly readable forever. The
+ * handler therefore validates EVERY surviving snapshot against the owner's
+ * CURRENT shelf list on read (since the pointer-key fix; it used to skip
+ * time-limited ones) and answers exactly like a token that never existed.
+ * Every case in that suite seeds the shelf list through the LEGACY
+ * `user:{userId}.publicSharing` field and writes NO pointer key, so the whole
+ * describe doubles as the un-migrated owner's coverage: their links must keep
+ * resolving through the fallback, at the documented cost of one extra
+ * `user:{userId}` read per hit.
+ *
+ * Liveness fixtures: `convertedShelfEntry` is the SAME shelf after the owner
+ * converted it to time-limited — identical shelfId and share token, only a
+ * deadline added; the deadline is in the FUTURE on purpose (the shelf is
+ * perfectly alive), so a 404 can only come from the permanent snapshot
+ * contradicting the record, never from expiry. That is the one orphan the
+ * record still points straight at: reached when the update handler rewrote
+ * the record to time-limited and its snapshot rewrite failed, leaving a
+ * TTL-less permanent snapshot under the live token — which would otherwise
+ * outlive, and contradict, the owner's own setting. `timedShelfEntry` is a
+ * time-limited shelf whose deadline the CALLER pins, so the shelf entry and
+ * the snapshot it backs can carry the byte-same `expiresAt`. The guard is
+ * MONOTONIC rather than strict: an equal — or earlier — snapshot deadline is
+ * live, while one that OUTLIVES the shelf answers 404, which is what the
+ * "converted to time-limited" orphan row (permanent snapshot, time-limited
+ * shelf) relies on; the four-way table lives in `publicShelfPointer.test.ts`.
+ * `ORPHAN_CASES` lists every way a permanent snapshot can outlive the shelf it
+ * belongs to; the snapshot itself is identical in all of them — only the
+ * owner's record differs, which is exactly what the guard reads. The read
+ * path stays side-effect free: a stranger must never be able to drive a KV
+ * write, so the dead snapshot is refused, not cleaned up (handler scope only —
+ * see `watchKvOps`).
+ *
+ * Liveness, migrated and time-limited: when the update handler's snapshot
+ * rewrite SUCCEEDS on a permanent → time-limited conversion, the stored
+ * snapshot carries the new deadline, so the liveness guard is out of the
+ * picture and the conversion is invisible to readers — driven through the
+ * API, not hand-seeded, so a handler that stopped rewriting the snapshot
+ * fails. That owner IS migrated (the create handler wrote the pointer key), so
+ * the guard resolves the shelf list from `publicshelves:{id}` alone and never
+ * falls back to the books record — the guard now runs for a time-limited
+ * snapshot too, and the pinned read trail is what it costs. The old guard
+ * skipped time-limited snapshots entirely; it now validates every surviving
+ * one: with the un-migrated owner's list seeded and LIVE, the answer is still
+ * 200 and only the read trail shows the guard ran. A deliberately pinned
+ * behaviour change: a time-limited snapshot with a live deadline and no shelf
+ * list backing it at all was admitted by the old permanent-only guard until
+ * KV TTL / expiresAt eventually retired it; the guard now covers every
+ * snapshot, so it is dead on arrival.
+ *
+ * Books-sync refresh (scope, named honestly): the books-side coverUrl case
+ * covers the REFRESH path only — a poisoned cover arriving in a PUT body,
+ * which `parseBooks` already blanks before the record is stored, so the
+ * refreshed snapshot inherits a clean value. It is defence in depth rather
+ * than the chokepoint's own failing check: a record poisoned BEFORE the
+ * whitelist shipped never passes through there, and is covered by the "Public
+ * snapshot coverUrl sanitize" suite.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -43,20 +253,13 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/**
- * An attacker-controlled cover host. Every anonymous public-shelf visitor's
- * browser fetches the cover URLs a snapshot carries, so an off-whitelist host
- * that reaches a snapshot is a tracking beacon — the P0 the sanitize chokepoint
- * (`buildSnapshot` in `src/services/publicShelf.ts`) guards.
- */
+/** An attacker-controlled cover host — a tracking beacon if it reaches a snapshot.
+ *  See the header → "Cover fixtures". */
 const BEACON_HOST = "evil.example.com";
 const BEACON_COVER = `https://${BEACON_HOST}/beacon.gif`;
 
-/**
- * Whitelisted cover of book3 (shared). Used as the control in every sanitize
- * case: the chokepoint must blank ONLY the off-whitelist value, never scrub
- * covers wholesale.
- */
+/** Whitelisted cover of book3 (shared): the control in every sanitize case.
+ *  See the header → "Cover fixtures". */
 const CONTROL_COVER = "https://cdn.readmoo.com/cover3.jpg";
 
 function sampleBooks(): UserBooksRecord["books"] {
@@ -106,24 +309,8 @@ async function seedUser(userId: string, token: string) {
   await seedAuthToken(kv, userId, { token });
 }
 
-/**
- * Seed the LEGACY shelf list — `user:{userId}.publicSharing` — with no auth
- * token, for the suites that only exercise the public read path.
- *
- * No `publicshelves:{userId}` pointer key is written, so every case seeded this
- * way pins the UN-MIGRATED owner: the read paths must fall back to this field
- * (`resolvePublicShelves`) and keep such an owner's existing public links
- * working until their first public-shelf write migrates them.
- *
- * Omit `shelves` entirely to seed a record with NO `publicSharing` block (the
- * shape every account carries before it ever creates a public shelf); pass `[]`
- * for a record whose shelves were all removed.
- *
- * Needed because a snapshot is served only while the owner's shelf list still
- * carries its shelfId under the SAME share token, with a deadline the snapshot
- * does not OUTLIVE — see the liveness suite below. A hand-seeded snapshot with
- * no matching shelf list is an orphan and answers 404.
- */
+/** Seed the LEGACY shelf list (no pointer key ⇒ an UN-MIGRATED owner); omit
+ *  `shelves` for no `publicSharing` block. See the header → "Legacy seeding". */
 async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
   const record: UserBooksRecord = {
     schemaVersion: 1,
@@ -136,14 +323,8 @@ async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
 }
 
-/**
- * The shelves the AUTHORITATIVE `publicshelves:{userId}` pointer key lists, or
- * `null` when the user has never been migrated to it.
- *
- * Since the lost-update fix, this key — not `user:{userId}` — is what the four
- * public-shelf write handlers write and what every reader resolves first, so
- * assertions about "the shelf list after a write handler ran" belong here.
- */
+/** The shelves the AUTHORITATIVE pointer key lists, or `null` if never migrated.
+ *  See the header → "Legacy seeding". */
 async function pointerShelves(userId: string): Promise<PublicShelf[] | null> {
   const pointer = await kv.get<PublicShelvesRecord>(
     kvKeys.publicShelves(userId),
@@ -508,29 +689,11 @@ describe("POST reset-token", () => {
 });
 
 // ── Public snapshot coverUrl sanitize (buildSnapshot chokepoint) ─
-//
-// A `user:{id}` record written BEFORE the cover-host whitelist shipped can
-// still carry an attacker-chosen coverUrl. The books write paths scrub it only
-// on the owner's NEXT sync — but the three snapshot-minting public-shelf
-// handlers hand that raw record straight to the snapshot writer, so without the
-// sanitize inside `buildSnapshot` (`src/services/publicShelf.ts`) any of them
-// could publish a fresh beaconing `public:{shareToken}` snapshot for a record
-// whose owner never syncs books again. One case per minting handler; the
-// books-sync refresh path is covered under "PUT /api/user/:id/books
-// side-effect" below.
-//
-// WRITE side only: every case here starts from a poisoned `user:{id}` record
-// and pins that the snapshot is MINTED clean. The READ side — a snapshot
-// already STORED poisoned, which no write path can reach any more — is the
-// suite immediately after this one.
+// WRITE side only. See the header → "Write-side sanitize (coverUrl)".
 
 describe("Public snapshot coverUrl sanitize", () => {
-  /**
-   * Write an off-whitelist cover DIRECTLY into the stored `user:{userId}`
-   * record, bypassing every books handler — the shape of a record poisoned
-   * before the whitelist existed. Targets book1, which is SHARED and therefore
-   * a candidate for publication; book3 keeps CONTROL_COVER.
-   */
+  /** Poison book1's stored cover DIRECTLY, bypassing every books handler.
+   *  See the header → "Write-side sanitize (coverUrl)". */
   async function poisonStoredCover(userId: string): Promise<void> {
     const record = await kv.get<UserBooksRecord>(kvKeys.user(userId), "json");
     if (!record) throw new Error(`no seeded books record for ${userId}`);
@@ -582,9 +745,8 @@ describe("Public snapshot coverUrl sanitize", () => {
     expectSanitized(await readSnapshot(shareToken));
     await expectPublicReadClean(shareToken);
 
-    // The handler writes no books record, so the poison is still sitting in
-    // `user:{id}`: the snapshot is clean because of the chokepoint, not because
-    // something scrubbed KV first.
+    // The poison is still in `user:{id}`: clean because of the chokepoint.
+    // See the header → "Chokepoint proofs".
     const record = await kv.get<UserBooksRecord>(kvKeys.user(USER_ID), "json");
     const stored = record?.books.find((b) => b.bookId === "book1");
     expect(stored?.coverUrl).toBe(BEACON_COVER);
@@ -607,9 +769,8 @@ describe("Public snapshot coverUrl sanitize", () => {
     expect(res.status).toBe(200);
 
     const snapshot = await readSnapshot(shareToken);
-    // Proves the snapshot really was rebuilt from the poisoned record — a
-    // handler that skipped the rewrite would leave the pre-poison snapshot and
-    // pass the cover assertions for the wrong reason.
+    // Proves the snapshot was rebuilt from the poisoned record.
+    // See the header → "Chokepoint proofs".
     expect(snapshot.title).toBe("新標題");
     expectSanitized(snapshot);
     await expectPublicReadClean(shareToken);
@@ -639,16 +800,7 @@ describe("Public snapshot coverUrl sanitize", () => {
 });
 
 // ── GET /api/public/:shareToken — coverUrl read-side scrub ────
-//
-// Read-side twin of the suite above, and not a duplicate of it: the write-side
-// chokepoint only governs snapshots minted AFTER the whitelist shipped. One
-// minted BEFORE it keeps its attacker-chosen coverUrl until the shelf is
-// refreshed — and a PERMANENT snapshot has no TTL and may never be refreshed at
-// all, so it would beacon every anonymous visitor indefinitely. The PWA's CSP
-// `img-src` does not close that: `_headers` only takes effect on a host that
-// parses it, and self-hosting the PWA elsewhere is a documented selling point.
-// So the scrub happens on the way out, as a response transform: the handler
-// keeps its zero-KV-write invariant and the stored snapshot is NOT repaired.
+// See the header → "Read-side scrub (coverUrl)".
 
 describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
   const SHARE_TOKEN = "beadbeadbeadbeadbeadbeadbeadbead";
@@ -657,13 +809,8 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
   const CREATED_AT = Date.parse("2026-02-01T00:00:00.000Z");
   const NO_COVER_BOOK_ID = "book-nocover";
 
-  /**
-   * The books the STORED snapshot carries — one per cover shape the scrub has
-   * to answer for: book1 poisoned before the whitelist existed, book3
-   * whitelisted (the control that must survive byte-identical), and a scraper
-   * placeholder with an empty cover. Derived from the shared fixture, so a
-   * `BookEntry` field change breaks here too.
-   */
+  /** The stored snapshot's books: poisoned book1, control book3, an empty cover.
+   *  See the header → "Read-side fixtures". */
   function storedBooks(): BookEntry[] {
     const shared = sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE);
     const poisoned = shared.find((b) => b.bookId === "book1");
@@ -679,17 +826,8 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
     ];
   }
 
-  /**
-   * Seed the poisoned PERMANENT snapshot DIRECTLY into `public:{shareToken}`,
-   * bypassing every write path on purpose: `buildSnapshot` would have blanked
-   * the cover, so no handler alive today can produce this state — only a
-   * snapshot minted before the whitelist shipped carries it.
-   *
-   * The pointer key is seeded alongside it because the liveness guard 404s any
-   * snapshot the owner's CURRENT shelf list does not back; without it the
-   * request would stop at that guard and never reach the scrub, passing the
-   * "no beacon host in the body" assertions for entirely the wrong reason.
-   */
+  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key backing it.
+   *  See the header → "Read-side fixtures". */
   async function seedPoisonedSnapshot(): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
@@ -810,31 +948,15 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
     const { json } = await fetchPublicShelf();
 
     expect(servedBook(json, "book1")?.coverUrl).toBe("");
-    // Anti-tautology anchor: the response is clean because THIS handler
-    // scrubbed it, not because something rewrote KV first. A lazy repair write
-    // would also hand an anonymous stranger a key to have written. (DEV_MODE
-    // elides the per-IP counter put — see the scope caveat in
-    // `helpers/kvOps.ts`; this trail is the handler's own writes.)
+    // Anti-tautology anchor: clean because THIS handler scrubbed it, KV untouched.
+    // See the header → "Read-side fixtures".
     expect(await storedCover("book1")).toBe(BEACON_COVER);
     expect(ops.writeTrail()).toEqual([]);
   });
 });
 
 // ── Public snapshot readmooUrl sanitize (buildSnapshot chokepoint) ─
-//
-// Twin of the coverUrl chokepoint suite above for the OTHER attacker-controlled
-// URL field. A `user:{id}` record written BEFORE the Readmoo domain whitelist
-// shipped can still carry an off-whitelist `readmooUrl`, which the PWA renders
-// as a clickable `<a href>` — a phishing / arbitrary-redirect lure served to
-// anonymous strangers under a legitimate book title. The three snapshot-minting
-// handlers hand `buildSnapshot` a RAW record read, so without the sanitize
-// inside it any of them would publish a fresh poisoned snapshot for a record
-// whose owner never syncs books again.
-//
-// WRITE side only: every case starts from a poisoned `user:{id}` record and
-// pins that the snapshot is MINTED clean. The READ side — an already-STORED
-// poisoned snapshot, which no write path can reach any more — is the suite
-// after this one.
+// WRITE side only. See the header → "Write-side sanitize (readmooUrl)".
 
 describe("Public snapshot readmooUrl sanitize", () => {
   const PHISHING_HOST = "phish.example.com";
@@ -842,12 +964,8 @@ describe("Public snapshot readmooUrl sanitize", () => {
   /** book3's whitelisted link from `sampleBooks()` — the control that survives. */
   const CONTROL_LINK = "https://readmoo.com/book/book3";
 
-  /**
-   * Write an off-whitelist book link DIRECTLY into the stored `user:{userId}`
-   * record, bypassing every books handler — the shape of a record poisoned
-   * before the whitelist existed. Targets book1, which is SHARED and therefore
-   * a candidate for publication; book3 keeps its whitelisted link.
-   */
+  /** Poison book1's stored link DIRECTLY, bypassing every books handler.
+   *  See the header → "Write-side sanitize (readmooUrl)". */
   async function poisonStoredReadmooUrl(userId: string): Promise<void> {
     const record = await kv.get<UserBooksRecord>(kvKeys.user(userId), "json");
     if (!record) throw new Error(`no seeded books record for ${userId}`);
@@ -899,9 +1017,8 @@ describe("Public snapshot readmooUrl sanitize", () => {
     expectSanitized(await readSnapshot(shareToken));
     await expectPublicReadClean(shareToken);
 
-    // The handler writes no books record, so the poison is still sitting in
-    // `user:{id}`: the snapshot is clean because of the chokepoint, not because
-    // something scrubbed KV first.
+    // The poison is still in `user:{id}`: clean because of the chokepoint.
+    // See the header → "Chokepoint proofs".
     const record = await kv.get<UserBooksRecord>(kvKeys.user(USER_ID), "json");
     const stored = record?.books.find((b) => b.bookId === "book1");
     expect(stored?.readmooUrl).toBe(PHISHING_LINK);
@@ -924,9 +1041,8 @@ describe("Public snapshot readmooUrl sanitize", () => {
     expect(res.status).toBe(200);
 
     const snapshot = await readSnapshot(shareToken);
-    // Proves the snapshot really was rebuilt from the poisoned record — a
-    // handler that skipped the rewrite would leave the pre-poison snapshot and
-    // pass the link assertions for the wrong reason.
+    // Proves the snapshot was rebuilt from the poisoned record.
+    // See the header → "Chokepoint proofs".
     expect(snapshot.title).toBe("新標題");
     expectSanitized(snapshot);
     await expectPublicReadClean(shareToken);
@@ -961,9 +1077,8 @@ describe("Public snapshot readmooUrl sanitize", () => {
     const { json } = await createShelf(USER_ID, AUTH_TOKEN);
     const snapshot = await readSnapshot(json.data.shelf.shareToken);
 
-    // The chokepoint sanitizes the two URL fields independently: a blanked link
-    // must not take the book's legitimate cover down with it. The expected
-    // cover is read back off the shared fixture so the two cannot drift.
+    // The two URL fields are sanitized independently; the cover comes off the
+    // fixture. See the header → "Write-side sanitize (readmooUrl)".
     const fixtureCover = sampleBooks().find(
       (b) => b.bookId === "book1",
     )?.coverUrl;
@@ -976,16 +1091,7 @@ describe("Public snapshot readmooUrl sanitize", () => {
 });
 
 // ── GET /api/public/:shareToken — readmooUrl read-side scrub ──
-//
-// Read-side twin of the suite above, and not a duplicate of it: the write-side
-// chokepoint only governs snapshots minted AFTER the whitelist shipped. One
-// minted BEFORE it keeps its attacker-chosen `readmooUrl` until the shelf is
-// refreshed — and a PERMANENT snapshot has no TTL and may never be refreshed at
-// all, so it would keep offering anonymous visitors a clickable lure
-// indefinitely. No CSP substitutes for this one: `img-src` never constrained a
-// navigation. So the scrub happens on the way out as a response transform, the
-// handler keeps its zero-KV-write invariant, and the stored snapshot is NOT
-// repaired.
+// See the header → "Read-side scrub (readmooUrl)".
 
 describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
   const SHARE_TOKEN = "cafecafecafecafecafecafecafecafe";
@@ -999,13 +1105,8 @@ describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
   /** book3's whitelisted link from `sampleBooks()` — the control that survives. */
   const CONTROL_LINK = "https://readmoo.com/book/book3";
 
-  /**
-   * The books the STORED snapshot carries — one per link shape the scrub has to
-   * answer for: book1 poisoned before the whitelist existed, book3 whitelisted
-   * (the control that must survive byte-identical), and a scraper placeholder
-   * with an empty link. Derived from the shared fixture, so a `BookEntry` field
-   * change breaks here too.
-   */
+  /** The stored snapshot's books: poisoned book1, control book3, an empty link.
+   *  See the header → "Read-side fixtures". */
   function storedBooks(): BookEntry[] {
     const shared = sampleBooks().filter((b) => b.isShared === BoolFlag.TRUE);
     const poisoned = shared.find((b) => b.bookId === "book1");
@@ -1021,17 +1122,8 @@ describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
     ];
   }
 
-  /**
-   * Seed the poisoned PERMANENT snapshot DIRECTLY into `public:{shareToken}`,
-   * bypassing every write path on purpose: `buildSnapshot` would have blanked
-   * the link, so no handler alive today can produce this state — only a
-   * snapshot minted before the whitelist shipped carries it.
-   *
-   * The pointer key is seeded alongside it because the liveness guard 404s any
-   * snapshot the owner's CURRENT shelf list does not back; without it the
-   * request would stop at that guard and never reach the scrub, passing the
-   * "no phishing host in the body" assertions for entirely the wrong reason.
-   */
+  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key backing it.
+   *  See the header → "Read-side fixtures". */
   async function seedPoisonedSnapshot(): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
@@ -1152,11 +1244,8 @@ describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
     const { json } = await fetchPublicShelf();
 
     expect(servedBook(json, "book1")?.readmooUrl).toBe("");
-    // Anti-tautology anchor: the response is clean because THIS handler
-    // scrubbed it, not because something rewrote KV first. A lazy repair write
-    // would also hand an anonymous stranger a key to have written. (DEV_MODE
-    // elides the per-IP counter put — see the scope caveat in
-    // `helpers/kvOps.ts`; this trail is the handler's own writes.)
+    // Anti-tautology anchor: clean because THIS handler scrubbed it, KV untouched.
+    // See the header → "Read-side fixtures".
     expect(await storedLink("book1")).toBe(PHISHING_LINK);
     expect(ops.writeTrail()).toEqual([]);
   });
@@ -1182,9 +1271,8 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
 
     expect(res.status).toBe(204);
 
-    // An EMPTY pointer list is the "migrated, no shelves" state — it outranks
-    // any legacy field, which is what stops a later books save from re-listing
-    // the deleted shelf.
+    // An EMPTY pointer list ("migrated, no shelves") outranks any legacy field.
+    // See the header → "Legacy seeding".
     expect(await pointerShelves(USER_ID)).toEqual([]);
 
     // The books record is not a shelf-list writer anymore: byte-unchanged.
@@ -1211,25 +1299,10 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId", () => {
 });
 
 // ── Per-userId public-shelf write ceiling ─────────────────────
-//
-// The four authenticated write handlers (create / update / reset-token /
-// delete) share ONE per-userId counter, so a single account cannot drain the
-// Worker's daily KV write quota by rotating source addresses — reset-token
-// alone costs 4 KV operations per call.
-//
-// These cases run WITHOUT DEV_MODE, which every other case in this file sets:
-// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
-// fire. Setup that must not spend the budget still goes through the DEV_MODE
-// helpers on purpose.
+// See the header → "Per-userId write ceiling".
 
-/**
- * The very options object the four `enforcePerUserRateLimit` call sites in
- * `src/routes/publicShelf.ts` spread, imported rather than copied — so the
- * boundary cases below (last write admitted, next one refused) track any change
- * to the ceiling instead of silently drifting from it. The counter KEY is
- * likewise always derived through the production key builder
- * (`peekPerUserRateLimit`).
- */
+/** The production ceiling options, imported rather than copied.
+ *  See the header → "Per-userId write ceiling". */
 const {
   scope: WRITE_SCOPE,
   max: WRITE_MAX,
@@ -1240,13 +1313,8 @@ const {
 const PINNED_WRITE_NOW = Date.parse("2026-01-01T00:30:00.000Z");
 
 describe("Public shelf per-userId write ceiling", () => {
-  /**
-   * Same as {@link request} but WITHOUT `DEV_MODE`, so the live limiters run —
-   * and WITH the Rate Limiting bindings a production deploy carries, so the
-   * per-IP tier is counted by the platform instead of falling back to a KV
-   * counter. The `public-shelf` ceiling under test is hourly: it has no binding
-   * at all and stays on KV by design.
-   */
+  /** {@link request} WITHOUT `DEV_MODE`, with the production bindings injected.
+   *  See the header → "Per-userId write ceiling". */
   async function prodRequest(
     method: string,
     path: string,
@@ -1309,11 +1377,8 @@ describe("Public shelf per-userId write ceiling", () => {
     });
   }
 
-  /**
-   * The four write endpoints of USER_ID, each acting on an existing shelf.
-   * `token` is a parameter so the same table can drive the ceiling cases and
-   * the auth-ordering cases (no token → 401, someone else's token → 403).
-   */
+  /** USER_ID's four write endpoints on an existing shelf; `token` lets one table
+   *  drive the ceiling and auth-ordering cases (401 / 403). */
   const WRITE_ENDPOINTS: {
     label: string;
     call: (shelfId: string, token?: string) => Promise<Response>;
@@ -1519,10 +1584,8 @@ describe("Public shelf per-userId write ceiling", () => {
     expect(await writesCharged(USER_ID)).toBe(1);
   });
 
-  // A JSON body that parses but is not an object carries no fields, so create
-  // and update read it as `{}` (#239) — before that, a bare `null` threw on
-  // `body.title` and answered 500. The rows are the JSON spellings of every
-  // non-object value; the response must equal the `{}` body's, exactly.
+  // Every non-object JSON body must answer exactly like `{}` (#239).
+  // See the header → "Non-object bodies".
   const NON_OBJECT_BODIES: [string, string][] = [
     ["null", "null"],
     ["a number", "5"],
@@ -1743,11 +1806,7 @@ describe("GET /api/public/:shareToken", () => {
 });
 
 // ── GET /api/public/:shareToken — expiry backstop ─────────────
-//
-// KV TTL is the primary expiry mechanism, but a snapshot can outlive its shelf
-// (e.g. reset-token's final delete failed) — and this mock KV never expires a
-// key at all, which is exactly the orphan situation the handler's own
-// `expiresAt` check has to answer for.
+// See the header → "Expiry backstop".
 
 describe("GET /api/public/:shareToken — expiry backstop", () => {
   const SHARE_TOKEN = "abcdef0123456789abcdef0123456789";
@@ -1766,12 +1825,8 @@ describe("GET /api/public/:shareToken — expiry backstop", () => {
     vi.useRealTimers();
   });
 
-  /**
-   * Seed a snapshot AND the live shelf backing it, so every row below isolates
-   * the `expiresAt` boundary: with a live shelf, a 404 can only come from the
-   * deadline, never from the permanent-shelf liveness guard (which would 404 a
-   * permanent snapshot whose shelf is gone — see the suite after this one).
-   */
+  /** Seed a snapshot AND its live shelf, so a 404 can only come from the deadline.
+   *  See the header → "Expiry backstop". */
   async function seedSnapshot(expiresAt: number | null): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
@@ -1873,21 +1928,7 @@ describe("GET /api/public/:shareToken — expiry backstop", () => {
 });
 
 // ── GET /api/public/:shareToken — snapshot liveness (legacy owner) ────
-//
-// A snapshot can outlive the shelf it belongs to: its share token is rotated,
-// its shelf deleted, or the whole account removed while the `public:` key
-// survives a failed cleanup write. For a PERMANENT snapshot (`expiresAt: null`)
-// nothing else can ever retire it — no KV TTL, no deadline — so it would stay
-// publicly readable forever. The handler therefore validates EVERY surviving
-// snapshot against the owner's CURRENT shelf list on read (since the pointer-key
-// fix; it used to skip time-limited ones) and answers exactly like a token that
-// never existed.
-//
-// Every case in this suite seeds the shelf list through the LEGACY
-// `user:{userId}.publicSharing` field and writes NO pointer key, so the whole
-// describe doubles as the un-migrated owner's coverage: their links must keep
-// resolving through the fallback, at the documented cost of one extra
-// `user:{userId}` read per hit.
+// See the header → "Snapshot liveness (legacy owner)".
 
 describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () => {
   const PERM_TOKEN = "1a2b3c4d5e6f70819a2b3c4d5e6f7081";
@@ -1928,12 +1969,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     };
   }
 
-  /**
-   * The SAME shelf after the owner converted it to time-limited: identical
-   * shelfId and share token, only a deadline added. The deadline is in the
-   * FUTURE on purpose — this shelf is perfectly alive, so a 404 can only come
-   * from the permanent snapshot contradicting the record, never from expiry.
-   */
+  /** The SAME shelf converted to time-limited, with a FUTURE deadline on purpose.
+   *  See the header → "Liveness fixtures". */
   function convertedShelfEntry(
     shelfId: string,
     shareToken: string,
@@ -1945,14 +1982,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     };
   }
 
-  /**
-   * A time-limited shelf whose deadline the CALLER pins, so the shelf entry and
-   * the snapshot it backs can carry the byte-same `expiresAt`. The guard is
-   * MONOTONIC rather than strict: an equal — or earlier — snapshot deadline is
-   * live, while one that OUTLIVES the shelf answers 404, which is what the
-   * "converted to time-limited" orphan row (permanent snapshot, time-limited
-   * shelf) relies on. The four-way table lives in `publicShelfPointer.test.ts`.
-   */
+  /** A time-limited shelf whose deadline the CALLER pins (the guard is MONOTONIC).
+   *  See the header → "Liveness fixtures". */
   function timedShelfEntry(
     shelfId: string,
     shareToken: string,
@@ -1965,11 +1996,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     vi.restoreAllMocks();
   });
 
-  /**
-   * Every way a permanent snapshot can outlive the shelf it belongs to. The
-   * snapshot itself is identical in all of them — only the owner's record
-   * differs, which is exactly what the guard reads.
-   */
+  /** Every way a permanent snapshot can outlive its shelf; only the owner's record
+   *  differs, which is exactly what the guard reads. */
   const ORPHAN_CASES: { label: string; seedRecord: () => Promise<void> }[] = [
     {
       label: "the owner's account was deleted",
@@ -1994,11 +2022,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
         seedUserWithShelves(USER_ID, [shelfEntry(OTHER_SHELF_ID, PERM_TOKEN)]),
     },
     {
-      // The one orphan the record still points straight at: same shelfId, same
-      // token, but the shelf is no longer permanent. Reached when the update
-      // handler rewrote the record to time-limited and its snapshot rewrite
-      // failed, leaving a TTL-less permanent snapshot under the live token —
-      // which would otherwise outlive, and contradict, the owner's own setting.
+      // The one orphan the record still points straight at (a failed rewrite).
+      // See the header → "Liveness fixtures".
       label: "the shelf was converted to time-limited",
       seedRecord: () =>
         seedUserWithShelves(USER_ID, [
@@ -2030,9 +2055,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
       expect(body).not.toContain(SNAPSHOT_TITLE);
       expect(body).not.toContain("Shared Book");
 
-      // Read path stays side-effect free: a stranger must never be able to
-      // drive a KV write, so the dead snapshot is refused, not cleaned up.
-      // (Handler scope only — see `watchKvOps`.)
+      // Read path stays side-effect free: refused, not cleaned up (handler scope).
+      // See the header → "Liveness fixtures".
       expect(ops.putKeys()).toEqual([]);
       expect(ops.deleteKeys()).toEqual([]);
       expect(await kv.get(kvKeys.publicShelf(PERM_TOKEN))).not.toBeNull();
@@ -2103,11 +2127,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
   });
 
   it("keeps serving a permanent shelf successfully converted to time-limited", async () => {
-    // The counterpart of the drift row above: when the update handler's
-    // snapshot rewrite SUCCEEDS, the stored snapshot carries the new deadline,
-    // so the liveness guard is out of the picture and the conversion is
-    // invisible to readers. Driven through the API, not hand-seeded, so a
-    // handler that stopped rewriting the snapshot fails here.
+    // Counterpart of the drift row: a SUCCESSFUL rewrite is invisible to readers.
+    // See the header → "Liveness, migrated and time-limited".
     await seedUser(USER_ID, AUTH_TOKEN);
     const { json: created } = await createShelf(USER_ID, AUTH_TOKEN, {
       expiresDays: null,
@@ -2134,10 +2155,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     const json = (await res.json()) as Json;
     expect(json.data.title).toBe("我的公開書櫃");
     expect(json.data.expiresAt).toBe(snapshot.expiresAt);
-    // This owner IS migrated (the create handler wrote the pointer key), so the
-    // liveness guard resolves the shelf list from `publicshelves:{id}` alone and
-    // never falls back to the books record — the guard now runs for a
-    // time-limited snapshot too, and this is what it costs.
+    // Migrated owner: the guard reads `publicshelves:{id}` alone — its whole cost.
+    // See the header → "Liveness, migrated and time-limited".
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(shareToken),
       kvKeys.publicShelves(USER_ID),
@@ -2145,9 +2164,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
   });
 
   it("validates a time-limited snapshot against an un-migrated owner's legacy list", async () => {
-    // The old guard skipped time-limited snapshots entirely; it now validates
-    // every surviving one. The shelf list is seeded and LIVE, so the answer is
-    // still 200 — only the read trail shows the guard ran.
+    // The list is LIVE, so 200 — only the read trail shows the guard ran.
+    // See the header → "Liveness, migrated and time-limited".
     const expiresAt = Date.now() + 7 * DAY_MS;
     await seedSnapshot(TIMED_TOKEN, expiresAt);
     await seedUserWithShelves(USER_ID, [
@@ -2185,10 +2203,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
   });
 
   it("refuses a time-limited orphan whose shelf is gone, which the permanent-only guard used to serve", async () => {
-    // Behaviour change pinned deliberately: this snapshot has a live deadline
-    // and no shelf list backing it at all. The old permanent-only guard admitted
-    // it until KV TTL / expiresAt eventually retired it; the guard now covers
-    // every snapshot, so it is dead on arrival.
+    // Behaviour change pinned deliberately: a live deadline, no shelf list ⇒ 404.
+    // See the header → "Liveness, migrated and time-limited".
     await seedSnapshot(TIMED_TOKEN, Date.now() + DAY_MS);
 
     const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
@@ -2243,12 +2259,8 @@ describe("PUT /api/user/:id/books side-effect", () => {
   });
 
   it("blanks an off-whitelist coverUrl on the books-sync snapshot refresh", async () => {
-    // Scope, named honestly: this covers the REFRESH path only — a poisoned
-    // cover arriving in a PUT body, which `parseBooks` already blanks before
-    // the record is stored, so the refreshed snapshot inherits a clean value.
-    // Defence in depth rather than the chokepoint's own failing check: a record
-    // poisoned BEFORE the whitelist shipped never passes through here, and is
-    // covered by the "Public snapshot coverUrl sanitize" suite above.
+    // REFRESH path only (`parseBooks` blanks the PUT body first): defence in depth.
+    // See the header → "Books-sync refresh".
     await seedUser(USER_ID, AUTH_TOKEN);
     const { json: created } = await createShelf(USER_ID, AUTH_TOKEN);
     const shareToken = created.data.shelf.shareToken;

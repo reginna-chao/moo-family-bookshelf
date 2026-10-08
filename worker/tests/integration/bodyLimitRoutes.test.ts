@@ -23,6 +23,15 @@ type Json = any;
  * sends NO Content-Length header (undici's Request does not add one), so the
  * guard buffers the body; `withContentLength` sets the header explicitly to the
  * real byte length, which takes the header branch.
+ *
+ * Realistic book: `realisticBook` is shaped like what the Extension scrapes —
+ * CJK title / author / category (3 bytes per char in UTF-8) and full-length
+ * cover / book URLs on Readmoo domains, so the write-path whitelist KEEPS them
+ * and the stored record is comparable to the input.
+ *
+ * PATCH companion: positive companion to the #233 regression — the size that
+ * PUT now saves is still over the default limit, so a route that did NOT get
+ * the 2MB limit (PATCH on the very same path) refuses it.
  */
 
 let kv: KVNamespace;
@@ -57,12 +66,8 @@ function send(method: string, path: string, body: string, opts?: SendOptions) {
   );
 }
 
-/**
- * A book shaped like what the Extension scrapes: CJK title / author / category
- * (3 bytes per char in UTF-8) and full-length cover / book URLs on Readmoo
- * domains, so the write-path whitelist KEEPS them and the stored record is
- * comparable to the input.
- */
+/** A scraped-shaped book (CJK text, whitelisted Readmoo URLs) the write path keeps.
+ *  See the header → "Realistic book". */
 function realisticBook(i: number) {
   const id = String(210000000000000 + i);
   return {
@@ -187,9 +192,8 @@ describe("other /api routes keep the 256KB default", () => {
   );
 
   it("rejects the same >256KB realistic shelf on PATCH that PUT accepts", async () => {
-    // Positive companion to the #233 regression: the size that PUT now saves
-    // is still over the default limit, so a route that did NOT get the 2MB
-    // limit — PATCH on the very same path — refuses it.
+    // #233 positive companion: PATCH on the same path keeps the 256KB default.
+    // See the header → "PATCH companion".
     const body = booksBody(LARGE_SHELF_COUNT);
 
     const res = await send("PATCH", BOOKS_PATH, body);

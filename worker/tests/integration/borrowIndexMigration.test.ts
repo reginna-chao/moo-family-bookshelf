@@ -31,6 +31,55 @@
  * DEV_MODE is on for every request here: rate limiting is not what these cases
  * are about, and its counters would add writes to the `watchKvOps` assertions
  * (see the scope caveat at the end of tests/helpers/kvOps.ts).
+ *
+ * Legacy migration: after the first write the legacy `borrow:{id}` value is
+ * NOT rewritten — it is a stale copy no reader consults; only its existence
+ * still matters, as the pointer. Its stale status is exactly what proves the
+ * index is now the truth.
+ *
+ * Orphan pointer: the record aged out of the history cap (or a delete failed
+ * after the trim), so the pointer resolves but the index has no entry. Same
+ * 404 as an unknown requestId — the response must not disclose that the id
+ * ever existed.
+ *
+ * Pointer/record mismatch: `OTHER_FAMILY_ID` is a DIFFERENT, equally
+ * well-formed familyId, used where a record has to claim a family other than
+ * the one whose index holds it. The point is the DISAGREEMENT, so the value
+ * must not also be malformed, or the pointer's own format guard would be what
+ * refused the request. The pointer says FAMILY_ID (that is where
+ * `seedNewIndex` writes it) while the record in FAMILY_ID's index claims the
+ * other family; one of the two is corrupt, and acting on it would rewrite THIS
+ * family's whole index from a record that says it belongs elsewhere.
+ *
+ * PENDING ceiling: PENDING records are exempt from the history cap — evicting
+ * one would strand a request the owner still has to answer — so they are the
+ * one part of the index a single member could otherwise grow without bound.
+ * The ceiling counts the CALLER's own PENDING records only (Inv-6: nobody
+ * else's traffic can spend a member's allowance), and it is checked AFTER
+ * membership and DUPLICATE_REQUEST, off the index read those already paid
+ * for. Its cases:
+ * - The boundary is ">= cap", so the request that brings the count TO the cap
+ *   must still succeed; without that case an off-by-one that refused at
+ *   cap - 1 would keep the refusal case green.
+ * - The ceiling spent by ALICE borrowing BOB's books must not refuse BOB's own
+ *   first request: keyed on the family (or on the target), BOB would be
+ *   refused by someone else's traffic — the Inv-6 failure mode.
+ * - A borrower who has FINISHED this many borrows is not holding anything
+ *   open, so nothing is blocked. Those records are terminal, but exactly AT
+ *   the history cap, so the create's own write evicts none of them either.
+ * - A finished transaction is not a duplicate — the same book can be borrowed
+ *   again. That is the positive companion to DUPLICATE_REQUEST: without it, a
+ *   check that refused everything would keep the refusal case green.
+ *
+ * Departure shape: the CANCELLATION half of the settlement stays observable on
+ * the record the departing member merely OWNED, since the one they borrowed is
+ * purged before any reader could see its status. When ALICE borrowed BOB's
+ * book and already returned it, BOB leaving is only the OWNER: nothing to
+ * cancel (the record is terminal) and nothing to purge (it is ALICE's own
+ * history), so the settlement has no work and an un-migrated family must not
+ * be rewritten for no reason. The companion flips ONE field — who BORROWED —
+ * so the same removal has work to do; without it, "legacy stays legacy" could
+ * stay green on a handler that had stopped writing the index at all.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -53,12 +102,8 @@ import { ALICE, BOB } from "../helpers/ids";
 type Json = any;
 
 const FAMILY_ID = "abcd-1234";
-/**
- * A DIFFERENT, equally well-formed familyId. Used where a record has to claim
- * a family other than the one whose index holds it: the point is the
- * DISAGREEMENT, so the value must not also be malformed, or the pointer's own
- * format guard would be what refused the request.
- */
+/** A DIFFERENT, equally well-formed familyId, so only the disagreement is tested.
+ *  See the header → "Pointer/record mismatch". */
 const OTHER_FAMILY_ID = "wxyz-9876";
 const BASE_MS = Date.parse("2026-03-01T12:00:00.000Z");
 
@@ -162,9 +207,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// A legacy family keeps working, and a GET never migrates it
-// ===========================================================================
+// ===== A legacy family keeps working, and a GET never migrates it =====
 
 describe("GET /api/family/:id/borrow on an un-migrated family", () => {
   it("returns the same records as a migrated family and writes nothing", async () => {
@@ -197,9 +240,7 @@ describe("GET /api/family/:id/borrow on an un-migrated family", () => {
   });
 });
 
-// ===========================================================================
-// The first WRITE migrates — and leaves the legacy records alone
-// ===========================================================================
+// ===== The first WRITE migrates — and leaves the legacy records alone =====
 
 describe("PATCH /api/borrow/:requestId on an un-migrated family", () => {
   it("migrates the index and leaves the legacy borrow record byte-identical", async () => {
@@ -226,9 +267,8 @@ describe("PATCH /api/borrow/:requestId on an un-migrated family", () => {
     expect(index[0].status).toBe(BorrowStatus.LENT);
     expect(index[1].status).toBe(BorrowStatus.PENDING);
 
-    // The legacy `borrow:{id}` value is NOT rewritten — it is a stale copy no
-    // reader consults; only its existence still matters, as the pointer. Its
-    // stale status is exactly what proves the index is now the truth.
+    // The legacy `borrow:{id}` value is NOT rewritten; its stale status proves the
+    // index is now the truth. See the header → "Legacy migration".
     expect(await kv.get(kvKeys.borrow(records[0].requestId))).toBe(
       legacyBefore,
     );
@@ -240,9 +280,7 @@ describe("PATCH /api/borrow/:requestId on an un-migrated family", () => {
   });
 });
 
-// ===========================================================================
-// A pointer without an index entry is "no such request"
-// ===========================================================================
+// ===== A pointer without an index entry is "no such request" =====
 
 describe("PATCH /api/borrow/:requestId when the index entry is gone", () => {
   it("returns 404 REQUEST_NOT_FOUND for a pointer whose record was trimmed", async () => {
@@ -250,10 +288,8 @@ describe("PATCH /api/borrow/:requestId when the index entry is gone", () => {
     const survivor = makeRecord(1);
     await seedNewIndex([survivor]);
 
-    // An orphan pointer: the record aged out of the history cap (or a delete
-    // failed after the trim), so the pointer resolves but the index has no
-    // entry. Same 404 as an unknown requestId — the response must not disclose
-    // that the id ever existed.
+    // An orphan pointer answers the same 404 as an unknown requestId.
+    // See the header → "Orphan pointer".
     const trimmed = makeRecord(0);
     const pointer: BorrowPointer = { familyId: FAMILY_ID };
     await kv.put(kvKeys.borrow(trimmed.requestId), JSON.stringify(pointer));
@@ -282,9 +318,7 @@ describe("PATCH /api/borrow/:requestId when the index entry is gone", () => {
   });
 });
 
-// ===========================================================================
-// The history cap evicts on the write that exceeds it
-// ===========================================================================
+// ===== The history cap evicts on the write that exceeds it =====
 
 describe("PATCH /api/borrow/:requestId at the history cap", () => {
   it("evicts the oldest terminal record and deletes its pointer, still answering 200", async () => {
@@ -326,17 +360,13 @@ describe("PATCH /api/borrow/:requestId at the history cap", () => {
   });
 });
 
-// ===========================================================================
-// The pointer and the record must agree on which family owns the request
-// ===========================================================================
+// ===== The pointer and the record must agree on which family owns the request =====
 
 describe("PATCH /api/borrow/:requestId when pointer and record disagree", () => {
   it("returns 404 REQUEST_NOT_FOUND and writes nothing", async () => {
     await seedFamily();
-    // The pointer says FAMILY_ID (that is where `seedNewIndex` writes it), but
-    // the record sitting in FAMILY_ID's index claims a different family. One of
-    // the two is corrupt; acting on it would rewrite THIS family's whole index
-    // from a record that says it belongs elsewhere.
+    // Pointer says FAMILY_ID, the record in its index claims another family.
+    // See the header → "Pointer/record mismatch".
     const mismatched = makeRecord(0, { familyId: OTHER_FAMILY_ID });
     await seedNewIndex([mismatched]);
     const token = await seedAuthToken(kv, ALICE);
@@ -390,16 +420,8 @@ describe("PATCH /api/borrow/:requestId when pointer and record disagree", () => 
   });
 });
 
-// ===========================================================================
-// The per-borrower PENDING ceiling at the create boundary
-// ===========================================================================
-//
-// PENDING records are exempt from the history cap — evicting one would strand
-// a request the owner still has to answer — so they are the one part of the
-// index a single member could otherwise grow without bound. The ceiling counts
-// the CALLER's own PENDING records only (Inv-6: nobody else's traffic can
-// spend a member's allowance), and it is checked AFTER membership and
-// DUPLICATE_REQUEST, off the index read those already paid for.
+// ===== The per-borrower PENDING ceiling at the create boundary =====
+// See the header → "PENDING ceiling".
 
 /** `count` PENDING records, each for a distinct book, borrowed by `borrowerId`. */
 function makePendingRun(count: number, borrowerId: string): BorrowRequest[] {
@@ -439,9 +461,8 @@ describe("POST /api/family/:id/borrow at the per-borrower PENDING ceiling", () =
 
     const res = await borrowNewBookAsBob(token);
 
-    // The boundary is ">= cap", so the request that brings the count TO the cap
-    // must still succeed. Without this case an off-by-one that refused at
-    // cap - 1 would keep the refusal case below green.
+    // ">= cap": the request bringing the count TO the cap still succeeds.
+    // See the header → "PENDING ceiling".
     expect(res.status).toBe(201);
     expect((await storedIndex()) as BorrowRequest[]).toHaveLength(
       BORROW_MAX_PENDING_PER_BORROWER,
@@ -471,9 +492,8 @@ describe("POST /api/family/:id/borrow at the per-borrower PENDING ceiling", () =
 
   it("counts only the CALLER's own records, not the whole family's", async () => {
     await seedFamily();
-    // The ceiling is spent by ALICE, borrowing BOB's books. If it were keyed on
-    // the family (or on the target), BOB's own first request would be refused
-    // by someone else's traffic — the Inv-6 failure mode.
+    // ALICE spends the ceiling on BOB's books; BOB's own request must pass (Inv-6).
+    // See the header → "PENDING ceiling".
     await seedNewIndex(makePendingRun(BORROW_MAX_PENDING_PER_BORROWER, ALICE));
     const token = await seedAuthToken(kv, BOB);
 
@@ -484,9 +504,8 @@ describe("POST /api/family/:id/borrow at the per-borrower PENDING ceiling", () =
 
   it("counts only PENDING records, not finished ones", async () => {
     await seedFamily();
-    // A borrower who has FINISHED this many borrows is not holding anything
-    // open, so nothing is blocked. These are terminal, but exactly AT the
-    // history cap, so the create's own write evicts none of them either.
+    // FINISHED borrows hold nothing open; exactly AT the history cap, none evicted.
+    // See the header → "PENDING ceiling".
     const finished = makePendingRun(BORROW_MAX_PENDING_PER_BORROWER, BOB).map(
       (r) => ({ ...r, status: BorrowStatus.RETURNED }),
     );
@@ -502,9 +521,7 @@ describe("POST /api/family/:id/borrow at the per-borrower PENDING ceiling", () =
   });
 });
 
-// ===========================================================================
-// The duplicate check reads the index, not a fan-out
-// ===========================================================================
+// ===== The duplicate check reads the index, not a fan-out =====
 
 describe("POST /api/family/:id/borrow duplicate check against the new index", () => {
   it("refuses a second request for a PENDING book but allows one for a RETURNED book", async () => {
@@ -535,9 +552,8 @@ describe("POST /api/family/:id/borrow duplicate check against the new index", ()
       "DUPLICATE_REQUEST",
     );
 
-    // A finished transaction is not a duplicate — the same book can be
-    // borrowed again. This is the positive companion: without it, a check that
-    // refused everything would keep the case above green.
+    // Positive companion: a finished transaction is not a duplicate.
+    // See the header → "PENDING ceiling".
     const reborrow = await request(
       "POST",
       `/api/family/${FAMILY_ID}/borrow`,
@@ -551,9 +567,7 @@ describe("POST /api/family/:id/borrow duplicate check against the new index", ()
   });
 });
 
-// ===========================================================================
-// Member removal migrates only when the settlement actually changes something
-// ===========================================================================
+// ===== Member removal migrates only when the settlement actually changes something =====
 
 describe("DELETE /api/family/:id/member/:uid on an un-migrated family", () => {
   it("migrates the index, purging the departing member's own record and keeping the rest", async () => {
@@ -586,9 +600,8 @@ describe("DELETE /api/family/:id/member/:uid on an un-migrated family", () => {
     expect(index.map((r) => r.requestId)).toEqual(ids([lent, ownerSide]));
     // LENT is left alone: the book may still physically be out.
     expect(index[0].status).toBe(BorrowStatus.LENT);
-    // The CANCELLATION half of the settlement, still pinned — observable on the
-    // record the departing member merely OWNED, since the one they borrowed is
-    // purged before any reader could see its status.
+    // The CANCELLATION half, observable on the record the leaver merely OWNED.
+    // See the header → "Departure shape".
     expect(index[1].status).toBe(BorrowStatus.CANCELLED);
 
     // The PURGE half: index entry gone AND pointer deleted.
@@ -601,10 +614,8 @@ describe("DELETE /api/family/:id/member/:uid on an un-migrated family", () => {
 
   it("leaves the index legacy when the departing member's records need no change", async () => {
     await seedFamily();
-    // ALICE borrowed BOB's book and already returned it. BOB is leaving, but he
-    // is only the OWNER here: nothing to cancel (the record is terminal) and
-    // nothing to purge (it is ALICE's own history). So the settlement has no
-    // work, and an un-migrated family must not be rewritten for no reason.
+    // BOB leaves as the OWNER of ALICE's returned borrow: no work, no rewrite.
+    // See the header → "Departure shape".
     const returned = makeRecord(0, {
       borrowerId: ALICE,
       borrowerName: "Alice",
@@ -635,9 +646,8 @@ describe("DELETE /api/family/:id/member/:uid on an un-migrated family", () => {
   });
 
   it("rewrites the index when the departing member's own finished record is purged", async () => {
-    // Companion to the case above: flip ONE field — who BORROWED — and the same
-    // removal now has work to do. Without it, "legacy stays legacy" could stay
-    // green on a handler that had stopped writing the index at all.
+    // Companion: flip who BORROWED and the same removal has work to do.
+    // See the header → "Departure shape".
     await seedFamily();
     const returned = makeRecord(0, { status: BorrowStatus.RETURNED });
     await seedLegacyIndex([returned]);

@@ -19,17 +19,53 @@
  *
  * WHY THE COUNTS ARE ASSERTED AGAINST A RECORDER, NOT LITERALS. `watchKvOps`
  * observes the same namespace the Proxy wraps, so `reads`/`writes`/`deletes`
- * are compared to what the request ACTUALLY did. The literal numbers (7/2/0 for
- * a two-member bookshelf today) belong to tests/integration/budget/, which
- * exists to fail when they change; issue #160 is expected to lower them, and
- * this file must stay green when it does — it is about the line being CORRECT,
- * not about the bill being small.
+ * are compared to what the request ACTUALLY did. The literal numbers belong to
+ * tests/integration/budget/, which exists to fail when they change (#160 has
+ * already lowered them), and this file must stay green when they do — it is
+ * about the line being CORRECT, not about the bill being small.
  *
  * Caveat on that equality: `watchKvOps` spies `get` / `put` / `delete`, while
  * the Proxy also counts `getWithMetadata` as a read. Nothing on these paths
  * calls it, so the two agree today. A future handler that does would fail these
  * assertions — which is the right signal: it means the recorder no longer sees
  * everything the counter counts.
+ *
+ * Fixtures: FAMILY_ID is deliberately distinctive so the "the familyId is not
+ * in the log" assertions cannot pass vacuously — no substring of it occurs in
+ * the route pattern, the method, or any other field of the line. `KvOpsLine`
+ * mirrors the object literal in src/middleware/kvOpCounting.ts. `kvOpsLines`
+ * filters rather than assumes: an unrelated `console.log` added elsewhere in
+ * the pipeline must not turn these assertions into a false failure — nor be
+ * mistaken for the telemetry line. `bookshelfRequest` injects the Rate Limiting
+ * bindings a production deploy carries on every request, so the counts this
+ * suite compares against the recorder are the ones a deployed Worker
+ * produces, not the KV-fallback ones.
+ *
+ * Zero writes: `writes` and `deletes` genuinely ARE zero on the bookshelf path
+ * since #160 item 1 moved both rate-limit counters onto the platform — a
+ * read-only aggregation writes nothing, so only `reads` can carry non-vacuity
+ * proof. Non-zero write/delete counting is pinned directly on
+ * `createCountingKv` in tests/unit/kvOpCounting.test.ts.
+ *
+ * Error path: an empty members array makes `normalizeFamilyRecord`
+ * (src/kv/schema.ts) throw, so the request dies inside the handler AFTER
+ * several KV reads and is turned into a 500 by app.onError. The point of that
+ * case: work already paid for before the throw is still reported; the family
+ * read is the last one the handler reached.
+ *
+ * DEV_MODE: the per-IP `rateLimit` and `enforcePerUserRateLimit` short-circuit
+ * under it (and, with the bindings injected, cost no KV op on the other path
+ * either). Asserted against the recorder rather than a literal, so the case
+ * stays a statement about the line being correct for what ran.
+ *
+ * Unauthorized path: the route is still the HANDLER's pattern even though a
+ * middleware answered — verified by running it, not assumed. Hono resolves the
+ * whole matched-handler chain when it dispatches, so `routePath(c, -1)` names
+ * the registered route regardless of which link short-circuited. The
+ * aggregation never ran: since #160 item 1 the per-IP tier costs no KV
+ * operation, and authMiddleware refuses a request with no Authorization header
+ * before its own `token:` read — so a stranger's rejected request is logged as
+ * a genuine 0/0/0.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -47,11 +83,8 @@ import {
 } from "../../src/kv/schema";
 import { USER1, USER2 } from "../helpers/ids";
 
-/**
- * Deliberately distinctive so the "the familyId is not in the log" assertions
- * cannot pass vacuously: no substring of it occurs in the route pattern, the
- * method, or any other field of the line.
- */
+/** Deliberately distinctive: no substring occurs in any other field of the line.
+ *  See the header → "Fixtures". */
 const FAMILY_ID = "kvlg-9wq3";
 const BOOKSHELF_PATH = `/api/family/${FAMILY_ID}/bookshelf`;
 const BOOKSHELF_ROUTE = "/api/family/:id/bookshelf";
@@ -73,10 +106,8 @@ const IP = {
 
 let kv: KVNamespace;
 
-/**
- * The one log line under test. Mirrors the object literal in
- * src/middleware/kvOpCounting.ts.
- */
+/** The one log line under test. Mirrors the object literal in
+ *  src/middleware/kvOpCounting.ts. */
 interface KvOpsLine {
   event: "kv_ops";
   method: string;
@@ -100,11 +131,8 @@ function isKvOpsLine(value: unknown): value is KvOpsLine {
   );
 }
 
-/**
- * Every kv_ops line the spy saw, in order. Filtered rather than assumed: an
- * unrelated `console.log` added elsewhere in the pipeline must not turn these
- * assertions into a false failure — nor be mistaken for the telemetry line.
- */
+/** Every kv_ops line the spy saw, in order — filtered, not assumed.
+ *  See the header → "Fixtures". */
 function kvOpsLines(spy: LogSpy): KvOpsLine[] {
   return spy.mock.calls.map((call) => call[0]).filter(isKvOpsLine);
 }
@@ -153,11 +181,8 @@ async function seedFamilyWithBooks(): Promise<string> {
   return seedAuthToken(kv, USER1);
 }
 
-/**
- * The Rate Limiting bindings a production deploy carries. Injected on every
- * request here so the counts this suite compares against the recorder are the
- * ones a deployed Worker produces, not the KV-fallback ones.
- */
+/** GET the bookshelf with the production Rate Limiting bindings injected.
+ *  See the header → "Fixtures". */
 function bookshelfRequest(
   ip: string,
   opts?: { token?: string; devMode?: boolean },
@@ -205,11 +230,8 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       deletes: ops.deleteKeys().length,
     });
 
-    // Non-vacuity for `reads`: without traffic that equality would be 0 === 0.
-    // `writes` and `deletes` genuinely ARE zero here since #160 item 1 moved
-    // both rate-limit counters onto the platform — a read-only aggregation now
-    // writes nothing. Non-zero write/delete counting is pinned directly on
-    // `createCountingKv` in tests/unit/kvOpCounting.test.ts.
+    // Non-vacuity for `reads` (else 0 === 0); writes are genuinely zero here.
+    // See the header → "Zero writes".
     expect(ops.getKeys().length).toBeGreaterThan(0);
     expect(ops.putKeys()).toEqual([]);
   });
@@ -255,9 +277,8 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
   it("still logs the operations that ran before a handler threw", async () => {
     const token = await seedAuthToken(kv, USER1);
     await kv.put(kvKeys.member(USER1), FAMILY_ID);
-    // An empty members array makes `normalizeFamilyRecord` (src/kv/schema.ts)
-    // throw, so the request dies inside the handler AFTER several KV reads and
-    // is turned into a 500 by app.onError.
+    // Empty members ⇒ `normalizeFamilyRecord` throws after several reads ⇒ 500.
+    // See the header → "Error path".
     const corrupted: RawFamilyRecord = {
       familyId: FAMILY_ID,
       members: [],
@@ -288,10 +309,8 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       deletes: ops.deleteKeys().length,
     });
 
-    // The point of the case: work already paid for before the throw is still
-    // reported. The family read is the last one the handler reached. Only
-    // `reads` can carry that proof — the request performs no write at all now
-    // that #160 item 1 moved both rate-limit counters onto the platform.
+    // Reads paid before the throw are still reported; only `reads` can prove it.
+    // See the header → "Error path".
     expect(ops.getKeys()).toContain(kvKeys.family(FAMILY_ID));
     expect(lines[0].reads).toBeGreaterThan(0);
   });
@@ -307,10 +326,8 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
     expect(res.status).toBe(200);
     const lines = kvOpsLines(logSpy);
     expect(lines).toHaveLength(1);
-    // Lower than the first case by both rate-limit layers' get+put: the per-IP
-    // `rateLimit` and `enforcePerUserRateLimit` short-circuit under DEV_MODE.
-    // Asserted against the recorder rather than a literal, so this stays a
-    // statement about the line being correct for what ran.
+    // Both rate-limit layers short-circuit under DEV_MODE; recorder, not literal.
+    // See the header → "DEV_MODE".
     expect(lines[0]).toEqual({
       event: "kv_ops",
       method: "GET",
@@ -353,20 +370,16 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       event: "kv_ops",
       method: "GET",
       route: BOOKSHELF_ROUTE,
-      // Verified by running it, not assumed: the route is still the HANDLER's
-      // pattern even though a middleware answered. Hono resolves the whole
-      // matched-handler chain when it dispatches, so `routePath(c, -1)` names
-      // the registered route regardless of which link short-circuited.
+      // Still the HANDLER's pattern though a middleware answered (verified).
+      // See the header → "Unauthorized path".
       status: 401,
       reads: ops.getKeys().length,
       writes: ops.putKeys().length,
       deletes: ops.deleteKeys().length,
     });
 
-    // Corroborates the comment above: the aggregation never ran. Since #160
-    // item 1 the per-IP tier costs no KV operation, and authMiddleware refuses
-    // a request with no Authorization header before its own `token:` read — so
-    // a stranger's rejected request is now logged as a genuine 0/0/0.
+    // The aggregation never ran: a genuine 0/0/0.
+    // See the header → "Unauthorized path".
     expect(ops.getKeys()).toEqual([]);
     expect(ops.putKeys()).toEqual([]);
     // (Positive companion for that negative: the error-path case asserts the

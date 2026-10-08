@@ -7,14 +7,42 @@ import { BoolFlag, kvKeys } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
+/**
+ * Personal-settings routes (`src/routes/user.ts`): GET / PUT / PATCH
+ * `/api/user/:id/books` and their rate limits.
+ *
+ * Rate Limiting bindings: the request helpers inject the bindings a production
+ * deploy carries — without them the per-IP tier falls back to a KV counter
+ * that no deployed Worker writes. The `put-books` ceiling under test is hourly
+ * and stays on KV by design.
+ *
+ * PATCH /api/user/:id/books — coverUrl lazy cleanup (P0 privacy): a book cover
+ * is fetched by every family member and every public-shelf visitor, so an
+ * attacker-chosen cover host acts as a tracking beacon. PUT blocks new ones at
+ * the boundary; PATCH additionally SCRUBS records written before that guard
+ * existed. The cleanup is opportunistic on purpose: it rides a write that was
+ * going to happen anyway and never forces one.
+ *
+ * PATCH /api/user/:id/books — readmooUrl lazy cleanup (P0 privacy): the other
+ * attacker-controlled URL field of a book, rendered as a clickable `<a href>`:
+ * an off-whitelist value is a phishing / arbitrary-redirect lure served under a
+ * legitimate book title. PUT blocks new ones at the boundary; PATCH
+ * additionally SCRUBS records written before that guard existed. Same
+ * opportunistic contract as the coverUrl cleanup — it rides the write this
+ * handler was going to perform anyway and never forces one. The two URL
+ * fields are sanitized independently.
+ *
+ * Legacy-record seeding (`seedLegacyRecord`, both cleanup suites): `user:{id}`
+ * is seeded DIRECTLY rather than through PUT. A poisoned coverUrl / readmooUrl
+ * can only be in KV because it was written BEFORE the whitelist existed — PUT
+ * sanitizes on the way in, so it cannot produce this fixture.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-/**
- * Real-shaped Readmoo bookIds (12+ digits). PUT /books drops any NEW bookId of
- * another shape (`dropNewMalformedBookIds` in `src/routes/user.ts`), so a
- * fixture saved through PUT must use these or its books silently vanish.
- */
+// Real-shaped Readmoo bookIds (12+ digits): PUT /books drops any NEW bookId of another shape
+// (`dropNewMalformedBookIds` in `src/routes/user.ts`), so PUT fixtures must use these.
 const B1 = "210439468000101";
 const B2 = "210439468000102";
 const B3 = "210439468000103";
@@ -75,9 +103,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ===========================================================================
-// GET /api/user/:id/books — validation and authorization
-// ===========================================================================
+// --- GET /api/user/:id/books — validation and authorization ---
 
 describe("GET /api/user/:id/books", () => {
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
@@ -153,9 +179,7 @@ describe("GET /api/user/:id/books", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/books — validation and authorization
-// ===========================================================================
+// --- PUT /api/user/:id/books — validation and authorization ---
 
 describe("PUT /api/user/:id/books", () => {
   it("should return 401 UNAUTHORIZED when no auth token is provided", async () => {
@@ -231,9 +255,7 @@ describe("PUT /api/user/:id/books", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/user/:id/books — per-user rate limit (non-dev mode)
-// ===========================================================================
+// --- PUT /api/user/:id/books — per-user rate limit (non-dev mode) ---
 
 describe("PUT /:id/books per-user rate limit", () => {
   const TEST_USER = "a".repeat(64);
@@ -253,9 +275,8 @@ describe("PUT /:id/books per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    // The Rate Limiting bindings a production deploy carries: without them the
-    // per-IP tier falls back to a KV counter that no deployed Worker writes.
-    // The `put-books` ceiling under test is hourly and stays on KV by design.
+    // Production rate-limit bindings; the hourly `put-books` ceiling stays on KV by design.
+    // See the header → "Rate Limiting bindings".
     return app.request(path, init, {
       KV: kv,
       ...createRateLimitBindings().bindings,
@@ -351,9 +372,7 @@ describe("PUT /:id/books per-user rate limit", () => {
   });
 });
 
-// ===========================================================================
-// PATCH /api/user/:id/books — validation and authorization
-// ===========================================================================
+// --- PATCH /api/user/:id/books — validation and authorization ---
 
 describe("PATCH /api/user/:id/books", () => {
   const sampleBook = (id: string, isShared = 0) => ({
@@ -739,9 +758,8 @@ describe("PATCH /api/user/:id/books", () => {
         title: "My Book",
         author: "Jane",
         isbn: "978-xxx",
-        // Must be a whitelisted Readmoo cover host: the books write paths blank
-        // anything else (see the coverUrl lazy-cleanup suite below), so an
-        // arbitrary host here would test blanking, not field preservation.
+        // A whitelisted Readmoo cover host: the books write paths blank anything else
+        // (coverUrl lazy-cleanup suite below), which would test blanking, not preservation.
         coverUrl: "https://cdn.readmoo.com/b1.jpg",
         readmooUrl: "https://readmoo.com/book/b1",
         category: "sci-fi",
@@ -892,15 +910,8 @@ describe("PATCH /api/user/:id/books", () => {
   });
 });
 
-// ===========================================================================
-// PATCH /api/user/:id/books — coverUrl lazy cleanup (P0 privacy)
-//
-// A book cover is fetched by every family member and every public-shelf
-// visitor, so an attacker-chosen cover host acts as a tracking beacon. PUT
-// blocks new ones at the boundary; PATCH additionally SCRUBS records written
-// before that guard existed. The cleanup is opportunistic on purpose: it rides
-// a write that was going to happen anyway and never forces one.
-// ===========================================================================
+// --- PATCH /api/user/:id/books — coverUrl lazy cleanup (P0 privacy) ---
+// See the header → "PATCH /api/user/:id/books — coverUrl lazy cleanup (P0 privacy)".
 
 describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
   const LEGACY_USER = ALICE;
@@ -923,11 +934,8 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
     };
   }
 
-  /**
-   * Seed `user:{id}` DIRECTLY rather than through PUT. A poisoned coverUrl can
-   * only be in KV because it was written BEFORE the whitelist existed — PUT
-   * sanitizes on the way in, so it cannot produce this fixture.
-   */
+  // Seed `user:{id}` DIRECTLY rather than through PUT (PUT cannot produce this fixture).
+  // See the header → "Legacy-record seeding".
   async function seedLegacyRecord(
     books: ReturnType<typeof book>[],
   ): Promise<string> {
@@ -1049,16 +1057,8 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
   });
 });
 
-// ===========================================================================
-// PATCH /api/user/:id/books — readmooUrl lazy cleanup (P0 privacy)
-//
-// The other attacker-controlled URL field of a book, rendered as a clickable
-// `<a href>`: an off-whitelist value is a phishing / arbitrary-redirect lure
-// served under a legitimate book title. PUT blocks new ones at the boundary;
-// PATCH additionally SCRUBS records written before that guard existed. Same
-// opportunistic contract as the coverUrl cleanup above — it rides the write
-// this handler was going to perform anyway and never forces one.
-// ===========================================================================
+// --- PATCH /api/user/:id/books — readmooUrl lazy cleanup (P0 privacy) ---
+// See the header → "PATCH /api/user/:id/books — readmooUrl lazy cleanup (P0 privacy)".
 
 describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
   const LEGACY_USER = BOB;
@@ -1082,11 +1082,8 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
     };
   }
 
-  /**
-   * Seed `user:{id}` DIRECTLY rather than through PUT. A poisoned readmooUrl
-   * can only be in KV because it was written BEFORE the whitelist existed —
-   * PUT sanitizes on the way in, so it cannot produce this fixture.
-   */
+  // Seed `user:{id}` DIRECTLY rather than through PUT (PUT cannot produce this fixture).
+  // See the header → "Legacy-record seeding".
   async function seedLegacyRecord(
     books: ReturnType<typeof book>[],
   ): Promise<string> {
@@ -1146,9 +1143,8 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
 
     const record = await storedRecord();
     const untouched = record.books.find((b: Json) => b.bookId === B2);
-    // Only the link moved: the book's own sharing state is not a change target,
-    // and its whitelisted cover is untouched — the two URL fields are
-    // sanitized independently.
+    // Only the link moved: sharing state is not a change target, and the whitelisted
+    // cover is untouched — the two URL fields are sanitized independently.
     expect(untouched.readmooUrl).toBe("");
     expect(untouched.isShared).toBe(BoolFlag.FALSE);
     expect(untouched.coverUrl).toBe("https://cdn.readmoo.com/clean.jpg");
@@ -1175,9 +1171,7 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
   });
 });
 
-// ===========================================================================
-// PATCH /api/user/:id/books — per-user rate limit (shared bucket with PUT)
-// ===========================================================================
+// --- PATCH /api/user/:id/books — per-user rate limit (shared bucket with PUT) ---
 
 describe("PATCH /:id/books per-user rate limit", () => {
   const TEST_USER = "c".repeat(64);
@@ -1196,9 +1190,8 @@ describe("PATCH /:id/books per-user rate limit", () => {
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
-    // The Rate Limiting bindings a production deploy carries: without them the
-    // per-IP tier falls back to a KV counter that no deployed Worker writes.
-    // The `put-books` ceiling under test is hourly and stays on KV by design.
+    // Production rate-limit bindings; the hourly `put-books` ceiling stays on KV by design.
+    // See the header → "Rate Limiting bindings".
     return app.request(path, init, {
       KV: kv,
       ...createRateLimitBindings().bindings,

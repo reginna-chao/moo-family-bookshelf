@@ -63,9 +63,7 @@ const INVALID_FIELDS = {
   message: "Request body fields are invalid",
 };
 
-// ===========================================================================
-// Probe routes, mounted on the production app
-// ===========================================================================
+// ===== Probe routes, mounted on the production app =====
 
 const probe = new OpenAPIHono({ defaultHook });
 
@@ -118,9 +116,7 @@ probe.get("/throw/plain", () => {
 
 app.route("/api/__probe", probe);
 
-// ===========================================================================
-// Helpers
-// ===========================================================================
+// ===== Helpers =====
 
 const TOKEN = tokenFor(USER1);
 let kv: KVNamespace;
@@ -168,9 +164,7 @@ async function expectEnvelope(
   return text;
 }
 
-// ===========================================================================
-// Declared JSON body
-// ===========================================================================
+// ===== Declared JSON body =====
 
 describe("app.onError — declared JSON body", () => {
   it("answers an unparsable body with 400 INVALID_JSON, not logged", async () => {
@@ -260,9 +254,7 @@ describe("app.onError — declared JSON body", () => {
   );
 });
 
-// ===========================================================================
-// Declared multipart body
-// ===========================================================================
+// ===== Declared multipart body =====
 
 describe("app.onError — declared multipart body", () => {
   it("answers a malformed multipart body with 400 REQUEST_REJECTED, parser text dropped", async () => {
@@ -289,9 +281,7 @@ describe("app.onError — declared multipart body", () => {
   });
 });
 
-// ===========================================================================
-// Other thrown errors
-// ===========================================================================
+// ===== Other thrown errors =====
 
 describe("app.onError — other thrown errors", () => {
   it.each([401, 403, 404, 409, 422])(

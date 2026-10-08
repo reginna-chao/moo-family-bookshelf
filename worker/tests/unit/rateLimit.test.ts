@@ -16,6 +16,62 @@
  * `RATE_LIMIT_BINDING_MISSING` on every mapped-limit request and the runner
  * output would otherwise be unreadable. It is a spy, not a filter: the cases
  * that care assert on it.
+ *
+ * Sub-minimum TTL clamp: with a 10s window, `windowSec * 2` is 20s — below the
+ * floor real Cloudflare KV enforces. Unclamped, the mock KV rejects that put,
+ * the charge throws, and an admitted request turns into a 500; so the case's
+ * 200 is part of the pin.
+ *
+ * RATE_LIMIT_BINDING_MISSING logging (the KV-fallback cases):
+ *  - 30/min IS in the limit -> binding table, so a deployment without the field
+ *    is a MISCONFIGURATION, not a design choice: the operator has to be told
+ *    which binding their wrangler.toml is missing. ONE line per rate-limit
+ *    CHECK, which is one check in that case because this harness calls
+ *    `enforcePerUserRateLimit` directly; a real request to a bookshelf /
+ *    borrow-* route passes the per-IP middleware too and logs twice.
+ *  - 5/min is not in the table at all — that is a tier whose number was
+ *    changed without adding its binding, and it must be as loud as a binding
+ *    missing from `env`, because the request is silently back on KV either
+ *    way. The placeholder carries the limit, since there is no name to give.
+ *  - The one negative companion: a 3600s window can never be served by a
+ *    binding (the platform period is 60s), so logging it would drown the signal
+ *    the line exists for.
+ *  - With every binding present, a limit the table never mapped still lands on
+ *    KV and is reported, so a tier whose number was raised without adding its
+ *    binding cannot go unnoticed.
+ *
+ * enforcePerUserRateLimit — native Rate Limiting binding: the path every
+ * deployed Worker takes for a per-minute scope: no KV counter, no bucket in the
+ * key, and `retryAfter` = the whole configured period because the binding
+ * exposes no reset time.
+ *
+ * Caller key normalization: a residential IPv6 subscriber holds at least a /64
+ * and privacy extensions let the client rotate its interface identifier at
+ * will. Keying per-caller counters (rate limits, verification failure
+ * accounting) on the full address would hand out a fresh budget on every
+ * request, so IPv6 callers are bucketed per /64. The deprecated
+ * IPv4-compatible form (`::1.2.3.4`) is NOT collapsed: only the `::ffff:`
+ * prefix collapses to the embedded IPv4, so it stays an IPv6 address and lands
+ * in the all-zero /64 next to ::1.
+ *
+ * Per-IP rateLimit middleware: every other suite runs with DEV_MODE, which
+ * short-circuits this middleware. These cases run WITHOUT it. They come in two
+ * halves, one per counting path: the KV FALLBACK first (a deployment carrying
+ * no binding for the tier's limit — the only place the /64 bucketing can still
+ * be observed through the X-RateLimit-Remaining countdown), then the NATIVE
+ * BINDING, which is what a deployed Worker actually runs. `limitedApp` mounts a
+ * sensitive public route because it carries the smallest limit, so a bucket
+ * fills in few calls; the limit itself is read back from X-RateLimit-Limit, so
+ * these tests survive a change to the configured ceiling.
+ *
+ * Per-IP rateLimit middleware — native Rate Limiting binding: one app
+ * (`tierApp`) carrying a route from each of the four counters, so the
+ * tier -> key mapping is exercised end to end rather than only through
+ * `rateLimitBucketFor` (whose own classification cases live in
+ * tests/unit/securityHardening.test.ts). Its expected prefixes and limits are
+ * literals, deliberately: they are the independent oracle for what production
+ * charges. `rateLimitBucketFor` is where they come from, so asserting against
+ * it would only restate the implementation.
  */
 import { Hono } from "hono";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
@@ -53,11 +109,8 @@ testApp.post("/test", async (c) => {
   return res ?? c.json({ ok: true });
 });
 
-/**
- * One call with a DELIBERATELY BINDING-LESS env: the KV fallback path.
- *
- * Pass `env` to add DEV_MODE or (via `callWithBindings`) the binding stubs.
- */
+// One call with a DELIBERATELY BINDING-LESS env: the KV fallback path.
+// Pass `env` to add DEV_MODE or (via `callWithBindings`) the binding stubs.
 function callHelper(opts: PerUserRateLimitOptions, env?: Partial<Env>) {
   return testApp.request(
     "/test",
@@ -197,9 +250,8 @@ describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () =
   });
 
   it("should clamp the counter TTL up to the KV 60s floor for sub-30s windows", async () => {
-    // windowSec * 2 is 20s here — below the floor real Cloudflare KV enforces.
-    // Unclamped, the mock KV rejects that put, the charge throws, and an
-    // admitted request turns into a 500; so the 200 below is part of the pin.
+    // windowSec * 2 is 20s here — below real KV's floor; unclamped, the put throws and an
+    // admitted request turns into a 500, so the 200 below is part of the pin.
     const opts = { userId: "u1", scope: "test", max: 5, windowSec: 10 };
 
     const res = await callHelper(opts);
@@ -213,14 +265,8 @@ describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () =
   });
 
   it("should report the missing binding once per check, naming it", async () => {
-    // 30/min IS in the limit -> binding table, so a deployment without the
-    // field is a MISCONFIGURATION, not a design choice: the operator has to be
-    // told which binding their wrangler.toml is missing.
-    //
-    // ONE line per rate-limit CHECK, which is one check here because this
-    // harness calls `enforcePerUserRateLimit` directly. A real request to a
-    // bookshelf / borrow-* route passes the per-IP middleware too and logs
-    // twice.
+    // 30/min IS mapped, so a missing binding is a MISCONFIGURATION to name; one line per CHECK.
+    // See the header → "RATE_LIMIT_BINDING_MISSING logging".
     const opts = { userId: "u1", scope: "bookshelf", max: 30, windowSec: 60 };
 
     const res = await callHelper(opts);
@@ -233,10 +279,8 @@ describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () =
   });
 
   it("should report a per-minute limit the binding table does not name", async () => {
-    // 5/min is not in the table at all — that is a tier whose number was
-    // changed without adding its binding, and it must be as loud as a binding
-    // missing from `env`, because the request is silently back on KV either
-    // way. The placeholder carries the limit, since there is no name to give.
+    // 5/min is unmapped — as loud as a missing binding, with the limit as the placeholder.
+    // See the header → "RATE_LIMIT_BINDING_MISSING logging".
     const res = await callHelper({
       userId: "u1",
       scope: "test",
@@ -252,9 +296,8 @@ describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () =
   });
 
   it("should stay silent for an hourly counter, which has no binding by design", async () => {
-    // The one negative companion to the two cases above: a 3600s window can
-    // never be served by a binding (the platform period is 60s), so logging it
-    // would drown the signal the line exists for.
+    // Negative companion: a 3600s window can never be served by a binding (period is 60s),
+    // so logging it would drown the signal the line exists for.
     await callHelper({
       userId: "u1",
       scope: "put-books",
@@ -266,13 +309,8 @@ describe("enforcePerUserRateLimit — KV fallback (no binding configured)", () =
   });
 });
 
-// ===========================================================================
-// enforcePerUserRateLimit — native Rate Limiting binding
-//
-// The path every deployed Worker takes for a per-minute scope: no KV counter,
-// no bucket in the key, and `retryAfter` = the whole configured period because
-// the binding exposes no reset time.
-// ===========================================================================
+// --- enforcePerUserRateLimit — native Rate Limiting binding ---
+// See the header → "enforcePerUserRateLimit — native Rate Limiting binding".
 
 /** Pinned so an hourly bucket index cannot roll over mid-case. */
 const BINDING_NOW = Date.parse("2026-03-01T12:00:00.000Z");
@@ -390,9 +428,8 @@ describe("enforcePerUserRateLimit — native Rate Limiting binding", () => {
   });
 
   it("should leave an unmapped per-minute limit on the KV counter and say so", async () => {
-    // Carrying every binding does not help a limit the table never mapped: the
-    // request lands on KV and is reported, so a tier whose number was raised
-    // without adding its binding cannot go unnoticed.
+    // Every binding present, but an unmapped limit still lands on KV and is reported.
+    // See the header → "RATE_LIMIT_BINDING_MISSING logging".
     const ops = watchKvOps(kv);
 
     const { res, calls } = await callWithBindings({
@@ -428,9 +465,7 @@ describe("enforcePerUserRateLimit — native Rate Limiting binding", () => {
   });
 });
 
-// ===========================================================================
-// bindingForWindow — the (limit, window) -> binding lookup
-// ===========================================================================
+// --- bindingForWindow — the (limit, window) -> binding lookup ---
 
 /** Typed so `bindings[name]` below indexes the Record without a cast. */
 const MAPPED_WINDOWS: {
@@ -498,14 +533,8 @@ describe("bindingForWindow", () => {
   });
 });
 
-// ===========================================================================
-// Caller key normalization
-//
-// A residential IPv6 subscriber holds at least a /64 and privacy extensions let
-// the client rotate its interface identifier at will. Keying per-caller counters
-// (rate limits, verification failure accounting) on the full address would hand
-// out a fresh budget on every request, so IPv6 callers are bucketed per /64.
-// ===========================================================================
+// --- Caller key normalization (IPv6 callers are bucketed per /64) ---
+// See the header → "Caller key normalization".
 
 /** The /64 bucket of 2001:db8:1:2::/64, as rendered by normalizeCallerIp. */
 const DB8_1_2_BUCKET = "2001:0db8:0001:0002::/64";
@@ -571,9 +600,8 @@ describe("normalizeCallerIp", () => {
       expected: ZERO_BUCKET,
     },
     {
-      // Deprecated IPv4-compatible form. Only the ::ffff: prefix collapses to
-      // the embedded IPv4, so this one stays an IPv6 address and lands in the
-      // all-zero /64 next to ::1.
+      // Deprecated IPv4-compatible form: only ::ffff: collapses to IPv4, so this stays IPv6
+      // and lands in the all-zero /64 next to ::1.
       label: "buckets an IPv4-compatible address in the all-zero /64",
       ip: "::1.2.3.4",
       expected: ZERO_BUCKET,
@@ -708,22 +736,13 @@ describe("getCallerIp", () => {
   });
 });
 
-// ===========================================================================
-// Per-IP rateLimit middleware
-//
-// Every other suite runs with DEV_MODE, which short-circuits this middleware.
-// These cases run WITHOUT it. They come in two halves, one per counting path:
-// the KV FALLBACK first (a deployment carrying no binding for the tier's
-// limit — the only place the /64 bucketing can still be observed through the
-// X-RateLimit-Remaining countdown), then the NATIVE BINDING, which is what a
-// deployed Worker actually runs.
-// ===========================================================================
+// --- Per-IP rateLimit middleware (WITHOUT DEV_MODE; KV fallback, then native binding) ---
+// See the header → "Per-IP rateLimit middleware".
 
 const limitedApp = new Hono<{ Bindings: Env }>();
 limitedApp.use("*", rateLimit);
-// A sensitive public route carries the smallest limit, so a bucket fills in
-// few calls. The limit itself is read back from X-RateLimit-Limit, so these
-// tests survive a change to the configured ceiling.
+// A sensitive public route has the smallest limit, so a bucket fills in few calls; the limit
+// is read back from X-RateLimit-Limit, so these tests survive a change to the ceiling.
 limitedApp.post("/api/family", (c) => c.json({ ok: true }));
 
 /** Binding-less env on purpose: these cases pin the KV fallback. */
@@ -811,14 +830,8 @@ describe("rateLimit middleware — KV fallback (no binding configured)", () => {
   });
 });
 
-// ===========================================================================
-// Per-IP rateLimit middleware — native Rate Limiting binding
-//
-// One app carrying a route from each of the four counters, so the tier -> key
-// mapping is exercised end to end rather than only through
-// `rateLimitBucketFor` (whose own classification cases live in
-// tests/unit/securityHardening.test.ts).
-// ===========================================================================
+// --- Per-IP rateLimit middleware — native Rate Limiting binding ---
+// See the header → "Per-IP rateLimit middleware — native Rate Limiting binding".
 
 const tierApp = new Hono<{ Bindings: Env }>();
 tierApp.use("*", rateLimit);
@@ -844,9 +857,8 @@ async function callTier(
 }
 
 describe("rateLimit middleware — native Rate Limiting binding", () => {
-  // Literal prefixes and limits, deliberately: they are the independent oracle
-  // for what production charges. `rateLimitBucketFor` is where they come from,
-  // so asserting against it here would only restate the implementation.
+  // Literal prefixes and limits, deliberately: the independent oracle for what production
+  // charges (asserting against `rateLimitBucketFor` would only restate the implementation).
   it.each([
     {
       label: "standard tier",

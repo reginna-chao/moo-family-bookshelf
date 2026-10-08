@@ -45,6 +45,22 @@
  * can fail"): driven through the seam below against fixture package.json files,
  * a declared `>=20` against a demanded `>=22.0.0` goes RED naming both values,
  * and `>=22` goes green.
+ *
+ * MUTATION-CHECK SEAM (same device as `kvAccessBoundary.test.ts`'s scan roots):
+ * `ROOT_PACKAGE_JSON` / `WRANGLER_PACKAGE_JSON` are overridable through
+ * `MOO_NODE_ENGINE_*` env variables purely so the comparison can be driven RED
+ * against throwaway fixture files at authoring time, WITHOUT editing the live
+ * root `package.json`. CI sets neither variable. The "file exists / field is a
+ * non-empty parseable range" assertions below catch a seam value pointing at
+ * NOTHING -- that throws, loudly. They do not catch a seam value pointing at
+ * VALID fixtures: that is the intended mutation-check use, and the guard then
+ * compares the fixtures rather than the repo, undetected.
+ *
+ * `readEnginesNode()` returns the raw `engines.node` value, deliberately
+ * UNVALIDATED -- the companion test asserts its shape, so a deleted field
+ * surfaces as a named assertion failure instead of being swallowed by a throw
+ * in there. A missing FILE does throw: that is a broken guard, not a drifted
+ * floor.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -53,16 +69,8 @@ import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/**
- * MUTATION-CHECK SEAM (same device as `kvAccessBoundary.test.ts`'s scan roots).
- * Both paths are overridable purely so the comparison can be driven RED against
- * throwaway fixture files at authoring time, WITHOUT editing the live root
- * `package.json`. CI sets neither variable. The "file exists / field is a
- * non-empty parseable range" assertions below catch a seam value pointing at
- * NOTHING -- that throws, loudly. They do not catch a seam value pointing at
- * VALID fixtures: that is the intended mutation-check use, and the guard then
- * compares the fixtures rather than the repo, undetected.
- */
+// Mutation-check seam: both paths are env-overridable for fixture runs; CI sets neither.
+// See the header → "MUTATION-CHECK SEAM".
 const ROOT_PACKAGE_JSON =
   process.env.MOO_NODE_ENGINE_ROOT_PACKAGE_JSON ??
   resolve(HERE, "../../../package.json");
@@ -77,12 +85,8 @@ type VersionTuple = readonly [number, number, number];
 /** The only range shape either file uses today: `>=X`, `>=X.Y`, `>=X.Y.Z`. */
 const MINIMUM_RANGE_PATTERN = /^>=\s*(\d+(?:\.\d+){0,2})$/;
 
-/**
- * The raw `engines.node` value of a package.json. Deliberately UNVALIDATED --
- * the companion test asserts its shape, so a deleted field surfaces as a named
- * assertion failure instead of being swallowed by a throw in here. A missing
- * FILE does throw: that is a broken guard, not a drifted floor.
- */
+// The raw `engines.node` value, deliberately UNVALIDATED; a missing FILE throws.
+// See the header → "`readEnginesNode()`".
 function readEnginesNode(file: string, label: string): unknown {
   if (!existsSync(file)) {
     throw new Error(
@@ -138,9 +142,8 @@ function formatVersion(version: VersionTuple): string {
 
 describe("declared Node engine floor vs. the floor wrangler demands", () => {
   it("resolves both package.json files and reads a parseable engines.node range from each", () => {
-    // Positive companion (test.md): a moved file, a deleted `engines` field or
-    // a range shape nothing compares would otherwise let the guard below pass
-    // while proving nothing.
+    // Positive companion (test.md): a moved file, a deleted `engines` field or an uncompared
+    // range shape would otherwise let the guard below pass while proving nothing.
     expect(
       existsSync(WRANGLER_PACKAGE_JSON),
       `wrangler package.json must exist at ${WRANGLER_PACKAGE_JSON}`,

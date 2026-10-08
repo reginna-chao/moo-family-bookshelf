@@ -45,6 +45,19 @@
  * cancels out of the difference either way; what matters is that the pipeline
  * matches the sibling budget files. See the scope caveat at the end of
  * tests/helpers/kvOps.ts.
+ *
+ * MIGRATED_LIST_READS: the fixed per-request read cost of a migrated listing —
+ * the auth token, the family record, the caller's `member:` pointer (#222
+ * active-member check), and the index. Pinned as a POSITIVE companion to the
+ * delta-of-0 assertion: without it, a fixture that somehow made both
+ * measurements read nothing would satisfy the delta and prove nothing.
+ *
+ * FIXTURE: every seeded record is PENDING, because `trimBorrowIndex` never
+ * evicts an active request, so a 50-entry fixture survives intact and the two
+ * shapes stay comparable. (A GET writes nothing either way — see the legacy
+ * case.) Request ids are deterministic v4-shaped values (RequestIdSchema,
+ * src/schemas/common.ts) built from a zero-padded index, so both measurements
+ * seed identical shapes.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../../src/index";
@@ -68,13 +81,8 @@ const PATH = `/api/family/${FAMILY_ID}/borrow`;
 const CALLER_IP = "10.0.0.7";
 const PINNED_NOW = Date.parse("2026-03-01T12:00:00.000Z");
 
-/**
- * Fixed per-request read cost of a migrated listing: the auth token, the family
- * record, the caller's `member:` pointer (#222 active-member check), and the
- * index. Pinned as a POSITIVE companion to the delta-of-0
- * assertion — without it, a fixture that somehow made both measurements read
- * nothing would satisfy the delta and prove nothing.
- */
+/** Fixed reads of a migrated listing (token, family, caller pointer, index) — the
+ *  positive companion to the delta-of-0. See the header → "MIGRATED_LIST_READS". */
 const MIGRATED_LIST_READS = 4;
 
 /** How the family's borrow index is stored — before vs after #160 item 2. */
@@ -84,10 +92,8 @@ type IndexShape =
   /** Pre-migration: `borrows:family:{id}` holds requestIds, `borrow:{id}` the record. */
   | "legacy";
 
-/**
- * Deterministic v4-shaped requestId (RequestIdSchema, src/schemas/common.ts)
- * built from a zero-padded index, so both measurements seed identical shapes.
- */
+/** Deterministic v4-shaped requestId (RequestIdSchema) from a zero-padded index,
+ *  so both measurements seed identical shapes. */
 function requestIdAt(index: number): string {
   return `aaaaaaaa-bbbb-4ccc-8ddd-${String(index).padStart(12, "0")}`;
 }
@@ -102,10 +108,8 @@ interface BorrowListMeasurement {
   writes: string[];
 }
 
-/**
- * Seed a 2-member family with `count` borrow records in the given index
- * `shape`, then measure ONE list request.
- */
+/** Seed a 2-member family with `count` borrow records in the given index `shape`,
+ *  then measure ONE list request. */
 async function measureBorrowList(
   count: number,
   shape: IndexShape,
@@ -138,9 +142,8 @@ async function measureBorrowList(
       bookTitle: `Book ${i}`,
       bookAuthor: "Author",
       bookCoverUrl: "",
-      // PENDING throughout: `trimBorrowIndex` never evicts an active request,
-      // so a 50-entry fixture survives intact and the two shapes stay
-      // comparable. (A GET writes nothing either way — see the legacy case.)
+      // PENDING throughout so the trim keeps all 50 entries.
+      // See the header → "FIXTURE".
       status: BorrowStatus.PENDING,
       createdAt: new Date(PINNED_NOW).toISOString(),
       updatedAt: new Date(PINNED_NOW).toISOString(),
@@ -198,9 +201,8 @@ afterEach(() => {
 });
 
 describe("KV read growth: GET /api/family/:id/borrow", () => {
-  // Seed health for every fixture the growth cases below rely on. A broken
-  // seed, a non-200 or an empty response must fail LOUDLY here, so that a
-  // delta assertion can never be satisfied by two equally-broken measurements.
+  // Seed health for every fixture the growth cases rely on.
+  // See the header → "THE PLAIN SEED-HEALTH COMPANION IS NOT OPTIONAL".
   it.each([
     { shape: "new" as const, count: 5 },
     { shape: "new" as const, count: 50 },
@@ -229,18 +231,14 @@ describe("KV read growth: GET /api/family/:id/borrow", () => {
     const small = await measureBorrowList(5, "legacy");
     const large = await measureBorrowList(50, "legacy");
 
-    // Design decision D3, pinned rather than papered over: migration is
-    // write-path only, so a family that has not written since the change keeps
-    // paying the fan-out — one `borrow:{requestId}` read per index entry, on
-    // top of the same 4-key constant.
+    // D3: one `borrow:{requestId}` read per entry on top of the 4-key constant.
+    // See the header → "THE LEGACY CASE IS NOT A REGRESSION".
     expect(small.reads).toBe(MIGRATED_LIST_READS + 5);
     expect(large.reads).toBe(MIGRATED_LIST_READS + 50);
     expect(large.reads - small.reads).toBe(45);
 
-    // …and the listing does NOT migrate the index it just fanned out over. A
-    // GET that wrote would make every reader a writer; `writeTrail()` covers
-    // puts AND deletes, so an "opportunistic migration" added to the read path
-    // fails here.
+    // …and does NOT migrate it: `writeTrail()` covers puts AND deletes, so an
+    // "opportunistic migration" on the read path fails here.
     expect(small.writes).toEqual([]);
     expect(large.writes).toEqual([]);
   });

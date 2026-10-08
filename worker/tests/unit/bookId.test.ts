@@ -23,9 +23,7 @@ function book(bookId: string): BookEntry {
   };
 }
 
-// ===========================================================================
-// isRealBookId — the shared shape rule (Extension scraper + Worker PUT books)
-// ===========================================================================
+// --- isRealBookId — the shared shape rule (Extension scraper + Worker PUT books) ---
 
 describe("isRealBookId", () => {
   it.each<{ label: string; input: unknown; expected: boolean }>([
@@ -78,9 +76,7 @@ describe("isRealBookId", () => {
   });
 });
 
-// ===========================================================================
-// dropNewMalformedBookIds — PUT /api/user/:id/books boundary filter
-// ===========================================================================
+// --- dropNewMalformedBookIds — PUT /api/user/:id/books boundary filter ---
 
 describe("dropNewMalformedBookIds", () => {
   it.each<{

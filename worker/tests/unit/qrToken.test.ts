@@ -8,6 +8,18 @@ import {
   type KickedRecord,
 } from "../../src/kv/schema";
 
+/**
+ * QR one-time login token: `POST /api/user/:id/qr-token` minting and the
+ * `qrToken` bypass on `POST /api/family/:id/join`.
+ *
+ * QR token burned on a refused join: the one-time token is resolved (and
+ * deleted) inside the verification-gate block of the join handler, which runs
+ * BEFORE the kicked-tombstone check, so a join the tombstone refuses
+ * (`403 MEMBER_REMOVED`) still burns it. Deliberate — the alternative is holding
+ * a consumed-or-not decision open across the rest of the handler — at the cost
+ * of the user needing a fresh QR code once the tombstone expires.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -223,9 +235,8 @@ describe("Join with QR token bypass", () => {
     );
     expect(firstRes.status).toBe(200);
 
-    // Second use — token is deleted. Since SEC-1 the verification gate runs
-    // BEFORE the existing-member branch, so an existing member with a PIN set
-    // and no valid qrToken/verifySecret is now rejected (was 200 pre-SEC-1).
+    // Second use — token deleted; since SEC-1 the gate runs BEFORE the existing-member branch,
+    // so a PIN-set member with no valid qrToken/verifySecret is rejected (200 pre-SEC-1).
     const secondRes = await request(
       "POST",
       `/api/family/${VALID_FAMILY_ID}/join`,
@@ -430,11 +441,8 @@ describe("Join with QR token bypass", () => {
     const json = (await joinRes.json()) as Json;
     expect(json.error.code).toBe("MEMBER_REMOVED");
 
-    // Pinning current behaviour: the one-time token is resolved (and deleted)
-    // inside the gate block, which runs BEFORE the tombstone check, so a
-    // refused join still burns it. Deliberate — the alternative is holding a
-    // consumed-or-not decision open across the rest of the handler — at the
-    // cost of the user needing a fresh QR code once the tombstone expires.
+    // Pins current behaviour: a join refused by the tombstone still burns the token.
+    // See the header → "QR token burned on a refused join".
     expect(await kv.get(kvKeys.qrToken(qrToken))).toBeNull();
   });
 

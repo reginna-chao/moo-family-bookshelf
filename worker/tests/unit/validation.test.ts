@@ -11,6 +11,71 @@ import {
 } from "../../src/utils/validation";
 import { BoolFlag } from "../../src/kv/schema";
 
+/**
+ * Input-validation helpers in `src/utils/validation.ts`.
+ *
+ * Base-sensitive URL forms (`BASE_SENSITIVE_URLS`) — the bypass BOTH URL
+ * sanitizers must blank. What the whitelist validates is a STRING; what a
+ * browser later resolves is that same string against the base of the
+ * RENDERING document. WHATWG reads a scheme with no `//` two different ways:
+ * standalone (no base) it goes through "special authority ignore slashes"
+ * state and the host is the one spelled out in the string — `readmoo.com`,
+ * which is exactly why the pre-fix whitelist let these through — but against a
+ * base carrying the SAME scheme it goes through "relative" state and the host
+ * becomes the BASE's host, i.e. the viewer's own origin. The consequence
+ * differs per field, and the COVER side is the worse of the two:
+ *  - `coverUrl` is rendered into an `<img src>`, so the request fires on
+ *    RENDER, with no user action at all. In the Extension the rendering
+ *    document is a Readmoo page, so it becomes a same-site GET to Readmoo
+ *    carrying the victim's cookies; in the PWA it becomes a GET against the
+ *    PWA's own origin — for every family member and every public-shelf visitor.
+ *  - `readmooUrl` is rendered into an `<a href>` and needs a click, but the
+ *    click lands the viewer on their OWN origin's `/public/x#invite=…` — a
+ *    route the PWA answers by unconditionally clearing the stored session
+ *    (`apiHost` included) and pre-filling the attacker's sync code. A
+ *    self-origin lure no host allowlist on the RENDERED href would catch,
+ *    because the href is genuinely same-origin by then.
+ * ONE table, asserted by BOTH describes. `isAllowedCoverUrl` and
+ * `isAllowedBookUrl` are separate trust boundaries but share a single
+ * file-local core in `shared/src/config/readmoo.ts`, and this defect was in
+ * that core — so a regression would surface on whichever boundary was left
+ * unpinned. Keeping one table is also what stops the two from drifting. The
+ * single-backslash row is exactly ONE backslash: WHATWG treats `\\` as
+ * equivalent to `//`, so the two-backslash spelling really does mean
+ * readmoo.com with or without a base and is deliberately still allowed — it is
+ * not a bypass.
+ *
+ * `sanitizeCoverUrl` suite — deliberately LEAN. The full URL matrix (schemes,
+ * ports, look-alike domains, userinfo smuggling, non-string shapes) is pinned
+ * through `parseBooks` in `tests/unit/putBooksAllowlist.test.ts`; duplicating
+ * it here would only make two tables drift apart. What this suite adds is the
+ * EXPORT itself: `sanitizeCoverUrl` moved out of `routes/user.ts` to become
+ * shared boundary logic, so `services/publicShelf.ts` can re-sanitize every
+ * public snapshot it writes. A rename, a removal, or a change to the
+ * keep/blank verdict now fails here rather than only inside one caller's
+ * suite. The base-sensitive table is the one URL row it carries in full,
+ * because the cover boundary is where such a value does the MOST damage.
+ *
+ * `sanitizeReadmooUrl` suite — deliberately FULLER than the cover suite, and
+ * that asymmetry is on purpose: the cover matrix is pinned through
+ * `parseBooks`, whereas the book-link matrix lives HERE — at the boundary
+ * helper all six of its call sites share (the three books write paths,
+ * `buildSnapshot`, the family-bookshelf aggregation, and the public snapshot
+ * read). The `parseBooks` suite pins only the WIRING for this field, so there
+ * is still exactly one table per rule and nothing to drift. Why the field
+ * needs its own guard at all: `readmooUrl` is rendered as a clickable
+ * `<a href>`, so an off-whitelist value is a phishing / arbitrary-redirect lure
+ * served under a legitimate book title — a different failure mode from an
+ * off-whitelist cover (a tracking beacon that loads by itself), and one no
+ * `img-src` CSP constrains. Every blank row is a way such a link could
+ * otherwise reach a family member or an anonymous public-shelf visitor.
+ *
+ * `isJsonObject`: why the helper exists — all three call sites (the family
+ * displayName and apiEndpoint handlers, plus parseFamilyPrefs) evaluate
+ * `key in body` immediately after this guard. A truthy primitive reaching `in`
+ * throws a TypeError, which would surface as a 500 instead of a clean 400.
+ */
+
 describe("sanitizeDisplayName", () => {
   it("returns empty string for undefined/null", () => {
     expect(sanitizeDisplayName(undefined)).toBe("");
@@ -76,35 +141,8 @@ describe("validateDisplayName", () => {
   });
 });
 
-/**
- * Base-sensitive URL forms — the bypass BOTH sanitizers below must blank.
- *
- * What the whitelist validates is a STRING; what a browser later resolves is
- * that same string against the base of the RENDERING document. WHATWG reads a
- * scheme with no `//` two different ways: standalone (no base) it goes through
- * "special authority ignore slashes" state and the host is the one spelled out
- * in the string — `readmoo.com`, which is exactly why the pre-fix whitelist let
- * these through — but against a base carrying the SAME scheme it goes through
- * "relative" state and the host becomes the BASE's host, i.e. the viewer's own
- * origin.
- *
- * The consequence differs per field, and the COVER side is the worse of the two:
- *
- * - `coverUrl` is rendered into an `<img src>`, so the request fires on RENDER,
- *   with no user action at all. In the Extension the rendering document is a
- *   Readmoo page, so it becomes a same-site GET to Readmoo carrying the
- *   victim's cookies; in the PWA it becomes a GET against the PWA's own origin.
- * - `readmooUrl` is rendered into an `<a href>` and needs a click, but the click
- *   lands the viewer on their OWN origin's `/public/x#invite=…` — a route the
- *   PWA answers by unconditionally clearing the stored session (`apiHost`
- *   included) and pre-filling the attacker's sync code.
- *
- * ONE table, asserted by BOTH describes below. `isAllowedCoverUrl` and
- * `isAllowedBookUrl` are separate trust boundaries but share a single
- * file-local core in `shared/src/config/readmoo.ts`, and this defect was in
- * that core — so a regression would surface on whichever boundary was left
- * unpinned. Keeping one table is also what stops the two from drifting.
- */
+// Base-sensitive URL forms — the bypass BOTH sanitizers below must blank (one shared table).
+// See the header → "Base-sensitive URL forms (`BASE_SENSITIVE_URLS`)".
 const BASE_SENSITIVE_URLS: ReadonlyArray<{ label: string; input: string }> = [
   {
     label: "a scheme with no slashes at all (the observed exploit shape)",
@@ -115,9 +153,8 @@ const BASE_SENSITIVE_URLS: ReadonlyArray<{ label: string; input: string }> = [
     input: "https:/readmoo.com/y",
   },
   {
-    // Exactly ONE backslash. WHATWG treats `\\` as equivalent to `//`, so the
-    // two-backslash spelling really does mean readmoo.com with or without a
-    // base and is deliberately still allowed — it is not a bypass.
+    // Exactly ONE backslash: the two-backslash spelling (`\\` ≡ `//`) is deliberately still
+    // allowed — it is not a bypass.
     label: "a scheme with a single backslash",
     input: "https:\\readmoo.com/x",
   },
@@ -127,18 +164,8 @@ const BASE_SENSITIVE_URLS: ReadonlyArray<{ label: string; input: string }> = [
   },
 ];
 
-/**
- * Deliberately LEAN. The full URL matrix (schemes, ports, look-alike domains,
- * userinfo smuggling, non-string shapes) is pinned through `parseBooks` in
- * `tests/unit/putBooksAllowlist.test.ts`; duplicating it here would only make
- * two tables drift apart.
- *
- * What this suite adds is the EXPORT itself: `sanitizeCoverUrl` moved out of
- * `routes/user.ts` to become shared boundary logic, so `services/publicShelf.ts`
- * can re-sanitize every public snapshot it writes. A rename, a removal, or a
- * change to the keep/blank verdict now fails here rather than only inside one
- * caller's suite.
- */
+// Deliberately LEAN — the full cover matrix lives in putBooksAllowlist.test.ts.
+// See the header → "`sanitizeCoverUrl` suite".
 describe("sanitizeCoverUrl", () => {
   it.each<{ label: string; input: string }>([
     { label: "the empty-string scraper placeholder", input: "" },
@@ -162,12 +189,8 @@ describe("sanitizeCoverUrl", () => {
     expect(sanitizeCoverUrl(input)).toBe("");
   });
 
-  // The one URL row this otherwise-lean suite carries in full, because the
-  // cover boundary is where a base-sensitive value does the MOST damage: an
-  // `<img src>` fires on render with no click, so a stored value of this shape
-  // beacons the viewer's own origin (Readmoo itself, with cookies, inside the
-  // Extension) for every family member and every public-shelf visitor.
-  // Mechanics and the shared-core reasoning: see BASE_SENSITIVE_URLS above.
+  // Carried in full: an `<img src>` fires on render, beaconing the viewer's own origin.
+  // See the header → "Base-sensitive URL forms (`BASE_SENSITIVE_URLS`)".
   it.each(BASE_SENSITIVE_URLS)(
     "blanks $label, which resolves onto the viewer's own origin",
     ({ input }) => {
@@ -176,23 +199,8 @@ describe("sanitizeCoverUrl", () => {
   );
 });
 
-/**
- * Deliberately FULLER than the `sanitizeCoverUrl` suite above, and that
- * asymmetry is on purpose: the cover matrix is pinned through `parseBooks` in
- * `tests/unit/putBooksAllowlist.test.ts`, whereas the book-link matrix lives
- * HERE — at the boundary helper all six of its call sites share (the three
- * books write paths, `buildSnapshot`, the family-bookshelf aggregation, and the
- * public snapshot read). The `parseBooks` suite pins only the WIRING for this
- * field, so there is still exactly one table per rule and nothing to drift.
- *
- * Why the field needs its own guard at all: `readmooUrl` is rendered as a
- * clickable `<a href>`, so an off-whitelist value is a phishing /
- * arbitrary-redirect lure served under a legitimate book title — a different
- * failure mode from an off-whitelist cover (a tracking beacon that loads by
- * itself), and one no `img-src` CSP constrains. Every blank row below is a way
- * such a link could otherwise reach a family member or an anonymous
- * public-shelf visitor.
- */
+// Deliberately FULLER than the cover suite: the book-link matrix lives HERE.
+// See the header → "`sanitizeReadmooUrl` suite".
 describe("sanitizeReadmooUrl", () => {
   // Values that survive byte-identical: the URL parser is consulted only for
   // the verdict, so a kept link is stored in its original spelling.
@@ -264,12 +272,8 @@ describe("sanitizeReadmooUrl", () => {
     expect(sanitizeReadmooUrl(input)).toBe("");
   });
 
-  // Same core defect as the cover boundary, different payoff: the click lands
-  // the viewer on their OWN origin's `/public/x#invite=…`, which the PWA answers
-  // by clearing the stored session (`apiHost` included) and pre-filling the
-  // attacker's sync code — a self-origin lure no host allowlist on the RENDERED
-  // href would catch, because the href is genuinely same-origin by then.
-  // Mechanics and the shared-core reasoning: see BASE_SENSITIVE_URLS above.
+  // Same core defect, different payoff: the click lands on the viewer's OWN origin.
+  // See the header → "Base-sensitive URL forms (`BASE_SENSITIVE_URLS`)".
   it.each(BASE_SENSITIVE_URLS)(
     "blanks $label, which resolves onto the viewer's own origin",
     ({ input }) => {
@@ -380,10 +384,8 @@ describe("isJsonObject", () => {
     expect(isJsonObject(value)).toBe(false);
   });
 
-  // Why the helper exists: all three call sites (the family displayName and
-  // apiEndpoint handlers, plus parseFamilyPrefs) evaluate `key in body`
-  // immediately after this guard. A truthy primitive reaching `in` throws a
-  // TypeError, which would surface as a 500 instead of a clean 400.
+  // All three call sites evaluate `key in body` right after this guard (TypeError → 500).
+  // See the header → "`isJsonObject`".
   it.each<{ label: string; value: unknown }>([
     { label: "a number", value: 5 },
     { label: "a string", value: "x" },

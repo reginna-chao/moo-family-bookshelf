@@ -12,6 +12,27 @@
  * while the integer requirement is deliberately stricter (real KV truncates) —
  * and pin the boundary of what the mock deliberately does NOT do (it never
  * simulates expiry).
+ *
+ * Rejection reasons (`expectRejectedPut`): asserts the put was rejected by the
+ * guard named in `reason`, not by some other error. The two guards carry
+ * different messages on purpose: the sub-60 floor mirrors real KV ("must be at
+ * least 60"), while the integer rule is the mock being stricter than the
+ * platform ("must be an integer").
+ *
+ * Miniflare message parity: Miniflare's own message ("Invalid expiration_ttl
+ * of 30. Expiration TTL must be at least 60.") contains the same two substrings
+ * the sub-60 test asserts on, so a suite asserting on them keeps passing if
+ * this mock is swapped for Miniflare — for positive sub-60 TTLs only;
+ * 0 / negative / NaN get a different Miniflare message (see the guard's
+ * comment in helpers/mockKv.ts).
+ *
+ * Absolute `expiration`: the test pins the MOCK's documented behavior, NOT the
+ * platform's — only `expirationTtl` is understood, so an absolute `expiration`
+ * (epoch seconds) is neither validated nor recorded. Real Cloudflare KV does
+ * validate it — `expiration` must be at least 60s in the future, so
+ * `expiration: 1` would come back a 400. The mock deliberately models none of
+ * that because no production code passes an absolute `expiration`; if that
+ * changes, this gap has to close before the caller can be trusted.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
@@ -41,12 +62,8 @@ async function captureRejection(put: Promise<unknown>): Promise<Error> {
   return error as Error;
 }
 
-/**
- * Asserts the put was rejected by the guard named in `reason`, not by some
- * other error. The two guards carry different messages on purpose: the sub-60
- * floor mirrors real KV ("must be at least 60"), while the integer rule is the
- * mock being stricter than the platform ("must be an integer").
- */
+// Asserts the put was rejected by the guard named in `reason`, not by another error.
+// See the header → "Rejection reasons (`expectRejectedPut`)".
 async function expectRejectedPut(
   put: Promise<unknown>,
   reason: string,
@@ -75,11 +92,8 @@ describe("createMockKV put", () => {
       kv.put(KEY, "value", { expirationTtl: 30 }),
     );
 
-    // Miniflare's own message ("Invalid expiration_ttl of 30. Expiration TTL
-    // must be at least 60.") contains these same two substrings, so a suite
-    // asserting on them keeps passing if this mock is swapped for Miniflare —
-    // for positive sub-60 TTLs like this one only; 0 / negative / NaN get a
-    // different Miniflare message (see the guard's comment in helpers/mockKv.ts).
+    // Miniflare's own message carries these two substrings too (positive sub-60 TTLs only).
+    // See the header → "Miniflare message parity".
     expect(error.message).toContain("Invalid expiration_ttl");
     expect(error.message).toContain("must be at least 60");
     expect(error.message).toContain(KEY);
@@ -174,13 +188,8 @@ describe("createMockKV put", () => {
   });
 
   it("ignores an absolute expiration instead of validating it", async () => {
-    // Pins the MOCK's documented behavior, NOT the platform's: only
-    // `expirationTtl` is understood, so an absolute `expiration` (epoch
-    // seconds) is neither validated nor recorded. Real Cloudflare KV does
-    // validate it — `expiration` must be at least 60s in the future, so
-    // `expiration: 1` would come back a 400. The mock deliberately models none
-    // of that because no production code passes an absolute `expiration`; if
-    // that changes, this gap has to close before the caller can be trusted.
+    // Pins the MOCK's behavior, NOT the platform's (real KV would 400 `expiration: 1`).
+    // See the header → "Absolute `expiration`".
     await kv.put(KEY, "value", { expiration: 1 });
 
     expect(await kv.get(KEY)).toBe("value");

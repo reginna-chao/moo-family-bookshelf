@@ -69,9 +69,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// PUT /api/family/:id/transfer — uncovered branches
-// ===========================================================================
+// --- PUT /api/family/:id/transfer — uncovered branches ---
 
 describe("PUT /api/family/:id/transfer edge cases", () => {
   it("should return 400 INVALID_JSON for malformed request body", async () => {
@@ -126,9 +124,7 @@ describe("PUT /api/family/:id/transfer edge cases", () => {
   });
 });
 
-// ===========================================================================
-// DELETE /api/family/:id/member/:uid — additional uncovered branches
-// ===========================================================================
+// --- DELETE /api/family/:id/member/:uid — additional uncovered branches ---
 
 describe("DELETE /api/family/:id/member/:uid edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID on delete", async () => {
@@ -177,9 +173,7 @@ describe("DELETE /api/family/:id/member/:uid edge cases", () => {
   });
 });
 
-// ===========================================================================
-// POST /api/family/:id/join — additional uncovered branches
-// ===========================================================================
+// --- POST /api/family/:id/join — additional uncovered branches ---
 
 describe("POST /api/family/:id/join edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID on join", async () => {
@@ -221,9 +215,7 @@ describe("POST /api/family/:id/join edge cases", () => {
   });
 });
 
-// ===========================================================================
-// GET /api/family/:id/members — additional uncovered branches
-// ===========================================================================
+// --- GET /api/family/:id/members — additional uncovered branches ---
 
 describe("GET /api/family/:id/members edge cases", () => {
   it("should return 400 INVALID_FAMILY_ID for invalid family ID", async () => {
@@ -273,9 +265,7 @@ describe("GET /api/family/:id/members edge cases", () => {
   });
 });
 
-// ===========================================================================
-// PUT /api/family/:id/member/:uid/displayName — additional uncovered branches
-// ===========================================================================
+// --- PUT /api/family/:id/member/:uid/displayName — additional uncovered branches ---
 
 describe("PUT /api/family/:id/member/:uid/displayName edge cases", () => {
   it("should return 400 INVALID_USER_ID for invalid target userId", async () => {
@@ -293,9 +283,7 @@ describe("PUT /api/family/:id/member/:uid/displayName edge cases", () => {
   });
 });
 
-// ===========================================================================
-// Index — 404 fallback and error handler
-// ===========================================================================
+// --- Index — 404 fallback and error handler ---
 
 describe("Index fallback routes", () => {
   it("should return 404 for unknown routes", async () => {
@@ -340,10 +328,8 @@ describe("Index fallback routes", () => {
       },
     } as unknown as KVNamespace;
 
-    // POST /api/family is a public route (no auth needed), triggers KV.get which
-    // will throw. The Rate Limiting bindings a production deploy carries are
-    // injected, so the throw comes from the HANDLER's own read rather than from
-    // the per-IP counter falling back to KV.
+    // POST /api/family is public, so its KV.get throws; production rate-limit bindings are injected
+    // so the throw comes from the HANDLER's own read, not the per-IP counter's KV fallback.
     const res = await app.request(
       "/api/family",
       {
@@ -359,9 +345,7 @@ describe("Index fallback routes", () => {
   });
 });
 
-// ===========================================================================
-// DELETE /api/family/:id/member/:uid — single-member owner leave
-// ===========================================================================
+// --- DELETE /api/family/:id/member/:uid — single-member owner leave ---
 
 describe("Single-member owner leave family", () => {
   it("should allow single-member owner to leave and delete family record", async () => {

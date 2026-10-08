@@ -54,6 +54,50 @@
  * mutation check `.claude/rules/test.md` requires) without ever touching a
  * production file. CI sets neither, and the "expected modules were found"
  * assertions mean a stray value cannot silently redirect the scan to nothing.
+ *
+ * THE DETECTORS.
+ *  - `specifierRe(name)` matches an import (or a re-export) whose named
+ *    specifier list contains `name`. Written against the statement rather than
+ *    the bare identifier so a doc comment mentioning the symbol is not a false
+ *    positive; `[^}]*` spans newlines, so a multi-line specifier list is
+ *    covered.
+ *  - `wildcardBindingRe(modulePath)` matches a WILDCARD binding of a module
+ *    whose specifier ends in `modulePath`: `import * as dal from
+ *    "../kv/publicShelves"`, plus the two re-export forms (`export * from`,
+ *    `export * as dal from`) that republish its exports under a new path.
+ *    `import * from` is not valid TS, so the optional `as <name>` covers every
+ *    real spelling of all three. A wildcard binding never names the accessor,
+ *    so `specifierRe` cannot see it — and neither can anything else in the
+ *    toolchain (see (ii) above).
+ *  - `canWritePublicShelves(source)` is true when `source` can reach
+ *    `putPublicShelves`: it either names the accessor in a specifier list (from
+ *    any module, so a re-export cannot launder it), or takes a wildcard binding
+ *    of the DAL module — which grants the put regardless of whether
+ *    `.putPublicShelves` is ever written out.
+ *  - The single-importer case asserts EXACTLY one importer, as equality, so the
+ *    "zero" failure mode (a renamed accessor the detector no longer sees) is
+ *    caught too; a wildcard binding of the DAL anywhere under `src/` lands
+ *    there as well. The whole-account teardown in `routes/user.ts` is a wipe,
+ *    not a list write — it can resurrect nothing, so it is the one sanctioned
+ *    non-publicShelf toucher; its negative half runs the full detector, because
+ *    a namespace import there would hand the books hot path the put without
+ *    ever naming it.
+ *
+ * THE FIXTURES (positive companions, kept as STRINGS — nothing is written to
+ * disk and nothing under `src/` is touched). `VIOLATING_ROUTE_FIXTURE` is one
+ * inline module carrying exactly one instance of each forbidden form — the
+ * companion for every "zero matches" assertion. `WILDCARD_FIXTURES` covers the
+ * wildcard half: every spelling that hands a module the put, and the controls
+ * that must NOT fire — a read-only named import (the books / family-prefs hot
+ * paths depend on staying legal) and a wildcard of a DIFFERENT DAL module.
+ *
+ * DAL EXPORT LISTS (`DAL_MODULES`): the EXACT export list of each DAL module,
+ * asserted with equality rather than containment on purpose. A missing name
+ * breaks the routes that call it (the import would not compile), but an ADDED
+ * one is the silent direction: a bare `putPublicSnapshot` there would be a way
+ * around the `buildSnapshot` URL-whitelist chokepoint and the dynamic-TTL rule
+ * in `services/publicShelf.ts`, and nothing else would notice. Adding an
+ * accessor is fine — updating that list is the deliberate act that says so.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -74,9 +118,7 @@ const ROUTES_DIR =
 /** `worker/src` — the single-writer scan looks at EVERY module, not just routes. */
 const SRC_DIR = process.env.MOO_KV_SCAN_SRC_DIR ?? resolve(HERE, "../../src");
 
-// ===========================================================================
-// A minimal source scanner
-// ===========================================================================
+// --- A minimal source scanner ---
 
 interface ScannedFile {
   /** Path relative to the scan root, POSIX separators, e.g. `routes/user.ts`. */
@@ -113,21 +155,15 @@ function lineOf(source: string, index: number): number {
   return source.slice(0, index).split("\n").length;
 }
 
-// ===========================================================================
-// (i) No direct KV access from a route module
-// ===========================================================================
+// --- (i) No direct KV access from a route module ---
 
 interface ForbiddenForm {
   rule: string;
   re: RegExp;
 }
 
-/**
- * Matches an import (or a re-export) whose named specifier list contains
- * `name`. Written against the statement rather than the bare identifier so a
- * doc comment mentioning the symbol is not a false positive; `[^}]*` spans
- * newlines, so a multi-line specifier list is covered.
- */
+// An import / re-export whose named specifier list contains `name` (multi-line lists included).
+// See the header → "THE DETECTORS".
 function specifierRe(name: string): RegExp {
   return new RegExp(
     `(?:import|export)\\s+(?:type\\s+)?\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from`,
@@ -143,9 +179,8 @@ const FORBIDDEN_IN_ROUTES: ForbiddenForm[] = [
     re: /c\.env\.KV\./g,
   },
   {
-    // The form the ESLint selectors CANNOT see: the binding arrives as a
-    // `kv: KVNamespace` parameter of a file-local helper, so the callee's
-    // object is a plain identifier, not `X.KV`.
+    // The form the ESLint selectors CANNOT see: the binding arrives as a `kv: KVNamespace`
+    // parameter of a file-local helper, so the callee's object is a plain identifier, not `X.KV`.
     rule: "file-local KV helper call (kv.get/put/delete/list)",
     re: /\bkv\.(?:get|put|delete|list)\(/g,
   },
@@ -182,11 +217,8 @@ function findForbidden(
   return found;
 }
 
-/**
- * One inline module carrying exactly one instance of each forbidden form — the
- * positive companion for every "zero matches" assertion below. Kept as a
- * STRING: nothing is written to disk and nothing under `src/` is touched.
- */
+// One instance of each forbidden form — the positive companion for every "zero matches" assertion.
+// See the header → "THE FIXTURES".
 const VIOLATING_ROUTE_FIXTURE = `
 import { kvKeys } from "../kv/schema";
 import type { Env } from "../utils/env";
@@ -243,19 +275,10 @@ describe("src/routes/** KV access boundary", () => {
   );
 });
 
-// ===========================================================================
-// The data access layer's own surface
-// ===========================================================================
+// --- The data access layer's own surface ---
 
-/**
- * The EXACT export list of each DAL module, asserted with equality rather than
- * containment on purpose. A missing name breaks the routes that call it (the
- * import would not compile), but an ADDED one is the silent direction: a bare
- * `putPublicSnapshot` here would be a way around the `buildSnapshot`
- * URL-whitelist chokepoint and the dynamic-TTL rule in
- * `services/publicShelf.ts`, and nothing else would notice. Adding an accessor
- * is fine — updating this list is the deliberate act that says so.
- */
+// The EXACT export list of each DAL module, asserted with equality (an ADDED name is the silent drift).
+// See the header → "DAL EXPORT LISTS".
 const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
   [
     "src/kv/families.ts",
@@ -319,23 +342,13 @@ describe("src/kv/* data access modules", () => {
   });
 });
 
-// ===========================================================================
-// (ii) publicshelves:{userId} stays single-writer
-// ===========================================================================
+// --- (ii) publicshelves:{userId} stays single-writer ---
 
 /** Specifier suffix of the public-shelf DAL, as every importer spells it. */
 const PUBLIC_SHELVES_MODULE = "kv/publicShelves";
 
-/**
- * Matches a WILDCARD binding of a module whose specifier ends in `modulePath`:
- * `import * as dal from "../kv/publicShelves"`, plus the two re-export forms
- * (`export * from`, `export * as dal from`) that republish its exports under a
- * new path. `import * from` is not valid TS, so the optional `as <name>` covers
- * every real spelling of all three.
- *
- * A wildcard binding never names the accessor, so `specifierRe` cannot see it —
- * and neither can anything else in the toolchain (see the header note on (ii)).
- */
+// A WILDCARD binding (`import * as`, `export *`, `export * as`) of a module ending in `modulePath`.
+// See the header → "THE DETECTORS".
 function wildcardBindingRe(modulePath: string): RegExp {
   return new RegExp(
     `(?:import|export)\\s+\\*\\s+(?:as\\s+\\w+\\s+)?from\\s+["'][^"']*${modulePath}["']`,
@@ -343,12 +356,8 @@ function wildcardBindingRe(modulePath: string): RegExp {
   );
 }
 
-/**
- * True when `source` can reach `putPublicShelves`: it either names the accessor
- * in a specifier list (from any module, so a re-export cannot launder it), or
- * takes a wildcard binding of the DAL module — which grants the put regardless
- * of whether `.putPublicShelves` is ever written out.
- */
+// True when `source` can reach `putPublicShelves` (named specifier from any module, or a DAL wildcard).
+// See the header → "THE DETECTORS".
 function canWritePublicShelves(source: string): boolean {
   return (
     specifierRe("putPublicShelves").test(source) ||
@@ -366,12 +375,8 @@ function putImporters(files: ScannedFile[]): string[] {
 const PUBLIC_SHELF_ROUTE = "routes/publicShelf.ts";
 const USER_ROUTE = "routes/user.ts";
 
-/**
- * Detector companion for the wildcard half: every spelling that hands a module
- * the put, and the controls that must NOT fire — a read-only named import (the
- * books / family-prefs hot paths depend on staying legal) and a wildcard of a
- * DIFFERENT DAL module. Kept as STRINGS: nothing is written under `src/`.
- */
+// Wildcard-half companion: every spelling that grants the put, plus controls that must NOT fire.
+// See the header → "THE FIXTURES".
 const WILDCARD_FIXTURES: [string, string, boolean][] = [
   [
     "a namespace import that calls the put",
@@ -441,9 +446,8 @@ describe("publicshelves:{userId} single-writer invariant", () => {
   );
 
   it("is imported by routes/publicShelf.ts and by nothing else", () => {
-    // Exactly one importer — asserted as equality, so the "zero" failure mode
-    // (a renamed accessor the detector no longer sees) is caught too. A
-    // wildcard binding of the DAL anywhere under `src/` lands here as well.
+    // Exactly one importer, as equality, so the "zero" failure mode is caught too; a DAL
+    // wildcard anywhere under `src/` lands here as well.
     expect(putImporters(SRC_FILES)).toEqual([PUBLIC_SHELF_ROUTE]);
   });
 
@@ -461,10 +465,8 @@ describe("publicshelves:{userId} single-writer invariant", () => {
     const module = SRC_FILES.find((file) => file.path === USER_ROUTE);
     expect(module).toBeDefined();
 
-    // The whole-account teardown is a wipe, not a list write — it can
-    // resurrect nothing, so it is the one sanctioned non-publicShelf toucher.
-    // The negative half runs the full detector: a namespace import here would
-    // hand the books hot path the put without ever naming it.
+    // The account teardown is a wipe (the one sanctioned non-publicShelf toucher); the negative
+    // half runs the full detector. See the header → "THE DETECTORS".
     expect(specifierRe("deletePublicShelves").test(module!.source)).toBe(true);
     expect(canWritePublicShelves(module!.source)).toBe(false);
   });

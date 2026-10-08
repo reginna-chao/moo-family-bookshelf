@@ -13,6 +13,52 @@
  *
  * The `clearEndpoint` branch of `PUT /:id/transfer` is covered at the bottom
  * because it is the only other writer of `apiEndpoint`.
+ *
+ * `expectNoStoredEndpoint` asserts the family record still exists AND carries
+ * no custom endpoint. The existence check matters:
+ * `expect(null).not.toHaveProperty(...)` passes, so a bare property assertion
+ * would also be satisfied by a record the handler had wrongly deleted.
+ *
+ * `NORMALIZED_ENDPOINTS` maps `input` → value written to
+ * `family:{id}.apiEndpoint`. The handler stores `url.origin + url.pathname`
+ * with trailing slashes stripped, so everything WHATWG `URL` normalizes away
+ * (default port, credentials, host case, IDN, alternate IPv4 spellings) is
+ * normalized here too.
+ *
+ * Loopback carve-outs: all of 127.0.0.0/8 is blocked as loopback; the exact
+ * string "127.0.0.1" (and localhost) is carved out ahead of that check, so the
+ * canonical dotted form still round-trips — the `https://127.0.0.1` row pins
+ * the carve-out itself, and the alternate spellings only reach it after the URL
+ * parser rewrites them. Both carve-outs are matched on `hostname`, which
+ * excludes the port, so the usual `wrangler dev` address
+ * (`http://127.0.0.1:8787`) stays acceptable over http. Alternate IPv4
+ * spellings of 127.0.0.1 are normalized by the URL parser BEFORE the host
+ * rules see them, so they land in the same carve-out and are stored in dotted
+ * form.
+ *
+ * Non-object bodies: primitive JSON bodies. The truthy ones are the
+ * regression: they survive a bare `!body` check, and `"apiEndpoint" in 5`
+ * throws a TypeError — which surfaced as a 500 instead of a client error. The
+ * falsy ones were always handled; both classes are pinned so the row set
+ * states the whole rule — any non-object body is MISSING_FIELDS, never a server
+ * error. The identical guard protects PUT /:id/member/:uid/displayName; that
+ * side is pinned in tests/integration/familyLifecycle.test.ts.
+ *
+ * Protocol before host: the protocol rule runs BEFORE any host
+ * classification, and the http carve-out is an exact-string match on
+ * localhost / 127.0.0.1. So `http://[::1]:8787` and `http://127.0.0.2` are
+ * answered with the protocol message, not with the IPv6 or private-IP message
+ * — pinned because the ordering decides which message a client sees.
+ *
+ * IPv6 literals (`BLOCKED_IPV6_HOSTS`): every IPv6 literal is rejected, with no
+ * range classification at all: private, link-local, IPv4-mapped and PUBLIC
+ * literals alike. That is the product decision — a family endpoint is expected
+ * to be a hostname — so the public entry is a deliberate case, not an
+ * over-block to be "fixed". The URL parser rewrites an embedded IPv4 into hex
+ * (`[::ffff:7f00:1]`), so the loopback carve-out — an exact string match on
+ * "127.0.0.1" — never applies to the IPv4-mapped loopback form; that row is
+ * pinned so the carve-out cannot be loosened into one that leaks IPv6 literals
+ * through.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
@@ -74,13 +120,8 @@ function storedFamily(familyId: string): Promise<FamilyRecord | null> {
   return kv.get<FamilyRecord>(kvKeys.family(familyId), "json");
 }
 
-/**
- * Assert the family record still exists AND carries no custom endpoint.
- *
- * The existence check matters: `expect(null).not.toHaveProperty(...)` passes,
- * so a bare property assertion would also be satisfied by a record the handler
- * had wrongly deleted.
- */
+// Asserts the family record still exists AND carries no custom endpoint.
+// See the header → "`expectNoStoredEndpoint`".
 async function expectNoStoredEndpoint(familyId: string) {
   const stored = await storedFamily(familyId);
   expect(stored).not.toBeNull();
@@ -126,9 +167,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Happy paths
-// ===========================================================================
+// --- Happy paths ---
 
 describe("PUT /api/family/:id/endpoint success", () => {
   it("should save a valid https endpoint and return the full family record", async () => {
@@ -207,17 +246,10 @@ describe("PUT /api/family/:id/endpoint success", () => {
   });
 });
 
-// ===========================================================================
-// URL normalization — what is actually persisted
-// ===========================================================================
+// --- URL normalization — what is actually persisted ---
 
-/**
- * `input` → value written to `family:{id}.apiEndpoint`.
- *
- * The handler stores `url.origin + url.pathname` with trailing slashes stripped,
- * so everything WHATWG `URL` normalizes away (default port, credentials, host
- * case, IDN, alternate IPv4 spellings) is normalized here too.
- */
+// `input` → value written to `family:{id}.apiEndpoint` (WHATWG-normalized).
+// See the header → "`NORMALIZED_ENDPOINTS`".
 const NORMALIZED_ENDPOINTS: [input: string, stored: string][] = [
   ["https://api.example.com", "https://api.example.com"],
   ["https://api.example.com/", "https://api.example.com"],
@@ -239,20 +271,16 @@ const NORMALIZED_ENDPOINTS: [input: string, stored: string][] = [
   ["http://localhost:8787", "http://localhost:8787"],
   ["http://LOCALHOST:8787", "http://localhost:8787"],
   ["http://127.0.0.1", "http://127.0.0.1"],
-  // Both loopback carve-outs are matched on `hostname`, which excludes the
-  // port — so the usual `wrangler dev` address stays acceptable over http even
-  // though all of 127.0.0.0/8 is otherwise blocked.
+  // Carve-outs match `hostname` (no port), so the usual `wrangler dev` address stays
+  // acceptable over http. See the header → "Loopback carve-outs".
   ["http://127.0.0.1:8787", "http://127.0.0.1:8787"],
-  // All of 127.0.0.0/8 is blocked as loopback; the exact string "127.0.0.1" is
-  // carved out ahead of that check, so the canonical dotted form still
-  // round-trips. This row is what pins the carve-out itself — the alternate
-  // spellings below only reach it after the URL parser rewrites them.
+  // This row pins the exact-string "127.0.0.1" carve-out itself.
+  // See the header → "Loopback carve-outs".
   ["https://127.0.0.1", "https://127.0.0.1"],
   ["https://localhost", "https://localhost"],
   ["https://LOCALHOST", "https://localhost"],
-  // Alternate IPv4 spellings of 127.0.0.1 are normalized by the URL parser
-  // BEFORE the host rules see them, so they land in the same loopback
-  // carve-out as the dotted form and are stored in dotted form.
+  // Alternate IPv4 spellings of 127.0.0.1 are normalized BEFORE the host rules see them,
+  // so they hit the same carve-out and are stored in dotted form.
   ["https://2130706433", "https://127.0.0.1"],
   // The http carve-out is evaluated on the NORMALIZED hostname, so a decimal
   // loopback is accepted over http exactly like the dotted form.
@@ -298,9 +326,7 @@ describe("PUT /api/family/:id/endpoint normalization", () => {
   });
 });
 
-// ===========================================================================
-// Permission and ownership
-// ===========================================================================
+// --- Permission and ownership ---
 
 describe("PUT /api/family/:id/endpoint permissions", () => {
   it("should return 401 UNAUTHORIZED without an auth token", async () => {
@@ -386,9 +412,8 @@ describe("PUT /api/family/:id/endpoint permissions", () => {
       memberToken,
     );
 
-    // URL validation runs ahead of the ownership check, so a non-owner sees the
-    // validation error first. Pinned because it means the endpoint doubles as a
-    // URL validator for any family member.
+    // URL validation runs ahead of the ownership check, so a non-owner sees the validation
+    // error first — pinned because the endpoint thus doubles as a URL validator for any member.
     expect(res.status).toBe(400);
     expect((await readJson(res)).error!.code).toBe("INVALID_ENDPOINT");
   });
@@ -410,9 +435,7 @@ describe("PUT /api/family/:id/endpoint permissions", () => {
   });
 });
 
-// ===========================================================================
-// Request-shape validation
-// ===========================================================================
+// --- Request-shape validation ---
 
 describe("PUT /api/family/:id/endpoint request validation", () => {
   it("should return 400 INVALID_FAMILY_ID for a malformed family id", async () => {
@@ -434,7 +457,7 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
     const res = await putEndpoint("INVALID", "https://custom.example.com");
 
     // The auth middleware runs before the handler, so the missing token wins
-    // over the handler's own family-id check.
+    // over the route schema's family-id check (`FamilyIdParam`, since #227).
     expect(res.status).toBe(401);
     expect((await readJson(res)).error!.code).toBe("UNAUTHORIZED");
   });
@@ -459,13 +482,8 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
     ["a JSON null body", "null"],
     ["an array body", "[]"],
     ["an unrelated key", '{"endpoint":"https://example.com"}'],
-    // Primitive JSON bodies. The truthy ones are the regression: they survive a
-    // bare `!body` check, and `"apiEndpoint" in 5` throws a TypeError — which
-    // surfaced as a 500 instead of a client error. The falsy ones were always
-    // handled; both classes are pinned so the row set states the whole rule —
-    // any non-object body is MISSING_FIELDS, never a server error.
-    // The identical guard protects PUT /:id/member/:uid/displayName; that side
-    // is pinned in tests/integration/familyLifecycle.test.ts.
+    // Primitive JSON bodies (the truthy ones once threw a TypeError → 500): any non-object
+    // body is MISSING_FIELDS. See the header → "Non-object bodies".
     ["a number body", "5"],
     ["a string body", '"hello"'],
     ["a true body", "true"],
@@ -581,9 +599,7 @@ describe("PUT /api/family/:id/endpoint request validation", () => {
   );
 });
 
-// ===========================================================================
-// Protocol + host rules (client-redirect hardening)
-// ===========================================================================
+// --- Protocol + host rules (client-redirect hardening) ---
 
 const REJECTED_PROTOCOLS: [label: string, value: string][] = [
   ["plain http on a public host", "http://api.example.com"],
@@ -592,11 +608,8 @@ const REJECTED_PROTOCOLS: [label: string, value: string][] = [
   ["websocket", "ws://api.example.com"],
   ["javascript", "javascript:alert(1)"],
   ["file", "file:///etc/passwd"],
-  // The protocol rule runs BEFORE any host classification, and the http
-  // carve-out is an exact-string match on localhost / 127.0.0.1. So these two
-  // loopback-ish hosts are answered with the protocol message, not with the
-  // IPv6 or private-IP message — pinned because the ordering decides which
-  // message a client sees.
+  // These two loopback-ish hosts get the protocol message, not the IPv6 / private-IP one.
+  // See the header → "Protocol before host".
   ["http on an IPv6 loopback literal", "http://[::1]:8787"],
   ["http on a non-.1 loopback address", "http://127.0.0.2"],
 ];
@@ -620,12 +633,8 @@ const BLOCKED_HOSTS: [label: string, value: string][] = [
   ["trailing-dot form of 10.0.0.1", "https://10.0.0.1."],
 ];
 
-/**
- * Every IPv6 literal is rejected, with no range classification at all: private,
- * link-local, IPv4-mapped and PUBLIC literals alike. That is the product
- * decision — a family endpoint is expected to be a hostname — so the public
- * entry below is a deliberate case, not an over-block to be "fixed".
- */
+// Every IPv6 literal is rejected, PUBLIC ones included — a product decision, not an over-block.
+// See the header → "IPv6 literals (`BLOCKED_IPV6_HOSTS`)".
 const BLOCKED_IPV6_HOSTS: [label: string, value: string][] = [
   ["the loopback literal", "https://[::1]"],
   ["the unspecified address", "https://[::]"],
@@ -634,9 +643,8 @@ const BLOCKED_IPV6_HOSTS: [label: string, value: string][] = [
   // The URL parser rewrites the embedded IPv4 into hex ("[::ffff:a00:1]"), so
   // the dotted-quad check never sees 10.0.0.1 — only the bracket rule stops it.
   ["an IPv4-mapped private address", "https://[::ffff:10.0.0.1]"],
-  // Same rewrite ("[::ffff:7f00:1]") means the loopback carve-out — an exact
-  // string match on "127.0.0.1" — never applies to the mapped form. Pinned so
-  // the carve-out cannot be loosened into one that leaks IPv6 literals through.
+  // Same rewrite ("[::ffff:7f00:1]"): the exact-string loopback carve-out never applies here.
+  // See the header → "IPv6 literals (`BLOCKED_IPV6_HOSTS`)".
   ["an IPv4-mapped loopback address", "https://[::ffff:127.0.0.1]"],
   ["a public documentation address", "https://[2001:db8::1]"],
 ];
@@ -738,9 +746,7 @@ describe("PUT /api/family/:id/endpoint IPv6 host rules", () => {
   );
 });
 
-// ===========================================================================
-// PUT /api/family/:id/transfer — clearEndpoint branch
-// ===========================================================================
+// --- PUT /api/family/:id/transfer — clearEndpoint branch ---
 
 /** `clearEndpoint` is checked with `=== 1`; every other value is a no-op. */
 const CLEAR_ENDPOINT_CASES: [

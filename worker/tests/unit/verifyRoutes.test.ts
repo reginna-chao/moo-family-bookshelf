@@ -15,6 +15,102 @@ import {
   UNKNOWN_CALLER_KEY,
 } from "../../src/middleware/rateLimit";
 
+/**
+ * PWA login verification (`src/routes/verify.ts` + the gate on
+ * `POST /api/family/:id/join`): settings, failure accounting and lockout.
+ *
+ * Fixtures:
+ *  - `seedFamilyWithMembers` seeds a family whose members are `userIds` (first
+ *    entry is the owner), plus the `member:{userId}` reverse-lookup keys so
+ *    each listed user counts as an EXISTING member of that family on the join
+ *    path.
+ *  - `joinFamily` sends `callerIp` as `cf-connecting-ip`, the only header the
+ *    Worker trusts as caller identity (see `getCallerIp` in
+ *    `worker/src/middleware/rateLimit.ts`); omit it to simulate a request with
+ *    no client IP available.
+ *  - `seedPinAccount` seeds a PIN verify record whose stored hash is a
+ *    placeholder, so no submitted secret can ever match it — use it when the
+ *    test only needs verification to be ACTIVE (the lockout branch runs before
+ *    any hash compare). `secretUpdatedAt` is OMITTED unless passed,
+ *    reproducing a record written before that field existed (absence must never
+ *    void a failure streak).
+ *  - `seedCallerLockout` locks out ONE CALLER until `lockedUntil`, by seeding
+ *    the caller-scoped `verifyfail:{userId}:{callerKey}` record. Lockout state
+ *    deliberately does not live on `verify:{userId}` (see "Verification
+ *    failure accounting"), so a lockout fixture must be keyed on the caller,
+ *    normalized exactly as the Worker does. `startedAt` is OMITTED unless
+ *    passed, reproducing an entry written before that field existed (a legacy
+ *    entry must stay locked, never be voided).
+ *  - `expectStreakStartedBetween` range-checks the streak start stamp against
+ *    the wall clock window the test ran in. Paired with a `toEqual` on the rest
+ *    of the record, this pins the exact field set while still tolerating a real
+ *    (unpinned) `Date.now()`.
+ *
+ * Verification failure accounting — caller-scoped (DoS regression suite):
+ * failures are charged to `verifyfail:{userId}:{callerKey}` where callerKey is
+ * the Cloudflare-supplied client IP, NEVER to `verify:{userId}`. Rationale: the
+ * join endpoint is public, the submitted userId is derived from the user's
+ * email with a fixed salt, and the victim's own familyId is retrievable with no
+ * credentials from the public `POST /api/auth/lookup`. Any counter keyed on the
+ * victim's identity — including one gated on "is an existing member" — would
+ * let a stranger lock the victim out of PWA login on demand. Membership is
+ * therefore deliberately parameterised in the core regression: the attacker can
+ * always aim at the victim's OWN familyId, so "existing member" is not a trust
+ * signal and must not change the outcome. The only failure-adjacent field
+ * allowed on the account record is `secretUpdatedAt`, which records WHEN the
+ * secret changed (not how often anyone failed) and is what voids streaks
+ * charged against the replaced secret. A legacy account record still carrying
+ * the removed `lockedUntil` field — exactly what a KV entry written by a
+ * pre-migration Worker looks like — must be inert: neither the lockout
+ * decision nor the back-off hint may be read off `verify:{userId}`.
+ *
+ * Failure-streak voiding after a secret change (owner recovery path): an owner
+ * who forgot their PIN/pattern resets it through the AUTHENTICATED
+ * `PUT /api/user/:id/verify` (callerId === userId). That stamps
+ * `secretUpdatedAt`, which voids any failure streak that began earlier: the
+ * streak accumulated against a secret that no longer exists, so honouring it
+ * would lock the owner out of their own account right after a legitimate
+ * reset. Voiding is deliberately narrow — it needs BOTH timestamps, compares
+ * them strictly ("streak started before the secret changed"), and only ever
+ * deletes the CALLER's own key. A missing timestamp (legacy KV entry) keeps the
+ * lockout in force: absence never unlocks.
+ *
+ * KV write budget per exit path (void-streak leftovers): Cloudflare KV accepts
+ * at most one write per second per key, so deleting
+ * `verifyfail:{userId}:{callerKey}` and writing it again within the same
+ * request can silently drop the second write — i.e. the failure just charged.
+ * Voiding is therefore an in-memory verdict only (re-derived on every read, so
+ * an undeleted void entry is already inert), and each exit path touches the
+ * key AT MOST ONCE: nothing while locked, nothing when no secret was submitted
+ * (spending the key's one write there would leave the next request in the same
+ * second unable to record a real failure), one put on a wrong secret, one
+ * delete on success. The in-memory mock has no one-write-per-second limit, so a
+ * delete followed by a put leaves exactly the same stored value as a lone put —
+ * only the recorded op sequence can tell those two apart.
+ *  - `trackWritesTo` replaces `kv` with a wrapper that logs every write aimed
+ *    at `key`, and returns the live log. The wrapper is discarded together with
+ *    the per-test `kv` instance (`beforeEach` builds a fresh mock), so there is
+ *    nothing to restore. `getPutTtl` is keyed on the original mock instance and
+ *    therefore reports nothing for the wrapper — assert TTLs outside a tracked
+ *    request.
+ *  - `seedVoidedStreak` leaves a genuine VOID leftover under `failKey`: a real
+ *    streak of `failCount` wrong secrets charged at T0 against the old PIN,
+ *    then an owner reset at T1 that stamps `secretUpdatedAt` after it. The
+ *    clock ends at T2, so a freshly charged streak differs from the leftover in
+ *    `startedAt` as well as in `failCount`. Returns the raw stored leftover for
+ *    byte-identity checks.
+ *  - The correct-secret cleanup case: the leftover is a live, non-null entry
+ *    with no lockout on it, so nothing but the void verdict can zero out
+ *    `failRecord` — it reaches the cleanup through the `|| voided` half of the
+ *    condition, which the plain `failRecord` half could not cover.
+ *
+ * IPv6 caller bucketing (rotation regression suite): a residential IPv6
+ * subscriber gets at least a /64 and privacy extensions let the client pick a
+ * new interface identifier per request. Keying failure accounting on the full
+ * address would therefore hand an attacker an unlimited number of 5-attempt
+ * budgets. `getCallerIp` buckets IPv6 callers on their /64.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -41,11 +137,8 @@ function request(
   return app.request(path, init, { KV: kv, DEV_MODE: "1" });
 }
 
-/**
- * Seed a family whose members are `userIds` (first entry is the owner), plus the
- * `member:{userId}` reverse-lookup keys so each listed user counts as an
- * EXISTING member of that family on the join path.
- */
+// Seeds a family of `userIds` (first = owner) plus their `member:` keys, so each counts as an
+// EXISTING member on the join path.
 async function seedFamilyWithMembers(userIds: string[], familyId: string) {
   await Promise.all(userIds.map((uid) => kv.put(kvKeys.member(uid), familyId)));
   await kv.put(
@@ -74,12 +167,8 @@ async function setPin(userId: string, pin: string) {
   expect(res.status).toBe(200);
 }
 
-/**
- * Join the target family as `userId`. `callerIp` is sent as `cf-connecting-ip`,
- * the only header the Worker trusts as caller identity (see `getCallerIp` in
- * `worker/src/middleware/rateLimit.ts`); omit it to simulate a request with no
- * client IP available.
- */
+// Joins the target family as `userId`; `callerIp` goes out as `cf-connecting-ip` (omit = no IP).
+// See the header → "Fixtures".
 function joinFamily(userId: string, verifySecret?: string, callerIp?: string) {
   const body: { userId: string; verifySecret?: string } = { userId };
   if (verifySecret !== undefined) body.verifySecret = verifySecret;
@@ -90,14 +179,8 @@ function joinFamily(userId: string, verifySecret?: string, callerIp?: string) {
   });
 }
 
-/**
- * Seed a PIN verify record for `userId`. The stored hash is a placeholder, so no
- * submitted secret can ever match it — use this when the test only needs
- * verification to be ACTIVE (the lockout branch runs before any hash compare).
- *
- * `secretUpdatedAt` is OMITTED unless passed, reproducing a record written
- * before that field existed (absence must never void a failure streak).
- */
+// Seeds a PIN record no secret can match (verification merely ACTIVE); `secretUpdatedAt` omitted
+// unless passed. See the header → "Fixtures".
 async function seedPinAccount(userId: string, secretUpdatedAt?: number) {
   const record: VerifyRecord = {
     method: "pin",
@@ -109,15 +192,8 @@ async function seedPinAccount(userId: string, secretUpdatedAt?: number) {
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
 }
 
-/**
- * Lock out ONE CALLER until `lockedUntil`, by seeding the caller-scoped
- * `verifyfail:{userId}:{callerKey}` record. Lockout state deliberately does not
- * live on `verify:{userId}` — see the DoS regression suite below — so a lockout
- * fixture must be keyed on the caller, normalized exactly as the Worker does.
- *
- * `startedAt` is OMITTED unless passed, reproducing an entry written before that
- * field existed (a legacy entry must stay locked, never be voided).
- */
+// Locks out ONE CALLER via `verifyfail:{userId}:{callerKey}`; `startedAt` omitted unless passed.
+// See the header → "Fixtures".
 async function seedCallerLockout(
   userId: string,
   callerIp: string,
@@ -389,11 +465,8 @@ describe("PUT /api/user/:id/verify", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    // Failure counters live in `verifyfail:{userId}:{callerKey}`, never on the
-    // account record — a counter on the account would be a DoS lever. The only
-    // failure-adjacent field allowed here is `secretUpdatedAt`, which records
-    // WHEN the secret changed (not how often anyone failed) and is what voids
-    // streaks charged against the replaced secret.
+    // No failure counter on the account record (a DoS lever); only `secretUpdatedAt` is allowed.
+    // See the header → "Verification failure accounting".
     const record = JSON.parse(
       (await kv.get(kvKeys.verify(VALID_USER_ID))) as string,
     ) as Record<string, unknown>;
@@ -663,17 +736,8 @@ describe("Verification in join flow", () => {
   });
 });
 
-// ===========================================================================
-// Verification failure accounting — caller-scoped (DoS regression suite)
-//
-// Failures are charged to `verifyfail:{userId}:{callerKey}` where callerKey is
-// the Cloudflare-supplied client IP, NEVER to `verify:{userId}`. Rationale: the
-// join endpoint is public, the submitted userId is derived from the user's email
-// with a fixed salt, and the victim's own familyId is retrievable with no
-// credentials from the public `POST /api/auth/lookup`. Any counter keyed on the
-// victim's identity — including one gated on "is an existing member" — would let
-// a stranger lock the victim out of PWA login on demand.
-// ===========================================================================
+// --- Verification failure accounting — caller-scoped (DoS regression suite) ---
+// See the header → "Verification failure accounting".
 
 const ATTACKER_IP = "203.0.113.10";
 const VICTIM_IP = "198.51.100.20";
@@ -693,11 +757,8 @@ async function readVerifyRecord(userId: string): Promise<VerifyRecord | null> {
   return raw ? (JSON.parse(raw) as VerifyRecord) : null;
 }
 
-/**
- * Range-check the streak start stamp against the wall clock window the test ran
- * in. Paired with a `toEqual` on the rest of the record, this pins the exact
- * field set while still tolerating a real (unpinned) `Date.now()`.
- */
+// Range-checks the streak start stamp against the test's wall-clock window; paired with a
+// `toEqual` on the rest, it pins the exact field set while tolerating a real `Date.now()`.
 function expectStreakStartedBetween(
   record: VerifyFailRecord | null,
   notBefore: number,
@@ -729,9 +790,8 @@ async function submitWrongSecrets(count: number, callerIp?: string) {
 }
 
 describe("Verification failure accounting in join flow (caller-scoped)", () => {
-  // The core DoS regression. Membership is deliberately parameterised: the
-  // attacker can always aim at the victim's OWN familyId (public lookup), so
-  // "existing member" is not a trust signal and must not change the outcome.
+  // The core DoS regression; membership is parameterised because it is not a trust signal.
+  // See the header → "Verification failure accounting".
   it.each([
     {
       label: "an existing member of the target family",
@@ -859,10 +919,8 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
-    // A legacy account record still carrying the removed `lockedUntil` field —
-    // exactly what a KV entry written by a pre-migration Worker looks like. It
-    // must be inert: neither the lockout decision nor the back-off hint may be
-    // read off `verify:{userId}`.
+    // A pre-migration account record still carrying `lockedUntil` must be inert.
+    // See the header → "Verification failure accounting".
     await kv.put(
       kvKeys.verify(VALID_USER_ID),
       JSON.stringify({
@@ -1044,19 +1102,8 @@ describe("Verification failure accounting in join flow (caller-scoped)", () => {
   });
 });
 
-// ===========================================================================
-// Failure-streak voiding after a secret change (owner recovery path)
-//
-// An owner who forgot their PIN/pattern resets it through the AUTHENTICATED
-// `PUT /api/user/:id/verify` (callerId === userId). That stamps
-// `secretUpdatedAt`, which voids any failure streak that began earlier: the
-// streak accumulated against a secret that no longer exists, so honouring it
-// would lock the owner out of their own account right after a legitimate reset.
-//
-// Voiding is deliberately narrow — it needs BOTH timestamps, compares them
-// strictly, and only ever deletes the CALLER's own key. A missing timestamp
-// (legacy KV entry) keeps the lockout in force: absence never unlocks.
-// ===========================================================================
+// --- Failure-streak voiding after a secret change (owner recovery path) ---
+// See the header → "Failure-streak voiding after a secret change (owner recovery path)".
 
 const SECOND_CALLER_IP = "203.0.113.77";
 const NEW_PIN = "654321";
@@ -1121,9 +1168,8 @@ describe("Verification failure streak voiding after a secret change", () => {
     });
   });
 
-  // Voiding must fire ONLY on a strict "streak started before the secret
-  // changed". Everything else — including either timestamp being absent on a
-  // legacy KV entry — leaves the lockout untouched.
+  // Voiding fires ONLY on a strict "streak started before the secret changed"; anything else —
+  // either timestamp absent on a legacy entry included — leaves the lockout untouched.
   it.each([
     {
       label: "the failure entry predates the startedAt field",
@@ -1254,35 +1300,16 @@ describe("Verification failure streak voiding after a secret change", () => {
   });
 });
 
-// ===========================================================================
-// KV write budget per exit path (void-streak leftovers)
-//
-// Cloudflare KV accepts at most one write per second per key, so deleting
-// `verifyfail:{userId}:{callerKey}` and writing it again within the same request
-// can silently drop the second write — i.e. the failure just charged. Voiding is
-// therefore an in-memory verdict only (re-derived on every read, so an undeleted
-// void entry is already inert), and each exit path touches the key AT MOST ONCE:
-// nothing while locked, nothing when no secret was submitted, one put on a wrong
-// secret, one delete on success.
-//
-// The in-memory mock has no one-write-per-second limit, so a delete followed by
-// a put leaves exactly the same stored value as a lone put — only the recorded
-// op sequence can tell those two apart.
-// ===========================================================================
+// --- KV write budget per exit path (void-streak leftovers): each path writes the key AT MOST ONCE ---
+// See the header → "KV write budget per exit path (void-streak leftovers)".
 
 /** 5s after the reset — a freshly charged streak must stamp THIS instant. */
 const T2 = T1 + 5000;
 
 type KvWriteOp = "put" | "delete";
 
-/**
- * Replace `kv` with a wrapper that logs every write aimed at `key`, and return
- * the live log. The wrapper is discarded together with the per-test `kv`
- * instance (`beforeEach` builds a fresh mock), so there is nothing to restore.
- *
- * Note: `getPutTtl` is keyed on the original mock instance and therefore reports
- * nothing for the wrapper — assert TTLs outside a tracked request.
- */
+// Wraps `kv` to log every write aimed at `key` (nothing to restore); `getPutTtl` sees nothing
+// through it. See the header → "KV write budget per exit path (void-streak leftovers)".
 function trackWritesTo(key: string): KvWriteOp[] {
   const ops: KvWriteOp[] = [];
   const base = kv;
@@ -1310,13 +1337,8 @@ describe("Verification KV write budget on the void-streak paths", () => {
     normalizeCallerIp(ATTACKER_IP),
   );
 
-  /**
-   * Leave a genuine VOID leftover under `failKey`: a real streak of `failCount`
-   * wrong secrets charged at T0 against the old PIN, then an owner reset at T1
-   * that stamps `secretUpdatedAt` after it. The clock ends at T2, so a freshly
-   * charged streak differs from the leftover in `startedAt` as well as in
-   * `failCount`. Returns the raw stored leftover for byte-identity checks.
-   */
+  // Leaves a genuine VOID leftover (streak at T0, reset at T1, clock at T2); returns the raw value.
+  // See the header → "KV write budget per exit path (void-streak leftovers)".
   async function seedVoidedStreak(failCount: number): Promise<string> {
     pinClock(T0);
     await seedVictimInsideTargetFamily();
@@ -1347,9 +1369,8 @@ describe("Verification KV write budget on the void-streak paths", () => {
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("VERIFICATION_REQUIRED");
 
-    // No attempt was made, so nothing is charged — and nothing is cleaned up
-    // either. Spending the key's one write here would leave the next request in
-    // the same second unable to record a real failure.
+    // No attempt, so nothing charged and nothing cleaned up: spending the key's one write here
+    // would leave the next request in the same second unable to record a real failure.
     expect(await kv.get(failKey)).toBe(leftover);
     expect(writes).toEqual([]);
   });
@@ -1377,10 +1398,8 @@ describe("Verification KV write budget on the void-streak paths", () => {
   });
 
   it("should delete a void leftover on a successful verification", async () => {
-    // The leftover is a live, non-null entry with no lockout on it, so nothing
-    // but the void verdict can zero out `failRecord` — this reaches the cleanup
-    // through the `|| voided` half of the condition, which the plain
-    // `failRecord` half could not cover.
+    // Only the void verdict can zero out this live leftover's `failRecord`, so the cleanup is
+    // reached through the `|| voided` half of the condition.
     await seedVoidedStreak(2);
     const writes = trackWritesTo(failKey);
 
@@ -1392,14 +1411,8 @@ describe("Verification KV write budget on the void-streak paths", () => {
   });
 });
 
-// ===========================================================================
-// IPv6 caller bucketing (rotation regression suite)
-//
-// A residential IPv6 subscriber gets at least a /64 and privacy extensions let
-// the client pick a new interface identifier per request. Keying failure
-// accounting on the full address would therefore hand an attacker an unlimited
-// number of 5-attempt budgets. `getCallerIp` buckets IPv6 callers on their /64.
-// ===========================================================================
+// --- IPv6 caller bucketing (rotation regression suite): `getCallerIp` buckets per /64 ---
+// See the header → "IPv6 caller bucketing (rotation regression suite)".
 
 const ATTACKER_SUBNET = "2001:db8:1:2";
 /** One fresh interface identifier per allowed failure, all inside one /64. */

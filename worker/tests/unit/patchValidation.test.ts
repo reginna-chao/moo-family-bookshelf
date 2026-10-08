@@ -5,9 +5,7 @@ import {
 } from "../../src/routes/user";
 import { DISPLAY_NAME_MAX_LENGTH } from "../../src/utils/validation";
 
-// ---------------------------------------------------------------------------
-// parsePatchChanges
-// ---------------------------------------------------------------------------
+// --- parsePatchChanges ---
 
 describe("parsePatchChanges", () => {
   // --- Error cases (table-driven) ---
@@ -142,9 +140,7 @@ describe("parsePatchChanges", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// validatePatchDisplayName
-// ---------------------------------------------------------------------------
+// --- validatePatchDisplayName ---
 
 describe("validatePatchDisplayName", () => {
   it("returns ok when displayName is absent", () => {

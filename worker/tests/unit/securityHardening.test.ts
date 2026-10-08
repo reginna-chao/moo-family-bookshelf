@@ -22,6 +22,59 @@ import {
   makeUserId,
 } from "../helpers/ids";
 
+/**
+ * Worker security hardening: CORS origin validation, route classification and
+ * the sensitive-tier bucket split, the request body size limit, and the per-IP
+ * rate-limit tiers.
+ *
+ * Request helpers: `requestWithCalls` / `request` run a request in the world a
+ * deployed Worker runs in — no DEV_MODE, and the four Rate Limiting bindings
+ * production carries (without them every per-minute limit falls back to its KV
+ * counter and logs RATE_LIMIT_BINDING_MISSING). `requestWithCalls` returns the
+ * response together with the binding calls it made, so a case can assert what
+ * the request was charged for. `fallbackRequest` is a request from a deployment
+ * carrying NO Rate Limiting bindings — the self-hoster whose wrangler.toml
+ * predates them; used only by the KV-fallback tier suite.
+ *
+ * Sensitive-tier classification + bucket split: every sensitive route carries
+ * the SAME per-minute limit, but `/api/auth/lookup` counts in its OWN bucket so
+ * that a verified account's onboarding (two lookups — the no-secret probe, then
+ * the retry carrying the secret — plus one create/join) cannot exhaust its own
+ * budget. On a shared 3/min counter that flow would leave zero headroom for a
+ * mistyped PIN; split, it costs 2 of 3 and 1 of 3. `sensitiveBucketFor` owns
+ * the classification and `rateLimitBucketFor` turns it into a counter; both are
+ * asserted through the production exports so a renamed prefix or a moved route
+ * breaks here. Two key shapes are kept apart, because both are live: the KV
+ * fallback key `{prefix}:{ip}:{minuteBucket}` and the Rate Limiting binding key
+ * `{prefix}:{ip}` (the binding owns the window, so it carries no bucket). The
+ * only way an onboarding caller could reach into the nested lookup namespace is
+ * a caller key of exactly "lookup" — and even then the keys differ in shape.
+ *
+ * Rate limit tiers — KV fallback: every case in that suite goes through
+ * `fallbackRequest`, i.e. a deployment with NO Rate Limiting bindings —
+ * deliberately. Since #160 item 1 the per-IP tiers are normally counted by
+ * Cloudflare, which no test can drive to a refusal by sending requests; what a
+ * request COUNTS AGAINST there is a key, and the tier -> key mapping is pinned
+ * in tests/unit/rateLimit.test.ts. This suite is what remains the end-to-end
+ * pin of the KV counters the fallback still runs, through the real routes
+ * rather than a synthetic app — so the ceilings a self-hoster without the
+ * bindings actually gets are not left untested. The per-minute allowances are
+ * read back from the production classifier (`rateLimitBucketFor`) so a change
+ * to any tier's ceiling reaches these loops instead of leaving them asserting a
+ * stale number. The fallback logs RATE_LIMIT_BINDING_MISSING once per
+ * rate-limit CHECK — one line per request here, because every route in the
+ * suite passes only the per-IP middleware; a bookshelf / borrow-* route would
+ * add a second line from its per-minute per-userId check. That is correct and
+ * would otherwise flood the runner; a spy silences it without hiding it from
+ * an assertion.
+ *
+ * CORS preflight: the CORS middleware answers a preflight before `rateLimit`
+ * ever runs, so a browser's automatic OPTIONS must not eat into the caller's
+ * budget. Asserted on the binding call log, because since #160 item 1 that is
+ * where a per-minute charge shows up; the KV assertion still covers the hourly
+ * counters and the fallback.
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -42,14 +95,8 @@ function buildInit(method: string, opts?: RequestOptions): RequestInit {
   return init;
 }
 
-/**
- * A request in the world a deployed Worker runs in: no DEV_MODE, and the four
- * Rate Limiting bindings production carries. Without them every per-minute
- * limit falls back to its KV counter and logs RATE_LIMIT_BINDING_MISSING.
- *
- * Returns the response together with the binding calls it made, so a case can
- * assert what the request was charged for.
- */
+// A production-shaped request (no DEV_MODE, all four bindings) plus the binding calls it made.
+// See the header → "Request helpers".
 async function requestWithCalls(
   method: string,
   path: string,
@@ -67,11 +114,8 @@ function request(method: string, path: string, opts?: RequestOptions) {
   return requestWithCalls(method, path, opts).then(({ res }) => res);
 }
 
-/**
- * A request from a deployment carrying NO Rate Limiting bindings — the
- * self-hoster whose wrangler.toml predates them. Used only by the tier suite
- * below, which is the end-to-end pin of the KV fallback counters.
- */
+// A request from a deployment with NO Rate Limiting bindings; used only by the tier suite below.
+// See the header → "Request helpers".
 function fallbackRequest(method: string, path: string, opts?: RequestOptions) {
   return app.request(path, buildInit(method, opts), { KV: kv });
 }
@@ -80,12 +124,10 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// B1: CORS Origin Validation
-// ===========================================================================
+// --- B1: CORS Origin Validation ---
 
-// Content script 實際執行的書櫃站：read = 舊站，next = 新站。
-// 成對釘住，避免日後收緊 subdomain regex 時無聲失效。新增書櫃站時只改這裡。
+// Bookshelf sites the content script actually runs on: read = old site, next = new site. Pinned as a
+// pair so a later subdomain-regex tightening cannot silently break one; add new sites only here.
 const BOOKSHELF_ORIGINS = [
   "https://read.readmoo.com",
   "https://next.readmoo.com",
@@ -112,9 +154,9 @@ describe("isAllowedOrigin", () => {
     "https://next.readmoo.com.evil.com",
     "http://next.readmoo.com",
     "https://next.readmoo.com:8080",
-    // 多層子網域：釘住 subdomain 字元類 [a-zA-Z0-9-] 不含 "."
+    // Multi-level subdomain: pins that the subdomain character class [a-zA-Z0-9-] excludes "."
     "https://sub.next.readmoo.com",
-    // 同字首不同 TLD：釘住 regex 尾端的 $ 錨點
+    // Same prefix, different TLD: pins the regex's trailing $ anchor
     "https://next.readmoo.com.tw",
     "http://localhost:abc",
     "https://localhost:3000",
@@ -190,7 +232,7 @@ describe("isAllowedOrigin", () => {
 });
 
 describe("CORS headers on responses", () => {
-  // 每個書櫃站都必須拿到自己的 Access-Control-Allow-Origin 回填
+  // Every bookshelf site must get its own origin echoed back in Access-Control-Allow-Origin
   it.each(BOOKSHELF_ORIGINS)(
     "should set Access-Control-Allow-Origin for allowed origin: %s",
     async (origin) => {
@@ -211,9 +253,7 @@ describe("CORS headers on responses", () => {
   });
 });
 
-// ===========================================================================
-// Shared isPublicRoute utility
-// ===========================================================================
+// --- Shared isPublicRoute utility ---
 
 describe("isPublicRoute", () => {
   it("should match POST /api/family", () => {
@@ -268,16 +308,8 @@ describe("isPublicRoute", () => {
   });
 });
 
-// ===========================================================================
-// Sensitive-tier classification + bucket split
-//
-// Every sensitive route carries the SAME per-minute limit, but `/api/auth/lookup`
-// counts in its OWN bucket so that a verified account's onboarding (two lookups —
-// the no-secret probe, then the retry carrying the secret — plus one create/join)
-// cannot exhaust its own budget. `sensitiveBucketFor` owns the classification and
-// `rateLimitBucketFor` turns it into a counter; both are asserted through the
-// production exports so a renamed prefix or a moved route breaks here.
-// ===========================================================================
+// --- Sensitive-tier classification + bucket split ---
+// See the header → "Sensitive-tier classification + bucket split".
 
 const ONBOARDING_BUCKET = "onboarding";
 const LOOKUP_BUCKET = "lookup";
@@ -445,12 +477,8 @@ describe("rateLimitBucketFor", () => {
   });
 
   it("should not let a crafted caller key alias the lookup counter", () => {
-    // Two key shapes to keep apart, because both are live: the KV fallback key
-    // `{prefix}:{ip}:{minuteBucket}` and the Rate Limiting binding key
-    // `{prefix}:{ip}` (the binding owns the window, so it carries no bucket).
-    // The only way an onboarding caller could reach into the nested lookup
-    // namespace is a caller key of exactly "lookup" — and even then the keys
-    // differ in shape.
+    // Two live key shapes: `{prefix}:{ip}:{minuteBucket}` (KV fallback) and `{prefix}:{ip}` (binding).
+    // See the header → "Sensitive-tier classification + bucket split".
     const onboarding = rateLimitBucketFor("POST", "/api/family").prefix;
     const lookup = rateLimitBucketFor("POST", "/api/auth/lookup").prefix;
 
@@ -459,13 +487,10 @@ describe("rateLimitBucketFor", () => {
   });
 });
 
-// ===========================================================================
-// B2: Request Body Size Limit
-// ===========================================================================
+// --- B2: Request Body Size Limit ---
 
-// `/api/family` carries the 256KB per-route default (`utils/bodyLimit.ts`);
-// the books PUT's 2MB limit is covered in
-// `tests/integration/bodyLimitRoutes.test.ts`.
+// `/api/family` carries the 256KB per-route default (`utils/bodyLimit.ts`); the books PUT's
+// 2MB limit is covered in `tests/integration/bodyLimitRoutes.test.ts`.
 describe("Request body size limit", () => {
   it("should return 413 when Content-Length exceeds 256KB", async () => {
     const res = await request("POST", "/api/family", {
@@ -533,15 +558,10 @@ describe("Request body size limit", () => {
   });
 });
 
-// ===========================================================================
-// B3: Rate Limit Tiers
-// ===========================================================================
+// --- B3: Rate Limit Tiers ---
 
-/**
- * Per-minute allowances, read back from the production classifier so a change to
- * any tier's ceiling reaches these loops instead of leaving them asserting a
- * stale number. The routes below are the same ones the loops exercise.
- */
+// Per-minute allowances read back from the production classifier, so a retuned ceiling reaches
+// these loops instead of leaving a stale number; the routes are the ones the loops exercise.
 const SENSITIVE_LIMIT = rateLimitBucketFor("POST", "/api/family").limit;
 const LOOKUP_LIMIT = rateLimitBucketFor("POST", "/api/auth/lookup").limit;
 const PUBLIC_LIMIT = rateLimitBucketFor(
@@ -553,20 +573,8 @@ const STANDARD_LIMIT = rateLimitBucketFor("GET", "/api/user/test/books").limit;
 /** A public, non-sensitive route: the login-time verification-method probe. */
 const PUBLIC_ROUTE = `/api/user/${USER3}/verify`;
 
-// Every case below goes through `fallbackRequest`, i.e. a deployment with NO
-// Rate Limiting bindings — deliberately. Since #160 item 1 the per-IP tiers are
-// normally counted by Cloudflare, which no test can drive to a refusal by
-// sending requests; what a request COUNTS AGAINST there is a key, and the
-// tier -> key mapping is pinned in tests/unit/rateLimit.test.ts. This suite is
-// what remains the end-to-end pin of the KV counters the fallback still runs,
-// through the real routes rather than a synthetic app — so the ceilings a
-// self-hoster without the bindings actually gets are not left untested.
-//
-// The fallback logs RATE_LIMIT_BINDING_MISSING once per rate-limit CHECK —
-// one line per request here, because every route below passes only the per-IP
-// middleware; a bookshelf / borrow-* route would add a second line from its
-// per-minute per-userId check. That is correct and would otherwise flood the
-// runner; the spy below silences it without hiding it from an assertion.
+// Every case goes through `fallbackRequest` (NO bindings) — the end-to-end pin of the KV counters.
+// See the header → "Rate limit tiers — KV fallback".
 describe("Rate limit tiers — KV fallback (deployment without the bindings)", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -690,10 +698,8 @@ describe("Rate limit tiers — KV fallback (deployment without the bindings)", (
   });
 
   it("should fit one verified account's onboarding inside the split budgets", async () => {
-    // The flow the split exists for: a no-secret lookup probe, the same lookup
-    // carrying the secret, then the create — three sensitive requests from one
-    // IP inside one minute. On a shared 3/min counter this would leave zero
-    // headroom for a mistyped PIN; split, it costs 2 of 3 and 1 of 3.
+    // The flow the split exists for: probe lookup, lookup with the secret, then create — one IP,
+    // one minute. Split, it costs 2 of 3 and 1 of 3 (a shared 3/min counter leaves zero headroom).
     for (let i = 0; i < 2; i++) {
       const probe = await fallbackRequest("POST", "/api/auth/lookup", {
         body: JSON.stringify({ userId: USER1 }),
@@ -742,9 +748,7 @@ describe("Rate limit tiers — KV fallback (deployment without the bindings)", (
   });
 });
 
-// ===========================================================================
-// B4: Security Headers
-// ===========================================================================
+// --- B4: Security Headers ---
 
 describe("Security headers", () => {
   it("should set security headers on health check response", async () => {
@@ -789,9 +793,7 @@ describe("Security headers", () => {
   });
 });
 
-// ===========================================================================
-// OPTIONS preflight short-circuit (regression guard)
-// ===========================================================================
+// --- OPTIONS preflight short-circuit (regression guard) ---
 
 describe("OPTIONS preflight short-circuit", () => {
   const ALLOWED_ORIGIN = "https://readmoo.com";
@@ -826,11 +828,8 @@ describe("OPTIONS preflight short-circuit", () => {
   });
 
   it("should NOT be charged against any rate-limit counter", async () => {
-    // The CORS middleware answers a preflight before `rateLimit` ever runs, so
-    // a browser's automatic OPTIONS must not eat into the caller's budget.
-    // Asserted on the binding call log, because since #160 item 1 that is where
-    // a per-minute charge shows up; the KV assertion below still covers the
-    // hourly counters and the fallback.
+    // A preflight is answered by CORS before `rateLimit` runs, so OPTIONS must not eat the budget.
+    // See the header → "CORS preflight".
     const preflight = await requestWithCalls(
       "OPTIONS",
       "/api/user/test/books",

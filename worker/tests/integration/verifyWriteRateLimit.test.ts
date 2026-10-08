@@ -21,20 +21,68 @@ import {
   VERIFY_ATTEMPT_WINDOW_SECONDS,
 } from "../../src/services/verification";
 
-// ===========================================================================
-// Per-userId write ceiling on the verify-domain write handlers
-//
-// The four AUTHENTICATED write handlers — PUT /api/user/:id/verify,
-// POST /api/user/:id/verify/otp, POST /api/user/:id/verify/prompted and
-// POST /api/user/:id/qr-token — share ONE per-userId counter, so a single
-// account cannot drain the Worker's daily KV write quota by rotating source
-// addresses. The public GET /api/user/:id/verify is deliberately NOT limited.
-//
-// Everything here runs WITHOUT DEV_MODE, which every verify suite sets:
-// DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
-// fire. Setup that must not spend the live budget goes through the DEV_MODE
-// helper (`devRequest`) on purpose.
-// ===========================================================================
+/**
+ * Per-userId write ceiling on the verify-domain write handlers.
+ *
+ * The four AUTHENTICATED write handlers — PUT /api/user/:id/verify,
+ * POST /api/user/:id/verify/otp, POST /api/user/:id/verify/prompted and
+ * POST /api/user/:id/qr-token — share ONE per-userId counter, so a single
+ * account cannot drain the Worker's daily KV write quota by rotating source
+ * addresses. The public GET /api/user/:id/verify is deliberately NOT limited.
+ *
+ * Everything here runs WITHOUT DEV_MODE, which every verify suite sets:
+ * DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
+ * fire. Setup that must not spend the live budget goes through the DEV_MODE
+ * helper (`devRequest`) on purpose.
+ *
+ * Ceiling constants: `VERIFY_WRITE_LIMIT` is the very options object the four
+ * `enforcePerUserRateLimit` call sites in `src/routes/verify.ts` spread,
+ * imported rather than copied — so the boundary cases (last write admitted,
+ * next one refused) track any change to the ceiling instead of silently
+ * drifting from it. The counter KEY is likewise always derived through the
+ * production key builder (`peekPerUserRateLimit`), and `counterPrefix` cuts a
+ * production-built key at the userId it embeds rather than spelling the shape
+ * out, so the key shape stays owned by `peekPerUserRateLimit` alone.
+ * `PINNED_NOW` is exactly mid-window, so the counter cannot roll over mid-test
+ * AND the back-off hint is deterministic; it is derived from the production
+ * window length rather than hard-coded, so a changed window keeps the pin exact.
+ *
+ * Live requests: `prodRequest` has no DEV_MODE, so both limiters run — and it
+ * carries the Rate Limiting bindings a production deploy carries, so the
+ * per-IP tier is counted by the platform rather than falling back to its KV
+ * counter. The ceilings under test are hourly, which have no binding at all and
+ * stay on KV by design; the bindings only keep the per-IP layer out of the KV
+ * assertions.
+ *
+ * One table (`WRITE_ENDPOINTS`) drives all four authenticated write endpoints
+ * that share the ceiling: that is what proves the limit is a property of the
+ * SCOPE, not of a single handler.
+ *
+ * Charge before parse: a request that does no work at all still costs a slot.
+ * Charging BEFORE the handler's body parse and precondition checks is what
+ * stops a malformed-request loop from retrying for free; moving the ceiling
+ * below those checks must fail here.
+ *
+ * Auth ordering: the ceiling sits AFTER each handler's auth guard on purpose:
+ * an unauthenticated stranger must be able neither to SPEND the account
+ * owner's write budget nor to OBSERVE it (a 429 where a 401 belongs would
+ * confirm the account exists and is active).
+ *
+ * Public read: GET /api/user/:id/verify is what the PWA calls BEFORE login to
+ * learn which verification method to prompt for. Limiting it on the owner's
+ * write budget would let a spent window (or a third party who somehow spent
+ * it) hide the login prompt.
+ *
+ * Cross-scope isolation — the core invariant of this change: the write
+ * ceiling's scope is deliberately DISTINCT from the verification gate's
+ * wrong-guess attempt ceiling (`VERIFY_ATTEMPT_SCOPE`, 10/hr, in
+ * `services/verification.ts`). Sharing one counter would let an attacker's
+ * wrong guesses crowd out the owner's own settings writes, and the owner's
+ * settings writes weaken the brute-force bound — both directions are covered.
+ * With the same userId and the same window length, the scope segment is the
+ * ONLY thing keeping the two counters apart — and neither prefix may be a
+ * prefix of the other, or a `startsWith` scan would sweep up both.
+ */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -49,13 +97,8 @@ const OTHER_USER_ID = BOB;
 const CORRECT_PIN = "123456";
 const WRONG_PIN = "000000";
 
-/**
- * The very options object the four `enforcePerUserRateLimit` call sites in
- * `src/routes/verify.ts` spread, imported rather than copied — so the boundary
- * cases below (last write admitted, next one refused) track any change to the
- * ceiling instead of silently drifting from it. The counter KEY is likewise
- * always derived through the production key builder (`peekPerUserRateLimit`).
- */
+/** The production ceiling options, imported rather than copied.
+ *  See the header → "Ceiling constants". */
 const {
   scope: WRITE_SCOPE,
   max: WRITE_MAX,
@@ -64,11 +107,8 @@ const {
 
 const WRITE_WINDOW_MS = WRITE_WINDOW_SECONDS * 1000;
 
-/**
- * Exactly mid-window, so the counter cannot roll over mid-test AND the back-off
- * hint is deterministic. Derived from the production window length rather than
- * hard-coded, so a changed window keeps the pin exact.
- */
+/** Exactly mid-window (no rollover, deterministic back-off), derived from the
+ *  production window. See the header → "Ceiling constants". */
 const PINNED_NOW =
   Math.floor(Date.parse("2026-01-01T00:00:00.000Z") / WRITE_WINDOW_MS) *
     WRITE_WINDOW_MS +
@@ -103,13 +143,8 @@ async function buildRequest(
   return app.request(path, init, env);
 }
 
-/**
- * Live request: no DEV_MODE, so both limiters run — and WITH the Rate Limiting
- * bindings a production deploy carries, so the per-IP tier is counted by the
- * platform rather than falling back to its KV counter. The ceilings under test
- * here are hourly, which have no binding at all and stay on KV by design; the
- * bindings only keep the per-IP layer out of the KV assertions below.
- */
+/** Live request: no DEV_MODE, production bindings injected (per-IP stays off KV).
+ *  See the header → "Live requests". */
 function prodRequest(
   method: string,
   path: string,
@@ -183,11 +218,8 @@ async function attemptCounterKey(userId: string): Promise<string> {
   return reading.key;
 }
 
-/**
- * The scope-carrying prefix of a counter key, cut at the userId it embeds —
- * derived from a production-built key rather than spelled out here, so the key
- * shape stays owned by `peekPerUserRateLimit` alone.
- */
+/** The scope-carrying prefix of a production-built counter key, cut at the userId
+ *  it embeds. See the header → "Ceiling constants". */
 function counterPrefix(key: string, userId: string): string {
   return key.slice(0, key.indexOf(userId));
 }
@@ -246,11 +278,8 @@ interface WriteEndpoint {
   foreignTokenStatus: number;
 }
 
-/**
- * The four authenticated write endpoints that share the ceiling. Driving all of
- * them from one table is what proves the limit is a property of the SCOPE, not
- * of a single handler.
- */
+/** The four authenticated write endpoints sharing the ceiling: one table proves
+ *  the limit belongs to the SCOPE, not to a single handler. */
 const WRITE_ENDPOINTS: WriteEndpoint[] = [
   {
     label: "PUT verify",
@@ -374,9 +403,8 @@ describe("Verify-domain per-userId write ceiling", () => {
     expect(((await res.json()) as Json).error.code).toBe("INVALID_METHOD");
     // The request did no work at all — no OTP was pushed...
     expect(await kv.get(kvKeys.otp(USER_ID))).toBeNull();
-    // ...and it still cost a slot. Charging BEFORE the handler's body parse and
-    // precondition checks is what stops a malformed-request loop from retrying
-    // for free; moving the ceiling below those checks must fail here.
+    // ...and it still cost a slot (charged before parse/preconditions).
+    // See the header → "Charge before parse".
     expect(await writesCharged(USER_ID)).toBe(1);
   });
 
@@ -498,14 +526,8 @@ describe("Verify-domain per-userId write ceiling", () => {
   });
 });
 
-// ===========================================================================
-// Auth ordering
-//
-// The ceiling sits AFTER each handler's auth guard on purpose: an unauthenticated
-// stranger must be able neither to SPEND the account owner's write budget nor to
-// OBSERVE it (a 429 where a 401 belongs would confirm the account exists and is
-// active).
-// ===========================================================================
+// ===== Auth ordering — the ceiling sits AFTER each auth guard =====
+// See the header → "Auth ordering".
 
 describe("Verify-domain write ceiling — auth ordering", () => {
   it.each(WRITE_ENDPOINTS)(
@@ -560,14 +582,8 @@ describe("Verify-domain write ceiling — auth ordering", () => {
   );
 });
 
-// ===========================================================================
-// The public read stays outside the ceiling
-//
-// GET /api/user/:id/verify is what the PWA calls BEFORE login to learn which
-// verification method to prompt for. Limiting it on the owner's write budget
-// would let a spent window (or a third party who somehow spent it) hide the
-// login prompt.
-// ===========================================================================
+// ===== The public read stays outside the ceiling =====
+// See the header → "Public read".
 
 describe("Verify-domain write ceiling — public read", () => {
   it("serves the public GET with no token even when the write window is spent", async () => {
@@ -590,15 +606,8 @@ describe("Verify-domain write ceiling — public read", () => {
   });
 });
 
-// ===========================================================================
-// Cross-scope isolation — the core invariant of this change
-//
-// The write ceiling's scope is deliberately DISTINCT from the verification
-// gate's wrong-guess attempt ceiling (`VERIFY_ATTEMPT_SCOPE`, 10/hr, in
-// `services/verification.ts`). Sharing one counter would let an attacker's wrong
-// guesses crowd out the owner's own settings writes, and the owner's settings
-// writes weaken the brute-force bound — both directions are covered below.
-// ===========================================================================
+// ===== Cross-scope isolation — the core invariant of this change =====
+// See the header → "Cross-scope isolation".
 
 describe("Verify-domain write ceiling — isolation from the verification gate", () => {
   it("keys the two ceilings under prefixes that cannot alias each other", async () => {
@@ -608,9 +617,8 @@ describe("Verify-domain write ceiling — isolation from the verification gate",
     const attemptKey = await attemptCounterKey(USER_ID);
     expect(writeKey).not.toBe(attemptKey);
 
-    // Same userId and same window length, so the scope segment is the ONLY
-    // thing keeping the two counters apart — and neither prefix may be a prefix
-    // of the other, or a `startsWith` scan would sweep up both.
+    // Only the scope segment separates them; neither prefix may prefix the other.
+    // See the header → "Cross-scope isolation".
     const writePrefix = counterPrefix(writeKey, USER_ID);
     const attemptPrefix = counterPrefix(attemptKey, USER_ID);
     expect(writePrefix.startsWith(attemptPrefix)).toBe(false);

@@ -9,6 +9,71 @@ import {
 } from "../../src/kv/schema";
 import { ALICE, BOB, CHARLIE, DAVE } from "../helpers/ids";
 
+/**
+ * Borrow records on member removal: cancellation, visibility afterwards, and
+ * orphaned records after a family dissolution.
+ *
+ * Cover URLs: `bookCoverUrl` is optional, but a SUPPLIED non-empty value must
+ * clear `isAllowedCoverUrl` — the create handler refuses an off-Readmoo host
+ * with 400 INVALID_COVER_URL, which would never reach the removal logic these
+ * cases are about.
+ *
+ * Reading records: `readBorrow` reads a record the way production resolves
+ * one since the index was denormalised (#160 item 2,
+ * `src/services/borrowIndex.ts`): `borrow:{id}` is only a `{ familyId }`
+ * pointer, and the family's index (`borrows:family:{familyId}`) is the single
+ * source of truth for status and fields. Reading the pointer alone would
+ * assert against an object that has neither, which is exactly the drift this
+ * two-step lookup prevents. It returns `null` when the pointer is gone (never
+ * written / deleted by a trim) or when the index no longer carries the record.
+ * `storedIndexIds` lists the requestIds the stored index names, in index order,
+ * readable in EITHER shape (`string[]` legacy, records since #160 item 2):
+ * since the departure settlement (`settleDepartingBorrower`) PURGES a leaver's
+ * own terminal records, "was this record cancelled?" and "is this record still
+ * here?" are two different questions — `readBorrow` answers the first only
+ * while the record survives; `storedIndexIds` answers the second directly.
+ * `listBorrows` returns the parsed records plus the raw response text, so a
+ * test can assert that a userId appears NOWHERE in the payload (not just
+ * outside the fields it happens to check).
+ *
+ * Settlement outcomes:
+ * - (a) Bob was the BORROWER: the request is cancelled AND then purged in the
+ *   same settlement — index entry and pointer both gone. That purge is the fix
+ *   for security finding F-1: the history cap is keyed on `borrowerId`, so a
+ *   leaver's finished records would otherwise sit in the shared index under an
+ *   id that never writes again and can never be trimmed.
+ * - (b) Bob was the OWNER: the record is CAROL's own history, so it survives —
+ *   and it is where the CANCELLATION half of the settlement stays observable
+ *   now that the borrower-side record is purged before anyone can read it.
+ * - Bob's OWN borrows are judged by status: PENDING is cancelled (making it
+ *   terminal) and REJECTED already was, so both are purged; LENT is the only
+ *   survivor — the book may still be physically out on loan and the
+ *   counterparty must be able to close it. The survivor keeps BOTH halves,
+ *   the positive companion for the purged pair's `toBeNull()` lines, so they
+ *   cannot be green because the removal wiped everything.
+ *
+ * Visibility setup: maxMembers defaults to 2 and no route raises it, so the
+ * case bumps it in KV to hold four members (setup only; every assertion goes
+ * through the HTTP handlers). Both records must exist BEFORE the removal:
+ * POST requires the ownerId to be a current family member. The removed
+ * member's record survives specifically in the family INDEX, which the
+ * cancellation rewrote — the positive companion for the response check: the
+ * data is still there to leak, so an empty/filtered response is the API-layer
+ * least-privilege filter doing its job, not a deletion that would make the
+ * check pass vacuously.
+ *
+ * Orphan setup: the family is dissolved by dropping `family:{familyId}`
+ * (setup-only KV surgery; every assertion still goes through HTTP). Auth
+ * tokens live in `auth:{userId}` / `token:{token}` and dropping the family
+ * record deletes neither, so Bob's token survives it — that is precisely the
+ * residual being pinned. The borrower CAN still cancel: PATCH
+ * /api/borrow/:requestId does re-read `family:{familyId}` for its membership
+ * check (#159), but the key is ABSENT here — that is what makes this an
+ * orphan — so the check is skipped and the party check alone authorises. The
+ * orphan stays writable by its parties (see
+ * tests/integration/borrowMembershipRecheck.test.ts).
+ */
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
@@ -66,10 +131,8 @@ async function createBorrowRequest(
       bookId: `book-${bookSuffix}`,
       bookTitle: `Book ${bookSuffix}`,
       bookAuthor: "Author",
-      // `bookCoverUrl` is optional, but a SUPPLIED non-empty value must clear
-      // `isAllowedCoverUrl` — the create handler refuses an off-Readmoo host
-      // with 400 INVALID_COVER_URL, which would never reach the removal logic
-      // these cases are about.
+      // A supplied cover must clear `isAllowedCoverUrl`.
+      // See the header → "Cover URLs".
       bookCoverUrl: `https://cdn.readmoo.com/cover/${bookSuffix}.jpg`,
       ownerId,
     },
@@ -80,17 +143,8 @@ async function createBorrowRequest(
   return json.data.requestId as string;
 }
 
-/**
- * Read a borrow record the way production resolves one since the index was
- * denormalised (#160 item 2, `src/services/borrowIndex.ts`): `borrow:{id}` is
- * only a `{ familyId }` pointer, and the family's index
- * (`borrows:family:{familyId}`) is the single source of truth for status and
- * fields. Reading the pointer alone would assert against an object that has
- * neither, which is exactly the drift this two-step lookup prevents.
- *
- * Returns `null` when the pointer is gone (never written / deleted by a trim)
- * or when the index no longer carries the record.
- */
+/** Resolve a record as production does (pointer → family index); `null` when either
+ *  half is gone. See the header → "Reading records". */
 async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
   const pointer = await kv.get<BorrowPointer>(kvKeys.borrow(requestId), "json");
   if (!pointer?.familyId) return null;
@@ -101,15 +155,8 @@ async function readBorrow(requestId: string): Promise<BorrowRequest | null> {
   return index?.find((r) => r.requestId === requestId) ?? null;
 }
 
-/**
- * The requestIds the family's stored index currently names, in index order —
- * readable in EITHER shape (`string[]` legacy, records since #160 item 2).
- *
- * Since the departure settlement (`settleDepartingBorrower`) PURGES a leaver's
- * own terminal records, "was this record cancelled?" and "is this record still
- * here?" are now two different questions. `readBorrow` answers the first only
- * while the record survives; this answers the second directly.
- */
+/** The requestIds the stored index names, in order, in EITHER shape — "is it still
+ *  here?". See the header → "Reading records". */
 async function storedIndexIds(familyId: string): Promise<string[]> {
   const stored = await kv.get<BorrowRequest[] | string[]>(
     kvKeys.borrowsByFamily(familyId),
@@ -121,11 +168,8 @@ async function storedIndexIds(familyId: string): Promise<string[]> {
   );
 }
 
-/**
- * GET the family borrow list as `token`. Returns the parsed records plus the
- * raw response text, so a test can assert that a userId appears NOWHERE in the
- * payload (not just outside the fields it happens to check).
- */
+/** GET the family borrow list as `token`: parsed records plus the raw text, so a
+ *  userId can be asserted absent from the WHOLE payload. */
 async function listBorrows(familyId: string, token: string) {
   const res = await request(
     "GET",
@@ -142,9 +186,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// Auto-cancel PENDING borrow requests on member removal
-// ===========================================================================
+// ===== Auto-cancel PENDING borrow requests on member removal =====
 
 describe("Borrow Cancellation on Member Removal", () => {
   it("cancels PENDING requests on both sides and purges the ones the removed member borrowed", async () => {
@@ -201,18 +243,14 @@ describe("Borrow Cancellation on Member Removal", () => {
     );
     expect(removeRes.status).toBe(200);
 
-    // (a) Bob was the BORROWER: the request is cancelled AND then purged in the
-    // same settlement — index entry and pointer both gone. That purge is the
-    // fix for security finding F-1: the history cap is keyed on `borrowerId`,
-    // so a leaver's finished records would otherwise sit in the shared index
-    // under an id that never writes again and can never be trimmed.
+    // (a) Bob was the BORROWER: cancelled AND purged (index + pointer), the F-1 fix.
+    // See the header → "Settlement outcomes".
     expect(await storedIndexIds(familyId)).not.toContain(reqBobBorrows);
     expect(await kv.get(kvKeys.borrow(reqBobBorrows))).toBeNull();
     expect(await readBorrow(reqBobBorrows)).toBeNull();
 
-    // (b) Bob was the OWNER: the record is CAROL's own history, so it survives —
-    // and it is where the CANCELLATION half of the settlement stays observable
-    // now that the borrower-side record is purged before anyone can read it.
+    // (b) Bob was the OWNER: CAROL's history survives, showing the cancellation.
+    // See the header → "Settlement outcomes".
     expect(await storedIndexIds(familyId)).toContain(reqBobOwns);
     expect((await readBorrow(reqBobOwns))?.status).toBe(BorrowStatus.CANCELLED);
 
@@ -316,17 +354,14 @@ describe("Borrow Cancellation on Member Removal", () => {
     );
     expect(removeRes.status).toBe(200);
 
-    // All three are Bob's OWN borrows, so the settlement judges them by status:
-    // PENDING is cancelled (making it terminal) and REJECTED already was, so
-    // both are purged; LENT is the only survivor — the book may still be
-    // physically out on loan and the counterparty must be able to close it.
+    // Bob's OWN borrows, judged by status: PENDING + REJECTED purged, LENT survives.
+    // See the header → "Settlement outcomes".
     expect(await storedIndexIds(familyId)).toEqual([lentId]);
     expect(await kv.get(kvKeys.borrow(pendingId))).toBeNull();
     expect(await kv.get(kvKeys.borrow(rejectedId))).toBeNull();
 
-    // Positive companion for the two `toBeNull()` lines: the survivor keeps
-    // BOTH halves, so they cannot be green because the removal wiped
-    // everything.
+    // Positive companion for the two `toBeNull()` lines: the survivor keeps BOTH
+    // halves, so they cannot be green because the removal wiped everything.
     expect(await kv.get(kvKeys.borrow(lentId))).not.toBeNull();
     expect((await readBorrow(lentId))?.status).toBe(BorrowStatus.LENT);
   });
@@ -357,9 +392,7 @@ describe("Borrow Cancellation on Member Removal", () => {
   });
 });
 
-// ===========================================================================
-// A removed member's borrow data must not stay visible to uninvolved members
-// ===========================================================================
+// ===== A removed member's borrow data must not stay visible to uninvolved members =====
 
 describe("Borrow visibility after member removal", () => {
   it("keeps a removed member's record with its counterparty and out of an uninvolved member's list", async () => {
@@ -369,9 +402,8 @@ describe("Borrow visibility after member removal", () => {
       "Alice",
     );
 
-    // maxMembers defaults to 2 and no route raises it — bump it in KV so the
-    // family can hold four members. Setup only; every assertion below goes
-    // through the HTTP handlers.
+    // maxMembers defaults to 2 and no route raises it: bump it in KV (setup only).
+    // See the header → "Visibility setup".
     const raw = await kv.get<Json>(kvKeys.family(familyId), "json");
     raw.maxMembers = 4;
     await kv.put(kvKeys.family(familyId), JSON.stringify(raw));
@@ -388,8 +420,7 @@ describe("Borrow visibility after member removal", () => {
       "Dave",
     );
 
-    // Both records must exist BEFORE the removal: POST requires the ownerId to
-    // be a current family member.
+    // Both records exist BEFORE the removal (POST needs a current-member ownerId).
     // Carol borrows Bob's book — Bob is about to be removed.
     const reqCarolBorrowsBob = await createBorrowRequest(
       familyId,
@@ -419,11 +450,8 @@ describe("Borrow visibility after member removal", () => {
       BorrowStatus.CANCELLED,
     );
 
-    // (a2) It survives specifically in the family INDEX, which the cancellation
-    // rewrote. This is the positive companion for (b) below: the removed
-    // member's data is still there to leak, so an empty/filtered response is
-    // the API-layer least-privilege filter doing its job — not a deletion that
-    // would make (b) pass vacuously.
+    // (a2) It survives in the rewritten INDEX — the positive companion for (b).
+    // See the header → "Visibility setup".
     const index = await kv.get<BorrowRequest[]>(
       kvKeys.borrowsByFamily(familyId),
       "json",
@@ -448,9 +476,7 @@ describe("Borrow visibility after member removal", () => {
   });
 });
 
-// ===========================================================================
-// Orphaned borrow records outlive their family record
-// ===========================================================================
+// ===== Orphaned borrow records outlive their family record =====
 
 describe("Orphaned borrow records after family dissolution", () => {
   it("lets a party settle an orphaned request while a non-party stays forbidden", async () => {
@@ -476,11 +502,8 @@ describe("Orphaned borrow records after family dissolution", () => {
       "orphan",
     );
 
-    // Dissolve the family by dropping `family:{familyId}`. Setup-only KV
-    // surgery; every assertion below still goes through HTTP. Auth tokens live
-    // in `auth:{userId}` / `authtoken:{token}` and only member removal deletes
-    // them, so Bob's token survives the family record — that is precisely the
-    // residual being pinned here.
+    // Dissolve by dropping `family:{familyId}`; Bob's token survives (the residual).
+    // See the header → "Orphan setup".
     await kv.delete(kvKeys.family(familyId));
 
     // Sanity: the family really is gone — a family-scoped route now 404s.
@@ -511,11 +534,8 @@ describe("Orphaned borrow records after family dissolution", () => {
     // The refused write left the record untouched.
     expect((await readBorrow(requestId))?.status).toBe(BorrowStatus.PENDING);
 
-    // The borrower CAN still cancel: PATCH /api/borrow/:requestId does re-read
-    // `family:{familyId}` for its membership check (#159), but the key is
-    // ABSENT here — that is what makes this an orphan — so the check is
-    // skipped and the party check alone authorises. The orphan stays writable
-    // by its parties (see tests/integration/borrowMembershipRecheck.test.ts).
+    // The borrower CAN still cancel: no family record, so the party check alone
+    // authorises. See the header → "Orphan setup".
     const cancelRes = await request(
       "PATCH",
       `/api/borrow/${requestId}`,

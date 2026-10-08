@@ -54,12 +54,8 @@ const WORKER_ROOT = resolve(HERE, "../..");
 const CONFIG_FILE =
   process.env.MOO_ESLINT_CONFIG_FILE ?? join(WORKER_ROOT, "eslint.config.js");
 
-/**
- * Virtual paths — never created; they only select a config override. The
- * nested one models a future `src/routes/sub/` module, whose `../../kv/schema`
- * specifier is why the `kvKeys` ban is a `patterns` group and not a `paths`
- * name.
- */
+// Virtual paths, never created — they only select a config override. The nested one models a future
+// `src/routes/sub/` module, whose `../../kv/schema` specifier is why the `kvKeys` ban is a `patterns` group.
 const ROUTE_FIXTURE_PATH = join(WORKER_ROOT, "src/routes/__fixture__.ts");
 const NESTED_ROUTE_FIXTURE_PATH = join(
   WORKER_ROOT,
@@ -67,11 +63,8 @@ const NESTED_ROUTE_FIXTURE_PATH = join(
 );
 const SERVICE_FIXTURE_PATH = join(WORKER_ROOT, "src/services/__fixture__.ts");
 
-/**
- * The two rules this file is about. Every other message (unused vars, parser
- * noise, ...) is filtered out, so a fixture does not have to be otherwise
- * idiomatic to make its point.
- */
+// The two rules this file is about; every other message (unused vars, parser noise, ...) is
+// filtered out, so a fixture does not have to be otherwise idiomatic to make its point.
 const GUARDRAIL_RULES = ["no-restricted-syntax", "no-restricted-imports"];
 
 const eslint = new ESLint({
@@ -91,10 +84,8 @@ interface LintCase {
   code: string;
   /** Rule that must report it, or `null` when the form is legal. */
   expectedRule: string | null;
-  /**
-   * Substring of the message that must appear. Both guardrail rules carry
-   * several configurations, so the ruleId alone cannot say WHICH entry fired.
-   */
+  // Substring the message must contain: both guardrail rules carry several
+  // configurations, so the ruleId alone cannot say WHICH entry fired.
   expectedMessage?: string;
 }
 
@@ -127,9 +118,8 @@ const CASES: LintCase[] = [
     expectedRule: "no-restricted-syntax",
   },
   {
-    // The same alias reached by ASSIGNMENT rather than declaration: the
-    // declarator selector inspects `init`, so it is blind to this form and a
-    // fourth selector on `AssignmentExpression` carries it.
+    // The alias reached by ASSIGNMENT: the declarator selector inspects `init` and is blind
+    // to this form, so a fourth selector on `AssignmentExpression` carries it.
     label: "let kv; kv = c.env.KV",
     filePath: ROUTE_FIXTURE_PATH,
     code: `${PREAMBLE}export const run = () => { let kv; kv = c.env.KV; return kv; };`,
@@ -149,9 +139,8 @@ const CASES: LintCase[] = [
     expectedRule: "no-restricted-imports",
   },
   {
-    // Reached from a nested route dir, where the specifier gains a `../`. A
-    // `paths: { "../kv/schema": ... }` entry — the ban's original shape — is
-    // an exact specifier match and would miss this one entirely.
+    // From a nested route dir the specifier gains a `../`; a `paths: { "../kv/schema": ... }`
+    // entry (the ban's original shape) is an exact specifier match and would miss it.
     label: 'import { kvKeys } from "../../kv/schema" (nested route dir)',
     filePath: NESTED_ROUTE_FIXTURE_PATH,
     code: `import { kvKeys } from "../../kv/schema";\nexport const key = kvKeys.user("1");`,
@@ -175,10 +164,8 @@ const CASES: LintCase[] = [
     expectedRule: null,
   },
   {
-    // Widening the `kvKeys` ban to a `**/kv/schema` pattern must not have
-    // swept in the module's other exports at depth — and the sibling-route
-    // group must stay silent too: `../../kv/schema` matches neither `./*` nor
-    // `**/routes/*`.
+    // The `**/kv/schema` pattern must not sweep in the module's other exports at depth, and the
+    // sibling-route group stays silent: `../../kv/schema` matches neither `./*` nor `**/routes/*`.
     label: 'import { BoolFlag } from "../../kv/schema" (nested route dir)',
     filePath: NESTED_ROUTE_FIXTURE_PATH,
     code: `import { BoolFlag } from "../../kv/schema";\nexport const flag = BoolFlag.TRUE;`,
@@ -239,9 +226,8 @@ describe("eslint.config.js — src/routes/** KV guardrail", () => {
   );
 
   it("explains the kvKeys ban with the KV-key message, not the sibling-import one", () => {
-    // `no-restricted-imports` carries two `patterns` groups in this override
-    // (the sibling-route one, and this `**/kv/schema` group narrowed to the
-    // `kvKeys` importName); pinning the text proves the KV one fired.
+    // Two `patterns` groups here (sibling-route, and `**/kv/schema` narrowed to the `kvKeys`
+    // importName); pinning the text proves the KV one fired.
     const messages =
       reported.get('import { kvKeys } from "../kv/schema"') ?? [];
     expect(messages.map((message) => message.message).join("\n")).toContain(

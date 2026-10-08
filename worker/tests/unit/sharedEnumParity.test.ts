@@ -20,6 +20,13 @@
  * MUTATION-CHECKED at authoring time (test.md -> "Guard tests must prove they
  * can fail"): renumbering `BorrowStatus.CANCELLED`, adding a member on one
  * side, and adding a field to the Worker `BorrowRequest` each went red.
+ *
+ * `BorrowRequest` type parity: enums are nominal in TypeScript, so `status`
+ * cannot be compared across the two declarations directly; its VALUE parity is
+ * the runtime enum check. Every other field must be identical, and `status`
+ * must be that side's own `BorrowStatus` on both sides. The `expectTypeOf`
+ * calls are runtime no-ops — the assertion lands in `pnpm typecheck` (tsc
+ * includes `tests/**`).
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
@@ -35,12 +42,8 @@ import {
 
 type EnumObject = Record<string, string | number>;
 
-/**
- * `{ memberName: value }` for a TypeScript enum, string keys only. Numeric
- * enums also carry reverse mappings (`E[0] === "FALSE"`), so a raw
- * `Object.entries` would list every member twice and a renumbering on one
- * side could hide behind the extra reverse key.
- */
+// `{ memberName: value }`, string keys only: numeric enums carry reverse mappings (`E[0] === "FALSE"`),
+// so raw `Object.entries` lists members twice and a one-sided renumbering could hide behind them.
 function enumMembers(e: EnumObject): EnumObject {
   const members: EnumObject = {};
   for (const key of Object.keys(e)) {
@@ -73,19 +76,15 @@ describe("Worker <-> shared enum parity", () => {
       // broken `enumMembers`) must not pass vacuously.
       expect(Object.keys(workerMembers).length).toBeGreaterThan(0);
 
-      // `toEqual` is symmetric — a member added, dropped or renumbered on
-      // EITHER side fails, so neither a one-sided loop nor a count check is
-      // needed on top.
+      // `toEqual` is symmetric — a member added, dropped or renumbered on EITHER side fails,
+      // so neither a one-sided loop nor a count check is needed on top.
       expect(workerMembers).toEqual(sharedMembers);
     },
   );
 
   it("BorrowRequest: the Worker record and the shared wire type carry the same fields", () => {
-    // Enums are nominal in TypeScript, so `status` cannot be compared across
-    // the two declarations directly; its VALUE parity is the runtime check
-    // above. Every other field must be identical, and `status` must be that
-    // side's own `BorrowStatus` on both sides. Runtime no-ops — the assertion
-    // lands in `pnpm typecheck` (tsc includes `tests/**`).
+    // Nominal enums: `status` is each side's own `BorrowStatus` (value parity is checked above).
+    // See the header → "`BorrowRequest` type parity".
     expectTypeOf<Omit<WorkerBorrowRequest, "status">>().toEqualTypeOf<
       Omit<SharedBorrowRequest, "status">
     >();

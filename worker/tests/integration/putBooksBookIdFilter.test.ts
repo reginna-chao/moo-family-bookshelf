@@ -14,16 +14,16 @@ import { USER1, USER2 } from "../helpers/ids";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
-// ---------------------------------------------------------------------------
-// PUT /api/user/:id/books — new malformed bookIds are DROPPED, not rejected.
-//
-// A bookId that is not a real Readmoo id (12+ digits, `isRealBookId` in
-// `shared/src/api/bookId.ts`) and is not already in the caller's stored record
-// never reaches `user:{id}`, the response, or a refreshed public snapshot. Ids
-// already stored (legacy short ids from an old scraper fallback) are
-// grandfathered so the Extension can resolve them client-side. One log line per
-// request, carrying a count only.
-// ---------------------------------------------------------------------------
+/**
+ * PUT /api/user/:id/books — new malformed bookIds are DROPPED, not rejected.
+ *
+ * A bookId that is not a real Readmoo id (12+ digits, `isRealBookId` in
+ * `shared/src/api/bookId.ts`) and is not already in the caller's stored record
+ * never reaches `user:{id}`, the response, or a refreshed public snapshot. Ids
+ * already stored (legacy short ids from an old scraper fallback) are
+ * grandfathered so the Extension can resolve them client-side. One log line per
+ * request, carrying a count only.
+ */
 
 const LOG_TAG = "PUT_BOOKS_INVALID_BOOK_ID_DROPPED";
 

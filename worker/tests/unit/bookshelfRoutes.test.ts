@@ -39,9 +39,7 @@ beforeEach(() => {
   kv = createMockKV();
 });
 
-// ===========================================================================
-// GET /api/family/:id/bookshelf — validation branches
-// ===========================================================================
+// --- GET /api/family/:id/bookshelf — validation branches ---
 
 describe("GET /api/family/:id/bookshelf validation", () => {
   it("should return 400 INVALID_FAMILY_ID for malformed family ID", async () => {

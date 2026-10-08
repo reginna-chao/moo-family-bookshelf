@@ -76,16 +76,13 @@ describe("jsonError", () => {
   );
 });
 
-// ===========================================================================
-// clientErrorFor — root onError classification (#239)
-// ===========================================================================
+// --- clientErrorFor — root onError classification (#239) ---
 
 // Distinctive text placed in every thrown message: it must never come back.
 const SENTINEL = "SENTINEL_c41e_parser_detail";
 
-// Contract copy — the literals in `clientErrorFor` (src/utils/errors.ts).
-// Written out, not derived: INVALID_JSON must stay byte-identical to the
-// handlers' own unparsable-body answer, which clients already match on.
+// Contract copy of the `clientErrorFor` literals (src/utils/errors.ts), written out, not derived:
+// INVALID_JSON must stay byte-identical to the handlers' unparsable-body answer clients match on.
 const INVALID_JSON = {
   code: "INVALID_JSON",
   message: "Request body must be valid JSON",
