@@ -111,7 +111,9 @@ and "who is affected" must all survive the rewrite. If simplifying would make a 
 misleadingly incomplete, keep the detail and simplify the words around it instead.
 
 Specifically preserve: exact limits (`每小時 10 次`), exact durations (`6 小時`), who is exempt
-(`使用官方伺服器的人不受影響`), and any `**請更新擴充功能／PWA**` upgrade requirement.
+(`使用官方伺服器的人不受影響`), any `**請更新擴充功能／PWA**` upgrade requirement, and which
+surface the change lands on — a change confined to the Extension, the PWA, or self-hosted servers
+names that surface at the start of the bullet（`PWA：…`）.
 
 ### Rule 6 — One bullet, one change
 

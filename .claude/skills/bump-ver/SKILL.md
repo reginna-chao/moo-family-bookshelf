@@ -66,7 +66,7 @@ For each commit since last tag:
 - **Include** if prefix matches: `feat:`, `fix:`, `perf:`, `security:`, or `style:` with a user-facing scope like `(extension)`, `(pwa)`, `(dialog)`, `(ui)`.
 - **Exclude** if prefix matches: `chore:`, `docs:`, `test:`, `refactor:`, `ci:`, `build:`, or `style:` with a dev-tooling scope like `(skills)`, `(eslint)`, `(scripts)`.
 - For ambiguous commits, default to **exclude** and surface them in the plan as "uncertain — confirm if these should be in CHANGELOG".
-- Then match each **included** commit against the `## 未釋出` bullets (by PR number, or by the change the bullet describes — `git show <hash> -- CHANGELOG.md` tells you which bullet a commit wrote). Tag it **described** or **missing**. Only the **missing** ones get a new bullet in Step 3; a described commit still appears in the Step 4 table with its bullet, so the user can see the mapping.
+- Then match each **included** commit against the `## 未釋出` bullets (by PR number, or by the change the bullet describes — `git show <hash> -- CHANGELOG.md` tells you which bullet a commit wrote). Tag it **described** or **missing**. For each **missing** commit, note which surfaces it lands on (Extension / PWA / self-hosted Worker) from its diff, not its subject — the Step 3 bullet names them (`.claude/rules/user-facing-copy.md` Rule 5). Only the **missing** ones get a new bullet in Step 3; a described commit still appears in the Step 4 table with its bullet, so the user can see the mapping.
 
 ### Step 3 — Draft CHANGELOG entry
 

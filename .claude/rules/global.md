@@ -52,7 +52,7 @@ translation of a matched string fails silently, at the next run, far from the ed
 
 - **CRLF false positives**: with `core.autocrlf=true`, `prettier --check` can flag untouched files. Confirm with `diff --strip-trailing-cr` (or a `git diff` showing no content change) and leave untouched files alone — never "fix" files you didn't edit.
 - **Edit can rewrite EOLs**: the Edit tool intermittently rewrites a whole file to CRLF. After editing, check EOL (git's CRLF warning / `prettier --check` on that file) and convert back to LF if tripped.
-- **CJK files: Edit tool only**: sed/perl one-liners silently corrupt non-ASCII content; reserve stream editors for pure-ASCII mechanical changes.
+- **CJK files: Edit tool only**: sed/perl one-liners silently corrupt non-ASCII content; reserve stream editors for pure-ASCII mechanical changes. Even then, `grep -c` the anchor first (it must match exactly once) and `git diff` afterwards; `node -e` in-place writes can be silently dropped in the agent shell. Never slice a file by line numbers (`sed -n 'N,$p'`) once it has been modified — after rewriting a large file, diff its untouched regions against `origin/main` to catch silent truncation.
 - **cwd does not persist**: every git/verify command starts with `cd "<absolute worktree root>" && …` (Bash) or an absolute path (PowerShell) — never rely on a previous call's directory. If the Bash tool's PATH lacks git, run git via PowerShell.
 - **Split long verifications**: run typecheck / lint / test as separate calls so the 2-minute default timeout can't truncate them; when piping test output, capture to a file — `| tail` / `| grep` can swallow the failure status line.
 
@@ -129,7 +129,7 @@ Any code modification — **regardless of size** — must go through this cycle,
 
 **Enforcement route:**
 
-- `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend` or `backend`). It holds every user gate itself.
+- `/develop` is the single entry. On a CODE-intent request it runs the full lifecycle (`requirements → coder → tester → review → fix`) in one session, dispatching the `coder` / `tester` / `reviewer` / `security-auditor` agents (each scoped `frontend`, `backend` or `config`). It holds every user gate itself.
 - The Fix Cycle lives in `/develop` (`references/code-cycle.md`). The `coder` / `tester` / `reviewer` agents are dispatched ONLY by `/develop`'s orchestration — invoking an implementation agent in a way that skips the cycle is prohibited.
 - If the user dispatches a single agent directly (e.g. just a `coder`), follow that agent's own scope — but still run `pnpm typecheck` and report any lint/type issues before finishing.
 

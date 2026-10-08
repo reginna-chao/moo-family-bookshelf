@@ -354,8 +354,9 @@ All development and design go through a **single skill entry: `/develop`**. It t
     └── speak-human-tw/ # vendored de-AI pass (MIT, see VENDORED.md) — run AUTOMATICALLY on CHANGELOG / release-notes / UI copy per rules/user-facing-copy.md Rule 9 — never invoked by the user as part of this project's process
 ```
 
-- **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend` or
-  `backend`); the agent then `Read`s the matching `.claude/rules/*.md` and runs the right commands.
+- **`coder` / `tester` / `reviewer` are abstract.** `/develop` passes `scope` (`frontend`,
+  `backend`, or `config` for repo configuration with no runtime code); the agent then `Read`s the
+  matching `.claude/rules/*.md` (none for `config`) and runs the right commands.
   The Fix Cycle (CRITICAL auto-fix / SUGGESTION decision) lives in `/develop`, not in the agents.
 - **Why a top-level `.claude/rules/` here (not per-area role files):** moo is a single repo with
   just one FE/BE split, so one shared set of rules — sliced by **scope/concern** (`frontend.md`,

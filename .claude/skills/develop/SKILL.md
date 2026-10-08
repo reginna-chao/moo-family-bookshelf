@@ -12,7 +12,7 @@ description: >
   DO NOT TRIGGER when: user only wants to cut a release / bump version (/bump-ver), or to
   re-adapt the .claude templates for a new project (/project-init).
 argument-hint: "<feature, fix, or design request>"
-allowed-tools: Read, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Bash(ls*), Bash(mkdir*), Bash(cp*), Bash(npx tsc*), Bash(gh issue*), Bash(gh label*), Agent, AskUserQuestion, TodoWrite
+allowed-tools: Read, Edit, Grep, Glob, Bash(pnpm*), Bash(cd*), Bash(git*), Bash(ls*), Bash(mkdir*), Bash(cp*), Bash(npx tsc*), Bash(gh issue*), Bash(gh label*), Agent, AskUserQuestion, TodoWrite
 model: opus
 ---
 
@@ -36,9 +36,9 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 
 ## §1 Hard rules (both routes)
 
-- **Never write code or design assets directly.** Dispatch agents.
+- **Never write code or design assets directly.** Dispatch agents. Two exceptions you edit yourself (Edit tool, then `pnpm exec prettier --write <that file>`, then a Fix Cycle Log line): changes `.claude/rules/global.md` exempts from the workflow — pure comment / doc wording, no executable code touched — and re-inserting an existing `CHANGELOG.md` bullet after a base update.
 - **Code Modification Workflow is mandatory** (`.claude/rules/global.md`): every code change — regardless of size — goes through coder → typecheck → tester → review → fix. It has **two sanctioned forms**: the **full cycle** (default) and **fix mode** — the lightweight path defined in `references/code-cycle.md` → "Mode Selection: fix mode vs full cycle": same workflow, reduced ceremony, available only when that section's mechanical eligibility conditions ALL hold. "Too small to review" is still never a reason to skip review — fix mode still runs coder → verify → regression test → CRITICAL-only review. Only the user explicitly saying "skip review" / "just write the code" bypasses it, for that task only.
-- **Scope tagging.** Every code work-item is `frontend` or `backend`. When dispatching a `coder` / `tester` / `reviewer` agent, pass `scope` so it reads the right rules (`frontend.md` / `backend.md`) and runs the right commands. A full-stack feature splits into separate scoped dispatches.
+- **Scope tagging.** Every code work-item is `frontend`, `backend`, or `config` (CI workflows, `wrangler.toml`, any `package.json`, `pnpm-lock.yaml` — repo configuration with no runtime code). When dispatching a `coder` / `tester` / `reviewer` agent, pass `scope` so it reads the right rules (`frontend.md` / `backend.md`; neither for `config`) and runs the right commands. A full-stack feature splits into separate scoped dispatches.
 - **Agents dispatched via the Agent tool are non-interactive** — they cannot pause for the user. YOU hold every user gate (requirements confirm, verify-before-test, SUGGESTION decisions, commit) in this session (in fix mode the commit gate is the only user gate — the other three do not occur). Do not push a user gate into an agent prompt.
 - **Triage before proposing.** `Read .claude/rules/change-triage.md` before surfacing any unsolicited "X could be improved" item — SUGGESTION findings, follow-up items surfaced mid-run, opportunistic cleanups. P2 items and non-goals are not raised at all; a P0/P1 must carry `file:line`, the consequence of leaving it unfixed, and whether a failing check can be written.
 - **Progress tracking (mandatory).** Once requirements are confirmed, keep a TodoWrite checklist of the phases and update it (✅ / ⏳ / ⬜) so the user always sees progress. If TodoWrite is unavailable, render the same checklist inline.
@@ -59,7 +59,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 [the ONE concrete action the user must take now, as explicit options]
 ```
 
-**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (which SUGGESTIONs to take, how to commit, a direction or scope call…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form stops (e.g. manual verification feedback) stay text-only.
+**Decision prompts use AskUserQuestion.** Whenever the stop is a _choice_ (which SUGGESTIONs to take, how to commit, a direction or scope call…), issue it via the AskUserQuestion tool with the choices as options — never only as "回覆 A／B／C" text. The Stop Block still renders (progress + context); AskUserQuestion carries the actual question. Independent decisions may be batched into one call (≤ 4 questions). Free-form feedback (what is wrong after a manual verification) stays text; the verify-before-test gate's own options follow `references/code-cycle.md` Phase 3 step 3.
 
 **Autonomous runs (user unreachable).** When the session is non-interactive, or a gate's AskUserQuestion gets no reply: adopt 🟢 TL-recommended SUGGESTIONs and skip 🔴 ones; fold the requirements and verify-before-test gates into their machine-verifiable acceptance checks where the spec already pins them, stating the fold and its reason at the moment of folding. Every folded gate and every decision taken is disclosed with a one-line reason in the final report and re-presented for ratification at the commit gate — which remains an explicit user question in every mode.
 
@@ -75,7 +75,7 @@ If genuinely ambiguous, ask ONE clarifying question (AskUserQuestion) before loa
 
 Parallelize across file-disjoint scopes (frontend + backend coders run concurrently); never let two concurrent agents own the same file. Each parallel prompt MUST name the files that agent owns AND the files its sibling is changing — otherwise an agent misreads the sibling's in-flight edits as its own diff. Mirror files (extension/pwa same-named pairs sharing a helper/fixture) go to a single agent, or each prompt carries the shared block verbatim plus an instruction to report cross-file consistency evidence (hash/diff). Independent verification legs also run in parallel — e.g. reviewer dispatch + E2E typecheck, or (small diffs) focused re-review + security scan — issue them in the same message. Re-review only the files changed by a fix, unless the user asks for a full re-review.
 
-When a run dispatches coders in parallel, the `CHANGELOG.md` bullet has exactly ONE owner: name `CHANGELOG.md` in that agent's `files` and tell every sibling prompt not to touch it. The owning agent's bullet covers the whole change, both scopes — `.claude/agents/coder.md` item 4 is satisfied by the run, not by each agent. In a single-coder run, put `CHANGELOG.md` in that coder's `files` whenever the change is user-observable, so the bullet does not cost a Phase 8 round-trip.
+When a run dispatches coders in parallel, the `CHANGELOG.md` bullet has exactly ONE owner: name `CHANGELOG.md` in that agent's `files` and tell every sibling prompt not to touch it. The owning agent's bullet covers the whole change, both scopes — `.claude/agents/coder.md` item 4 is satisfied by the run, not by each agent. In a single-coder run, put `CHANGELOG.md` in that coder's `files` whenever the change is user-observable, so the bullet does not cost a Phase 8 round-trip. Likewise, when a coder will edit a file listed in its package's `MAX_LINES_LEGACY_CEILINGS`, put that package's `eslint.config.js` in its `files` (lowering the number only) and state the file's headroom (`wc -l` vs the entry) in the prompt.
 
 **Dead agents — forensics before re-dispatch.** When a dispatched agent dies mid-run (API error, session limit, watchdog kill), first run `git status` / `git diff` to see what it left on disk:
 
