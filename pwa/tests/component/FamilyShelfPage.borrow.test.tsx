@@ -25,6 +25,16 @@ import { FamilyDataProvider } from "@/hooks/useFamilyData";
  * `buildBorrowFailureText`, whose literals are pinned once in
  * `extension/tests/unit/borrowMessages.test.ts` (`.claude/rules/test.md` →
  * Anti-Drift).
+ *
+ * Re-announce key: the behavioural claim behind the banner's `key` — two presses that fail
+ * identically write the same string, React bails out on it, and a live region that is never
+ * re-mounted never re-announces: the user presses 申請借閱 again and neither the screen nor the
+ * screen reader reacts. Without `key={borrowFailureKey}` React reuses the element in place and the
+ * identity assertion fails (verified against this React version).
+ *
+ * Act render: renderPage renders inside `act` on purpose — `findBy*` waits with the act environment
+ * disabled, so a node appearing does not prove the provider's mount effects (which publish the
+ * `apiClient`-backed loaders) have committed before the click (`.claude/rules/test.md` → Anti-Drift).
  */
 
 vi.mock("@/api/client", async (importOriginal) => {
@@ -94,12 +104,8 @@ function createApiClient(opts: MockOpts = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
-/**
- * Renders inside `act` on purpose: `findBy*` waits with the act environment
- * disabled, so a node appearing does not prove the provider's mount effects
- * (which publish the `apiClient`-backed loaders) have committed before the
- * click below (`.claude/rules/test.md` → Anti-Drift).
- */
+/** Renders inside `act` on purpose, so the provider's mount effects are committed before the click.
+ *  See the header → "Act render". */
 async function renderPage(apiClient: ApiClient) {
   await act(async () => {
     render(
@@ -167,12 +173,8 @@ describe("FamilyShelfPage — borrow failure notice", () => {
   });
 
   it("re-mounts the alert node when the SAME failure happens a second time", async () => {
-    // The behavioural claim behind the banner's `key`: two presses that fail
-    // identically write the same string, React bails out on it, and a live
-    // region that is never re-mounted never re-announces — the user presses
-    // 申請借閱 again and neither the screen nor the screen reader reacts.
-    // Without `key={borrowFailureKey}` React reuses the element in place and
-    // the identity assertion below fails (verified against this React version).
+    // A repeated identical failure must re-mount the live region, or it never re-announces; without
+    // `key={borrowFailureKey}` the identity assertion below fails. See the header → "Re-announce key".
     const createBorrowRequest = vi
       .fn()
       .mockRejectedValue(new ApiError("DUPLICATE_REQUEST", "already pending"));

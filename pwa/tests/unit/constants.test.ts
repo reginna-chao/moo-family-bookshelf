@@ -28,12 +28,8 @@ describe("DEFAULT_API_ENDPOINT", () => {
     expect(DEFAULT_API_ENDPOINT).toBe("https://custom.workers.dev");
   });
 
-  /**
-   * `VersionWarning` compares this constant directly against
-   * `ApiClient.getEndpoint()`, which holds what `validateEndpointUrl` returns.
-   * An env value in any other spelling would make the official default read as
-   * a self-hosted endpoint and warn about nothing.
-   */
+  // `VersionWarning` compares this against `getEndpoint()` (`validateEndpointUrl`'s output):
+  // any other spelling makes the official default read as self-hosted and warn about nothing.
   it.each([
     ["a trailing slash", "https://custom.workers.dev/"],
     ["repeated trailing slashes", "https://custom.workers.dev///"],
@@ -51,11 +47,8 @@ describe("DEFAULT_API_ENDPOINT", () => {
     expect(DEFAULT_API_ENDPOINT).toBe("https://host.example/moo");
   });
 
-  /**
-   * A misconfigured build is dead either way — `new ApiClient()` already threw
-   * on such a value. Failing at the definition names the culprit instead of
-   * surfacing as a mystery error deep inside the first request.
-   */
+  // A misconfigured build is dead anyway (`new ApiClient()` threw); failing at the
+  // definition names the culprit, not a mystery error inside the first request.
   it.each([
     ["plain HTTP on a public host", "http://evil.example.com"],
     ["embedded credentials", "https://real.example@evil.com"],

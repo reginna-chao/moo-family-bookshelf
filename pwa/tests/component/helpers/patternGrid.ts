@@ -1,15 +1,16 @@
 import { vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 
-/**
- * Geometry mirror of `pwa/src/components/PatternLock.tsx` (GRID_SIZE 3,
- * cellSize 80, padding 20). The component keeps these private, so the helper
- * duplicates them; a layout change there makes the hit tests here miss and the
- * tests fail loudly rather than drift silently.
- */
+/** Geometry mirror of `pwa/src/components/PatternLock.tsx` (GRID_SIZE 3, cellSize 80, padding 20);
+ *  why it is duplicated: see PATTERN_SVG_SIZE's JSDoc. */
 const GRID_SIZE = 3;
 const CELL_SIZE = 80;
 const PADDING = 20;
+/**
+ * Side of the pattern SVG viewBox, from the geometry mirrored above. The component keeps GRID_SIZE,
+ * cellSize and padding private, so the helper duplicates them; a layout change there makes the hit
+ * tests here miss and the tests fail loudly rather than drift silently.
+ */
 export const PATTERN_SVG_SIZE = CELL_SIZE * GRID_SIZE + PADDING * 2;
 
 /** Centre of dot `index` in SVG user units (grid layout 0-1-2 / 3-4-5 / 6-7-8). */

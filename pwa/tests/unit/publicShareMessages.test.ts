@@ -17,6 +17,16 @@ import {
  * where the two apps genuinely differ: UNAUTHORIZED tells a PWA user to log in
  * again (the Extension tells them to reopen the shelf), and the 429 copy comes
  * from the PWA's own `buildRetryMessage`, which ends in a full stop.
+ *
+ * Prototype-chain keys: `error.code` is backend-controlled — it is a bare cast
+ * of backend JSON, and BYO self-hosted backends are in the threat model — so the
+ * lookup must never resolve a key through `Object.prototype`. The table used to
+ * be an object literal, where `code="__proto__"` returned `Object.prototype`:
+ * truthy, so it slipped past `?? fallback`. On the save path that interpolated
+ * into the copy as「[object Object]」; on the four direct paths the object went
+ * straight into JSX as a React child, which React rejects outright — a Dialog
+ * render crash. `"toString"` likewise returned a function. The `Map` has no
+ * inherited keys, so every one of these is simply an unmapped code.
  */
 
 describe("publicShelfErrorMessage", () => {
@@ -88,17 +98,8 @@ describe("publicShelfErrorMessage", () => {
     },
   );
 
-  /**
-   * `error.code` is backend-controlled — it is a bare cast of backend JSON, and
-   * BYO self-hosted backends are in the threat model — so the lookup must never
-   * resolve a key through `Object.prototype`. The table used to be an object
-   * literal, where `code="__proto__"` returned `Object.prototype`: truthy, so it
-   * slipped past `?? fallback`. On the save path that interpolated into the copy
-   * as「[object Object]」; on the four direct paths the object went straight into
-   * JSX as a React child, which React rejects outright — a Dialog render crash.
-   * `"toString"` likewise returned a function. The `Map` has no inherited keys,
-   * so every one of these is simply an unmapped code.
-   */
+  // Backend-controlled codes never resolve through `Object.prototype` (a `Map`).
+  // See the header → "Prototype-chain keys".
   it.each([
     ["__proto__"],
     ["toString"],

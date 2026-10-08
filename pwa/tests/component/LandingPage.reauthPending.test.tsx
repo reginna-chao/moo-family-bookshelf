@@ -1,13 +1,3 @@
-/**
- * LandingPage × the forced-re-verification marker (#266).
- *
- * The marker is seeded through production's own `markReauthPending`, then the
- * real form decodes a typed sync code, hashes the email and joins. Only the
- * ApiClient is mocked. The end-to-end regression (App writes the marker, the
- * landing re-login reads it) lives in `App.reauthRelogin.test.tsx`; this file
- * covers WHICH logins count as the same identity and what the marker does on
- * the other join outcomes.
- */
 import {
   describe,
   it,
@@ -20,6 +10,17 @@ import {
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
+
+/**
+ * LandingPage × the forced-re-verification marker (#266).
+ *
+ * The marker is seeded through production's own `markReauthPending`, then the
+ * real form decodes a typed sync code, hashes the email and joins. Only the
+ * ApiClient is mocked. The end-to-end regression (App writes the marker, the
+ * landing re-login reads it) lives in `App.reauthRelogin.test.tsx`; this file
+ * covers WHICH logins count as the same identity and what the marker does on
+ * the other join outcomes.
+ */
 
 const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
   mockJoinFamily: vi.fn(),
@@ -53,11 +54,8 @@ beforeAll(() => {
   }
 });
 
-/**
- * Literal userIds pinned by LandingPage.test.tsx: sha256("moo:test@test.com")
- * and deriveUserId("user@example.com"). Hard-coded so a match here really
- * means "the form derived the marked user's id".
- */
+/** Literal userIds as LandingPage.test.tsx pins them: sha256("moo:test@test.com") and deriveUserId(
+ *  "user@example.com"); hard-coded so a match really means "the form derived the marked user's id". */
 const EMAIL = "test@test.com";
 const USER_ID =
   "fb665feb4ce879ca70bcd4bb4358b56daceb33815ef832461ced74b23c3c25eb";
@@ -233,11 +231,8 @@ describe("LandingPage re-login after a forced re-verification", () => {
     });
   });
 
-  /**
-   * Shared device (#266 review): B's forced logout came AFTER A's. The marker
-   * key holds a set, so A's re-login is still a recovery join, and spending
-   * A's marker must leave B's in place for B's own later re-login.
-   */
+  /** Shared device (#266 review): B's forced logout came AFTER A's. The marker key holds a set, so A's
+   *  re-login is still a recovery join, and spending A's marker must leave B's for B's own later re-login. */
   describe("with another identity also awaiting re-verification", () => {
     /** Another account in another family, signed out after the marked one. */
     const SECOND: ReauthIdentity = {

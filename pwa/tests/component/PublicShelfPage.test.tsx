@@ -4,6 +4,28 @@ import { render, screen, act, type RenderResult } from "@testing-library/react";
 import React from "react";
 import { PublicShelfPage } from "@/pages/PublicShelfPage";
 
+/**
+ * A public shelf is served to ANYONE holding the share token — no login, no
+ * family membership — so its covers are the widest-reach render of somebody
+ * else's server data in the whole PWA. `safeCoverUrl`
+ * (pwa/src/utils/safeCoverUrl.ts) drops a cover outside the Readmoo host
+ * whitelist, and this page then omits the `<img>` ENTIRELY (rather than
+ * emitting `src=""`), so the browser issues no request at all and the book
+ * title placeholder shows instead.
+ *
+ * The CSP `img-src` in pwa/public/_headers is the second layer (pinned by
+ * tests/unit/cspHeaders.test.ts), but `_headers` is only honoured by hosts that
+ * serve it (Cloudflare Pages / Netlify) — `vite dev` / `vite preview` and plain
+ * static hosts send no CSP and rely on this code filter alone.
+ *
+ * Scope of this file: the cover gate. The page's load / not-found / search
+ * behaviour is out of scope here.
+ *
+ * Readiness: renderShelfWithCover's `act` wrapper (not `findBy*`) is the readiness signal — only
+ * leaving `act` guarantees the resolved fetch's state updates and the pending passive effects have
+ * been committed.
+ */
+
 const { mockGetPublicShelf } = vi.hoisted(() => ({
   mockGetPublicShelf: vi.fn(),
 }));
@@ -21,24 +43,6 @@ vi.mock("@/api/client", async (importOriginal) => {
 });
 
 import { BoolFlag, type BookEntry } from "@/api/client";
-
-/**
- * A public shelf is served to ANYONE holding the share token — no login, no
- * family membership — so its covers are the widest-reach render of somebody
- * else's server data in the whole PWA. `safeCoverUrl`
- * (pwa/src/utils/safeCoverUrl.ts) drops a cover outside the Readmoo host
- * whitelist, and this page then omits the `<img>` ENTIRELY (rather than
- * emitting `src=""`), so the browser issues no request at all and the book
- * title placeholder shows instead.
- *
- * The CSP `img-src` in pwa/public/_headers is the second layer (pinned by
- * tests/unit/cspHeaders.test.ts), but `_headers` is only honoured by hosts that
- * serve it (Cloudflare Pages / Netlify) — `vite dev` / `vite preview` and plain
- * static hosts send no CSP and rely on this code filter alone.
- *
- * Scope of this file: the cover gate. The page's load / not-found / search
- * behaviour is out of scope here.
- */
 
 const SHARE_TOKEN = "a".repeat(32);
 const READMOO_COVER = "https://cdn.readmoo.com/cover/x.jpg";
@@ -58,11 +62,8 @@ function makeBook(coverUrl: string): BookEntry {
   };
 }
 
-/**
- * Renders the loaded shelf. The `act` wrapper (not `findBy*`) is the readiness
- * signal: only leaving `act` guarantees the resolved fetch's state updates and
- * the pending passive effects have been committed.
- */
+/** Renders the loaded shelf; the `act` wrapper (not `findBy*`) is the readiness signal.
+ *  See the header → "Readiness". */
 async function renderShelfWithCover(coverUrl: string): Promise<RenderResult> {
   mockGetPublicShelf.mockResolvedValue({
     title: "公開書櫃",
@@ -89,9 +90,8 @@ describe("PublicShelfPage", () => {
   });
 
   afterEach(() => {
-    // RTL's auto-cleanup unmounts the page (its 300ms search-debounce timer is
-    // cleared by the effect's own teardown), so only the mocks are left to
-    // reset here.
+    // RTL's auto-cleanup unmounts the page (its 300ms search-debounce timer is cleared by the
+    // effect's own teardown), so only the mocks are left to reset here.
     vi.clearAllMocks();
   });
 

@@ -46,10 +46,8 @@ function hideMenuLabelOf(title: string): string {
   return item.textContent as string;
 }
 
-/**
- * Opens the custom member dropdown and clicks the option whose label matches.
- * Options render as `label + count`, so we match the label substring.
- */
+/** Opens the custom member dropdown and clicks the option whose label matches.
+ *  Options render as `label + count`, so we match the label substring. */
 function selectMemberOption(optionLabel: string) {
   fireEvent.click(memberFilterTrigger());
   const listbox = screen.getByRole("listbox", { name: "成員選單" });

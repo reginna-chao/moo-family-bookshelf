@@ -50,9 +50,8 @@ test.describe("Auth flow", () => {
     await expect(page.locator("#email-error")).toHaveText("請輸入 Email。");
   });
 
-  // Note: "invalid email format" test is skipped because <input type="email">
-  // triggers browser-native validation before handleSubmit runs,
-  // so the custom JS error never appears. This is correct behavior.
+  // No "invalid email format" test: <input type="email"> triggers browser-native validation
+  // before handleSubmit runs, so the custom JS error never appears. This is correct behavior.
 
   test("should return to landing page after logout", async ({ page }) => {
     const auth = createTestAuth();

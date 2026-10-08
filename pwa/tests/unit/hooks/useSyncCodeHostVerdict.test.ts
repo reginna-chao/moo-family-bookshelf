@@ -36,6 +36,29 @@ import {
  *
  * Codes come from tests/helpers/syncCodeHostFixtures.ts so the PWA and the
  * Extension drive the same values through the same policy.
+ *
+ * Case notes:
+ *  - Anchor against a vacuous pass: the hook DOES report once the value is a
+ *    complete, adoptable endpoint, so silence on a half-typed value is the delay
+ *    doing its job — not a hook that reports nothing whatever it is handed.
+ *  - A paste of text identical to the field's contents fires onPaste but produces
+ *    no change, so the paste flag is never consumed; blurring must disarm it,
+ *    otherwise the next keystroke would settle instantly and flicker.
+ *  - Editing a value that has already settled is the longest path a real user
+ *    walks, and the only one that moves the settled value back and forth across
+ *    the `=== code` boundary: the warning is already on screen, they go back
+ *    into the field to fix the address, and every keystroke of the correction
+ *    must retract the warning again — then bring it back if the result is still
+ *    wrong. A hook that settled ONCE and stayed settled would pass every other
+ *    test in this file while flashing the warning through the whole correction.
+ *    The successful ending of the same journey: `valid` is positive information
+ *    about the current value, so the fix is acknowledged with no timer advance at
+ *    all, even though the field had settled on a warning a moment ago.
+ *  - The stale-valid hazard is the most important case in this file. A note that
+ *    survives the value it described is worse than no note: "will connect to
+ *    api.moofamily.app" left standing over a field reading `…@evil.com` lends the
+ *    spoof exactly the legitimacy the warning exists to deny. So the withheld
+ *    state must render NOTHING, not the last verdict.
  */
 
 function renderVerdict(code = "") {
@@ -85,9 +108,8 @@ describe("useSyncCodeHostVerdict", () => {
         expect(result.current.result).toEqual({ kind: "none" });
       }
 
-      // Anchor against a vacuous pass: the hook DOES report once the value is a
-      // complete, adoptable endpoint, so the silence above is the delay doing
-      // its job — not a hook that reports nothing whatever it is handed.
+      // Anchor against a vacuous pass: a complete endpoint DOES report, so the
+      // silence above is the delay at work.
       rerender({ code: LAN_CODE });
       expect(result.current.result).toEqual({
         kind: "valid",
@@ -169,9 +191,8 @@ describe("useSyncCodeHostVerdict", () => {
     });
 
     it("does not leave the flag armed for a later keystroke once settleNow ran", () => {
-      // A paste of text identical to the field's contents fires onPaste but
-      // produces no change, so the flag is never consumed; blurring must disarm
-      // it, otherwise the next keystroke would settle instantly and flicker.
+      // A no-change paste never consumes the flag; blur must disarm it or the next
+      // keystroke settles instantly and flickers.
       const { result, rerender } = renderVerdict();
 
       act(() => result.current.settleOnNextChange());
@@ -199,16 +220,8 @@ describe("useSyncCodeHostVerdict", () => {
     });
   });
 
-  /**
-   * The longest path a real user walks, and the only one that moves the settled
-   * value back and forth across the `=== code` boundary: the warning is already
-   * on screen, they go back into the field to fix the address, and every
-   * keystroke of the correction must retract the warning again — then bring it
-   * back if the result is still wrong.
-   *
-   * A hook that settled ONCE and stayed settled would pass every other test in
-   * this file while flashing the warning through the whole correction.
-   */
+  // Correcting a settled value must re-hide the warning per keystroke. See the
+  // header → "Case notes".
   describe("editing a value that has already settled", () => {
     it("re-hides the warning while the user edits a settled value, then brings it back", () => {
       const { result, rerender } = renderVerdict();
@@ -233,10 +246,8 @@ describe("useSyncCodeHostVerdict", () => {
       advanceSettleDelay();
       expect(result.current.result).toEqual({ kind: "invalid" });
 
-      // The successful ending of the same journey: `valid` is positive
-      // information about the current value, so the fix is acknowledged with no
-      // timer advance at all, even though the field had settled on a warning a
-      // moment ago.
+      // The successful ending: `valid` describes the current value, so the fix
+      // shows with no timer advance at all.
       rerender({ code: LAN_CODE });
 
       expect(result.current.result).toEqual({
@@ -286,13 +297,8 @@ describe("useSyncCodeHostVerdict", () => {
     });
   });
 
-  /**
-   * The most important case in this file. A note that survives the value it
-   * described is worse than no note: "will connect to api.moofamily.app" left
-   * standing over a field reading `…@evil.com` lends the spoof exactly the
-   * legitimacy the warning exists to deny. So the withheld state must render
-   * NOTHING, not the last verdict.
-   */
+  // The most important case: the withheld state renders NOTHING, never the last
+  // verdict. See the header → "Case notes".
   describe("the stale-valid hazard", () => {
     it("drops the named endpoint the instant the value turns invalid", () => {
       const { result, rerender } = renderVerdict(TRUSTED_CODE);

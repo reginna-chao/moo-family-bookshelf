@@ -4,6 +4,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BookRow } from "@/components/BookRow";
 import { BoolFlag, type BookEntry } from "@/api/client";
 
+/**
+ * PWA BookRow: rendering, interaction, and its React.memo wrapping.
+ *
+ * Memo checks: one case checks the wrapping structurally (`$$typeof === Symbol.for("react.memo")`),
+ * the rest behaviourally. Callbacks are passed as stable refs, so any re-render of BookRow must come
+ * from a prop change (book / selected / isDirty), not from callback identity drift. The `$$typeof`
+ * case is the only one that fails if the memo is removed: with identical props the rerendered button
+ * stays the SAME DOM node, but reconciliation preserves that identity with or without memo. A changed
+ * prop goes through memo's shallow compare and the observable output — the toggle's `aria-pressed` /
+ * `aria-label`, which carry the title and isShared status — is re-checked.
+ */
+
 function makeBook(overrides: Partial<BookEntry> = {}): BookEntry {
   return {
     bookId: "book-1",
@@ -190,20 +202,8 @@ describe("BookRow (PWA) — interactions", () => {
 });
 
 describe("BookRow (PWA) — React.memo behavior", () => {
-  /**
-   * Wraps BookRow with a parent that owns a counter incremented every time the
-   * parent re-renders. We pass stable callback refs to BookRow so any re-render
-   * of BookRow must come from a prop change (book/selected/isDirty), not from
-   * callback identity drift. When parent re-renders but BookRow's relevant
-   * props are unchanged, React.memo should skip BookRow.
-   *
-   * To detect whether BookRow itself re-ran, we read a marker that BookRow
-   * incorporates into the DOM: the `aria-label` of the toggle button includes
-   * the book title and isShared status. Since these props derive from `book`
-   * + a derived value, and the test changes only orthogonal parent state, we
-   * can verify memo by checking the toggle button's data-render-token attribute
-   * via a wrapping spy.
-   */
+  /** Stable callback refs, so a re-render can only come from a prop change; unchanged props must let
+   *  React.memo skip BookRow. See the header → "Memo checks". */
   it("is wrapped in React.memo (structural check)", () => {
     // React.memo returns an object exotic with $$typeof === Symbol.for("react.memo")
     const memoSymbol = Symbol.for("react.memo");
@@ -217,8 +217,8 @@ describe("BookRow (PWA) — React.memo behavior", () => {
     const onToggle = vi.fn();
     const book = makeBook();
 
-    // Spy via inner React element identity: when memo skips, the rendered
-    // button DOM node is preserved across rerender.
+    // Capture the button node to check its identity survives the rerender; reconciliation keeps it
+    // with or without memo. See the header → "Memo checks".
     const { rerender } = render(
       <BookRow
         book={book}
@@ -240,7 +240,8 @@ describe("BookRow (PWA) — React.memo behavior", () => {
       />,
     );
 
-    // Same DOM node reference indicates React reused the element — memo short-circuited.
+    // Pins node identity across the rerender only; this alone does not prove memo short-circuited
+    // (see the header → "Memo checks").
     expect(screen.getByRole("button")).toBe(initialButton);
   });
 
@@ -262,10 +263,8 @@ describe("BookRow (PWA) — React.memo behavior", () => {
     // Sanity: visible content reflects current props
     expect(screen.getByRole("button", { pressed: true })).toBeInTheDocument();
 
-    // Flip isDirty. The component does not visually display isDirty, but
-    // changing it should still pass memo's shallow compare and trigger React
-    // to process the prop. We verify the render path executed by re-checking
-    // observable output, which depends on isShared (unchanged).
+    // Flip isDirty: not displayed, but it passes memo's shallow compare and React processes the prop;
+    // the render path is checked via observable output, which depends on isShared (unchanged).
     rerender(
       <BookRow
         book={book}

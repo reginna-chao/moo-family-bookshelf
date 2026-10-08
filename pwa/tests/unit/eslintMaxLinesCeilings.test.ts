@@ -1,4 +1,5 @@
 // @vitest-environment node
+
 /**
  * The `max-lines` legacy ratchet in `pwa/eslint.config.js` (issue #210).
  *
@@ -37,6 +38,14 @@
  * nothing but `pwa/eslint.config.js` or a `pwa/src/` file would never execute
  * an extension-side copy. Each copy validates its own counter against ESLint,
  * so the two need no parity check of their own.
+ *
+ * HELPERS. `plainMax` returns the cap a `max-lines` setting enforces, or `null`
+ * when the setting is not the plain `["error", { max }]` shape — a skip option,
+ * `"off"`, or a bare severity all return `null`, because they would make the
+ * line counts meaningless. `maxLinesOnly` is a flat config that runs
+ * `max-lines` alone through the TS parser. No type information is needed, but
+ * `tsconfigRootDir` must still be explicit so typescript-eslint never has to
+ * guess among candidate roots.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -86,12 +95,8 @@ interface LegacyCeiling {
   max: number;
 }
 
-/**
- * The cap a `max-lines` setting enforces, or `null` when the setting is not
- * the plain `["error", { max }]` shape — a skip option, `"off"`, or a bare
- * severity all return `null`, because they would make the line counts below
- * meaningless.
- */
+/** The cap a plain `["error", { max }]` setting enforces; `null` for any other
+ *  shape. See the header → "HELPERS". */
 function plainMax(setting: unknown): number | null {
   if (!Array.isArray(setting) || setting.length !== 2) return null;
   const [severity, options] = setting as [unknown, unknown];
@@ -150,11 +155,8 @@ function toCeilings(blocks: readonly MaxLinesBlock[]): LegacyCeiling[] {
   }));
 }
 
-/**
- * Flat config that runs `max-lines` alone through the TS parser. No type
- * information is needed, but `tsconfigRootDir` must still be explicit so
- * typescript-eslint never has to guess among candidate roots.
- */
+/** `max-lines` alone through the TS parser; `tsconfigRootDir` stays explicit
+ *  (no guessed root). See the header → "HELPERS". */
 function maxLinesOnly(max: number): Linter.Config[] {
   return [
     {

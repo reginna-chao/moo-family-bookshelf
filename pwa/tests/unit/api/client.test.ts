@@ -1,6 +1,52 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClient, BoolFlag, validateEndpointUrl } from "@/api/client";
 
+/**
+ * ApiClient (PWA, `src/api/client.ts`): request mechanics, endpoint validation,
+ * un-kick, lookup and the 401 retry.
+ *
+ * validateEndpointUrl now lives in `shared/` so the PWA and the Extension
+ * enforce byte-identical rules — the PWA adopts a sync code's `@host` too, so a
+ * weaker copy here would undo the whole check. These tests pin the PWA's side
+ * of that contract: what it accepts, what it refuses, and the exact canonical
+ * string it hands to the ApiClient.
+ *  - Embedded credentials: `https://real.example@evil.com` is fetched from
+ *    evil.com while the string READS as real.example — everything before the
+ *    `@` is userinfo. A sync code is shared as plain text, so this is the
+ *    cheapest way to make a member's auth token and full book list go somewhere
+ *    they never agreed to.
+ *  - Canonical form: the return value is what gets stored, compared against the
+ *    family record's endpoint, and shown in the `@host` disclosure note. Two
+ *    spellings of one endpoint must therefore collapse to one string, or the PWA
+ *    and the Extension will disagree about whether they are "the same" server.
+ *
+ * Fixtures match the wire. `createFamily`'s `members` carries MEMBER RECORDS,
+ * matching what the Worker actually returns (`worker/src/routes/family.ts`
+ * builds `members: [member]`). Bare userId strings are not a shape the API ever
+ * produced, and since PR #149 `sanitizeList` drops elements that cannot carry
+ * fields — a fixture that lies about the wire shape now reads back as `[]`. The
+ * `getFamilyMembers` fixture uses well-formed member objects: the client
+ * rebuilds `data.members` at the API boundary, so only a valid list comes back
+ * verbatim, and it always emits `apiEndpoint` (`null` when the payload omits
+ * it); the malformed cases live in `tests/unit/api/member-client.test.ts`. The
+ * `getFamilyBookshelf` book is kept complete on purpose: the client sanitizes
+ * that payload on the way out (`sanitizeFamilyBookshelfText`), which
+ * materializes any declared text field the fixture omits, and the assertion
+ * stays a strict `toEqual`.
+ *
+ * unkickMember lifts the 6-hour `kicked:` tombstone a removal leaves behind, so
+ * the removed member's sync code works again. It must hit the `kicked`
+ * collection — `/member/` is the REMOVAL endpoint, so a wrong path would be a
+ * destructive no-op the UI still reports as success.
+ *
+ * `toMatchObject`, not `toEqual`, on the 401 retry's personal-books payload:
+ * `getPersonalBooks` runs its payload through `sanitizePersonalBooksText`, which
+ * materializes the record's declared text fields, so the stand-in payload comes
+ * back carrying them as `""`. That coercion has its own coverage in
+ * `tests/unit/api/sanitizeEnvelope.test.ts`; that test is about the retry
+ * mechanics, so it pins only the field it supplied.
+ */
+
 // Mock fetch globally
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -42,13 +88,8 @@ describe("ApiClient", () => {
     });
   });
 
-  /**
-   * `validateEndpointUrl` now lives in `shared/` so the PWA and the Extension
-   * enforce byte-identical rules — the PWA adopts a sync code's `@host` too, so
-   * a weaker copy here would undo the whole check. These tests pin the PWA's
-   * side of that contract: what it accepts, what it refuses, and the exact
-   * canonical string it hands to the ApiClient.
-   */
+  // Shared with the Extension (byte-identical rules); pins the PWA's side: accepts,
+  // refuses, canonical string. See the header → "validateEndpointUrl".
   describe("validateEndpointUrl", () => {
     it.each([
       ["https://api.example.com", "https://api.example.com"],
@@ -73,12 +114,8 @@ describe("ApiClient", () => {
       expect(() => validateEndpointUrl(input)).toThrow();
     });
 
-    /**
-     * `https://real.example@evil.com` is fetched from evil.com while the string
-     * READS as real.example — everything before the `@` is userinfo. A sync
-     * code is shared as plain text, so this is the cheapest way to make a
-     * member's auth token and full book list go somewhere they never agreed to.
-     */
+    // Userinfo that LOOKS like the host (`https://real.example@evil.com`) is refused.
+    // See the header → "Embedded credentials".
     it.each([
       ["a bare userinfo masquerade", "https://real.example@evil.com"],
       ["user:password credentials", "https://user:pass@evil.com"],
@@ -98,13 +135,8 @@ describe("ApiClient", () => {
       ).toThrow(/credentials/i);
     });
 
-    /**
-     * The return value is what gets stored, compared against the family
-     * record's endpoint, and shown in the `@host` disclosure note. Two
-     * spellings of one endpoint must therefore collapse to one string, or the
-     * PWA and the Extension will disagree about whether they are "the same"
-     * server.
-     */
+    // Two spellings of one endpoint must collapse to one string (stored, compared,
+    // displayed). See the header → "Canonical form".
     it.each([
       [
         "a trailing slash",
@@ -350,11 +382,8 @@ describe("ApiClient", () => {
 
   describe("createFamily", () => {
     it("should call POST /api/family with userId only when no displayName", async () => {
-      // `members` carries MEMBER RECORDS, matching what the Worker actually
-      // returns (`worker/src/routes/family.ts` builds `members: [member]`).
-      // Bare userId strings are not a shape the API ever produced, and since
-      // PR #149 `sanitizeList` drops elements that cannot carry fields — a
-      // fixture that lies about the wire shape now reads back as `[]`.
+      // `members` carries MEMBER RECORDS, as the Worker returns; a bare-userId
+      // fixture would read back as `[]`. See the header → "Fixtures match the wire".
       const familyData = {
         familyId: "fam-1",
         ownerId: USER_1,
@@ -491,12 +520,8 @@ describe("ApiClient", () => {
     });
   });
 
-  /**
-   * Lifts the 6-hour `kicked:` tombstone a removal leaves behind, so the removed
-   * member's sync code works again. It must hit the `kicked` collection —
-   * `/member/` is the REMOVAL endpoint, so a wrong path would be a destructive
-   * no-op the UI still reports as success.
-   */
+  // Lifts the 6-hour `kicked:` tombstone; must hit `kicked`, since `/member/` is the
+  // REMOVAL endpoint. See the header → "unkickMember".
   describe("unkickMember", () => {
     it("should call DELETE /api/family/:id/kicked/:uid", async () => {
       mockFetch.mockResolvedValueOnce(
@@ -556,10 +581,8 @@ describe("ApiClient", () => {
 
   describe("getFamilyMembers", () => {
     it("should call GET /api/family/:id/members", async () => {
-      // Well-formed member objects: the client rebuilds `data.members` at the
-      // API boundary, so only a valid list comes back verbatim, and it always
-      // emits `apiEndpoint` (`null` when the payload omits it). The malformed
-      // cases live in `tests/unit/api/member-client.test.ts`.
+      // Well-formed members: the boundary rebuild returns only a valid list verbatim
+      // (plus `apiEndpoint`). See the header → "Fixtures match the wire".
       const familyData = {
         familyId: "fam-1",
         ownerId: USER_1,
@@ -595,10 +618,8 @@ describe("ApiClient", () => {
                 isbn: "978-0000000000",
                 coverUrl: "https://example.com/cover.jpg",
                 readmooUrl: "https://readmoo.com/book/b1",
-                // Kept complete on purpose: the client sanitizes this payload
-                // on the way out (`sanitizeFamilyBookshelfText`), which
-                // materializes any declared text field the fixture omits, and
-                // the assertion below stays a strict `toEqual`.
+                // Kept complete: the boundary text layer would materialize an
+                // omitted field. See the header → "Fixtures match the wire".
                 category: "文學小說",
                 isShared: BoolFlag.TRUE,
               },
@@ -638,9 +659,8 @@ describe("ApiClient", () => {
       );
     });
 
-    // Mirrors extension/tests/unit/client.test.ts — the PWA has no call site for
-    // the verification gate yet, so this is the only thing stopping the two
-    // client contracts from drifting.
+    // Mirrors extension/tests/unit/client.test.ts; the PWA never calls `lookupUser`
+    // (`lookupUser`'s JSDoc in src/api/client.ts), so this alone stops the two contracts drifting.
     it("should include verifySecret in the body only when supplied", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ data: { existingFamilyId: "fam-1", memberCount: 2 } }),
@@ -722,14 +742,8 @@ describe("ApiClient", () => {
       // Second call should use new token
       const [, retryInit] = mockFetch.mock.calls[1];
       expect(retryInit.headers["Authorization"]).toBe("Bearer new-token");
-      /**
-       * `toMatchObject`, not `toEqual`: `getPersonalBooks` runs its payload
-       * through `sanitizePersonalBooksText`, which materializes the record's
-       * declared text fields, so this stand-in payload comes back carrying them
-       * as `""`. That coercion has its own coverage in
-       * `tests/unit/api/sanitizeEnvelope.test.ts`; this test is about the retry
-       * mechanics, so it pins only the field it supplied.
-       */
+      // `toMatchObject`: the text layer materializes declared fields as `""`; this
+      // pins only what it supplied. See the header → "`toMatchObject`, not `toEqual`".
       expect(result.data).toMatchObject({ payload: "encrypted" });
     });
 

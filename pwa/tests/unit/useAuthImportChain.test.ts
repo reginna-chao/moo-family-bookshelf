@@ -1,4 +1,5 @@
 // @vitest-environment node
+
 /**
  * `pwa/src/hooks/useAuth.ts` must never reach `pwa/src/constants.ts` (#266).
  *

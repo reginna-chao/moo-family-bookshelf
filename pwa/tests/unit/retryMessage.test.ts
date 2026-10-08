@@ -7,6 +7,28 @@ import {
 } from "@/utils/retryMessage";
 import type { RetryErrorCode } from "@/utils/retryMessage";
 
+/**
+ * retryMessage (PWA): `formatRetryDelay`, `buildRetryMessage`,
+ * `buildStaticRetryMessage` and `rateLimitedEnvelopeMessage`.
+ *
+ * rateLimitedEnvelopeMessage is the envelope variant, used by the Settings page
+ * write paths that read `res.error` instead of catching a thrown `ApiError`
+ * (save display name in hooks/useDisplayNameEditor.ts, leave family in
+ * hooks/useLeaveFamily.ts). Those call sites used to render the Worker's
+ * English `error.message` verbatim on a 429.
+ *  - Zero and sub-second waits (a deliberate divergence from the Extension
+ *    helper): a zero wait selects the static copy here, because the PWA's own
+ *    `buildRetryMessage` treats <= 0 as "no countdown running", so 「0 秒」 is
+ *    never a wording this app shows. A sub-second wait clears the `<= 0` guard
+ *    but floors to 0, so it lands on the static copy as well — drop the
+ *    `Math.floor` and that row starts rendering the 「0 秒」 countdown this app
+ *    never shows.
+ *  - Wire-only shapes: the envelope is raw `JSON.parse` output, so a
+ *    self-hosted (BYO) backend can put anything in `retryAfter`. Unusable values
+ *    must degrade to the static copy instead of rendering 「NaN 秒」 — hence the
+ *    casts: these shapes are unreachable through the type, only over the wire.
+ */
+
 describe("formatRetryDelay", () => {
   it.each([
     [0, "0 秒"],
@@ -38,9 +60,8 @@ describe("formatRetryDelay", () => {
 });
 
 describe("buildRetryMessage", () => {
-  // Production copy is pinned here (anti-drift): component tests assert against
-  // buildRetryMessage() output, so this suite is the single source of truth for
-  // the literal strings shown to the user.
+  // Production copy pinned here (anti-drift): component tests assert against
+  // buildRetryMessage() output, so this suite is the single source of truth.
   it("returns the static lockout copy when no countdown is running", () => {
     expect(buildRetryMessage("VERIFICATION_LOCKED", 0)).toBe(
       "驗證錯誤次數過多，請稍後再試。",
@@ -95,13 +116,8 @@ describe("buildRetryMessage", () => {
   });
 });
 
-/**
- * The envelope variant, used by the Settings page write paths that read
- * `res.error` instead of catching a thrown `ApiError` (save display name in
- * hooks/useDisplayNameEditor.ts, leave family in hooks/useLeaveFamily.ts).
- * Those call sites used to render the Worker's English `error.message`
- * verbatim on a 429.
- */
+// The envelope variant for Settings write paths that read `res.error` (they used to
+// show the Worker's English 429 text). See the header → "rateLimitedEnvelopeMessage".
 describe("rateLimitedEnvelopeMessage", () => {
   const STATIC_COPY = "嘗試次數過多，請稍後再試。";
 
@@ -124,13 +140,11 @@ describe("rateLimitedEnvelopeMessage", () => {
     ["Infinity", Infinity],
     ["-Infinity", -Infinity],
     ["a negative wait", -1],
-    // Unlike the Extension helper, a zero wait selects the static copy here:
-    // the PWA's own `buildRetryMessage` treats <= 0 as "no countdown running",
-    // so 「0 秒」 is never a wording this app shows.
+    // Unlike the Extension helper, a zero wait selects the static copy: 「0 秒」 is
+    // never shown here. See the header → "Zero and sub-second waits".
     ["a zero wait", 0],
-    // A sub-second wait clears the `<= 0` guard but floors to 0, so it lands on
-    // the static copy as well. Drop the `Math.floor` and this row starts
-    // rendering the 「0 秒」 countdown this app never shows.
+    // Sub-second clears the `<= 0` guard but floors to 0, so static copy too; without
+    // `Math.floor` it would render 「0 秒」. See the header → "Zero and sub-second waits".
     ["a sub-second wait", 0.9],
   ])(
     "falls back to the static copy when the envelope carries %s",
@@ -141,12 +155,8 @@ describe("rateLimitedEnvelopeMessage", () => {
     },
   );
 
-  /**
-   * The envelope is raw `JSON.parse` output, so a self-hosted (BYO) backend can
-   * put anything in `retryAfter`. Unusable values must degrade to the static
-   * copy instead of rendering 「NaN 秒」 — hence the casts: these shapes are
-   * unreachable through the type, only over the wire.
-   */
+  // A BYO backend can put anything in `retryAfter`; unusable values degrade to the
+  // static copy (casts: wire-only shapes). See the header → "Wire-only shapes".
   it.each<[string, unknown]>([
     ["a string", "45"],
     ["a numeric-looking string", "45s"],

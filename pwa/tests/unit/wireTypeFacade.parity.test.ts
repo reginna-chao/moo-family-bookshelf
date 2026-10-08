@@ -23,6 +23,18 @@ import { describe, it, expect } from "vitest";
  * disjoint path filters (`extension/**`+`shared/**` vs `pwa/**`+`shared/**`),
  * so the file is duplicated into BOTH suites and the last case holds the two
  * copies byte-identical — edit both or neither.
+ *
+ * What localDeclarationOf() matches: a declaration (exported or not) of one of
+ * the consolidated names — a type form (`interface` / `type` / `class` /
+ * `enum`) or, since the list carries `PERSONAL_BOOKS_SCHEMA_VERSION`, a value
+ * form (`const` / `let` / `var` / `function`). A re-export line
+ * (`export type { FamilyBookshelf }`, `export { PERSONAL_BOOKS_SCHEMA_VERSION }
+ * from`) does not match: the keyword is followed by `{`, not a name.
+ *
+ * Why the last case uses no normalisation: each suite runs only its own copy,
+ * so a copy left un-updated guards one app only. The files sit at the same
+ * depth and every path above is repo-relative, so they can be literally the
+ * same bytes.
  */
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -76,14 +88,8 @@ const THIS_TEST_TWINS = {
   pwa: "pwa/tests/unit/wireTypeFacade.parity.test.ts",
 };
 
-/**
- * A declaration (exported or not) of one of the consolidated names — a type
- * form (`interface` / `type` / `class` / `enum`) or, since the list carries
- * `PERSONAL_BOOKS_SCHEMA_VERSION`, a value form (`const` / `let` / `var` /
- * `function`). A re-export line (`export type { FamilyBookshelf }`,
- * `export { PERSONAL_BOOKS_SCHEMA_VERSION } from`) does not match: the
- * keyword is followed by `{`, not a name.
- */
+/** A local declaration (type or value form) of a consolidated name, never a re-export.
+ *  See the header → "What localDeclarationOf() matches". */
 function localDeclarationOf(name: string): RegExp {
   return new RegExp(
     `^(?:export )?(?:declare )?(?:abstract )?(?:interface|type|class|enum|const|let|var|function) ${name}\\b`,
@@ -155,9 +161,8 @@ describe("wire-type façades", () => {
   });
 
   it("keeps the two copies of this guard byte-identical", () => {
-    // Each suite runs only its own copy, so a copy left un-updated guards one
-    // app only. No normalisation: the files sit at the same depth and every
-    // path above is repo-relative, so they can be literally the same bytes.
+    // A copy left un-updated guards one app only; same depth + repo-relative paths
+    // let them be the same bytes. See the header → "Why the last case uses no normalisation".
     expect(readRepoFile(THIS_TEST_TWINS.pwa)).toBe(
       readRepoFile(THIS_TEST_TWINS.extension),
     );

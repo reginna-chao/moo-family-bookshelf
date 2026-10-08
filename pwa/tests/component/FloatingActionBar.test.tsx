@@ -1,3 +1,8 @@
+import { describe, it, expect, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { FloatingActionBar } from "@/components/FloatingActionBar";
+
 /**
  * FloatingActionBar — the save / cancel-changes section (#250).
  *
@@ -5,10 +10,6 @@
  * can see `isSaved && isDirty`. It must not call that state saved, and 取消變更
  * must stay locked while a save is in flight (parity with the Extension).
  */
-import { describe, it, expect, vi } from "vitest";
-import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { FloatingActionBar } from "@/components/FloatingActionBar";
 
 interface BarState {
   isDirty: boolean;

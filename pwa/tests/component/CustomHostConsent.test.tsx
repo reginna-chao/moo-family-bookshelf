@@ -25,6 +25,25 @@ import { validateEndpointUrl } from "@/api/client";
  *
  * Presentational: it takes a verdict and two callbacks, which is what keeps the
  * decision of WHEN to ask — and what a "yes" then does — in the caller.
+ *
+ * Verify variant: a QR arrival never typed a sync code, so the form's "此同步碼" lead-in would point
+ * at something that is not on screen. Its absence is the only thing pinning `variant="verify"`: the
+ * join copy CONTAINS the verify copy, so the positive lead-in assertion passes either way.
+ *
+ * Button order: DOM order is behaviour, not styling — it is the Tab order and the order a screen
+ * reader announces the two answers in. Putting refusal first is the deliberate shape for a gate whose
+ * whole job is friction: the way out is reached before the way in. Deliberately no assertion on
+ * classes or colours: those are implementation detail and would turn every restyle red. The visual
+ * half of "equal weight" (matching size, no small grey text link) is therefore NOT covered here.
+ *
+ * Real classifier: end to end through the real parseSyncCodeApiHost, the address on this screen must
+ * be the one `validateEndpointUrl` would hand to the ApiClient. Derived from production rather than
+ * hard-coded, so a user who agrees to what is written here cannot be agreeing to a different host
+ * than the one contacted.
+ *
+ * Refused address: the caller mounts this only for a `valid` verdict — a refused address is rejected
+ * upstream and never reaches a screen offering to accept it. Pinned anyway: if that routing ever
+ * slips, the gate must not put a reassuring "connects to" line next to a spoofed host.
  */
 describe("CustomHostConsent", () => {
   const VALID: SyncCodeApiHostResult = {
@@ -62,10 +81,8 @@ describe("CustomHostConsent", () => {
 
       const note = screen.getByTestId("sync-code-host-note");
       expect(note).toHaveTextContent("將連線至自訂伺服器：");
-      // A QR arrival never typed a sync code, so the form's "此同步碼" lead-in
-      // would point at something that is not on screen. Its absence is the only
-      // thing pinning `variant="verify"`: the join copy CONTAINS the verify
-      // copy, so the positive assertion above passes either way.
+      // No "此同步碼" lead-in: its absence is the only thing pinning `variant="verify"` (the join copy
+      // CONTAINS the verify copy). See the header → "Verify variant".
       expect(note.textContent).not.toContain("此同步碼");
       expect(note).toHaveTextContent("https://custom.example.com");
     });
@@ -90,16 +107,8 @@ describe("CustomHostConsent", () => {
       expect(screen.getAllByRole("button")).toHaveLength(2);
     });
 
-    /**
-     * DOM order is behaviour, not styling: it is the Tab order and the order a
-     * screen reader announces the two answers in. Putting refusal first is the
-     * deliberate shape for a gate whose whole job is friction — the way out is
-     * reached before the way in.
-     *
-     * Deliberately no assertion on classes or colours: those are implementation
-     * detail and would turn every restyle red. The visual half of "equal weight"
-     * (matching size, no small grey text link) is therefore NOT covered here.
-     */
+    /** DOM order is the Tab and screen-reader order, so refusal comes first; classes and colours are
+     *  deliberately not asserted. See the header → "Button order". */
     it("puts the way out ahead of the way in", () => {
       renderConsent();
 
@@ -138,12 +147,8 @@ describe("CustomHostConsent", () => {
     });
   });
 
-  /**
-   * End to end through the real classifier: the address on this screen must be
-   * the one `validateEndpointUrl` would hand to the ApiClient. Derived from
-   * production rather than hard-coded, so a user who agrees to what is written
-   * here cannot be agreeing to a different host than the one contacted.
-   */
+  /** The address on screen must be the one `validateEndpointUrl` would hand to the ApiClient.
+   *  See the header → "Real classifier". */
   describe("driven by the real parseSyncCodeApiHost", () => {
     it.each([
       "https://custom.example.com",
@@ -159,12 +164,8 @@ describe("CustomHostConsent", () => {
     });
   });
 
-  /**
-   * The caller mounts this only for a `valid` verdict — a refused address is
-   * rejected upstream and never reaches a screen offering to accept it. Pinned
-   * anyway: if that routing ever slips, the gate must not put a reassuring
-   * "connects to" line next to a spoofed host.
-   */
+  /** The caller mounts this only for a `valid` verdict; pinned anyway, so a slipped routing never puts
+   *  a "connects to" line next to a spoofed host. See the header → "Refused address". */
   it("never names an address that would be refused", () => {
     renderConsent({ kind: "invalid" });
 

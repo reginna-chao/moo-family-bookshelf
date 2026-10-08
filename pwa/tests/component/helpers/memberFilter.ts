@@ -1,14 +1,7 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 
-/**
- * DOM probes for the member-filter counts in `src/components/MemberDropdown.tsx`.
- *
- * The collapsed trigger renders `label · count` and each menu option
- * `label count`. The count spans carry only Tailwind classes, so they are
- * found as the one element whose own text is a bare number. Both probes
- * return that EXACT text so a caller compares with `toBe` (a substring match
- * would accept `12` for `120`). Fixture labels must therefore not be numeric.
- */
+/** DOM probes for the member-filter counts in `src/components/MemberDropdown.tsx`; the count probes
+ *  return EXACT span text (see their JSDoc). */
 
 const BARE_NUMBER = /^\d+$/;
 
@@ -25,12 +18,22 @@ export function memberFilterTrigger(): HTMLElement {
   return screen.getByLabelText(MEMBER_FILTER_TRIGGER_NAME);
 }
 
-/** Exact text of the count shown on the (collapsed or open) trigger. */
+/**
+ * Exact text of the count shown on the (collapsed or open) trigger. The trigger renders
+ * `label · count`; the count span carries only Tailwind classes, so it is found as the one element
+ * whose own text is a bare number. Exact so a caller compares with `toBe` (a substring match would
+ * accept `12` for `120`). Fixture labels must therefore not be numeric.
+ */
 export function triggerCount(): string {
   return within(memberFilterTrigger()).getByText(BARE_NUMBER).textContent ?? "";
 }
 
-/** Exact text of the count inside one menu option element. */
+/**
+ * Exact text of the count inside one menu option element. The option renders `label count`; the
+ * count span carries only Tailwind classes, so it is found as the one element whose own text is a
+ * bare number. Exact so a caller compares with `toBe` (a substring match would accept `12` for
+ * `120`). Fixture labels must therefore not be numeric.
+ */
 export function optionCount(option: HTMLElement): string {
   return within(option).getByText(BARE_NUMBER).textContent ?? "";
 }

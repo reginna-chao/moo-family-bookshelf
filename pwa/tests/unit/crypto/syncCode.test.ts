@@ -17,6 +17,55 @@ import {
   TRUSTED_CODE,
 } from "../../helpers/syncCodeHostFixtures";
 
+/**
+ * Sync code encode / decode (`src/crypto/syncCode.ts`) and the `@host` display
+ * readers `parseSyncCodeApiHost` / `displayedSyncCodeApiHost` (PWA).
+ *
+ * parseSyncCodeApiHost is the DISPLAY-only reader behind SyncCodeHostNote: it
+ * runs on every keystroke while the user types a sync code, so it must never
+ * throw on partial or malformed input — it just reports "no custom host".
+ * Security contract: what the note DISPLAYS must equal what the join path would
+ * actually CONNECT to. The `@host` therefore goes through the same
+ * `validateEndpointUrl` the join path adopts, and the reported value is that
+ * function's canonical output (`origin + pathname`, trailing slashes stripped),
+ * NOT a bare host — a plain-HTTP LAN address must not read the same as its
+ * HTTPS namesake, and a sub-path endpoint must show the path it will call. The
+ * verdict itself comes from `shared/`, so the Extension's note and this one
+ * cannot disagree about the same code; the Extension pins the identical table
+ * in extension/tests/unit/syncCode.test.ts.
+ *
+ * displayedSyncCodeApiHost is the DISPLAY POLICY stacked on top of the
+ * classifier: given the LIVE verdict for whatever the field holds right now and
+ * whether that value has SETTLED, it answers what may actually be rendered. Why
+ * a policy exists at all: a `@host` typed one character at a time is `invalid`
+ * at nearly every intermediate keystroke (`…@http`, `…@http://192.`), so a live
+ * warning fires on almost every keypress. A warning that cries wolf during
+ * normal typing is one users learn to dismiss — fatal here, because this warning
+ * is the last human-facing defence against a userinfo-spoofed endpoint. Two
+ * properties matter more than any individual row:
+ *   - only `invalid` is ever withheld; `valid` and `none` pass through live, so
+ *     the delay can never SUPPRESS a warning, only postpone it;
+ *   - the withheld case renders NOTHING rather than the previously shown
+ *     verdict. Keeping a stale `valid` note on screen would leave a reassuring
+ *     "will connect to api.moofamily.app" standing for a value that now reads
+ *     `…@evil.com` — the exact legitimacy the warning exists to deny (the
+ *     stale-valid hazard: appending `@evil.com` to a host the user already saw
+ *     named must answer "nothing", never the endpoint that was legitimate one
+ *     keystroke ago).
+ * The anti-stale invariant is also stated as a property: the only two answers
+ * the policy may give are the CURRENT verdict verbatim or "render nothing" —
+ * anything else would be a claim about the field that the field does not
+ * currently support. Half-typed prefixes of a legitimate LAN endpoint (from the
+ * fixture both apps share) are each genuinely `invalid` — precisely why a live
+ * warning used to flash through the whole run — and each must stay silent until
+ * the value stops moving. The delay is a UX knob, but not a free one: long
+ * enough to cover typing an `@host`, short enough that the warning still lands
+ * well before the user commits; pinning the bounds (not the number) keeps a
+ * future tuning honest. The policy lives in `shared/` so the PWA and the
+ * Extension cry wolf at the same moment; the Extension pins the identical table
+ * in extension/tests/unit/syncCode.test.ts.
+ */
+
 describe("encodeSyncCode", () => {
   it("should encode without API host", () => {
     const result = encodeSyncCode({
@@ -77,22 +126,8 @@ describe("decodeSyncCode", () => {
   });
 });
 
-/**
- * `parseSyncCodeApiHost` is the DISPLAY-only reader behind SyncCodeHostNote: it
- * runs on every keystroke while the user types a sync code, so it must never
- * throw on partial or malformed input — it just reports "no custom host".
- *
- * Security contract: what the note DISPLAYS must equal what the join path would
- * actually CONNECT to. The `@host` therefore goes through the same
- * `validateEndpointUrl` the join path adopts, and the reported value is that
- * function's canonical output (`origin + pathname`, trailing slashes stripped),
- * NOT a bare host — a plain-HTTP LAN address must not read the same as its
- * HTTPS namesake, and a sub-path endpoint must show the path it will call.
- *
- * The verdict itself comes from `shared/`, so the Extension's note and this one
- * cannot disagree about the same code; the Extension pins the identical table
- * in extension/tests/unit/syncCode.test.ts.
- */
+// What the note DISPLAYS must equal what the join would CONNECT to (valid /
+// invalid / none). See the header → "parseSyncCodeApiHost".
 describe("parseSyncCodeApiHost", () => {
   interface Case {
     name: string;
@@ -229,29 +264,8 @@ describe("parseSyncCodeApiHost", () => {
   });
 });
 
-/**
- * `displayedSyncCodeApiHost` is the DISPLAY POLICY stacked on top of the
- * classifier: given the LIVE verdict for whatever the field holds right now and
- * whether that value has SETTLED, it answers what may actually be rendered.
- *
- * Why a policy exists at all: a `@host` typed one character at a time is
- * `invalid` at nearly every intermediate keystroke (`…@http`, `…@http://192.`),
- * so a live warning fires on almost every keypress. A warning that cries wolf
- * during normal typing is one users learn to dismiss — fatal here, because this
- * warning is the last human-facing defence against a userinfo-spoofed endpoint.
- *
- * Two properties matter more than any individual row below:
- *   - only `invalid` is ever withheld; `valid` and `none` pass through live, so
- *     the delay can never SUPPRESS a warning, only postpone it;
- *   - the withheld case renders NOTHING rather than the previously shown
- *     verdict. Keeping a stale `valid` note on screen would leave a reassuring
- *     "will connect to api.moofamily.app" standing for a value that now reads
- *     `…@evil.com` — the exact legitimacy the warning exists to deny.
- *
- * The policy lives in `shared/` so the PWA and the Extension cry wolf at the
- * same moment; the Extension pins the identical table in
- * extension/tests/unit/syncCode.test.ts.
- */
+// The DISPLAY POLICY: only `invalid` is withheld until settled, and then nothing is
+// rendered. See the header → "displayedSyncCodeApiHost".
 describe("displayedSyncCodeApiHost", () => {
   const VALID: SyncCodeApiHostResult = {
     kind: "valid",
@@ -308,12 +322,8 @@ describe("displayedSyncCodeApiHost", () => {
     expect(displayedSyncCodeApiHost(live, settled)).toEqual(expected);
   });
 
-  /**
-   * The anti-stale invariant, stated as a property rather than a row: the only
-   * two answers the policy may give are the CURRENT verdict verbatim or
-   * "render nothing". Anything else would be a claim about the field that the
-   * field does not currently support.
-   */
+  // Anti-stale invariant as a property: the CURRENT verdict verbatim, or nothing.
+  // See the header → "displayedSyncCodeApiHost".
   it.each(cases)(
     "$name — and returns either the live verdict itself or nothing",
     ({ live, settled }) => {
@@ -325,12 +335,8 @@ describe("displayedSyncCodeApiHost", () => {
     },
   );
 
-  /**
-   * Half-typed prefixes of a legitimate LAN endpoint, from the fixture both
-   * apps share. Each one is genuinely `invalid` — which is precisely why a live
-   * warning used to flash through the whole run — and each must stay silent
-   * until the value stops moving.
-   */
+  // Half-typed LAN prefixes (shared fixture) are genuinely `invalid`, yet must stay
+  // silent until the value settles.
   it.each(HALF_TYPED_PREFIXES)(
     "stays silent for the half-typed %s until it settles",
     (code) => {
@@ -343,11 +349,8 @@ describe("displayedSyncCodeApiHost", () => {
     },
   );
 
-  /**
-   * The stale-valid hazard at policy level: appending `@evil.com` to a host the
-   * user already saw named turns the verdict invalid, and the policy must
-   * answer "nothing" — never the endpoint that was legitimate one keystroke ago.
-   */
+  // Stale-valid hazard: after a spoof tail the answer is "nothing", never the
+  // endpoint that was legitimate one keystroke ago.
   it.each(SPOOF_TAILS.map((tail) => `${TRUSTED_CODE}${tail}`))(
     "never echoes the pre-spoof host for %s",
     (code) => {
@@ -362,11 +365,8 @@ describe("displayedSyncCodeApiHost", () => {
     },
   );
 
-  /**
-   * The delay is a UX knob, but not a free one: long enough to cover typing an
-   * `@host`, short enough that the warning still lands well before the user
-   * commits. Pinning the bounds (not the number) keeps a future tuning honest.
-   */
+  // A UX knob, not a free one: it covers typing an `@host` yet lands before commit.
+  // The bounds are pinned, not the number, to keep a future tuning honest.
   it("delays the warning by a short, positive interval", () => {
     expect(Number.isInteger(SYNC_CODE_HOST_SETTLE_DELAY_MS)).toBe(true);
     expect(SYNC_CODE_HOST_SETTLE_DELAY_MS).toBeGreaterThan(0);

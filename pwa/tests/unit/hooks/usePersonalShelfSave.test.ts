@@ -7,15 +7,6 @@ import {
 } from "moo-family-bookshelf-shared/personal/saveErrors";
 import { MAX_SAVE_PUT_ATTEMPTS } from "moo-family-bookshelf-shared/personal/fullPutConflict";
 
-// The save refreshes the aggregated family shelf through the FamilyData
-// context; isolate the hook from it (same approach as PersonalShelfPage.test).
-const mockRefreshBookshelf = vi.fn(async () => {});
-vi.mock("@/hooks/useFamilyData", () => ({
-  useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
-}));
-
-import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
-
 /**
  * #259 (P0 privacy), PWA mirror of
  * extension/tests/unit/dialog/useSavePersonalShelf.test.ts. A personal-shelf
@@ -34,6 +25,15 @@ import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
  * in practice through a batch share of more than the Worker's 1000-change
  * PATCH cap (its list only ever holds server-known books).
  */
+
+// The save refreshes the aggregated family shelf through the FamilyData
+// context; isolate the hook from it (same approach as PersonalShelfPage.test).
+const mockRefreshBookshelf = vi.fn(async () => {});
+vi.mock("@/hooks/useFamilyData", () => ({
+  useFamilyData: () => ({ refreshBookshelf: mockRefreshBookshelf }),
+}));
+
+import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
 
 const USER = "user-1";
 const L0 = "2026-09-30T10:00:00.000Z";

@@ -126,9 +126,8 @@ describe("normalizeSortMode", () => {
     { input: undefined, expected: "default", desc: "undefined" },
     { input: 42, expected: "default", desc: "number" },
     { input: {}, expected: "default", desc: "object" },
-    // Regression guard (W1): prototype-chain keys must not resolve to inherited
-    // Object/Function members via LEGACY_ALIASES lookup. The Object.hasOwn guard
-    // makes these fall back to 'default' instead of returning an object/function.
+    // Regression guard (W1): prototype-chain keys must not resolve to inherited members
+    // via LEGACY_ALIASES; the Object.hasOwn guard makes them fall back to 'default'.
     {
       input: "__proto__",
       expected: "default",

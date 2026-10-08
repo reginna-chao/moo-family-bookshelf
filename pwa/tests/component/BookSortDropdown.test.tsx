@@ -167,9 +167,8 @@ describe("BookSortDropdown", () => {
     expect(onChange).toHaveBeenCalledWith("title-asc");
   });
 
-  // Focus starts on an option — where a keyboard user is while the menu is
-  // open — so a focus that is NOT moved falls to <body> when that option
-  // unmounts with the menu.
+  // Focus starts on an option — where a keyboard user is while the menu is open — so a focus
+  // that is NOT moved falls to <body> when that option unmounts with the menu.
   describe("focus after closing", () => {
     function renderWithOutside(onChange: (mode: BookSortMode) => void) {
       render(

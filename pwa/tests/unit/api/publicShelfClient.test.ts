@@ -6,6 +6,58 @@ import {
   type PublicShelfData,
 } from "@/api/client";
 
+/**
+ * ApiClient public-shelf envelope handling (PWA): bodyless responses,
+ * `retryAfter` validation and hostile envelope text.
+ *
+ * Bodyless responses: `bodylessResponse` builds a response with NO body whose
+ * `json()` rejects exactly like the real `fetch` does on an empty payload. That
+ * SyntaxError is what used to be laundered into a NETWORK_ERROR envelope and
+ * then swallowed, so a 204 read as a failure and a refused revocation read as a
+ * success. The bodyless allowance is exactly 204, the one status this API
+ * answers without a body. Every other empty response is read as the parse
+ * failure it is, so a backend cannot have the dialog report a link as closed by
+ * answering an empty body on a status the API never returns. 304 lands there
+ * too — it is `!response.ok`, so its empty body was never eligible for the
+ * success path either way.
+ *
+ * retryAfter validation at the envelope boundary: `retryAfter` crosses a trust
+ * boundary — a self-hosted (BYO) backend can put anything in the envelope, and
+ * the value is rendered straight into the back-off copy. Anything unusable must
+ * be dropped so the UI falls back to its static wording instead of printing
+ * 「NaN 秒」/「-1 秒」.
+ *
+ * throwOnError — hostile envelope text: `throwOnError` is the single chokepoint
+ * every thrown `ApiError` passes through, and both of its text inputs arrive via
+ * `readEnvelope`, which bare-casts `response.json()` (src/api/client.ts). The
+ * endpoint is user-configurable (the PWA adopts a sync code's `@host` too), so
+ * `code` and `message` are `unknown` at runtime while the types call them
+ * `string`. That gap costs more than wording. `ApiError`'s constructor
+ * interpolates both — `super(\`${code}: ${message}\`)` — so a value whose
+ * ToPrimitive throws (`{ toString: null, valueOf: null }`, a shape `JSON.parse`
+ * really can produce) used to raise a TypeError from INSIDE the constructor: no
+ * `ApiError` was ever built, every caller's `instanceof ApiError` branch went
+ * false, and the machine-readable `code` plus the 429 `retryAfter` the back-off
+ * copy counts down from were lost with it. A TypeError is not an ApiError, so the
+ * 429 branch that renders the localized back-off copy was skipped — and that
+ * branch reads exactly `code` and `retryAfter`, which is why the review payload's
+ * case pins them rather than the (degraded) wording. `code` is interpolated
+ * first, so a hostile code kills construction just as thoroughly as a hostile
+ * message; it must still land as a non-empty string (`err.code === ""` would
+ * match no branch and read as "no code"). Mirrors
+ * extension/tests/unit/client.test.ts — the two clients keep byte-identical
+ * fallbacks, and nothing else stops them from drifting.
+ *
+ * getPublicShelf — hostile envelope text: the public snapshot read is the one
+ * refusal path that does NOT go through `throwOnError`: it builds a plain
+ * `Error` and hangs `status` on it, because PublicShelfPage switches on that
+ * number — 404 →「此公開書櫃不存在或已過期」, 400 →「網址格式不正確」, anything
+ * else → the generic load error with a retry button. If the envelope's text
+ * makes `new Error(...)` throw, the assignment on the NEXT line never runs, so
+ * `status` is absent and an expired link is reported as a transient failure the
+ * user is invited to retry forever.
+ */
+
 // Mock fetch globally
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -33,12 +85,8 @@ function jsonResponse(body: unknown, status = 200) {
   };
 }
 
-/**
- * A response with NO body. `json()` rejects exactly like the real `fetch` does
- * on an empty payload — that SyntaxError is what used to be laundered into a
- * NETWORK_ERROR envelope and then swallowed, so a 204 read as a failure and a
- * refused revocation read as a success.
- */
+/** A response with NO body; `json()` rejects like the real `fetch`. See the header
+ *  → "Bodyless responses". */
 function bodylessResponse(status: number) {
   return {
     ok: status >= 200 && status < 300,
@@ -94,14 +142,8 @@ describe("ApiClient public-shelf envelope handling", () => {
       },
     );
 
-    /**
-     * Counter-case to the row above: the bodyless allowance is exactly 204, the
-     * one status this API answers without a body. Every other empty response is
-     * read as the parse failure it is, so a backend cannot have the dialog
-     * report a link as closed by answering an empty body on a status the API
-     * never returns. 304 lands here too — it is `!response.ok`, so its empty
-     * body was never eligible for the success path either way.
-     */
+    // Counter-case: the bodyless allowance is exactly 204; any other empty body
+    // is a parse failure. See the header → "Bodyless responses".
     it.each([
       { status: 205, label: "Reset Content" },
       { status: 304, label: "Not Modified" },
@@ -251,12 +293,8 @@ describe("ApiClient public-shelf envelope handling", () => {
       expect(err).toMatchObject({ code: "MAX_SHELVES_REACHED" });
     });
 
-    /**
-     * `retryAfter` crosses a trust boundary: a self-hosted (BYO) backend can put
-     * anything in the envelope, and the value is rendered straight into the
-     * back-off copy. Anything unusable must be dropped so the UI falls back to
-     * its static wording instead of printing「NaN 秒」/「-1 秒」.
-     */
+    // A BYO backend's value is rendered into the back-off copy, so anything unusable
+    // is dropped. See the header → "retryAfter validation at the envelope boundary".
     describe("retryAfter validation at the envelope boundary", () => {
       async function rejectWithRetryAfter(retryAfter: unknown) {
         mockFetch.mockResolvedValue(
@@ -318,34 +356,15 @@ describe("ApiClient public-shelf envelope handling", () => {
     });
   });
 
-  /**
-   * `throwOnError` is the single chokepoint every thrown `ApiError` passes
-   * through, and both of its text inputs arrive via `readEnvelope`, which
-   * bare-casts `response.json()` (src/api/client.ts). The endpoint is
-   * user-configurable (the PWA adopts a sync code's `@host` too), so `code` and
-   * `message` are `unknown` at runtime while the types call them `string`.
-   *
-   * That gap costs more than wording. `ApiError`'s constructor interpolates
-   * both — `super(\`${code}: ${message}\`)` — so a value whose ToPrimitive
-   * throws (`{ toString: null, valueOf: null }`, a shape `JSON.parse` really
-   * can produce) used to raise a TypeError from INSIDE the constructor: no
-   * `ApiError` was ever built, every caller's `instanceof ApiError` branch went
-   * false, and the machine-readable `code` plus the 429 `retryAfter` the
-   * back-off copy counts down from were lost with it.
-   *
-   * Mirrors extension/tests/unit/client.test.ts — the two clients keep
-   * byte-identical fallbacks, and nothing else stops them from drifting.
-   */
+  // Hostile `code`/`message` must not kill `ApiError` construction; mirrors the
+  // Extension's client test. See the header → "throwOnError — hostile envelope text".
   describe("throwOnError — hostile envelope text", () => {
     /** Fallbacks as written at the production call site in src/api/client.ts. */
     const CODE_FALLBACK = "UNKNOWN_ERROR";
     const MESSAGE_FALLBACK = "請稍後再試";
 
-    /**
-     * Refuse the next request with `error` verbatim, then hand back whatever
-     * the unwrapping method threw. `captureRejection`'s trailing throw keeps a
-     * resolved call from passing vacuously.
-     */
+    /** Refuse the next request with `error` verbatim; return what the method threw
+     *  (`captureRejection`'s trailing throw stops a resolved call passing vacuously). */
     async function captureThrown(
       error: Record<string, unknown>,
       status: number,
@@ -381,12 +400,8 @@ describe("ApiClient public-shelf envelope handling", () => {
     );
 
     it("still throws an ApiError (not a TypeError) for a message that cannot be stringified", async () => {
-      // The exact payload from review: nulling both `toString` and `valueOf`
-      // makes ToPrimitive throw, so `new ApiError(code, message, …)` used to
-      // die inside its own constructor. A TypeError is not an ApiError, so the
-      // 429 branch that renders the localized back-off copy was skipped — and
-      // that branch reads exactly the two fields asserted here, which is why
-      // this pins them rather than the (degraded) wording.
+      // The review payload: null `toString`/`valueOf` made ToPrimitive throw inside
+      // the constructor. Pins the two fields the 429 branch reads (see header).
       const err = await captureThrown(
         {
           code: "RATE_LIMITED",
@@ -404,9 +419,8 @@ describe("ApiClient public-shelf envelope handling", () => {
     });
 
     it("falls back to UNKNOWN_ERROR when the code itself is not a string", async () => {
-      // `code` is interpolated first, so a hostile code kills construction just
-      // as thoroughly as a hostile message. It must still land as a non-empty
-      // string: `err.code === ""` would match no branch and read as "no code".
+      // A hostile `code` kills construction too; it must still land as a non-empty
+      // string (`""` would match no branch and read as "no code").
       const err = await captureThrown(
         {
           code: { toString: null, valueOf: null },
@@ -417,9 +431,8 @@ describe("ApiClient public-shelf envelope handling", () => {
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe(CODE_FALLBACK);
-      // A legitimate message still reaches the user even when the code is junk
-      // — and its presence proves the envelope's own error was used, not the
-      // client's `HTTP 500` stand-in for a missing error field.
+      // A legitimate message survives junk code — proof the envelope's own error
+      // was used, not the client's `HTTP 500` stand-in.
       expect((err as ApiError).rawMessage).toBe("伺服器拒絕了這個請求");
       // Sanitizing must not launder provenance: this payload came off the wire,
       // so the UI may not render its text verbatim.
@@ -427,9 +440,8 @@ describe("ApiClient public-shelf envelope handling", () => {
     });
 
     it("passes a legitimate string code and message through unchanged", async () => {
-      // Positive control: the guard must not over-degrade. Real server text
-      // still reaches the user, the legacy "CODE: message" shape stays intact
-      // for callers that read `message`, and `retryAfter` rides along.
+      // Positive control, no over-degrading: real server text, the legacy
+      // "CODE: message" shape (for callers reading `message`) and `retryAfter` survive.
       const err = await captureThrown(
         {
           code: "MAX_SHELVES_REACHED",
@@ -449,15 +461,8 @@ describe("ApiClient public-shelf envelope handling", () => {
     });
   });
 
-  /**
-   * The public snapshot read is the one refusal path that does NOT go through
-   * `throwOnError`: it builds a plain `Error` and hangs `status` on it, because
-   * PublicShelfPage switches on that number — 404 →「此公開書櫃不存在或已過期」,
-   * 400 →「網址格式不正確」, anything else → the generic load error with a retry
-   * button. If the envelope's text makes `new Error(...)` throw, the assignment
-   * on the NEXT line never runs, so `status` is absent and an expired link is
-   * reported as a transient failure the user is invited to retry forever.
-   */
+  // A plain `Error` with `status` (no `throwOnError`); hostile text must not stop that
+  // assignment. See the header → "getPublicShelf — hostile envelope text".
   describe("getPublicShelf — hostile envelope text", () => {
     const SHARE_TOKEN = "tok-abc";
 

@@ -6,6 +6,46 @@ import { FamilyBookRow } from "@/components/FamilyBookRow";
 import type { FamilyBookRowBook } from "@/components/FamilyBookRow";
 import { BoolFlag } from "@/api/client";
 
+/**
+ * FamilyBookRow: the list-view row, its link attributes, the two server-supplied URL gates (cover
+ * and book link), and the hide-action overflow menu.
+ *
+ * Rel pair: rel="noopener noreferrer" is asserted as the full string; the two tokens do different jobs, so a
+ * substring check stays green after the load-bearing half is deleted — `noopener` severs
+ * `window.opener`, `noreferrer` suppresses the Referer header. Production documents the pair as
+ * load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it is the layer that still holds
+ * when the URL whitelist is bypassed — which has happened: see the base-sensitivity rows in
+ * extension/tests/unit/readmooConfig.test.ts.
+ *
+ * Cover URL whitelist: a family-shelf cover is ANOTHER member's server data, so it is exactly the
+ * value a hostile member would point at a tracking beacon to collect every viewer's IP / UA.
+ * `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops it before it becomes an `<img src>`; LazyCover
+ * then renders the BookOpen fallback box. The CSP `img-src` in pwa/public/_headers is the second
+ * layer (tests/unit/cspHeaders.test.ts) but is only served by Cloudflare Pages / Netlify — `vite dev`
+ * / `vite preview` and plain static hosts have only this code filter, which is what the cases pin.
+ * coverFallback finds LazyCover's BookOpen fallback box by `bg-gray-100`: the wrapper LazyCover
+ * renders around a live cover carries `relative` and the row's own classes, never a background, so a
+ * non-null result means the fallback branch ran. The nested icon is asserted alongside it.
+ *
+ * Book link whitelist: `readmooUrl` is the other attacker-controllable URL on the same server record:
+ * a family member can bypass the UI and POST any value, and here the whole ROW is the `<a>`, so a
+ * click anywhere on the book follows it. That makes an off-domain value an arbitrary-redirect /
+ * phishing lure presented under a legitimate book title, and the destination host learns the viewer's
+ * IP and User-Agent. The referer does NOT go with it, purely because the render site pairs the href
+ * with `rel="noopener noreferrer"` (pwa/src/components/FamilyBookRow.tsx), where `noreferrer`
+ * suppresses the Referer header outright — load-bearing, not decoration. It differs from the cover
+ * gate in when it fires (a click, not a render — lower rate, same severity) and in what could
+ * substitute for it: nothing. The CSP in pwa/public/_headers is `img-src` only, which says nothing
+ * about where a navigation may go, and that file is in any case only honoured by hosts that serve it.
+ * `safeBookUrl` (pwa/src/utils/safeBookUrl.ts) is the whole defence. The degradation contract is
+ * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because
+ * an empty `href` resolves to the current document and a click would reload the PWA. With no `href`
+ * the `<a>` has no `link` role and is inert, while the row's layout and content stay untouched. The
+ * whitelisted counterpart is pinned by "links to readmooUrl". The `getAttribute("href")` null check
+ * is NOT interchangeable with the role query: RTL reports no `link` role for `href=""` either, so only
+ * the attribute check can tell "omitted" from "empty" — only it fails if `|| undefined` is dropped.
+ */
+
 function makeBook(
   overrides: Partial<FamilyBookRowBook> = {},
 ): FamilyBookRowBook {
@@ -104,37 +144,19 @@ describe("FamilyBookRow", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "https://readmoo.com/book/book-1");
     expect(link).toHaveAttribute("target", "_blank");
-    // Full string, not `toContain("noopener")`: the two tokens do different
-    // jobs, so a substring check stays green after the load-bearing half is
-    // deleted. `noopener` severs `window.opener`; `noreferrer` is the one
-    // that suppresses the Referer header. Production documents the pair as
-    // load-bearing (shared/src/config/readmoo.ts → isAllowedBookUrl), and it
-    // is the layer that still holds when the URL whitelist is bypassed —
-    // which has happened: see the base-sensitivity rows in
-    // extension/tests/unit/readmooConfig.test.ts.
+    // Full string, not `toContain("noopener")`: the two tokens do different jobs and `noreferrer` is
+    // load-bearing. See the header → "Rel pair".
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  /**
-   * A family-shelf cover is ANOTHER member's server data, so it is exactly the
-   * value a hostile member would point at a tracking beacon to collect every
-   * viewer's IP / UA. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops it
-   * before it becomes an `<img src>`; LazyCover then renders the BookOpen
-   * fallback box. The CSP `img-src` in pwa/public/_headers is the second layer
-   * (tests/unit/cspHeaders.test.ts) but is only served by Cloudflare Pages /
-   * Netlify — `vite dev` / `vite preview` and plain static hosts have only this
-   * code filter, which is what the cases below pin.
-   */
+  /** Another member's cover URL never becomes an `<img src>` off the Readmoo whitelist (safeCoverUrl).
+   *  See the header → "Cover URL whitelist". */
   describe("cover URL whitelist", () => {
     const READMOO_COVER = "https://cdn.readmoo.com/cover/x.jpg";
     const BEACON_COVER = "https://evil.example/beacon.gif";
 
-    /**
-     * LazyCover's BookOpen fallback box. `bg-gray-100` singles it out here: the
-     * wrapper LazyCover renders around a live cover carries `relative` and the
-     * row's own classes, never a background, so a non-null result means the
-     * fallback branch ran. The nested icon is asserted alongside it.
-     */
+    /** LazyCover's BookOpen fallback box, singled out by `bg-gray-100`.
+     *  See the header → "Cover URL whitelist". */
     function coverFallback(container: HTMLElement): Element | null {
       return container.querySelector("div.bg-gray-100");
     }
@@ -184,29 +206,8 @@ describe("FamilyBookRow", () => {
     });
   });
 
-  /**
-   * `readmooUrl` is the other attacker-controllable URL on the same server
-   * record: a family member can bypass the UI and POST any value, and here the
-   * whole ROW is the `<a>`, so a click anywhere on the book follows it. That
-   * makes an off-domain value an arbitrary-redirect / phishing lure presented
-   * under a legitimate book title, and the destination host learns the viewer's
-   * IP and User-Agent. The referer does NOT go with it, purely because the
-   * render site pairs the href with `rel="noopener noreferrer"`
-   * (pwa/src/components/FamilyBookRow.tsx), where `noreferrer` suppresses the
-   * Referer header outright — load-bearing, not decoration. It differs from the
-   * cover gate above in when it fires (a click, not a render — lower rate, same
-   * severity) and in what could substitute for it: nothing. The CSP in
-   * pwa/public/_headers is `img-src` only, which says nothing about where a
-   * navigation may go, and that file is in any case only honoured by hosts that
-   * serve it. `safeBookUrl` (pwa/src/utils/safeBookUrl.ts) is the whole defence.
-   *
-   * The degradation contract is `href={safeBookUrl(...) || undefined}`: the
-   * attribute is OMITTED rather than set to `""`, because an empty `href`
-   * resolves to the current document and a click would reload the PWA. With no
-   * `href` the `<a>` has no `link` role and is inert, while the row's layout and
-   * content stay untouched. The whitelisted counterpart is pinned by "links to
-   * readmooUrl" above.
-   */
+  /** An off-domain `readmooUrl` leaves an inert `<a>` with the href OMITTED (safeBookUrl is the whole
+   *  defence). See the header → "Book link whitelist". */
   describe("book link whitelist", () => {
     const PHISHING_URL = "https://evil.example.com/phish";
 
@@ -229,10 +230,8 @@ describe("FamilyBookRow", () => {
 
         const anchors = container.querySelectorAll("a");
         expect(anchors).toHaveLength(1);
-        // Load-bearing assertion, and NOT interchangeable with the role query
-        // below: RTL reports no `link` role for `href=""` either, so only the
-        // attribute check can tell "omitted" from "empty" — i.e. only this line
-        // fails if the `|| undefined` is ever dropped from the render site.
+        // Load-bearing, NOT interchangeable with the role query: RTL reports no `link` role for `href=""`
+        // either, so only this line fails if `|| undefined` is dropped from the render site.
         expect(anchors[0].getAttribute("href")).toBeNull();
         // The role query is what proves the hostile URL never made it in: with
         // the filter removed this anchor would be a real, followable link.

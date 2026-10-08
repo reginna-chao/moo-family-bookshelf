@@ -17,6 +17,37 @@ import {
   BORROW_HISTORY_KEEP,
 } from "moo-family-bookshelf-shared/borrow/history";
 
+/**
+ * PWA BorrowPage: the inbox / outbox sections, the borrow cards, status badges and the history cap
+ * hint, driven through a mocked useFamilyData.
+ *
+ * Borrow card cover: the borrow card renders its cover through `LazyCover`, so a cover that is missing
+ * OR fails to load degrades to the same neutral placeholder instead of leaving a broken-image box. The
+ * PWA runs TWO render-time beacon defences, not one:
+ *   1. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops a cover outside the Readmoo host whitelist
+ *      BEFORE it can become an `<img src>` — a code-level filter, so jsdom observes it and the cover
+ *      cases pin it.
+ *   2. The CSP `img-src` in pwa/public/_headers (pinned by tests/unit/cspHeaders.test.ts), which only
+ *      a real browser enforces.
+ * Layer 2 alone would not cover every deployment: `_headers` is honoured only by hosts that serve it
+ * (Cloudflare Pages / Netlify), so `vite dev` / `vite preview` and plain static hosts send no CSP at
+ * all and rely on layer 1. Borrow records have no TTL, so covers stored before the Worker's write-time
+ * check (INVALID_COVER_URL) still reach this render path.
+ *
+ * Unknown status fallback: `status` is bare-cast out of the API response by `listBorrowRequests()`,
+ * and the API endpoint is user-configurable (BYO backend), so an out-of-enum value can reach the
+ * badge. Anything that is not PENDING is archived, so the card only mounts when the history toggle is
+ * expanded — that click is where the old `getStatusStyle` (an exhaustive switch with no `default`)
+ * returned `undefined` and threw, blanking the page.
+ *
+ * History cap hint: each box states how many finished records it keeps, and 收件匣 / 寄件匣 say
+ * DIFFERENT things (the cap is per borrower, so the outbox as a whole is bounded while the inbox holds
+ * one allowance per family member). The two sentences share substrings, so every assertion uses
+ * `getByText` / `queryByText` with the imported constant — RTL matches a string matcher against the
+ * node's FULL normalized text — plus a negative assertion on the sibling variant
+ * (.claude/rules/test.md → "Substring copy variants need exact equality").
+ */
+
 // --- Mock useFamilyData hook ---
 
 interface MockFamilyData {
@@ -251,23 +282,8 @@ describe("BorrowPage", () => {
     expect(screen.queryByText("標記已歸還")).not.toBeInTheDocument();
   });
 
-  /**
-   * The borrow card renders its cover through `LazyCover`, so a cover that is
-   * missing OR fails to load degrades to the same neutral placeholder instead
-   * of leaving a broken-image box.
-   *
-   * The PWA runs TWO render-time beacon defences, not one:
-   *   1. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops a cover outside
-   *      the Readmoo host whitelist BEFORE it can become an `<img src>` — a
-   *      code-level filter, so jsdom observes it and the cases below pin it.
-   *   2. The CSP `img-src` in pwa/public/_headers (pinned by
-   *      tests/unit/cspHeaders.test.ts), which only a real browser enforces.
-   * Layer 2 alone would not cover every deployment: `_headers` is honoured only
-   * by hosts that serve it (Cloudflare Pages / Netlify), so `vite dev` /
-   * `vite preview` and plain static hosts send no CSP at all and rely on
-   * layer 1. Borrow records have no TTL, so covers stored before the Worker's
-   * write-time check (INVALID_COVER_URL) still reach this render path.
-   */
+  /** A missing, broken or off-whitelist cover degrades to LazyCover's neutral placeholder; safeCoverUrl is
+   *  the layer jsdom can pin. See the header → "Borrow card cover". */
   describe("borrow card cover", () => {
     function renderWithCover(bookCoverUrl: string) {
       setMockFamilyData({
@@ -305,7 +321,8 @@ describe("BorrowPage", () => {
       // The fallback is the same neutral box the empty-cover case renders.
       const placeholder = container.querySelector("div.bg-gray-100");
       expect(placeholder).not.toBeNull();
-      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      // LazyCover's wrapper also carries bg-gray-100; checking `relative` too proves the wrapper is
+      // gone and only the fallback remains.
       expect(placeholder).not.toHaveClass("relative");
       // The card itself must survive the failed cover.
       expect(screen.getByText("測試書名")).toBeInTheDocument();
@@ -317,7 +334,8 @@ describe("BorrowPage", () => {
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
       const placeholder = container.querySelector("div.bg-gray-100");
       expect(placeholder).not.toBeNull();
-      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      // LazyCover's wrapper also carries bg-gray-100; checking `relative` too proves the wrapper is
+      // gone and only the fallback remains.
       expect(placeholder).not.toHaveClass("relative");
       expect(screen.getByText("測試書名")).toBeInTheDocument();
     });
@@ -325,9 +343,8 @@ describe("BorrowPage", () => {
     it("drops a cover on a non-Readmoo host instead of requesting it", () => {
       const { container } = renderWithCover("https://evil.example/beacon.gif");
 
-      // No `<img>` ⇒ the browser issues no request ⇒ no IP / UA leak. This is
-      // the whole point of the filter, so assert on the element too, not only
-      // on the accessible role.
+      // No `<img>` ⇒ the browser issues no request ⇒ no IP / UA leak. That is the whole point of the
+      // filter, so assert on the element too, not only on the accessible role.
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
       expect(container.querySelector("img")).toBeNull();
       // The beacon host must not survive anywhere in the markup (src, srcset,
@@ -336,7 +353,8 @@ describe("BorrowPage", () => {
 
       const placeholder = container.querySelector("div.bg-gray-100");
       expect(placeholder).not.toBeNull();
-      // LazyCover 的 wrapper 也帶 bg-gray-100，多驗 relative 才能證明「wrapper 已消失、只剩 fallback」
+      // LazyCover's wrapper also carries bg-gray-100; checking `relative` too proves the wrapper is
+      // gone and only the fallback remains.
       expect(placeholder).not.toHaveClass("relative");
       // The card must still render — filtering a cover is not an error state.
       expect(screen.getByText("測試書名")).toBeInTheDocument();
@@ -593,14 +611,8 @@ describe("BorrowPage", () => {
     });
   });
 
-  /**
-   * `status` is bare-cast out of the API response by `listBorrowRequests()`,
-   * and the API endpoint is user-configurable (BYO backend), so an out-of-enum
-   * value can reach the badge. Anything that is not PENDING is archived, so the
-   * card only mounts when the history toggle is expanded — that click is where
-   * the old `getStatusStyle` (an exhaustive switch with no `default`) returned
-   * `undefined` and threw, blanking the page.
-   */
+  /** An out-of-enum `status` from a BYO backend must not blank the page when the history toggle mounts
+   *  its card. See the header → "Unknown status fallback". */
   describe("unknown status fallback", () => {
     it.each([
       { name: '"__proto__"', status: "__proto__" },
@@ -609,9 +621,8 @@ describe("BorrowPage", () => {
       { name: '"valueOf"', status: "valueOf" },
       { name: '"hasOwnProperty"', status: "hasOwnProperty" },
       { name: "an unknown numeric status (99)", status: 99 },
-      // A backend that simply omits `status` is the likeliest out-of-range
-      // case. `isActive` is `status === PENDING`, so these land in the
-      // archived bucket exactly like the rows above.
+      // A backend that omits `status` is the likeliest out-of-range case. `isActive` is
+      // `status === PENDING`, so these land in the archived bucket exactly like the rows above.
       { name: "a null status", status: null },
       { name: "a missing status (undefined)", status: undefined },
     ])(
@@ -646,21 +657,11 @@ describe("BorrowPage", () => {
     );
   });
 
-  /**
-   * History cap hint: each box states how many finished records it keeps, and
-   * 收件匣 / 寄件匣 say DIFFERENT things (the cap is per borrower, so the
-   * outbox as a whole is bounded while the inbox holds one allowance per
-   * family member). The two sentences share substrings, so every assertion
-   * uses `getByText` / `queryByText` with the imported constant — RTL matches
-   * a string matcher against the node's FULL normalized text — plus a negative
-   * assertion on the sibling variant (.claude/rules/test.md → "Substring copy
-   * variants need exact equality").
-   */
+  /** 收件匣 / 寄件匣 state DIFFERENT history caps in sentences sharing substrings, so each is matched
+   *  exactly plus a negative on its sibling. See the header → "History cap hint". */
   describe("history cap hint", () => {
-    /**
-     * 收件匣 gets 2 archived records (the user owns the books), 寄件匣 gets 1
-     * (the user is the borrower), so each section's toggle label is unique.
-     */
+    /** 收件匣 gets 2 archived records (the user owns the books), 寄件匣 gets 1 (the user is the
+     *  borrower), so each section's toggle label is unique. */
     function setArchivedOnBothSides() {
       setMockFamilyData({
         borrowRequestsState: "loaded",

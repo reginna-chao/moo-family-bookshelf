@@ -10,6 +10,20 @@ import {
 import { VerifySetupPrompt } from "@/components/VerifySetupPrompt";
 import { ApiClient } from "@/api/client";
 
+/**
+ * VerifySetupPrompt: the PWA overlay that sets up (or skips) login verification.
+ *
+ * Hostile save-error envelopes: `setVerifyMethod` resolves the `{ data, error }` envelope through
+ * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts), and the endpoint is
+ * user-configurable (BYO backend), so `error.message` is `unknown` at runtime. This site used to read
+ * it as `res.error.message || "…"`, and `||` lets every truthy non-string through — including
+ * exactly the objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary above it, the
+ * throw took the whole page white while this overlay (`fixed inset-0`) was covering it. The fallback
+ * literal lives in VerifySetupPrompt.tsx (`saveMethod`) and is read back off the production render
+ * path; `getByText` matches the node's whole text, so a hostile value that had reached state would
+ * fail there rather than hide inside the same node.
+ */
+
 // Mock the ApiClient
 vi.mock("@/api/client", () => ({
   ApiClient: vi.fn(),
@@ -266,16 +280,8 @@ describe("VerifySetupPrompt", () => {
     });
   });
 
-  /**
-   * `setVerifyMethod` resolves the `{ data, error }` envelope through
-   * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts),
-   * and the endpoint is user-configurable (BYO backend), so `error.message` is
-   * `unknown` at runtime. This site used to read it as `res.error.message ||
-   * "…"`, and `||` lets every truthy non-string through — including exactly the
-   * objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary
-   * above it, the throw took the whole page white while this overlay
-   * (`fixed inset-0`) was covering it.
-   */
+  /** A non-string `error.message` from setVerifyMethod must neither crash the overlay nor reach the
+   *  screen. See the header → "Hostile save-error envelopes". */
   describe("hostile save-error envelopes", () => {
     /** Walk to the one save that needs no secret: 不設定驗證 → 確定不設定. */
     async function confirmSkipWith(setVerifyMethod: ReturnType<typeof vi.fn>) {
@@ -295,9 +301,8 @@ describe("VerifySetupPrompt", () => {
       await waitFor(() => {
         expect(screen.getByText("確定不設定")).toBeInTheDocument();
       });
-      // `act` is the barrier for the save: its state update lands in a promise
-      // continuation that would otherwise settle outside any act scope, between
-      // this helper resolving and the caller's next assertion.
+      // `act` is the barrier for the save: its state update lands in a promise continuation that would
+      // otherwise settle outside any act scope, between this helper resolving and the next assertion.
       await act(async () => {
         fireEvent.click(screen.getByText("確定不設定"));
       });
@@ -321,17 +326,14 @@ describe("VerifySetupPrompt", () => {
           }),
         );
 
-        // The literal lives in VerifySetupPrompt.tsx (`saveMethod`); this reads
-        // it back off the production render path. `getByText` matches the
-        // node's whole text, so a hostile value that had reached state would
-        // fail here rather than hide inside the same node.
+        // Production literal (VerifySetupPrompt.tsx `saveMethod`), whole-text match so a hostile value
+        // cannot hide in the same node. See the header → "Hostile save-error envelopes".
         expect(screen.getByText("儲存失敗，請重試。")).toHaveAttribute(
           "role",
           "alert",
         );
-        // A thrown render tears the tree down; the still-mounted overlay is
-        // what the regression is really about — and a failed save must not
-        // report completion.
+        // A thrown render tears the tree down; the still-mounted overlay is what the regression is
+        // really about — and a failed save must not report completion.
         expect(screen.getByText("確定不設定驗證？")).toBeInTheDocument();
         expect(mockOnComplete).not.toHaveBeenCalled();
       },

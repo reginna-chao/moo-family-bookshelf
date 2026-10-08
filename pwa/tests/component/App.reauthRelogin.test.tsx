@@ -1,18 +1,3 @@
-/**
- * #266 REGRESSION, end to end through App and the REAL LandingPage.
- *
- * A member with PWA-login verification leaves the family on another device.
- * The PWA's silent recovery join is answered VERIFICATION_REQUIRED, so App logs
- * out and asks for re-verification. The landing re-login used to be a plain
- * join, and the Worker re-added the departed user. It must now carry
- * `recovery: 1` for that same identity, show a landing explanation on 409
- * RECOVERY_NOT_MEMBER without logging anyone in, and let the NEXT submit be an
- * explicit (non-recovery) re-join.
- *
- * Only `useAuth` (the hook — its module exports stay real), the ApiClient and
- * the signed-in pages are mocked; the sync-code pre-fill, the userId hash, the
- * verification screen and the join choke point all run production code.
- */
 import {
   describe,
   it,
@@ -31,6 +16,22 @@ import {
   act,
 } from "@testing-library/react";
 import { webcrypto } from "node:crypto";
+
+/**
+ * #266 REGRESSION, end to end through App and the REAL LandingPage.
+ *
+ * A member with PWA-login verification leaves the family on another device.
+ * The PWA's silent recovery join is answered VERIFICATION_REQUIRED, so App logs
+ * out and asks for re-verification. The landing re-login used to be a plain
+ * join, and the Worker re-added the departed user. It must now carry
+ * `recovery: 1` for that same identity, show a landing explanation on 409
+ * RECOVERY_NOT_MEMBER without logging anyone in, and let the NEXT submit be an
+ * explicit (non-recovery) re-join.
+ *
+ * Only `useAuth` (the hook — its module exports stay real), the ApiClient and
+ * the signed-in pages are mocked; the sync-code pre-fill, the userId hash, the
+ * verification screen and the join choke point all run production code.
+ */
 
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
@@ -121,10 +122,8 @@ beforeAll(() => {
 });
 
 const EMAIL = "test@test.com";
-/**
- * sha256("moo:test@test.com") — the literal LandingPage.test.tsx pins, so the
- * re-login below derives the SAME userId the stored session holds.
- */
+/** sha256("moo:test@test.com") — the literal LandingPage.test.tsx pins, so the re-login below
+ *  derives the SAME userId the stored session holds. */
 const USER_ID =
   "fb665feb4ce879ca70bcd4bb4358b56daceb33815ef832461ced74b23c3c25eb";
 /** Two dash-separated parts, so `encodeSyncCode` → `decodeSyncCode` round-trips. */
