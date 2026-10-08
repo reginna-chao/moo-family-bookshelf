@@ -260,19 +260,19 @@ export async function doRefreshToken(
   }
 }
 
-/** Read the recovery cooldown, returning its epoch-ms deadline only if still active. */
+/** Active deadline or undefined; an over-long one is re-saved (best-effort) at the 1 h max, so it self-heals. */
 async function getActiveRecoveryCooldown(): Promise<number | undefined> {
   const stored = await browser.storage.local.get(RECOVERY_COOLDOWN_UNTIL_KEY);
   const cooldownUntil = stored[RECOVERY_COOLDOWN_UNTIL_KEY];
   if (typeof cooldownUntil !== "number") return undefined;
-  // Clamp on read as well as on write: a deadline persisted before the write-side
-  // cap existed (or one inflated by a clock skew) must not outlive the max.
   const now = Date.now();
-  const bounded = Math.min(
-    cooldownUntil,
-    now + MAX_RECOVERY_COOLDOWN_SECONDS * 1000,
-  );
-  return now < bounded ? bounded : undefined;
+  const maxDeadline = now + MAX_RECOVERY_COOLDOWN_SECONDS * 1000;
+  if (cooldownUntil > maxDeadline) {
+    return setRecoveryCooldown(MAX_RECOVERY_COOLDOWN_SECONDS).catch(
+      () => maxDeadline,
+    );
+  }
+  return now < cooldownUntil ? cooldownUntil : undefined;
 }
 
 /** Persist a fresh recovery cooldown and return its epoch-ms deadline; the wait is clamped to
