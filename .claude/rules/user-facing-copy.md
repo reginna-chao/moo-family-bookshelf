@@ -161,6 +161,19 @@ deployment procedure is engineering copy no matter how plain each word is. Hard 
 Self-check: cover the sub-bullets with your hand. Does the reader still know what changed and
 what to do? If yes, the sub-bullets were depth, not information — delete them.
 
+**When `**請更新擴充功能／PWA**` is warranted — and when it is not.** The Worker deploys the
+moment a PR merges to `main`; the Extension and PWA ship only at the next tag. The line exists
+for that gap: it is a COMPATIBILITY warning, written only when the deployed Worker already
+behaves differently and an Extension / PWA still on the previous release breaks or misbehaves
+against it (v1.7.0: a verified user's family creation fails; a removed member's old client
+retries forever and may rejoin). It then says what happens WITHOUT the update, and how to
+update (or `更新方式同上`). It is never a marker that "this fix lives in the Extension": every
+bullet in the file ships with the next release, so "update to get it" is the file's premise,
+not information — and before `/bump-ver` there is nothing to update to. An Extension-only or
+PWA-only fix never carries it; neither does a Worker change an older client tolerates (an
+optional field whose absence keeps the old behaviour). Self-hosters needing a Worker update
+is a different fact — say it in the bullet's own sentence (`使用自架伺服器的家庭，要等管理者更新伺服器…`).
+
 ### Rule 9 — De-AI pass with `speak-human-tw` (automatic, no user invocation)
 
 `.claude/skills/speak-human-tw/` is a vendored copy of
