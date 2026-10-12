@@ -22,9 +22,11 @@ import {
   fetchSavedBooksForSync,
   uploadSyncBooksRereadingOnConflict,
 } from "./syncUpload";
-
-/** User-configurable auto-sync frequency */
-export type AutoSyncInterval = "daily" | "weekly" | "monthly" | "never";
+import {
+  DEFAULT_AUTO_SYNC_INTERVAL,
+  isAutoSyncInterval,
+  type AutoSyncInterval,
+} from "../storage/autoSyncInterval";
 
 /** Single source of truth: interval value (ms); `never` → null = disabled */
 export const AUTO_SYNC_INTERVALS_MS: Record<AutoSyncInterval, number | null> = {
@@ -33,13 +35,6 @@ export const AUTO_SYNC_INTERVALS_MS: Record<AutoSyncInterval, number | null> = {
   monthly: 30 * 24 * 60 * 60 * 1000,
   never: null,
 };
-
-export const DEFAULT_AUTO_SYNC_INTERVAL: AutoSyncInterval = "daily";
-
-/** Type guard for AutoSyncInterval */
-export function isAutoSyncInterval(v: unknown): v is AutoSyncInterval {
-  return v === "daily" || v === "weekly" || v === "monthly" || v === "never";
-}
 
 /** Interval gate: enough time has passed since the timestamp at `timestampKey` for the
  *  user-configured `autoSyncInterval` (`never` → always false). */

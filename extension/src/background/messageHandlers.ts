@@ -13,7 +13,6 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   SYNC_ARCHIVED_KEY,
   FLOATING_ICON_SIZE_KEY,
-  AUTO_SYNC_INTERVAL_KEY,
   FAMILY_SHELF_SORT_KEY,
   PERSONAL_SHELF_SORT_KEY,
   API_ENDPOINT_KEY,
@@ -38,8 +37,6 @@ export type BackgroundMessage =
   | { type: "SET_SYNC_ARCHIVED"; syncArchived: number }
   | { type: "GET_FLOATING_ICON_SIZE" }
   | { type: "SET_FLOATING_ICON_SIZE"; size: string }
-  | { type: "GET_AUTO_SYNC_INTERVAL" }
-  | { type: "SET_AUTO_SYNC_INTERVAL"; interval: string }
   | { type: "GET_BOOK_SORT"; shelf: string }
   | { type: "SET_BOOK_SORT"; shelf: string; sort: string }
   | { type: "SET_SYNC_ERROR_BADGE" }
@@ -152,38 +149,6 @@ async function handleSetFloatingIconSize(
   return { ok: true };
 }
 
-async function handleGetAutoSyncInterval(): Promise<unknown> {
-  const result = await browser.storage.local.get([AUTO_SYNC_INTERVAL_KEY]);
-  const stored = result[AUTO_SYNC_INTERVAL_KEY];
-  const interval =
-    stored === "daily" ||
-    stored === "weekly" ||
-    stored === "monthly" ||
-    stored === "never"
-      ? stored
-      : "daily";
-  return { interval };
-}
-
-async function handleSetAutoSyncInterval(
-  message: Extract<BackgroundMessage, { type: "SET_AUTO_SYNC_INTERVAL" }>,
-): Promise<unknown> {
-  const value = message.interval;
-  if (
-    value !== "daily" &&
-    value !== "weekly" &&
-    value !== "monthly" &&
-    value !== "never"
-  ) {
-    return {
-      ok: false,
-      error: "interval must be 'daily', 'weekly', 'monthly', or 'never'",
-    };
-  }
-  await browser.storage.local.set({ [AUTO_SYNC_INTERVAL_KEY]: value });
-  return { ok: true };
-}
-
 async function handleGetBookSort(
   message: Extract<BackgroundMessage, { type: "GET_BOOK_SORT" }>,
 ): Promise<unknown> {
@@ -273,8 +238,6 @@ export const messageHandlers: MessageHandlerMap = {
   SET_SYNC_ARCHIVED: handleSetSyncArchived,
   GET_FLOATING_ICON_SIZE: handleGetFloatingIconSize,
   SET_FLOATING_ICON_SIZE: handleSetFloatingIconSize,
-  GET_AUTO_SYNC_INTERVAL: handleGetAutoSyncInterval,
-  SET_AUTO_SYNC_INTERVAL: handleSetAutoSyncInterval,
   GET_BOOK_SORT: handleGetBookSort,
   SET_BOOK_SORT: handleSetBookSort,
   SET_SYNC_ERROR_BADGE: handleSetSyncErrorBadge,
