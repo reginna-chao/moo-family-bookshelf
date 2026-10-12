@@ -202,10 +202,14 @@ describe("App re-login after a forced re-verification (#266)", () => {
     expect(mockJoinFamily).toHaveBeenNthCalledWith(1, FAMILY_ID, USER_ID, {
       recovery: BoolFlag.TRUE,
     });
+    // The marker lands before LandingPage even mounts (App shows a loader until
+    // acquireNewToken settles); the pre-fill is its mount effect, so wait for it.
+    await waitFor(() => {
+      expect((screen.getByLabelText("同步碼") as HTMLInputElement).value).toBe(
+        `moo-${FAMILY_ID}`,
+      );
+    });
     expect(screen.getByText(REVERIFY_LOGOUT_MESSAGE)).toBeInTheDocument();
-    expect((screen.getByLabelText("同步碼") as HTMLInputElement).value).toBe(
-      `moo-${FAMILY_ID}`,
-    );
     fireEvent.change(screen.getByLabelText("讀墨帳號 Email"), {
       target: { value: EMAIL },
     });
