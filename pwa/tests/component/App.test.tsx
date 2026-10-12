@@ -554,7 +554,9 @@ describe("App", () => {
         await waitFor(() => {
           expect(mockLogout).toHaveBeenCalled();
         });
-        expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+        // App logs out from an async callback outside act, so the landing render may
+        // not be committed yet when the mock call is seen (#305): wait for the DOM.
+        expect(await screen.findByTestId("landing-page")).toBeInTheDocument();
         expect(screen.getByTestId("landing-external-error")).toHaveTextContent(
           expected as string,
         );
@@ -686,7 +688,8 @@ describe("App", () => {
       const remembered = localStorage.getItem(REMEMBERED_LOGOUT_KEY);
       expect(remembered).not.toBeNull();
       expect(decodeSyncCode(remembered as string).familyId).toBe("fam-001");
-      expect(screen.getByTestId("landing-page")).toBeInTheDocument();
+      // The landing render may trail the logout call (#305): wait for the DOM.
+      expect(await screen.findByTestId("landing-page")).toBeInTheDocument();
       // #263: a reason, so this forced logout cannot pass for a finished leave.
       // Exact equality — the literal is pinned in joinErrorMessages.test.ts.
       expect(screen.getByTestId("landing-external-error").textContent).toBe(
@@ -710,9 +713,10 @@ describe("App", () => {
         expect(mockLogout).toHaveBeenCalledTimes(1);
       });
       // Positive companion: the message really was on screen before the login.
-      expect(screen.getByTestId("landing-external-error").textContent).toBe(
-        REVERIFY_LOGOUT_MESSAGE,
-      );
+      // The landing render may trail the logout call (#305): wait for the DOM.
+      expect(
+        (await screen.findByTestId("landing-external-error")).textContent,
+      ).toBe(REVERIFY_LOGOUT_MESSAGE);
 
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: "Login" }));
