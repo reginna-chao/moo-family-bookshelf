@@ -170,12 +170,14 @@ Every push/PR triggers:
 
 ### CD (GitHub Actions)
 
-| Trigger                             | Action                                    |
-| ----------------------------------- | ----------------------------------------- |
-| Merge to `main` + `worker/` changed | `wrangler deploy`                         |
-| Merge to `main` + `site/` changed   | Deploy GitHub Pages                       |
-| Merge to `main` + `pwa/` changed    | Deploy PWA to Cloudflare Pages            |
-| Git tag `v*`                        | Build Extension → `.zip` → GitHub Release |
+| Trigger                             | Action                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Merge to `main` + `worker/` changed | Deploy the **dev** Worker only (`deploy-worker-dev`)                                                                                                                     |
+| Merge to `main` + `pwa/` changed    | Deploy the PWA to the **dev** Cloudflare Pages project `moo-family-bookshelf-dev` (`deploy-pwa-dev`)                                                                     |
+| Merge to `main` + `site/` changed   | Deploy GitHub Pages (`deploy-pages`)                                                                                                                                     |
+| Git tag `v*`                        | Deploy the **production** Worker and PWA (`deploy-worker-prod`, `deploy-pwa-prod`), build the Extension → `.zip` → GitHub Release, then build & submit the Firefox build |
+
+A merge to `main` never reaches production: everything a user runs ships on the tag. The production Worker is live minutes after the tag, while the Extension waits for the store rollout (hours) and the PWA for the user's next reload — that gap is what the `**請更新擴充功能／PWA**` line in `.claude/rules/user-facing-copy.md` (Rule 8) exists for.
 
 Release body: the release job reads `docs/release-notes/v<X.Y.Z>.md` (curated, bilingual) and puts it at the top of the Release, then appends the commit list inside a `<details>` block plus a Full Changelog link. That file is produced by `/bump-ver` and MUST exist in the commit the tag points at; when it is missing, the release job falls back to the auto-generated commit list and prints `::warning::`. **Run `/bump-ver` BEFORE tagging** — the other order takes the fallback.
 
