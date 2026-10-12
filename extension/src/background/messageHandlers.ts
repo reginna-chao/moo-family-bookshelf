@@ -3,18 +3,12 @@
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
-import { BoolFlag } from "../api/client";
-import { normalizeSortMode } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
 import { readFamilyId } from "../storage/familyId";
 import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
-  SYNC_ARCHIVED_KEY,
-  FLOATING_ICON_SIZE_KEY,
-  FAMILY_SHELF_SORT_KEY,
-  PERSONAL_SHELF_SORT_KEY,
   API_ENDPOINT_KEY,
 } from "../constants";
 
@@ -33,12 +27,6 @@ export type BackgroundMessage =
   | { type: "GET_FAMILY_ID" }
   | { type: "SET_FAMILY_ID"; familyId: string }
   | { type: "CLEAR_FAMILY_ID" }
-  | { type: "GET_SYNC_ARCHIVED" }
-  | { type: "SET_SYNC_ARCHIVED"; syncArchived: number }
-  | { type: "GET_FLOATING_ICON_SIZE" }
-  | { type: "SET_FLOATING_ICON_SIZE"; size: string }
-  | { type: "GET_BOOK_SORT"; shelf: string }
-  | { type: "SET_BOOK_SORT"; shelf: string; sort: string }
   | { type: "SET_SYNC_ERROR_BADGE" }
   | { type: "CLEAR_SYNC_ERROR_BADGE" }
   | { type: "GET_API_ENDPOINT" }
@@ -101,90 +89,6 @@ async function handleClearFamilyId(): Promise<unknown> {
   return { ok: true };
 }
 
-async function handleGetSyncArchived(): Promise<unknown> {
-  const result = await browser.storage.local.get([SYNC_ARCHIVED_KEY]);
-  return { syncArchived: result[SYNC_ARCHIVED_KEY] ?? BoolFlag.FALSE };
-}
-
-async function handleSetSyncArchived(
-  message: Extract<BackgroundMessage, { type: "SET_SYNC_ARCHIVED" }>,
-): Promise<unknown> {
-  const value = message.syncArchived;
-  if (value !== BoolFlag.FALSE && value !== BoolFlag.TRUE) {
-    return { ok: false, error: "syncArchived must be 0 or 1" };
-  }
-  await browser.storage.local.set({ [SYNC_ARCHIVED_KEY]: value });
-  return { ok: true };
-}
-
-async function handleGetFloatingIconSize(): Promise<unknown> {
-  const result = await browser.storage.local.get([FLOATING_ICON_SIZE_KEY]);
-  const stored = result[FLOATING_ICON_SIZE_KEY];
-  const size =
-    stored === "small" ||
-    stored === "medium" ||
-    stored === "large" ||
-    stored === "icon"
-      ? stored
-      : "medium";
-  return { size };
-}
-
-async function handleSetFloatingIconSize(
-  message: Extract<BackgroundMessage, { type: "SET_FLOATING_ICON_SIZE" }>,
-): Promise<unknown> {
-  const value = message.size;
-  if (
-    value !== "small" &&
-    value !== "medium" &&
-    value !== "large" &&
-    value !== "icon"
-  ) {
-    return {
-      ok: false,
-      error: "size must be 'small', 'medium', 'large', or 'icon'",
-    };
-  }
-  await browser.storage.local.set({ [FLOATING_ICON_SIZE_KEY]: value });
-  return { ok: true };
-}
-
-async function handleGetBookSort(
-  message: Extract<BackgroundMessage, { type: "GET_BOOK_SORT" }>,
-): Promise<unknown> {
-  const shelf = message.shelf;
-  if (shelf !== "family" && shelf !== "personal") {
-    return { sort: "default" };
-  }
-  const key =
-    shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
-  const result = await browser.storage.local.get([key]);
-  // Normalize legacy stored values (`title`/`author`) to their canonical
-  // `-asc` form so persisted preferences survive the schema change.
-  const sort = normalizeSortMode(result[key]);
-  return { sort };
-}
-
-async function handleSetBookSort(
-  message: Extract<BackgroundMessage, { type: "SET_BOOK_SORT" }>,
-): Promise<unknown> {
-  const shelf = message.shelf;
-  const value = message.sort;
-  if (shelf !== "family" && shelf !== "personal") {
-    return { ok: false, error: "shelf must be 'family' or 'personal'" };
-  }
-  // normalizeSortMode maps anything unrecognized to "default"; reject that instead of silently
-  // downgrading an intended sort — only an explicit "default" stores "default".
-  const normalized = normalizeSortMode(value);
-  if (normalized === "default" && value !== "default") {
-    return { ok: false, error: "invalid sort mode" };
-  }
-  const key =
-    shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
-  await browser.storage.local.set({ [key]: normalized });
-  return { ok: true };
-}
-
 function handleSetSyncErrorBadge(): unknown {
   showSyncErrorBadge();
   return { ok: true };
@@ -234,12 +138,6 @@ export const messageHandlers: MessageHandlerMap = {
   GET_FAMILY_ID: handleGetFamilyId,
   SET_FAMILY_ID: handleSetFamilyId,
   CLEAR_FAMILY_ID: handleClearFamilyId,
-  GET_SYNC_ARCHIVED: handleGetSyncArchived,
-  SET_SYNC_ARCHIVED: handleSetSyncArchived,
-  GET_FLOATING_ICON_SIZE: handleGetFloatingIconSize,
-  SET_FLOATING_ICON_SIZE: handleSetFloatingIconSize,
-  GET_BOOK_SORT: handleGetBookSort,
-  SET_BOOK_SORT: handleSetBookSort,
   SET_SYNC_ERROR_BADGE: handleSetSyncErrorBadge,
   CLEAR_SYNC_ERROR_BADGE: handleClearSyncErrorBadge,
   GET_API_ENDPOINT: handleGetApiEndpoint,

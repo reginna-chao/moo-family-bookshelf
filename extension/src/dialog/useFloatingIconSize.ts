@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import browser from "webextension-polyfill";
+import {
+  DEFAULT_FLOATING_ICON_SIZE,
+  readFloatingIconSize,
+  writeFloatingIconSize,
+  type FloatingIconSize,
+} from "../storage/floatingIconSize";
 
-export type FloatingIconSize = "small" | "medium" | "large" | "icon";
-
-const DEFAULT_SIZE: FloatingIconSize = "medium";
-
-function isSize(value: unknown): value is FloatingIconSize {
-  return (
-    value === "small" ||
-    value === "medium" ||
-    value === "large" ||
-    value === "icon"
-  );
-}
+export type { FloatingIconSize };
 
 export interface UseFloatingIconSizeReturn {
   size: FloatingIconSize;
@@ -20,26 +14,22 @@ export interface UseFloatingIconSizeReturn {
 }
 
 export function useFloatingIconSize(): UseFloatingIconSizeReturn {
-  const [size, setSizeState] = useState<FloatingIconSize>(DEFAULT_SIZE);
-  const sizeRef = useRef(size);
-
-  useEffect(() => {
-    sizeRef.current = size;
-  }, [size]);
+  const [size, setSizeState] = useState<FloatingIconSize>(
+    DEFAULT_FLOATING_ICON_SIZE,
+  );
+  // Set once the user picks a value, so a mount read that resolves later cannot overwrite it.
+  const userChoseRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = (await browser.runtime.sendMessage({
-          type: "GET_FLOATING_ICON_SIZE",
-        })) as { size?: unknown } | undefined;
-        if (cancelled) return;
-        if (isSize(response?.size)) {
-          setSizeState(response.size);
+        const stored = await readFloatingIconSize();
+        if (!cancelled && !userChoseRef.current) {
+          setSizeState(stored);
         }
       } catch {
-        // Background unavailable — keep default
+        // storage.local unavailable — keep default
       }
     })();
     return () => {
@@ -47,24 +37,19 @@ export function useFloatingIconSize(): UseFloatingIconSizeReturn {
     };
   }, []);
 
-  const setSize = useCallback((next: FloatingIconSize) => {
-    const prev = sizeRef.current;
-    if (prev === next) return;
-    setSizeState(next);
-    void (async () => {
-      try {
-        const response = (await browser.runtime.sendMessage({
-          type: "SET_FLOATING_ICON_SIZE",
-          size: next,
-        })) as { ok?: boolean } | undefined;
-        if (!response?.ok) {
-          setSizeState(prev);
-        }
-      } catch {
-        setSizeState(prev);
-      }
-    })();
-  }, []);
+  const setSize = useCallback(
+    (next: FloatingIconSize) => {
+      if (size === next) return;
+      userChoseRef.current = true;
+      setSizeState(next);
+      // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
+      // persistence beats snapping the choice back under the user.
+      void writeFloatingIconSize(next).catch(() => {
+        // Ignore write failures; UI state remains authoritative.
+      });
+    },
+    [size],
+  );
 
   return { size, setSize };
 }

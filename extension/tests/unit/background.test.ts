@@ -7,9 +7,6 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
-  FLOATING_ICON_SIZE_KEY,
-  FAMILY_SHELF_SORT_KEY,
-  PERSONAL_SHELF_SORT_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
 } from "@/constants";
 
@@ -385,66 +382,18 @@ describe("background service worker", () => {
     });
   });
 
-  describe("GET_FLOATING_ICON_SIZE", () => {
-    it("returns 'medium' when storage has no value", async () => {
-      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
-      expect(response).toEqual({ size: "medium" });
-    });
-
-    it.each(["small", "medium", "large", "icon"] as const)(
-      "returns '%s' when storage has '%s'",
-      async (size) => {
-        vi.mocked(browser.storage.local.get).mockResolvedValue({
-          [FLOATING_ICON_SIZE_KEY]: size,
-        });
-        const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
-        expect(response).toEqual({ size });
-      },
-    );
-
-    it("returns 'medium' when storage has invalid value", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FLOATING_ICON_SIZE_KEY]: "huge",
-      });
-      const response = await sendMessage({ type: "GET_FLOATING_ICON_SIZE" });
-      expect(response).toEqual({ size: "medium" });
-    });
-  });
-
-  describe("SET_FLOATING_ICON_SIZE", () => {
-    it.each(["small", "medium", "large", "icon"] as const)(
-      "writes '%s' to local storage and responds ok",
-      async (size) => {
-        const response = await sendMessage({
-          type: "SET_FLOATING_ICON_SIZE",
-          size,
-        });
-        expect(response).toEqual({ ok: true });
-        expect(browser.storage.local.set).toHaveBeenCalledWith({
-          [FLOATING_ICON_SIZE_KEY]: size,
-        });
-      },
-    );
-
-    it.each(["huge", undefined, 42, ""])(
-      "rejects invalid value '%s' without writing",
-      async (invalidValue) => {
-        const response = await sendMessage({
-          type: "SET_FLOATING_ICON_SIZE",
-          size: invalidValue,
-        });
-        expect(response).toEqual({ ok: false, error: expect.any(String) });
-        expect(browser.storage.local.set).not.toHaveBeenCalled();
-      },
-    );
-  });
-
   describe("unhandled message types", () => {
-    // The auto-sync interval moved to direct storage.local access in the Dialog
-    // (storage/autoSyncInterval.ts); the background no longer answers for it.
+    // Dialog-local preferences (auto-sync interval, 同步封存書, floating-button size,
+    // shelf sort) moved to direct storage.local access; the background no longer answers.
     it.each([
       { type: "GET_AUTO_SYNC_INTERVAL" },
       { type: "SET_AUTO_SYNC_INTERVAL", interval: "never" },
+      { type: "GET_SYNC_ARCHIVED" },
+      { type: "SET_SYNC_ARCHIVED", syncArchived: 1 },
+      { type: "GET_FLOATING_ICON_SIZE" },
+      { type: "SET_FLOATING_ICON_SIZE", size: "large" },
+      { type: "GET_BOOK_SORT", shelf: "family" },
+      { type: "SET_BOOK_SORT", shelf: "personal", sort: "title-asc" },
       { type: "NOT_A_REAL_MESSAGE" },
     ])("returns undefined for $type without touching storage", (message) => {
       const response = listener(message, {} as Runtime.MessageSender);
@@ -456,153 +405,14 @@ describe("background service worker", () => {
 
     it("still answers a known message type (positive companion)", async () => {
       const response = listener(
-        { type: "GET_FLOATING_ICON_SIZE" },
+        { type: "GET_API_ENDPOINT" },
         {} as Runtime.MessageSender,
       );
 
       expect(response).toBeInstanceOf(Promise);
       await expect(response).resolves.toBeDefined();
+      expect(browser.storage.local.get).toHaveBeenCalled();
     });
-  });
-
-  describe("GET_BOOK_SORT", () => {
-    it("returns 'default' when storage has no value for family", async () => {
-      const response = await sendMessage({
-        type: "GET_BOOK_SORT",
-        shelf: "family",
-      });
-      expect(response).toEqual({ sort: "default" });
-    });
-
-    it("returns canonical stored value for family shelf", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_SHELF_SORT_KEY]: "title-desc",
-      });
-      const response = await sendMessage({
-        type: "GET_BOOK_SORT",
-        shelf: "family",
-      });
-      expect(response).toEqual({ sort: "title-desc" });
-    });
-
-    it("returns canonical stored value for personal shelf", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [PERSONAL_SHELF_SORT_KEY]: "author-desc",
-      });
-      const response = await sendMessage({
-        type: "GET_BOOK_SORT",
-        shelf: "personal",
-      });
-      expect(response).toEqual({ sort: "author-desc" });
-    });
-
-    it.each([
-      { stored: "title", expected: "title-asc" },
-      { stored: "author", expected: "author-asc" },
-    ])(
-      "normalizes legacy stored value '$stored' to '$expected'",
-      async ({ stored, expected }) => {
-        vi.mocked(browser.storage.local.get).mockResolvedValue({
-          [FAMILY_SHELF_SORT_KEY]: stored,
-        });
-        const response = await sendMessage({
-          type: "GET_BOOK_SORT",
-          shelf: "family",
-        });
-        expect(response).toEqual({ sort: expected });
-      },
-    );
-
-    it("returns 'default' for invalid shelf", async () => {
-      const response = await sendMessage({
-        type: "GET_BOOK_SORT",
-        shelf: "invalid",
-      });
-      expect(response).toEqual({ sort: "default" });
-    });
-
-    it("returns 'default' when storage has invalid sort value", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_SHELF_SORT_KEY]: "bogus",
-      });
-      const response = await sendMessage({
-        type: "GET_BOOK_SORT",
-        shelf: "family",
-      });
-      expect(response).toEqual({ sort: "default" });
-    });
-  });
-
-  describe("SET_BOOK_SORT", () => {
-    it.each(
-      (
-        [
-          "default",
-          "title-asc",
-          "title-desc",
-          "author-asc",
-          "author-desc",
-        ] as const
-      ).flatMap((sort) =>
-        (["family", "personal"] as const).map((shelf) => ({ sort, shelf })),
-      ),
-    )(
-      "writes canonical '$sort' for '$shelf' to correct storage key",
-      async ({ sort, shelf }) => {
-        const response = await sendMessage({
-          type: "SET_BOOK_SORT",
-          shelf,
-          sort,
-        });
-        expect(response).toEqual({ ok: true });
-        const expectedKey =
-          shelf === "family" ? FAMILY_SHELF_SORT_KEY : PERSONAL_SHELF_SORT_KEY;
-        expect(browser.storage.local.set).toHaveBeenCalledWith({
-          [expectedKey]: sort,
-        });
-      },
-    );
-
-    it.each([
-      { legacy: "title", stored: "title-asc" },
-      { legacy: "author", stored: "author-asc" },
-    ])(
-      "accepts legacy value '$legacy' and writes normalized '$stored'",
-      async ({ legacy, stored }) => {
-        const response = await sendMessage({
-          type: "SET_BOOK_SORT",
-          shelf: "family",
-          sort: legacy,
-        });
-        expect(response).toEqual({ ok: true });
-        expect(browser.storage.local.set).toHaveBeenCalledWith({
-          [FAMILY_SHELF_SORT_KEY]: stored,
-        });
-      },
-    );
-
-    it("rejects invalid shelf without writing", async () => {
-      const response = await sendMessage({
-        type: "SET_BOOK_SORT",
-        shelf: "invalid",
-        sort: "title-asc",
-      });
-      expect(response).toEqual({ ok: false, error: expect.any(String) });
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-    });
-
-    it.each(["bogus", "title-up", ""])(
-      "rejects unrecognized sort value '%s' without writing",
-      async (invalidSort) => {
-        const response = await sendMessage({
-          type: "SET_BOOK_SORT",
-          shelf: "family",
-          sort: invalidSort,
-        });
-        expect(response).toEqual({ ok: false, error: expect.any(String) });
-        expect(browser.storage.local.set).not.toHaveBeenCalled();
-      },
-    );
   });
 
   describe("sync error badge messages", () => {

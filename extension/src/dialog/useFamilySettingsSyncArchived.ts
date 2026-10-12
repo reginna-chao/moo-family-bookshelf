@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import browser from "webextension-polyfill";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { BoolFlag } from "../api/client";
+import { readSyncArchived, writeSyncArchived } from "../storage/syncArchived";
 
 export interface UseFamilySettingsSyncArchivedResult {
   syncArchived: number;
@@ -8,25 +8,24 @@ export interface UseFamilySettingsSyncArchivedResult {
 }
 
 /**
- * The 同步封存書籍 switch: reads the flag from the background on mount and
- * writes it back optimistically, reverting when the background refuses.
+ * The 同步封存書籍 switch: reads the flag from storage.local on mount and writes
+ * each toggle straight back, keeping the user's choice on screen even if the write fails.
  */
 export function useFamilySettingsSyncArchived(): UseFamilySettingsSyncArchivedResult {
-  const [syncArchived, setSyncArchived] = useState<number>(0);
+  const [syncArchived, setSyncArchived] = useState<number>(BoolFlag.FALSE);
+  // Set once the user toggles, so a mount read that resolves later cannot overwrite it.
+  const userChoseRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = (await browser.runtime.sendMessage({
-          type: "GET_SYNC_ARCHIVED",
-        })) as { syncArchived?: number } | undefined;
-        if (cancelled) return;
-        if (response?.syncArchived !== undefined) {
-          setSyncArchived(response.syncArchived);
+        const stored = await readSyncArchived();
+        if (!cancelled && !userChoseRef.current) {
+          setSyncArchived(stored);
         }
       } catch {
-        // Background unavailable — keep default
+        // storage.local unavailable — keep default
       }
     })();
     return () => {
@@ -35,22 +34,15 @@ export function useFamilySettingsSyncArchived(): UseFamilySettingsSyncArchivedRe
   }, []);
 
   const handleToggleSyncArchived = useCallback(() => {
-    const prev = syncArchived;
-    const newValue = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
-    setSyncArchived(newValue);
-    void (async () => {
-      try {
-        const response = (await browser.runtime.sendMessage({
-          type: "SET_SYNC_ARCHIVED",
-          syncArchived: newValue,
-        })) as { ok?: boolean } | undefined;
-        if (!response?.ok) {
-          setSyncArchived(prev);
-        }
-      } catch {
-        setSyncArchived(prev);
-      }
-    })();
+    const next =
+      syncArchived === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
+    userChoseRef.current = true;
+    setSyncArchived(next);
+    // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
+    // persistence beats snapping the choice back under the user.
+    void writeSyncArchived(next).catch(() => {
+      // Ignore write failures; UI state remains authoritative.
+    });
   }, [syncArchived]);
 
   return { syncArchived, handleToggleSyncArchived };

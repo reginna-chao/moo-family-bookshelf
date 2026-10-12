@@ -8,7 +8,7 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
-import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { PERSONAL_BOOKS_CACHE_KEY, SYNC_ARCHIVED_KEY } from "@/constants";
 import { renamedBooksNotice } from "@/dialog/PersonalShelfSyncNotices";
 
 /**
@@ -195,6 +195,20 @@ function seedCache(books: TestBook[]) {
       if (typeof callback === "function") {
         callback(result);
         return undefined as unknown as void;
+      }
+      return Promise.resolve(result) as unknown as void;
+    },
+  );
+}
+
+/** Seed chrome.storage.local's 同步封存書 flag (read directly by useFamilySettingsSyncArchived), beside
+ *  the display name every test's default storage mock returns. */
+function seedSyncArchived(flag: BoolFlag) {
+  vi.mocked(chrome.storage.local.get).mockImplementation(
+    (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
+      const result = { displayName: "小明", [SYNC_ARCHIVED_KEY]: flag };
+      if (typeof callback === "function") {
+        callback(result);
       }
       return Promise.resolve(result) as unknown as void;
     },
@@ -1001,17 +1015,7 @@ describe("PersonalShelf", () => {
         }),
       ];
 
-      // Mock GET_SYNC_ARCHIVED to return 1
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.TRUE);
 
       renderPersonalShelf({}, books);
       await waitFor(() => {
@@ -1034,20 +1038,14 @@ describe("PersonalShelf", () => {
     });
 
     it("archive view tabs do NOT appear when syncArchived is 0", async () => {
-      // Default sendMessage mock doesn't call back, so syncArchived stays 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 0 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.FALSE);
 
       renderPersonalShelf();
       await waitForBooksLoaded();
+      // The flag was actually read; the "appear when 1" case above is the positive companion.
+      expect(chrome.storage.local.get).toHaveBeenCalledWith([
+        SYNC_ARCHIVED_KEY,
+      ]);
 
       expect(
         screen.queryByText(
@@ -1074,16 +1072,7 @@ describe("PersonalShelf", () => {
         }),
       ];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.TRUE);
 
       renderPersonalShelf({}, books);
       await waitFor(() => {
@@ -1112,16 +1101,7 @@ describe("PersonalShelf", () => {
         }),
       ];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.TRUE);
 
       renderPersonalShelf({}, books);
       await waitFor(() => {
@@ -1141,16 +1121,7 @@ describe("PersonalShelf", () => {
 
     it("shows '尚無封存書籍' when archived view has no books", async () => {
       // All books are active, none archived
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.TRUE);
 
       renderPersonalShelf();
       await waitForBooksLoaded();
@@ -1478,16 +1449,7 @@ describe("PersonalShelf", () => {
           title: `封存書 ${i}`,
         })),
       ];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+      seedSyncArchived(BoolFlag.TRUE);
 
       renderPersonalShelf({ pageSize: PAGE_SIZE }, books);
 
