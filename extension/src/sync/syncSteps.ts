@@ -1,9 +1,8 @@
 /** The steps of `syncBooks` (sync/syncBooks.ts) that write nothing — scrape, borrow-list fetch,
  *  id-change resolution of the merged list — kept apart so the orchestrator stays short. */
 
-import browser from "webextension-polyfill";
 import { ApiClient, BookEntry, BoolFlag, BorrowRequest } from "../api/client";
-import { SYNC_ARCHIVED_KEY } from "../constants";
+import { readSyncArchived } from "../storage/syncArchived";
 import {
   scrapeLibrary,
   scrapeArchivedBooks,
@@ -27,12 +26,9 @@ export interface SyncScrape extends ScrapeResult {
   archiveCovered: boolean;
 }
 
-async function readSyncArchived(): Promise<BoolFlag> {
+async function readSyncArchivedOrOff(): Promise<BoolFlag> {
   try {
-    const result = await browser.storage.local.get([SYNC_ARCHIVED_KEY]);
-    return (
-      (result[SYNC_ARCHIVED_KEY] as BoolFlag | undefined) ?? BoolFlag.FALSE
-    );
+    return await readSyncArchived();
   } catch {
     // Archive setting unavailable — skip archive sync
     return BoolFlag.FALSE;
@@ -47,7 +43,7 @@ export async function scrapeForSync(
   onProgress?: ScrapeProgressCallback,
 ): Promise<SyncScrape> {
   const library = await scrapeLibrary({ onProgress });
-  const syncArchived = await readSyncArchived();
+  const syncArchived = await readSyncArchivedOrOff();
   const archive =
     syncArchived === BoolFlag.TRUE
       ? await scrapeArchivedBooks({ onProgress })

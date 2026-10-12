@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getButtonSizeStyles, isFloatingIconSize } from "@/content/index";
+import { getButtonSizeStyles } from "@/content/index";
+import { isFloatingIconSize } from "@/storage/floatingIconSize";
 
 describe("getButtonSizeStyles", () => {
   it.each([

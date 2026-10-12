@@ -58,7 +58,7 @@ export function FamilySettings({
     initialDisplayName,
   });
 
-  // Hook call order is load-bearing: effects run copy-timer cleanup → GET_SYNC_ARCHIVED →
+  // Hook call order is load-bearing: effects run copy-timer cleanup → syncArchived storage read →
   // endpoint switch → sync code.
   const { copied, inviteCopied, handleCopy, handleInviteCopy } =
     useFamilySettingsCopy(syncCode);

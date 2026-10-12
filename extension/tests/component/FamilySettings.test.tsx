@@ -22,6 +22,7 @@ import {
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   DISPLAY_NAME_KEY,
+  SYNC_ARCHIVED_KEY,
 } from "@/constants";
 
 /**
@@ -930,26 +931,20 @@ describe("FamilySettings", () => {
     });
 
     it("toggle is initially off (aria-checked false)", async () => {
-      // Default sendMessage does not call back, so syncArchived stays 0
+      // No SYNC_ARCHIVED_KEY in storage.local, so the flag reads as 0.
       renderFamilySettings();
 
       await waitFor(() => {
-        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
-        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        expect(chrome.storage.local.get).toHaveBeenCalledWith([
+          SYNC_ARCHIVED_KEY,
+        ]);
       });
+      const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
     });
 
-    it("toggle reflects initial GET_SYNC_ARCHIVED value of 1", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 1 });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+    it("toggle reflects an initial stored value of 1", async () => {
+      mockStorageGet({ [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE });
 
       renderFamilySettings();
 
@@ -959,66 +954,62 @@ describe("FamilySettings", () => {
       });
     });
 
-    it("clicking toggle sends SET_SYNC_ARCHIVED message", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 0 });
-          }
-          if (msg.type === "SET_SYNC_ARCHIVED") {
-            return Promise.resolve({ ok: true });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
-
+    it("clicking toggle writes 1 to storage.local, not to the background", async () => {
       renderFamilySettings();
 
       await waitFor(() => {
-        expect(
-          screen.getByRole("switch", { name: "同步封存書籍" }),
-        ).toBeInTheDocument();
+        expect(chrome.storage.local.get).toHaveBeenCalledWith([
+          SYNC_ARCHIVED_KEY,
+        ]);
       });
 
       fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
 
-      // Should have sent SET_SYNC_ARCHIVED with value 1 (no Chrome callback arg)
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_SYNC_ARCHIVED", syncArchived: 1 }),
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE,
+      });
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_SYNC_ARCHIVED" }),
       );
     });
 
-    it("reverts toggle state when SET_SYNC_ARCHIVED response is not ok", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-        (message: unknown) => {
-          const msg = message as { type: string };
-          if (msg.type === "GET_SYNC_ARCHIVED") {
-            return Promise.resolve({ syncArchived: 0 });
-          }
-          if (msg.type === "SET_SYNC_ARCHIVED") {
-            return Promise.resolve({ ok: false });
-          }
-          return Promise.resolve(undefined);
-        },
-      );
+    it("keeps the toggle on when the storage.local write rejects (no rollback)", async () => {
+      vi.mocked(chrome.storage.local.set).mockImplementation(((
+        items: Record<string, unknown>,
+      ) =>
+        SYNC_ARCHIVED_KEY in items
+          ? Promise.reject(new Error("storage write failed"))
+          : Promise.resolve()) as never);
 
       renderFamilySettings();
 
       await waitFor(() => {
-        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
-        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        expect(chrome.storage.local.get).toHaveBeenCalledWith([
+          SYNC_ARCHIVED_KEY,
+        ]);
       });
-
-      fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
-
-      // Should revert back to false after failed response
-      await waitFor(() => {
-        const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
-        expect(toggle.getAttribute("aria-checked")).toBe("false");
+      // Settle the mount read so the click lands on a loaded switch.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
       });
+      const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+      // Flush the rejected write: the old hook snapped the switch back to off here.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE,
+      });
+      expect(
+        screen
+          .getByRole("switch", { name: "同步封存書籍" })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
     });
   });
 
