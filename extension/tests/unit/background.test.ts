@@ -8,7 +8,6 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
   FLOATING_ICON_SIZE_KEY,
-  AUTO_SYNC_INTERVAL_KEY,
   FAMILY_SHELF_SORT_KEY,
   PERSONAL_SHELF_SORT_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
@@ -440,58 +439,30 @@ describe("background service worker", () => {
     );
   });
 
-  describe("GET_AUTO_SYNC_INTERVAL", () => {
-    it("returns 'daily' when storage has no value", async () => {
-      const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
-      expect(response).toEqual({ interval: "daily" });
+  describe("unhandled message types", () => {
+    // The auto-sync interval moved to direct storage.local access in the Dialog
+    // (storage/autoSyncInterval.ts); the background no longer answers for it.
+    it.each([
+      { type: "GET_AUTO_SYNC_INTERVAL" },
+      { type: "SET_AUTO_SYNC_INTERVAL", interval: "never" },
+      { type: "NOT_A_REAL_MESSAGE" },
+    ])("returns undefined for $type without touching storage", (message) => {
+      const response = listener(message, {} as Runtime.MessageSender);
+
+      expect(response).toBeUndefined();
+      expect(browser.storage.local.get).not.toHaveBeenCalled();
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
     });
 
-    it.each(["daily", "weekly", "monthly", "never"] as const)(
-      "returns '%s' when storage has '%s'",
-      async (interval) => {
-        vi.mocked(browser.storage.local.get).mockResolvedValue({
-          [AUTO_SYNC_INTERVAL_KEY]: interval,
-        });
-        const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
-        expect(response).toEqual({ interval });
-      },
-    );
+    it("still answers a known message type (positive companion)", async () => {
+      const response = listener(
+        { type: "GET_FLOATING_ICON_SIZE" },
+        {} as Runtime.MessageSender,
+      );
 
-    it("returns 'daily' when storage has invalid value", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [AUTO_SYNC_INTERVAL_KEY]: "yearly",
-      });
-      const response = await sendMessage({ type: "GET_AUTO_SYNC_INTERVAL" });
-      expect(response).toEqual({ interval: "daily" });
+      expect(response).toBeInstanceOf(Promise);
+      await expect(response).resolves.toBeDefined();
     });
-  });
-
-  describe("SET_AUTO_SYNC_INTERVAL", () => {
-    it.each(["daily", "weekly", "monthly", "never"] as const)(
-      "writes '%s' to local storage and responds ok",
-      async (interval) => {
-        const response = await sendMessage({
-          type: "SET_AUTO_SYNC_INTERVAL",
-          interval,
-        });
-        expect(response).toEqual({ ok: true });
-        expect(browser.storage.local.set).toHaveBeenCalledWith({
-          [AUTO_SYNC_INTERVAL_KEY]: interval,
-        });
-      },
-    );
-
-    it.each(["foo", undefined, 42, ""])(
-      "rejects invalid value '%s' without writing",
-      async (invalidValue) => {
-        const response = await sendMessage({
-          type: "SET_AUTO_SYNC_INTERVAL",
-          interval: invalidValue,
-        });
-        expect(response).toEqual({ ok: false, error: expect.any(String) });
-        expect(browser.storage.local.set).not.toHaveBeenCalled();
-      },
-    );
   });
 
   describe("GET_BOOK_SORT", () => {

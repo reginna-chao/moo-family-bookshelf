@@ -1,20 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import browser from "webextension-polyfill";
-// Type-only import: avoids pulling the content scraper into the dialog bundle.
-import type { AutoSyncInterval } from "../sync/syncBooks";
+import {
+  DEFAULT_AUTO_SYNC_INTERVAL,
+  readAutoSyncInterval,
+  writeAutoSyncInterval,
+  type AutoSyncInterval,
+} from "../storage/autoSyncInterval";
 
 export type { AutoSyncInterval };
-
-const DEFAULT_AUTO_SYNC_INTERVAL: AutoSyncInterval = "daily";
-
-function isAutoSyncInterval(value: unknown): value is AutoSyncInterval {
-  return (
-    value === "daily" ||
-    value === "weekly" ||
-    value === "monthly" ||
-    value === "never"
-  );
-}
 
 export interface UseAutoSyncIntervalReturn {
   interval: AutoSyncInterval;
@@ -25,25 +17,19 @@ export function useAutoSyncInterval(): UseAutoSyncIntervalReturn {
   const [interval, setIntervalState] = useState<AutoSyncInterval>(
     DEFAULT_AUTO_SYNC_INTERVAL,
   );
-  const intervalRef = useRef(interval);
-
-  useEffect(() => {
-    intervalRef.current = interval;
-  }, [interval]);
+  // Set once the user picks a value, so a mount read that resolves later cannot overwrite it.
+  const userChoseRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = (await browser.runtime.sendMessage({
-          type: "GET_AUTO_SYNC_INTERVAL",
-        })) as { interval?: unknown } | undefined;
-        if (cancelled) return;
-        if (isAutoSyncInterval(response?.interval)) {
-          setIntervalState(response.interval);
+        const stored = await readAutoSyncInterval();
+        if (!cancelled && !userChoseRef.current) {
+          setIntervalState(stored);
         }
       } catch {
-        // Background unavailable — keep default
+        // storage.local unavailable — keep default
       }
     })();
     return () => {
@@ -51,24 +37,19 @@ export function useAutoSyncInterval(): UseAutoSyncIntervalReturn {
     };
   }, []);
 
-  const updateInterval = useCallback((next: AutoSyncInterval) => {
-    const prev = intervalRef.current;
-    if (prev === next) return;
-    setIntervalState(next);
-    void (async () => {
-      try {
-        const response = (await browser.runtime.sendMessage({
-          type: "SET_AUTO_SYNC_INTERVAL",
-          interval: next,
-        })) as { ok?: boolean } | undefined;
-        if (!response?.ok) {
-          setIntervalState(prev);
-        }
-      } catch {
-        setIntervalState(prev);
-      }
-    })();
-  }, []);
+  const updateInterval = useCallback(
+    (next: AutoSyncInterval) => {
+      if (interval === next) return;
+      userChoseRef.current = true;
+      setIntervalState(next);
+      // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
+      // persistence beats snapping the choice back under the user.
+      void writeAutoSyncInterval(next).catch(() => {
+        // Ignore write failures; UI state remains authoritative.
+      });
+    },
+    [interval],
+  );
 
   return { interval, setInterval: updateInterval };
 }
