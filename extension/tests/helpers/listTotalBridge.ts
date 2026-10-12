@@ -1,4 +1,4 @@
-import { ATTR_LIST_TOTAL } from "@/content/fiber-data";
+import { ATTR_LIBRARY_IDS, ATTR_LIST_TOTAL } from "@/content/fiber-data";
 
 /**
  * What the stub publishes on each `moo-request-fiber-data`:
@@ -36,5 +36,29 @@ export function installListTotalPublisher(source: ListTotalSource): () => void {
   return () => {
     document.removeEventListener("moo-request-fiber-data", handler);
     root.removeAttribute(ATTR_LIST_TOTAL);
+  };
+}
+
+/**
+ * Mimics the library-ids half of the main-world fiber bridge
+ * (`src/content/fiber-bridge.ts` → `publishLibraryIds`, #241): on every
+ * `moo-request-fiber-data` it writes `ids` comma-joined onto `<html>` as
+ * `data-moo-library-ids` (`[]` → `""`, a known-empty library), or removes the
+ * attribute when `ids` is null — the real bridge's "unreadable". Like
+ * `installListTotalPublisher` it does NOT dispatch `moo-fiber-data`. Returns a
+ * cleanup that removes the listener and the attribute.
+ */
+export function installLibraryIdsPublisher(
+  ids: readonly string[] | null,
+): () => void {
+  const root = document.documentElement;
+  const handler = () => {
+    if (ids === null) root.removeAttribute(ATTR_LIBRARY_IDS);
+    else root.setAttribute(ATTR_LIBRARY_IDS, ids.join(","));
+  };
+  document.addEventListener("moo-request-fiber-data", handler);
+  return () => {
+    document.removeEventListener("moo-request-fiber-data", handler);
+    root.removeAttribute(ATTR_LIBRARY_IDS);
   };
 }

@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * `syncBooks` reconciliation (#236): the order scrape → GET saved → breaker →
- * borrow list (once) → merge → id-change resolution → PUT → lastSyncAt →
- * auto-return. A failed read or a tripped breaker must stop BEFORE any upload;
- * id-change resolution only runs on a complete scrape with a known borrow list.
+ * borrow list (once) → merge → id-change resolution → pruning (#241) → PUT →
+ * lastSyncAt → auto-return. A failed read or a tripped breaker must stop BEFORE
+ * any upload; id-change resolution and pruning only run on a complete scrape
+ * with a known borrow list.
  *
  * Two consecutive syncs — F2 regression (#236): a sync that cannot judge renames
  * must leave the pair resolvable by the next one. The fake server stores exactly
@@ -152,8 +153,12 @@ function serverRecord(books: BookEntry[]) {
   return { data: { books, displayName: "小明", keepMe: "unknown-field" } };
 }
 
-function mockScrape(books: ScrapedBook[], complete = true): void {
-  vi.mocked(scrapeLibrary).mockResolvedValue({ books, complete });
+function mockScrape(
+  books: ScrapedBook[],
+  complete = true,
+  libraryIds: ReadonlySet<string> | null = null,
+): void {
+  vi.mocked(scrapeLibrary).mockResolvedValue({ books, complete, libraryIds });
 }
 
 function uploadedPayload(api: MockApi): PersonalBooks {
@@ -204,6 +209,7 @@ describe("syncBooks — reconciliation", () => {
     vi.mocked(scrapeArchivedBooks).mockResolvedValue({
       books: [],
       complete: true,
+      libraryIds: null,
     });
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -310,6 +316,7 @@ describe("syncBooks — reconciliation", () => {
         vi.mocked(scrapeArchivedBooks).mockResolvedValue({
           books: [],
           complete: archiveComplete,
+          libraryIds: null,
         });
         // 20 active (all found) + 60 archived (not scraped this time).
         const active = Array.from({ length: 20 }, (_, i) =>
@@ -390,6 +397,7 @@ describe("syncBooks — reconciliation", () => {
       vi.mocked(scrapeArchivedBooks).mockResolvedValue({
         books: [],
         complete: false,
+        libraryIds: null,
       });
       mockScrape(SCRAPED_BOOKS);
       const api = createApi(serverRecord(SERVER_BOOKS));
@@ -466,6 +474,84 @@ describe("syncBooks — reconciliation", () => {
         BorrowStatus.RETURNED,
       );
       expect(result.autoReturnedRequestIds).toEqual([`req-${NEW_ID}`]);
+    });
+  });
+
+  // #241: pruning runs after id-change resolution, under the same gates.
+  describe("pruning books Readmoo no longer holds", () => {
+    const GONE_ID = "210000000000004";
+    const LOANED_ID = "210000000000005";
+    /** KEPT is on the shelf, LOANED only in Readmoo's loaned list, GONE nowhere. */
+    const PRUNE_SERVER = [
+      savedBook(KEPT_ID, "沒變的書"),
+      savedBook(GONE_ID, "退款的書", { isShared: BoolFlag.TRUE }),
+      savedBook(LOANED_ID, "借給別人的書"),
+    ];
+    const PRUNE_SCRAPE = [scrapedBook(KEPT_ID, "沒變的書")];
+    const LIBRARY_IDS = new Set([KEPT_ID, LOANED_ID]);
+
+    it("uploads the list without the gone book and reports the removed counts", async () => {
+      mockScrape(PRUNE_SCRAPE, true, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), []);
+
+      const result = await runSync(api, true);
+
+      expect(result.success).toBe(true);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, LOANED_ID]);
+      expect(result.books.map((b) => b.bookId)).toEqual([KEPT_ID, LOANED_ID]);
+      expect(result.removedBooks).toEqual([
+        { bookId: GONE_ID, isShared: BoolFlag.TRUE },
+      ]);
+      expect(result.removedBookCount).toBe(1);
+      expect(result.removedSharedCount).toBe(1);
+      expect(result.renamedBookCount).toBe(0);
+    });
+
+    it.each([
+      {
+        name: "the scrape is incomplete",
+        complete: false,
+        requests: [] as BorrowRequest[] | Error,
+      },
+      {
+        name: "the borrow list is unavailable",
+        complete: true,
+        requests: new Error("borrow list down") as BorrowRequest[] | Error,
+      },
+    ])("removes nothing when $name", async ({ complete, requests }) => {
+      mockScrape(PRUNE_SCRAPE, complete, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), requests);
+
+      const result = await runSync(api, true);
+
+      expect(result.success).toBe(true);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, GONE_ID, LOANED_ID]);
+      expect(result.removedBookCount).toBe(0);
+      expect(result.removedSharedCount).toBe(0);
+      expect(result.removedBooks).toEqual([]);
+    });
+
+    it("keeps the gone book while it is lent out through MooFamily", async () => {
+      mockScrape(PRUNE_SCRAPE, true, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), [
+        makeLentRequest(GONE_ID),
+      ]);
+
+      const result = await runSync(api, true);
+
+      expect(uploadedIds(api)).toEqual([KEPT_ID, GONE_ID, LOANED_ID]);
+      expect(result.removedBookCount).toBe(0);
+    });
+
+    it("reports a renamed old id as renamed, not removed", async () => {
+      mockScrape(SCRAPED_BOOKS, true, new Set([KEPT_ID, NEW_ID]));
+      const api = createApi(serverRecord(SERVER_BOOKS), []);
+
+      const result = await runSync(api, true);
+
+      expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+      expect(result.removedBookCount).toBe(0);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, NEW_ID]);
     });
   });
 

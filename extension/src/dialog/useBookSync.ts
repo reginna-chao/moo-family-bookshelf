@@ -6,7 +6,13 @@ import type { ApiClient, BookEntry } from "../api/client";
 import { syncBooks, canAutoSync } from "../sync/syncBooks";
 import type { RenamedBook } from "../sync/renamedBooks";
 import { formatScrapeProgress } from "../content/scraper";
-import { type LastSync, NO_SYNC, lastSyncOf } from "./lastSync";
+import {
+  type LastSync,
+  type SyncNoticeCounts,
+  NO_SYNC,
+  lastSyncOf,
+  syncNoticeCountsOf,
+} from "./lastSync";
 import {
   ACCOUNT_UNCONFIRMED_SYNC_MESSAGE,
   useAccountCheck,
@@ -38,8 +44,8 @@ export interface UseBookSyncReturn {
   autoSyncDone: boolean;
   /** Live progress message during a paginated scrape (Wave G). Empty otherwise. */
   progressMessage: string;
-  /** Books moved to their new Readmoo id by the last SUCCESSFUL sync (0 = none). */
-  renamedBookCount: number;
+  /** Renamed / removed book counts of the last SUCCESSFUL sync (all 0 before one). */
+  syncNoticeCounts: SyncNoticeCounts;
 }
 
 export function useBookSync({
@@ -181,6 +187,6 @@ export function useBookSync({
     triggerManualSync,
     autoSyncDone,
     progressMessage,
-    renamedBookCount: lastSync.renamedBookCount,
+    syncNoticeCounts: syncNoticeCountsOf(lastSync),
   };
 }

@@ -9,7 +9,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PersonalShelf, PersonalShelfProps } from "@/dialog/PersonalShelf";
 import { BoolFlag, type ApiClient, type FamilyMember } from "@/api/client";
 import { PERSONAL_BOOKS_CACHE_KEY, SYNC_ARCHIVED_KEY } from "@/constants";
-import { renamedBooksNotice } from "@/dialog/PersonalShelfSyncNotices";
+import {
+  removedBooksNotice,
+  renamedBooksNotice,
+} from "@/dialog/PersonalShelfSyncNotices";
+import type { SyncNoticeCounts } from "@/dialog/lastSync";
 
 /**
  * PersonalShelf: the per-book share toggles, save, load / error states, the personal-books cache, and
@@ -31,6 +35,12 @@ vi.mock("@/dialog/FamilyDataContext", () => ({
   useFamilyData: () => mockUseFamilyData(),
 }));
 
+const NO_NOTICE_COUNTS: SyncNoticeCounts = {
+  renamedBookCount: 0,
+  removedBookCount: 0,
+  removedSharedCount: 0,
+};
+
 const mockUseBookSync = vi.fn().mockReturnValue({
   syncStatus: "idle",
   syncError: "",
@@ -38,7 +48,7 @@ const mockUseBookSync = vi.fn().mockReturnValue({
   triggerManualSync: vi.fn(),
   autoSyncDone: false,
   progressMessage: "",
-  renamedBookCount: 0,
+  syncNoticeCounts: NO_NOTICE_COUNTS,
 });
 
 vi.mock("@/dialog/useBookSync", () => ({
@@ -166,7 +176,10 @@ function serverClient(
 }
 
 /** Configure the mocked useBookSync to stream `books` back via lastSyncBooks (the "open shelf → auto full sync" path). */
-function setSyncBooks(books: TestBook[], renamedBookCount = 0) {
+function setSyncBooks(
+  books: TestBook[],
+  counts: Partial<SyncNoticeCounts> = {},
+) {
   mockUseBookSync.mockReturnValue({
     syncStatus: "done",
     syncError: "",
@@ -174,7 +187,7 @@ function setSyncBooks(books: TestBook[], renamedBookCount = 0) {
     triggerManualSync: vi.fn(),
     autoSyncDone: true,
     progressMessage: "",
-    renamedBookCount,
+    syncNoticeCounts: { ...NO_NOTICE_COUNTS, ...counts },
   });
 }
 
@@ -253,7 +266,7 @@ describe("PersonalShelf", () => {
       triggerManualSync: vi.fn(),
       autoSyncDone: false,
       progressMessage: "",
-      renamedBookCount: 0,
+      syncNoticeCounts: NO_NOTICE_COUNTS,
     });
     vi.mocked(chrome.storage.local.get).mockImplementation(
       (keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -301,6 +314,7 @@ describe("PersonalShelf", () => {
       triggerManualSync: vi.fn(),
       autoSyncDone: false,
       progressMessage: "正在讀取第 3 頁，已收集 600 本…",
+      syncNoticeCounts: NO_NOTICE_COUNTS,
     });
 
     render(
@@ -975,6 +989,7 @@ describe("PersonalShelf", () => {
         triggerManualSync: vi.fn(),
         autoSyncDone: false,
         progressMessage: "",
+        syncNoticeCounts: NO_NOTICE_COUNTS,
       });
       renderPersonalShelf();
       await waitForBooksLoaded();
@@ -1318,7 +1333,7 @@ describe("PersonalShelf", () => {
         triggerManualSync: vi.fn(),
         autoSyncDone: true,
         progressMessage: "",
-        renamedBookCount: 0,
+        syncNoticeCounts: NO_NOTICE_COUNTS,
       });
       await act(async () => {
         rerender(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
@@ -1339,7 +1354,7 @@ describe("PersonalShelf", () => {
 
   describe("rename notice", () => {
     it("shows the production notice when the last sync moved books to a new id", async () => {
-      setSyncBooks(DEFAULT_BOOKS, 2);
+      setSyncBooks(DEFAULT_BOOKS, { renamedBookCount: 2 });
       renderPersonalShelf();
       await waitForBooksLoaded();
 
@@ -1349,7 +1364,7 @@ describe("PersonalShelf", () => {
     });
 
     it("shows no notice when the last sync moved nothing", async () => {
-      setSyncBooks(DEFAULT_BOOKS, 0);
+      setSyncBooks(DEFAULT_BOOKS);
       renderPersonalShelf();
       await waitForBooksLoaded();
 
@@ -1357,6 +1372,25 @@ describe("PersonalShelf", () => {
       expect(
         screen.queryByText(/讀墨更換了 .* 本書的編號/),
       ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/讀墨書櫃裡已經沒有的書/),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // #241: the sync's removed counts reach the notice through useBookSync's syncNoticeCounts.
+  describe("removed-books notice", () => {
+    it("shows the production notice with the shared count of the last sync", async () => {
+      setSyncBooks(DEFAULT_BOOKS, {
+        removedBookCount: 3,
+        removedSharedCount: 1,
+      });
+      renderPersonalShelf();
+      await waitForBooksLoaded();
+
+      expect(screen.getByRole("status").textContent).toBe(
+        removedBooksNotice(3, 1),
+      );
     });
   });
 

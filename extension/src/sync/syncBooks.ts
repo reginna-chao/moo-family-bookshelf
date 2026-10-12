@@ -16,6 +16,7 @@ import { type ScrapeProgressCallback } from "../content/scraper";
 import { NAV_SETTLE_MS, settleMsLeft, wait } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { runAutoReturn } from "./autoReturn";
+import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
 import { fetchBorrowRequestsForSync, scrapeForSync } from "./syncSteps";
 import {
@@ -83,6 +84,11 @@ export interface SyncBooksResult {
   renamedBooks?: RenamedBook[];
   /** Always `renamedBooks.length` on success. */
   renamedBookCount?: number;
+  /** Saved books pruned because Readmoo no longer holds them (`sync/pruneBooks.ts`). */
+  removedBooks?: RemovedBook[];
+  /** On success: `removedBooks.length`, and how many of those were shared. */
+  removedBookCount?: number;
+  removedSharedCount?: number;
   /** The `lastUpdated` this sync's own landed PUT stored (`SyncUploadResult`). */
   lastUpdated?: string;
 }
@@ -100,7 +106,7 @@ export interface SyncBooksResult {
  * 2. Wait for render
  * 3. Scrape books (+ archive when enabled)
  * 4. Merge with saved books (preserve isShared settings); circuit breaker;
- *    id-change resolution
+ *    id-change resolution; pruning of books Readmoo no longer holds
  * 5. Upload as plaintext JSON; a save that lands meanwhile re-runs step 4
  * 6. Navigate back if needed
  * 7. Update lastSyncAt
@@ -143,10 +149,11 @@ export async function syncBooks(
     // Step 5: Merge, resolve ids and upload; a conflict re-reads and retries.
     const displayName =
       (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
-    const upload = await uploadSyncBooksRereadingOnConflict(
-      { ...read, familyId, displayName, requests },
-      firstRead,
-    );
+    const { removedCount, ...upload } =
+      await uploadSyncBooksRereadingOnConflict(
+        { ...read, familyId, displayName, requests },
+        firstRead,
+      );
 
     // Step 6: Navigate back if we navigated away
     if (navigate && !isOnLibrary) {
@@ -171,6 +178,7 @@ export async function syncBooks(
       ...upload,
       autoReturnedRequestIds,
       renamedBookCount: upload.renamedBooks.length,
+      removedBookCount: removedCount,
     };
   } catch (err) {
     // Restore navigation on error

@@ -41,8 +41,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mock scraper module (the DOM boundary). The sync reads `scrapeLibrary` /
 // `scrapeArchivedBooks`, both of which report completeness (#236).
 vi.mock("@/content/scraper", () => ({
-  scrapeLibrary: vi.fn().mockResolvedValue({ books: [], complete: true }),
-  scrapeArchivedBooks: vi.fn().mockResolvedValue({ books: [], complete: true }),
+  scrapeLibrary: vi
+    .fn()
+    .mockResolvedValue({ books: [], complete: true, libraryIds: null }),
+  scrapeArchivedBooks: vi
+    .fn()
+    .mockResolvedValue({ books: [], complete: true, libraryIds: null }),
 }));
 
 // Mock mergeBooks — pass through by returning scraped as BookEntry[]
@@ -61,6 +65,7 @@ import {
   scrapeLibrary,
   scrapeArchivedBooks,
   type ScrapedBook,
+  type ScrapeResult,
 } from "@/content/scraper";
 import { queryWithLegacyFallback } from "@/content/readmoo-dom";
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
@@ -95,8 +100,8 @@ function toStorageKeys(data: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** A complete scrape result holding `books` (the common, non-degraded case). */
-function completeScrape(books: ScrapedBook[] = []) {
-  return { books, complete: true };
+function completeScrape(books: ScrapedBook[] = []): ScrapeResult {
+  return { books, complete: true, libraryIds: null };
 }
 
 function createMockApiClient(): ApiClient {

@@ -122,8 +122,12 @@ describe("isLibraryScrapeComplete", () => {
 });
 
 describe("failedScrape", () => {
-  it("is empty and incomplete", () => {
-    expect(failedScrape()).toEqual({ books: [], complete: false });
+  it("is empty, incomplete and has no library ids", () => {
+    expect(failedScrape()).toEqual({
+      books: [],
+      complete: false,
+      libraryIds: null,
+    });
   });
 
   it("returns a fresh object each call", () => {
@@ -134,9 +138,11 @@ describe("failedScrape", () => {
 });
 
 describe("combineScrapeResults", () => {
+  const libraryIds = new Set(["210000000000001", "210000000000002"]);
   const library = {
     books: [makeScraped("210000000000001")],
     complete: true,
+    libraryIds,
   };
 
   it("returns the library unchanged when the archive is not synced", () => {
@@ -153,12 +159,17 @@ describe("combineScrapeResults", () => {
     ({ libraryComplete, archiveComplete, expected }) => {
       const archivedBook = makeScraped("210000000000002", BoolFlag.TRUE);
       const result = combineScrapeResults(
-        { books: library.books, complete: libraryComplete },
-        { books: [archivedBook], complete: archiveComplete },
+        { books: library.books, complete: libraryComplete, libraryIds },
+        {
+          books: [archivedBook],
+          complete: archiveComplete,
+          libraryIds: new Set(["210000000000002"]),
+        },
       );
       expect(result).toEqual({
         books: [...library.books, archivedBook],
         complete: expected,
+        libraryIds,
       });
     },
   );
@@ -167,6 +178,29 @@ describe("combineScrapeResults", () => {
     expect(combineScrapeResults(library, failedScrape())).toEqual({
       books: library.books,
       complete: false,
+      libraryIds,
     });
+  });
+
+  // The main-view pass reads the whole account; the archive pass's ids are ignored.
+  it.each([
+    { name: "a set", archiveIds: new Set(["210000000000009"]) },
+    { name: "null", archiveIds: null },
+  ])(
+    "keeps the library pass's ids whatever the archive pass read ($name)",
+    ({ archiveIds }) => {
+      const archive = { books: [], complete: true, libraryIds: archiveIds };
+      expect(combineScrapeResults(library, archive).libraryIds).toBe(
+        libraryIds,
+      );
+    },
+  );
+
+  it("stays unknown when only the archive pass read ids", () => {
+    const result = combineScrapeResults(
+      { ...library, libraryIds: null },
+      { books: [], complete: true, libraryIds: new Set(["210000000000009"]) },
+    );
+    expect(result.libraryIds).toBeNull();
   });
 });

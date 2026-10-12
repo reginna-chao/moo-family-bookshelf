@@ -45,6 +45,7 @@ const USER_ID = "user-123";
 const FAMILY_ID = "fam-1";
 const BOOK_A = "210000000000011";
 const BOOK_B = "210000000000012";
+const GONE_ID = "210000000000013";
 const KEPT_ID = "210000000000003";
 const OLD_ID = "210000000000001";
 const NEW_ID = "210000000000002";
@@ -212,8 +213,15 @@ function isSharedOf(books: BookEntry[], bookId: string): BoolFlag | undefined {
   return books.find((b) => b.bookId === bookId)?.isShared;
 }
 
-function mockScrape(books: ScrapedBook[]): void {
-  vi.mocked(scrapeLibrary).mockResolvedValue({ books, complete: true });
+function mockScrape(
+  books: ScrapedBook[],
+  libraryIds: ReadonlySet<string> | null = null,
+): void {
+  vi.mocked(scrapeLibrary).mockResolvedValue({
+    books,
+    complete: true,
+    libraryIds,
+  });
 }
 
 function wroteLastSyncAt(): boolean {
@@ -244,6 +252,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
     vi.mocked(scrapeArchivedBooks).mockResolvedValue({
       books: [],
       complete: true,
+      libraryIds: null,
     });
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -428,6 +437,60 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         expect(isSharedOf(server.puts[0].body.books, KEPT_ID)).toBe(
           BoolFlag.FALSE,
         );
+      },
+    );
+
+    // #241: the removed books are recomputed from each re-read, like the renames.
+    it.each([
+      {
+        name: "drops a removal found only by the stale attempt",
+        firstServer: [savedBook(BOOK_A), savedBook(GONE_ID, BoolFlag.TRUE)],
+        // Another device's sync already removed GONE.
+        racingServer: [savedBook(BOOK_A, BoolFlag.TRUE)],
+        firstPutIds: [BOOK_A],
+        removedBooks: [],
+        removedSharedCount: 0,
+      },
+      {
+        name: "reports a removal found only by the attempt that landed",
+        firstServer: [savedBook(BOOK_A)],
+        // Another device uploaded GONE meanwhile; Readmoo no longer holds it.
+        racingServer: [
+          savedBook(BOOK_A, BoolFlag.TRUE),
+          savedBook(GONE_ID, BoolFlag.TRUE),
+        ],
+        firstPutIds: [BOOK_A],
+        removedBooks: [{ bookId: GONE_ID, isShared: BoolFlag.TRUE }],
+        removedSharedCount: 1,
+      },
+    ])(
+      "returns the removed books of the landed attempt: $name",
+      async ({
+        firstServer,
+        racingServer,
+        firstPutIds,
+        removedBooks,
+        removedSharedCount,
+      }) => {
+        mockScrape([scrapedBook(BOOK_A)], new Set([BOOK_A]));
+        const server = createFakeServer(storedRecord(firstServer), {
+          beforePut: (index, state) => {
+            if (index === 0) state.stored = storedRecord(racingServer, "race");
+          },
+        });
+
+        const result = await runSync(server.client, false);
+
+        expect(result.success).toBe(true);
+        expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+        expect(server.puts[0].body.books.map((b) => b.bookId)).toEqual(
+          firstPutIds,
+        );
+        expect(result.removedBooks).toEqual(removedBooks);
+        expect(result.removedBookCount).toBe(removedBooks.length);
+        expect(result.removedSharedCount).toBe(removedSharedCount);
+        expect(result.books).toEqual(server.puts[1].body.books);
+        expect(result.books.map((b) => b.bookId)).toEqual([BOOK_A]);
       },
     );
   });

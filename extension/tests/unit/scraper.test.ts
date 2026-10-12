@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
-import { installListTotalPublisher } from "../helpers/listTotalBridge";
+import {
+  installLibraryIdsPublisher,
+  installListTotalPublisher,
+} from "../helpers/listTotalBridge";
 
 /**
  * The Readmoo content scraper (`src/content/scraper.ts`): user email, display
@@ -658,7 +661,7 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(3000);
     const result = await promise;
     // A failed archive scrape is NOT complete — distinct from zero archived books.
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   });
 
   it("returns an incomplete empty result when nav buttons exist but none contain i.mo-filter", async () => {
@@ -672,7 +675,7 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(3000);
     const result = await promise;
     // A failed archive scrape is NOT complete — distinct from zero archived books.
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   });
 
   it("returns an incomplete empty result when filter modal does not appear (timeout)", async () => {
@@ -689,7 +692,7 @@ describe("scrapeArchivedBooks", () => {
 
     const result = await promise;
     // A failed archive scrape is NOT complete — distinct from zero archived books.
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   });
 
   it("returns an incomplete empty result when archive option element not found", async () => {
@@ -716,7 +719,7 @@ describe("scrapeArchivedBooks", () => {
 
     const result = await promise;
     // A failed archive scrape is NOT complete — distinct from zero archived books.
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   }, 15000);
 
   it("returns scraped books marked with isArchived=1 on success", async () => {
@@ -910,6 +913,65 @@ describe("scrapeLibrary", () => {
     );
   });
 
+  // #241: the account's library ids come from the same post-pagination request.
+  describe("libraryIds", () => {
+    let cleanupIds: (() => void) | null = null;
+    const LOANED_ID = "210439468000202";
+
+    afterEach(() => {
+      cleanupIds?.();
+      cleanupIds = null;
+    });
+
+    it("returns the ids the bridge published, beyond the cards on screen", async () => {
+      cleanupBridge = installFiberBridgeMock([
+        { bookId: GOOD_ID, title: "好書" },
+      ]);
+      cleanupTotal = installListTotalPublisher("cards");
+      cleanupIds = installLibraryIdsPublisher([GOOD_ID, LOANED_ID]);
+      document.body.innerHTML = GOOD_CARD;
+
+      const result = await runScrape();
+
+      expect(result.complete).toBe(true);
+      expect(result.books.map((b) => b.bookId)).toEqual([GOOD_ID]);
+      expect(result.libraryIds).toEqual(new Set([GOOD_ID, LOANED_ID]));
+    });
+
+    it("is null when the bridge cannot read them", async () => {
+      cleanupBridge = installFiberBridgeMock([
+        { bookId: GOOD_ID, title: "好書" },
+      ]);
+      cleanupTotal = installListTotalPublisher("cards");
+      cleanupIds = installLibraryIdsPublisher(null);
+      document.body.innerHTML = GOOD_CARD;
+
+      const result = await runScrape();
+
+      // Positive companion: the scrape itself succeeded.
+      expect(result.complete).toBe(true);
+      expect(result.libraryIds).toBeNull();
+    });
+
+    it("never reuses ids left on <html> by an earlier request", async () => {
+      cleanupBridge = installFiberBridgeMock([
+        { bookId: GOOD_ID, title: "好書" },
+      ]);
+      document.documentElement.setAttribute(
+        "data-moo-library-ids",
+        `${GOOD_ID},${LOANED_ID}`,
+      );
+      document.body.innerHTML = GOOD_CARD;
+
+      const result = await runScrape();
+
+      expect(result.libraryIds).toBeNull();
+      expect(
+        document.documentElement.hasAttribute("data-moo-library-ids"),
+      ).toBe(false);
+    });
+  });
+
   const unreadableCardCases: Array<{
     name: string;
     card: string;
@@ -1024,7 +1086,7 @@ describe("scrapeLibrary", () => {
 
     const result = await runScrape(60);
 
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
     const messages = warnMessages();
     expect(messages).toHaveLength(2);
     expect(messages).toEqual(
