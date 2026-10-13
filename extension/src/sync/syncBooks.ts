@@ -21,6 +21,7 @@ import type { RenamedBook } from "./renamedBooks";
 import { fetchBorrowRequestsForSync, scrapeForSync } from "./syncSteps";
 import {
   fetchSavedBooksForSync,
+  readSavedBooksForSync,
   uploadSyncBooksRereadingOnConflict,
 } from "./syncUpload";
 import {
@@ -104,12 +105,14 @@ export interface SyncBooksResult {
  *
  * 1. Navigate to #/library if needed
  * 2. Wait for render
- * 3. Scrape books (+ archive when enabled)
- * 4. Merge with saved books (preserve isShared settings); circuit breaker;
- *    id-change resolution; pruning of books Readmoo no longer holds
- * 5. Upload as plaintext JSON; a save that lands meanwhile re-runs step 4
- * 6. Navigate back if needed
- * 7. Update lastSyncAt
+ * 3. Read the saved books once to fix the prune candidates (nothing else)
+ * 4. Scrape books (+ archive when enabled)
+ * 5. Read the saved books for merge; circuit breaker
+ * 6. Merge (preserve isShared), resolve id changes, prune step-3 books Readmoo no longer holds
+ * 7. Upload as plaintext JSON; a save that lands meanwhile re-reads and
+ *    re-runs step 6 (prune candidates stay those of step 3)
+ * 8. Navigate back if needed
+ * 9. Update lastSyncAt
  */
 export async function syncBooks(
   options: SyncBooksOptions,
@@ -133,12 +136,15 @@ export async function syncBooks(
       if (settleMs > 0) await wait(settleMs);
     }
 
-    // Step 3: Scrape books (+ archived books when 同步封存書 is on)
+    // Step 3: Fix the prune candidates before scraping, so a book another device adds meanwhile is never
+    // pruned; the upload basis is read again after the scrape (docs/architecture.md → 書單同步).
+    const preScrape = await readSavedBooksForSync({ apiClient, userId });
+    const preScrapeServerIds = new Set(preScrape.books.map((b) => b.bookId));
+
+    // Step 4+5: Scrape books (+ archived books when 同步封存書 is on), then read the saved books to merge
+    // with; a failed read or a redesign-shaped scrape throws there (no upload, no lastSyncAt).
     const scrape = await scrapeForSync(onProgress);
     const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
-
-    // Step 4: Read the saved books for merge. A failed read or a
-    // redesign-shaped scrape throws here (no upload, no lastSyncAt).
     const storageResult = await browser.storage.local.get([DISPLAY_NAME_KEY]);
     const read = { apiClient, userId, scrape, scrapedIds };
     const firstRead = await fetchSavedBooksForSync(read);
@@ -146,25 +152,25 @@ export async function syncBooks(
       ? await fetchBorrowRequestsForSync(apiClient, familyId)
       : null;
 
-    // Step 5: Merge, resolve ids and upload; a conflict re-reads and retries.
+    // Step 6+7: Merge, resolve ids, prune and upload; a conflict re-reads and retries.
     const displayName =
       (storageResult[DISPLAY_NAME_KEY] as string | undefined) ?? "";
     const { removedCount, ...upload } =
       await uploadSyncBooksRereadingOnConflict(
-        { ...read, familyId, displayName, requests },
+        { ...read, preScrapeServerIds, familyId, displayName, requests },
         firstRead,
       );
 
-    // Step 6: Navigate back if we navigated away
+    // Step 8: Navigate back if we navigated away
     if (navigate && !isOnLibrary) {
       window.location.hash = originalHash || "#/";
     }
 
-    // Step 7: Record this successful sync so the auto-sync throttle (canAutoSync)
+    // Step 9: Record this successful sync so the auto-sync throttle (canAutoSync)
     // honours the user's configured interval before syncing again.
     await browser.storage.local.set({ [LAST_SYNC_AT_KEY]: Date.now() });
 
-    // Step 8 (best-effort, never affects the sync result): mark returned books' LENT requests
+    // Step 10 (best-effort, never affects the sync result): mark returned books' LENT requests
     // RETURNED, reusing the pre-upload borrow list (skipped when that fetch failed).
     let autoReturnedRequestIds: string[] | undefined;
     if (familyId) {

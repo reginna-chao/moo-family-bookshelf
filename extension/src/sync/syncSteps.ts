@@ -112,14 +112,21 @@ function nothingPruned(): Omit<PruneResult, "books"> {
  * with a family — only when the borrow list was obtained (lent books must
  * stay); pruning further needs the fiber library ids readable and covering the
  * scrape (`pruneRemovedBooks`). Otherwise the merged list is uploaded minus its
- * rename candidates and nothing is pruned. Writes nothing.
+ * rename candidates and nothing is pruned. Pruning may only remove books in
+ * `options.preScrapeServerIds` (on the server before the scrape began): a book
+ * first seen in a later read is never a candidate. Rename resolution still
+ * judges against `savedBooks` (the current read). Writes nothing.
  */
 export function resolveForUpload(
   merged: BookEntry[],
   scrape: SyncScrape,
   savedBooks: BookEntry[],
   requests: BorrowRequest[] | null,
-  options: { familyId?: string; userId: string },
+  options: {
+    familyId?: string;
+    userId: string;
+    preScrapeServerIds: ReadonlySet<string>;
+  },
 ): UploadPlan {
   const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
   const borrowKnown = !options.familyId || requests !== null;
@@ -139,7 +146,7 @@ export function resolveForUpload(
     scrapedIds,
     libraryIds: scrape.libraryIds,
     lentBookIds,
-    serverIds,
+    serverIds: options.preScrapeServerIds,
     syncArchived: scrape.syncArchived,
   });
   return { ...resolved, ...pruned, deferredCount: 0 };

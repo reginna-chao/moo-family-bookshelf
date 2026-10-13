@@ -36,6 +36,9 @@ export interface SyncUploadContext {
   displayName: string;
   scrape: SyncScrape;
   scrapedIds: ReadonlySet<string>;
+  /** Ids the server held before the scrape began; only bounds pruning (constant across re-reads, so a
+   *  book another device adds meanwhile is never pruned). The upload basis is the post-scrape read. */
+  preScrapeServerIds: ReadonlySet<string>;
   /** Fetched once per sync and reused by every attempt; null = fetch failed. */
   requests: BorrowRequest[] | null;
 }
@@ -55,6 +58,14 @@ interface SyncUpload extends Omit<SyncUploadResult, "lastUpdated"> {
   record: PersonalBooks & { expectedLastUpdated?: string };
 }
 
+/** GET the saved record; throws on a failed read. No breaker check. Writes nothing. */
+export async function readSavedBooksForSync(
+  ctx: Pick<SyncUploadContext, "apiClient" | "userId">,
+): Promise<LoadSavedResult> {
+  const response = await ctx.apiClient.getPersonalBooks(ctx.userId);
+  return loadSavedBooksForSync(response);
+}
+
 /** GET the saved record; throws on a failed read or a redesign-shaped scrape. Writes nothing. */
 export async function fetchSavedBooksForSync(
   ctx: Pick<
@@ -62,8 +73,7 @@ export async function fetchSavedBooksForSync(
     "apiClient" | "userId" | "scrape" | "scrapedIds"
   >,
 ): Promise<LoadSavedResult> {
-  const response = await ctx.apiClient.getPersonalBooks(ctx.userId);
-  const saved = loadSavedBooksForSync(response);
+  const saved = await readSavedBooksForSync(ctx);
   assertSyncNotPaused(saved.books, ctx.scrapedIds, ctx.scrape.archiveCovered);
   return saved;
 }

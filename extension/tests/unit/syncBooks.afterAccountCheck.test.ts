@@ -177,6 +177,11 @@ describe("syncBooks — right after an account check restored the hash", () => {
     });
   }
 
+  /** Settle the mocked saved-books GET that precedes the scrape, without moving the clock. */
+  async function flushSavedBooksRead(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
   /** Let the (timer-free) scrape, merge and upload run to the end. */
   async function finish<T>(result: Promise<T>): Promise<T> {
     await vi.advanceTimersByTimeAsync(nav.NAV_SETTLE_MS);
@@ -216,6 +221,7 @@ describe("syncBooks — right after an account check restored the hash", () => {
     const startedAt = Date.now();
 
     const result = startSync(client);
+    await flushSavedBooksRead();
     expect(scrapeRequests[0]).toBe(startedAt);
 
     const outcome = await finish(result);
@@ -234,8 +240,10 @@ describe("syncBooks — right after an account check restored the hash", () => {
     const startedAt = Date.now();
 
     const result = startSync(client);
-    expect(scrapeRequests[0]).toBe(startedAt);
+    // No settle timer was armed before the (already-resolved) saved-books read.
     expect(vi.getTimerCount()).toBe(0);
+    await flushSavedBooksRead();
+    expect(scrapeRequests[0]).toBe(startedAt);
 
     const outcome = await finish(result);
     expect(outcome.success).toBe(true);

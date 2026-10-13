@@ -372,10 +372,10 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           ...Array<string>(conflicts).fill("conflict"),
           "ok",
         ]);
-        // One GET per attempt; each PUT carries the stamp of the read before it …
-        expect(server.getPersonalBooks).toHaveBeenCalledTimes(conflicts + 1);
+        // The pre-scrape GET, then one per attempt; each PUT carries the stamp of the read before it …
+        expect(server.getPersonalBooks).toHaveBeenCalledTimes(conflicts + 2);
         expect(server.puts.map((p) => p.body.expectedLastUpdated)).toEqual(
-          server.servedStamps,
+          server.servedStamps.slice(1),
         );
         // … and was merged from that read (A's flag tracks each racing save).
         const expectedFlags = [BoolFlag.TRUE, BoolFlag.FALSE, BoolFlag.TRUE];
@@ -448,18 +448,32 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         // Another device's sync already removed GONE.
         racingServer: [savedBook(BOOK_A, BoolFlag.TRUE)],
         firstPutIds: [BOOK_A],
+        landedIds: [BOOK_A],
         removedBooks: [],
         removedSharedCount: 0,
       },
       {
-        name: "reports a removal found only by the attempt that landed",
+        name: "keeps a book first seen in the re-read (added after the scrape began), share flag intact",
         firstServer: [savedBook(BOOK_A)],
-        // Another device uploaded GONE meanwhile; Readmoo no longer holds it.
+        // Another device uploaded GONE meanwhile; the pre-scrape read never held it.
         racingServer: [
           savedBook(BOOK_A, BoolFlag.TRUE),
           savedBook(GONE_ID, BoolFlag.TRUE),
         ],
         firstPutIds: [BOOK_A],
+        landedIds: [BOOK_A, GONE_ID],
+        removedBooks: [],
+        removedSharedCount: 0,
+      },
+      {
+        name: "still removes a pre-scrape book the re-read holds too",
+        firstServer: [savedBook(BOOK_A), savedBook(GONE_ID, BoolFlag.TRUE)],
+        racingServer: [
+          savedBook(BOOK_A, BoolFlag.TRUE),
+          savedBook(GONE_ID, BoolFlag.TRUE),
+        ],
+        firstPutIds: [BOOK_A],
+        landedIds: [BOOK_A],
         removedBooks: [{ bookId: GONE_ID, isShared: BoolFlag.TRUE }],
         removedSharedCount: 1,
       },
@@ -469,6 +483,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         firstServer,
         racingServer,
         firstPutIds,
+        landedIds,
         removedBooks,
         removedSharedCount,
       }) => {
@@ -490,7 +505,11 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         expect(result.removedBookCount).toBe(removedBooks.length);
         expect(result.removedSharedCount).toBe(removedSharedCount);
         expect(result.books).toEqual(server.puts[1].body.books);
-        expect(result.books.map((b) => b.bookId)).toEqual([BOOK_A]);
+        expect(result.books.map((b) => b.bookId)).toEqual(landedIds);
+        // A book the landed PUT keeps keeps the re-read's share flag.
+        for (const id of landedIds) {
+          expect(isSharedOf(result.books, id)).toBe(BoolFlag.TRUE);
+        }
       },
     );
   });
@@ -604,8 +623,8 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         "conflict",
         "conflict",
       ]);
-      // No re-read after the last conflict: nothing would use it.
-      expect(server.getPersonalBooks).toHaveBeenCalledTimes(3);
+      // Pre- and post-scrape reads plus two re-reads; none after the last conflict.
+      expect(server.getPersonalBooks).toHaveBeenCalledTimes(4);
       expect(wroteLastSyncAt()).toBe(false);
       expect(window.location.hash).toBe("#/settings");
       expect(server.updateBorrowStatus).not.toHaveBeenCalled();
@@ -644,7 +663,8 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
         expect(result).toEqual({ success: false, books: [], error: shown });
         expect(server.updatePersonalBooks).toHaveBeenCalledTimes(1);
-        expect(server.getPersonalBooks).toHaveBeenCalledTimes(1);
+        // Only the pre- and post-scrape reads.
+        expect(server.getPersonalBooks).toHaveBeenCalledTimes(2);
         expect(wroteLastSyncAt()).toBe(false);
       },
     );
@@ -658,8 +678,9 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           beforePut: (index: number, state: ServerState) => {
             if (index === 0) saveLands(state, BOOK_A, BoolFlag.TRUE, "toggle");
           },
+          // GET 0 / 1 are the pre- and post-scrape reads; GET 2 is the re-read.
           scriptedGet: (index: number) =>
-            index === 1
+            index === 2
               ? { error: { code: "INTERNAL_ERROR", message: "伺服器忙碌" } }
               : undefined,
         },
@@ -690,7 +711,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
       expect(result).toEqual({ success: false, books: [], error: shown });
       expect(server.puts.map((p) => p.outcome)).toEqual(["conflict"]);
-      expect(server.getPersonalBooks).toHaveBeenCalledTimes(2);
+      expect(server.getPersonalBooks).toHaveBeenCalledTimes(3);
       expect(wroteLastSyncAt()).toBe(false);
       expect(server.updateBorrowStatus).not.toHaveBeenCalled();
     });
@@ -703,7 +724,8 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           beforePut: (index, state) => {
             if (index === 0) saveLands(state, BOOK_A, BoolFlag.TRUE, "toggle");
           },
-          scriptedGet: (index) => (index === 1 ? { data: null } : undefined),
+          // GET 2 is the conflict re-read (0 / 1 are the pre- and post-scrape reads).
+          scriptedGet: (index) => (index === 2 ? { data: null } : undefined),
         },
       );
 

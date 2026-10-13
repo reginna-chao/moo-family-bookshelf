@@ -18,7 +18,7 @@ export interface PruneContext {
   libraryIds: ReadonlySet<string> | null;
   /** Book ids the user has lent out through the app (LENT, user is owner). */
   lentBookIds: ReadonlySet<string>;
-  /** Every bookId the server held before this sync. */
+  /** Every bookId the server held BEFORE this sync's scrape began (not the current read). */
   serverIds: ReadonlySet<string>;
   /** The 同步封存書 setting for this sync. */
   syncArchived: BoolFlag;
