@@ -4,6 +4,7 @@ import { createMockKV } from "../helpers/mockKv";
 import {
   BoolFlag,
   kvKeys,
+  MAX_FAMILY_PREF_BOOK_ID_LENGTH,
   MAX_FAMILY_PREF_ENTRIES,
   type UserBooksRecord,
 } from "../../src/kv/schema";
@@ -695,6 +696,73 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it.each<{ label: string; prefs: Record<string, string[]> }>([
+    {
+      label: "hidden ref with a 33-char bookId",
+      prefs: { hidden: [ref("9".repeat(33))] },
+    },
+    {
+      label: "the 1000-char hidden bookId from #316",
+      prefs: { hidden: [ref("b1"), ref("x".repeat(1000))] },
+    },
+    {
+      label: "favorites ref with a 33-char bookId",
+      prefs: { favorites: [ref("9".repeat(33))] },
+    },
+  ])(
+    "returns 400 INVALID_PAYLOAD for a familyShelfPrefs $label and writes nothing (#316)",
+    async ({ prefs }) => {
+      const token = await auth();
+      const path = `/api/user/${USER1}/books`;
+      const seeded = await request(
+        "PUT",
+        path,
+        {
+          books: [{ bookId: B1, isShared: BoolFlag.FALSE }],
+          familyShelfPrefs: { hidden: [ref("h1")] },
+        },
+        token,
+      );
+      expect(seeded.status).toBe(200);
+      const before = await kv.get(kvKeys.user(USER1));
+
+      // The books change would bump the record if the PUT were (wrongly) accepted.
+      const res = await request(
+        "PUT",
+        path,
+        {
+          books: [{ bookId: B1, isShared: BoolFlag.TRUE }],
+          familyShelfPrefs: prefs,
+        },
+        token,
+      );
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("INVALID_PAYLOAD");
+      expect(await kv.get(kvKeys.user(USER1))).toBe(before);
+    },
+  );
+
+  it("accepts a familyShelfPrefs ref whose bookId is exactly at the cap (#316)", async () => {
+    const token = await auth();
+    const capRef = ref("9".repeat(MAX_FAMILY_PREF_BOOK_ID_LENGTH));
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        books: [{ bookId: B1, isShared: BoolFlag.TRUE }],
+        familyShelfPrefs: { hidden: [capRef] },
+      },
+      token,
+    );
+    expect(res.status).toBe(200);
+    const stored = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(stored?.familyShelfPrefs).toEqual({
+      hidden: [capRef],
+      favorites: [],
+    });
   });
 
   it("returns 400 for an empty familyShelfPrefs object (no kind present)", async () => {

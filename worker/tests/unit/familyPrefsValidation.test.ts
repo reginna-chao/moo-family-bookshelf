@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { isValidFamilyPrefRef } from "../../src/utils/validation";
 import { parseFamilyPrefs } from "../../src/routes/user";
+import { MAX_FAMILY_PREF_BOOK_ID_LENGTH } from "../../src/kv/schema";
 
 // A canonical 64-char lowercase SHA-256 hex ownerId for building valid refs.
 const OWNER = "a".repeat(64);
 const ref = (bookId: string, owner = OWNER) => `${owner}:${bookId}`;
+// A bookId exactly at the length cap (#316) — the longest one a ref may carry.
+const MAX_LEN_BOOK_ID = "9".repeat(MAX_FAMILY_PREF_BOOK_ID_LENGTH);
 
 // --- isValidFamilyPrefRef ---
 
@@ -37,6 +40,42 @@ describe("isValidFamilyPrefRef", () => {
     { label: "only the ownerId, no colon", value: OWNER },
   ])("rejects $label", ({ value }) => {
     expect(isValidFamilyPrefRef(value)).toBe(false);
+  });
+
+  // --- bookId length cap (#316) ---
+
+  it("pins the bookId length cap at 32 characters", () => {
+    expect(MAX_FAMILY_PREF_BOOK_ID_LENGTH).toBe(32);
+  });
+
+  it.each<{ label: string; bookId: string }>([
+    { label: "a bookId of exactly the cap", bookId: MAX_LEN_BOOK_ID },
+    {
+      label: "a cap-length bookId containing ':'",
+      bookId: `a:${"b".repeat(MAX_FAMILY_PREF_BOOK_ID_LENGTH - 2)}`,
+    },
+    { label: "a 15-digit Readmoo bookId", bookId: "210439468000101" },
+    { label: "a one-character bookId", bookId: "x" },
+  ])("accepts $label", ({ bookId }) => {
+    expect(isValidFamilyPrefRef(ref(bookId))).toBe(true);
+  });
+
+  it.each<{ label: string; bookId: string }>([
+    {
+      label: "a 33-character bookId (one over the cap)",
+      bookId: "9".repeat(33),
+    },
+    {
+      label: "a 33-character bookId whose extra char is ':'",
+      bookId: `${MAX_LEN_BOOK_ID}:`,
+    },
+    { label: "the 1000-character bookId from #316", bookId: "x".repeat(1000) },
+    { label: "a bookId with an embedded newline", bookId: "b1\nb2" },
+    { label: "a bookId with a trailing newline", bookId: "b1\n" },
+    { label: "a bookId with a carriage return", bookId: "b1\rb2" },
+    { label: "a bookId with a U+2028 line separator", bookId: "b1 b2" },
+  ])("rejects $label", ({ bookId }) => {
+    expect(isValidFamilyPrefRef(ref(bookId))).toBe(false);
   });
 });
 
@@ -122,6 +161,19 @@ describe("parseFamilyPrefs", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.prefs.favorites).toEqual([ref("b1"), ref("b2"), ref("b3")]);
+    }
+  });
+
+  it("accepts refs whose bookId is exactly at the length cap in both kinds", () => {
+    const capRef = ref(MAX_LEN_BOOK_ID);
+    const result = parseFamilyPrefs(
+      { hidden: [capRef], favorites: [capRef] },
+      100,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prefs.hidden).toEqual([capRef]);
+      expect(result.prefs.favorites).toEqual([capRef]);
     }
   });
 
@@ -213,6 +265,16 @@ describe("parseFamilyPrefs", () => {
     {
       label: "both present but favorites invalid",
       body: { hidden: [ref("b1")], favorites: [123] },
+      max: 100,
+    },
+    {
+      label: "a hidden entry's bookId is over the length cap (#316)",
+      body: { hidden: [ref("b1"), ref("x".repeat(1000)), ref("b2")] },
+      max: 100,
+    },
+    {
+      label: "a favorites entry's bookId is one over the length cap (#316)",
+      body: { favorites: [ref(`${MAX_LEN_BOOK_ID}9`)] },
       max: 100,
     },
   ])("returns INVALID_PAYLOAD when $label", ({ body, max }) => {

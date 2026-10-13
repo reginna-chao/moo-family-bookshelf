@@ -8,6 +8,7 @@ import {
   type PublicShelf,
   type BookEntry,
   MAX_FAMILY_PREF_ENTRIES,
+  MAX_FAMILY_PREF_BOOK_ID_LENGTH,
 } from "../kv/schema";
 import {
   getFamilyRecord,
@@ -215,7 +216,7 @@ function parsePrefList(
       return {
         ok: false,
         code: "INVALID_PAYLOAD",
-        message: `Each ${kind} entry must be a string in the form '{ownerId}:{bookId}'`,
+        message: `Each ${kind} entry must be a string in the form '{ownerId}:{bookId}' with a bookId of at most ${MAX_FAMILY_PREF_BOOK_ID_LENGTH} characters`,
       };
     }
     if (seen.has(entry)) continue;

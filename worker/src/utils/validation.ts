@@ -2,7 +2,11 @@ import {
   isAllowedBookUrl,
   isAllowedCoverUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
-import { BoolFlag, type VerifyMethod } from "../kv/schema";
+import {
+  BoolFlag,
+  MAX_FAMILY_PREF_BOOK_ID_LENGTH,
+  type VerifyMethod,
+} from "../kv/schema";
 import {
   UserIdSchema,
   Sha256HexSchema,
@@ -291,8 +295,11 @@ export function sanitizePublicShelfTitle(value: unknown): string | null {
   return sanitizeShortString(value, PUBLIC_SHELF_TITLE_MAX_LENGTH);
 }
 
-// "{ownerId}:{bookId}" — 64-char lowercase SHA-256 hex ownerId, ':' separator, non-empty bookId.
-const FAMILY_PREF_REF_RE = /^[0-9a-f]{64}:.+$/;
+// "{ownerId}:{bookId}" — 64-char lowercase SHA-256 hex ownerId, ':' separator, 1..32-char bookId
+// (`.` without the `s` flag: no line terminators; the bookId may itself contain ':').
+const FAMILY_PREF_REF_RE = new RegExp(
+  `^[0-9a-f]{64}:.{1,${MAX_FAMILY_PREF_BOOK_ID_LENGTH}}$`,
+);
 
 export function isValidFamilyPrefRef(s: string): boolean {
   return FAMILY_PREF_REF_RE.test(s);
