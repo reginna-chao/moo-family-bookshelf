@@ -1,0 +1,47 @@
+name: KV 每日備份
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kv-backup-production
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: 備份正式 KV 至私人 R2
+    if: ${{ github.ref == 'refs/heads/main' && vars.KV_BACKUP_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: 安裝鎖定版本依賴
+        run: pnpm install --frozen-lockfile
+
+      # Credentials are scoped to this step, after dependency installation.
+      # Restore write credentials never belong in the daily backup workflow.
+      - name: 備份並回讀驗證 R2 物件
+        run: node scripts/kv-backup.mjs
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KV_BACKUP_NAMESPACE_ID: ${{ secrets.KV_BACKUP_NAMESPACE_ID }}
+          KV_BACKUP_BUCKET: ${{ vars.KV_BACKUP_BUCKET }}
+          KV_BACKUP_API_TOKEN: ${{ secrets.KV_BACKUP_API_TOKEN }}
+          KV_BACKUP_R2_API_TOKEN: ${{ secrets.KV_BACKUP_R2_API_TOKEN }}

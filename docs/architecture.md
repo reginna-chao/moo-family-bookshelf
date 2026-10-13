@@ -1355,6 +1355,12 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 
 ---
 
+### KV 備份與事故還原
+
+正式 KV 的每日備份由 GitHub Actions 執行 Node.js 腳本，寫入私人 R2；Worker 本身不新增排程、管理 API 或 R2 binding。備份讀取憑證與還原寫入憑證分開，還原只接受不同於來源的空白隔離 namespace，完成回讀與服務驗證後才由管理者另行決定是否切換正式 binding。KV 的最終一致與跨 key 修改意味著備份不是交易快照。
+
+資料範圍、保留政策與已知限制見 [KV 備份計畫](kv-backup-plan.md)，啟用及演練步驟見 [部署指南](../worker/DEPLOY.md#kv-每日備份與還原演練)。程式合併與排程啟用是兩個步驟；外部設定與真實還原演練完成前，不宣稱正式備份已上線。
+
 ## API 版本相容性策略
 
 ### 策略選擇：漸進式相容（Progressive Compatibility）
