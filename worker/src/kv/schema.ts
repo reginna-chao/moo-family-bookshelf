@@ -1,5 +1,6 @@
 /** KV key builders (`kvKeys`), record types and TTL constants. Key → value → TTL: .claude/rules/backend.md
  *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s): docs/architecture.md → KV Key 設計. */
+import { MAX_BOOK_ID_LENGTH } from "moo-family-bookshelf-shared/api/bookId";
 
 /** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
 export const KV_MIN_TTL_SECONDS = 60;
@@ -325,8 +326,9 @@ export interface UserBooksRecord {
  */
 export const MAX_REMOVED_UNSHARED_BOOK_IDS = 1000;
 
-/** Longest bookId ever tombstoned (real Readmoo ids are 15 digits); a longer id is never listed. */
-export const MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH = 32;
+/** Longest bookId ever tombstoned (real Readmoo ids are 15 digits); a longer id is never listed.
+ *  Equals the shared storable-id bound `MAX_BOOK_ID_LENGTH`. */
+export const MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
 
 /**
  * `newbookdefault:{userId}` — the per-user "newly synced books default to
@@ -356,23 +358,40 @@ export interface NewBookDefaultRecord {
  *   `utils/bodyLimit.ts`); `/family-prefs` keeps the 256KB default
  *   (`DEFAULT_MAX_BODY_SIZE`) — only the books PUT gets 2MB. That guard is the
  *   *outer* defense and rejects oversized bodies with 413 before they reach
- *   this handler. Each valid entry is
- *   `"{64-hex ownerId}:{bookId}"` and serializes to ~69 bytes of JSON
- *   (including quotes + comma). At 3000 entries an over-limit payload of
- *   3001 refs is ~207KB < 256KB, so it slips past the body guard and actually
+ *   this handler. Each valid entry is `"{64-hex ownerId}:{bookId}"`, the
+ *   bookId at most `MAX_FAMILY_PREF_BOOK_ID_LENGTH` (32) chars. In JSON
+ *   (quotes + comma) a 15-digit Readmoo id costs ~83 bytes and a 32-char
+ *   ASCII bookId 100 bytes, so a list stays ≤ ~300KB (a bookId of chars JSON
+ *   must escape, ≤ 6 bytes each, raises that to ≤ 260 bytes/entry, ~780KB).
+ *   An over-limit payload of 3001 refs with 15-digit ids is ~249KB < 256KB
+ *   (shorter test ids, less), so it slips past the body guard and actually
  *   triggers the 400 branch here — keeping that branch reachable and testable
- *   over the real HTTP path. A larger cap (e.g. 10000 ≈ 690KB) would always be
- *   pre-empted by the 413 guard, making the 400 branch dead code. Real hidden
- *   counts are far smaller than 3000, so this cap is ample headroom.
+ *   over the real HTTP path; 3001 max-length refs (~300KB) hit the 413 first
+ *   on `/family-prefs` (the books PUT's 2MB still reaches 400). A larger cap
+ *   (e.g. 10000) would always be pre-empted by the 413 guard, making the 400
+ *   branch dead code. Real hidden counts are far smaller than 3000, so this
+ *   cap is ample headroom.
  *
  *   Per-list cap vs whole-body guard: the 256KB guard measures the WHOLE
  *   request body, while this cap is PER-LIST. Over-capping BOTH lists at once
- *   (`{ hidden: 3001, favorites: 3001 }` ≈ 414KB) exceeds 256KB and is
- *   pre-empted by the 413 guard, so it never reaches the 400 branch. The 400
- *   branch stays reachable via a SINGLE over-capped list (the other list small
- *   or absent, ~207KB total), which stays under 256KB.
+ *   (`{ hidden: 3001, favorites: 3001 }`, ≥ ~2 × 3001 × 69 bytes even with the
+ *   shortest ids) exceeds 256KB and is pre-empted by the 413 guard, so it never
+ *   reaches the 400 branch. The 400 branch stays reachable via a SINGLE
+ *   over-capped list of short or 15-digit ids (the other list small or
+ *   absent), which stays under 256KB.
  */
 export const MAX_FAMILY_PREF_ENTRIES = 3000;
+
+/**
+ * Longest bookId accepted in a familyShelfPrefs ref `"{ownerId}:{bookId}"`
+ * (#316); real Readmoo ids are 15 digits, legacy ones 7–8. Without it the
+ * entry COUNT cap alone bounded nothing per entry. Over ⇒ 400 INVALID_PAYLOAD.
+ * Equals the shared storable-id bound `MAX_BOOK_ID_LENGTH`, so every book a
+ * books PUT can store fits in a ref. The ref's bookId stays `.{1,N}`, not
+ * `isRealBookId`: grandfathered legacy 7–8-digit ids (kept by
+ * `dropNewMalformedBookIds`) must remain hideable.
+ */
+export const MAX_FAMILY_PREF_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
 
 export interface AuthRecord {
   token: string;

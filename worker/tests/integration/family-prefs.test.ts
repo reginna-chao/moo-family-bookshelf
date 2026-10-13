@@ -6,6 +6,7 @@ import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import {
   BoolFlag,
   kvKeys,
+  MAX_FAMILY_PREF_BOOK_ID_LENGTH,
   MAX_FAMILY_PREF_ENTRIES,
   type BookEntry,
   type PublicShelf,
@@ -290,6 +291,75 @@ describe("PUT /api/user/:id/family-prefs — auth & validation", () => {
     expect(res.status).toBe(404);
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("NOT_FOUND");
+  });
+});
+
+// ===== PUT /api/user/:id/family-prefs — bookId length cap (#316) =====
+
+describe("PUT /api/user/:id/family-prefs — bookId length cap", () => {
+  const STORED_PREFS = { hidden: [ref("h1")], favorites: [ref("f1")] };
+  const capRef = ref("9".repeat(MAX_FAMILY_PREF_BOOK_ID_LENGTH));
+
+  async function seedWithPrefs(): Promise<string> {
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await seedUser(USER1, { familyShelfPrefs: STORED_PREFS });
+    return authToken;
+  }
+
+  it.each<{ label: string; body: unknown }>([
+    {
+      label: "a hidden ref with a 33-char bookId",
+      body: { hidden: [ref("9".repeat(33))] },
+    },
+    {
+      label: "a favorites ref with a 33-char bookId",
+      body: { favorites: [ref("9".repeat(33))] },
+    },
+    {
+      label: "the 1000-char bookId from #316 among valid refs",
+      body: { hidden: [ref("b1"), ref("x".repeat(1000))] },
+    },
+  ])(
+    "rejects $label with 400 INVALID_PAYLOAD and leaves the record unchanged",
+    async ({ body }) => {
+      const authToken = await seedWithPrefs();
+      const before = await kv.get(kvKeys.user(USER1));
+      const ops = watchKvOps(kv);
+
+      const res = await request(
+        "PUT",
+        `/api/user/${USER1}/family-prefs`,
+        body,
+        authToken,
+      );
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      expect(json.error.code).toBe("INVALID_PAYLOAD");
+
+      // DEV_MODE elides the counter put, so any put here would be the handler's own.
+      expect(ops.putKeys()).toEqual([]);
+      expect(await kv.get(kvKeys.user(USER1))).toBe(before);
+    },
+  );
+
+  it("accepts a ref whose bookId is exactly at the cap and stores it", async () => {
+    const authToken = await seedWithPrefs();
+
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/family-prefs`,
+      { hidden: [capRef] },
+      authToken,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    expect(json.data.hidden).toEqual([capRef]);
+
+    const record = await kv.get<UserBooksRecord>(kvKeys.user(USER1), "json");
+    expect(record?.familyShelfPrefs).toEqual({
+      hidden: [capRef],
+      favorites: STORED_PREFS.favorites,
+    });
   });
 });
 

@@ -10,6 +10,7 @@ import {
   type UserBooksRecord,
 } from "../../src/kv/schema";
 import { USER1, USER2 } from "../helpers/ids";
+import { MAX_BOOK_ID_LENGTH } from "moo-family-bookshelf-shared/api/bookId";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -17,7 +18,7 @@ type Json = any;
 /**
  * PUT /api/user/:id/books — new malformed bookIds are DROPPED, not rejected.
  *
- * A bookId that is not a real Readmoo id (12+ digits, `isRealBookId` in
+ * A bookId that is not a real Readmoo id (12–32 digits, `isRealBookId` in
  * `shared/src/api/bookId.ts`) and is not already in the caller's stored record
  * never reaches `user:{id}`, the response, or a refreshed public snapshot. Ids
  * already stored (legacy short ids from an old scraper fallback) are
@@ -186,6 +187,23 @@ describe("PUT /api/user/:id/books — malformed bookId filter", () => {
     // Positive companion to the "no call" assertion: the tag the filter is
     // checked against is the one the drop case above actually emits.
     expect(dropLogCalls(warn)).toHaveLength(0);
+  });
+
+  it("drops a new all-digit id over MAX_BOOK_ID_LENGTH and keeps one at the cap (#316)", async () => {
+    const token = await seedAuthToken(kv, USER1);
+    const overLongId = "9".repeat(40);
+    const atCapId = "8".repeat(MAX_BOOK_ID_LENGTH);
+
+    const res = await putBooks(USER1, token, [
+      book(overLongId, { isShared: BoolFlag.TRUE }),
+      book(atCapId),
+      book(REAL_ID),
+    ]);
+
+    expect(res.status).toBe(200);
+    expect(await storedBookIds(USER1)).toEqual([atCapId, REAL_ID]);
+    expect(await kv.get(kvKeys.user(USER1))).not.toContain(overLongId);
+    expect(dropLogCalls(warn)).toEqual([[LOG_TAG, { count: 1 }]]);
   });
 
   it("drops every short id on a first save, answering 200 with an empty list", async () => {

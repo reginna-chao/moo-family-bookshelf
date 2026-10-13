@@ -1,5 +1,5 @@
 /** Book-id sources for a `.library-item`, in order: fiber `data-moo-book-id`, reader-link href, `.privacy`.
- *  Each must be a real id (`isRealBookId`, 12+ digits) — any other would upload a never-matching ghost. */
+ *  Each must be a real id (`isRealBookId`, 12–32 digits) — any other would upload a never-matching ghost. */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";

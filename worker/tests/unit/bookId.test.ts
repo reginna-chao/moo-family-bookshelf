@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isRealBookId,
+  MAX_BOOK_ID_LENGTH,
   REAL_BOOK_ID_PATTERN,
 } from "moo-family-bookshelf-shared/api/bookId";
 import { dropNewMalformedBookIds } from "../../src/routes/user";
@@ -34,7 +35,21 @@ describe("isRealBookId", () => {
     },
     { label: "exactly 12 digits", input: "1".repeat(12), expected: true },
     { label: "a 15-digit production id", input: REAL_ID, expected: true },
-    { label: "a long all-digit id", input: "9".repeat(40), expected: true },
+    {
+      label: "exactly MAX_BOOK_ID_LENGTH digits",
+      input: "1".repeat(MAX_BOOK_ID_LENGTH),
+      expected: true,
+    },
+    {
+      label: "one digit over MAX_BOOK_ID_LENGTH",
+      input: "1".repeat(MAX_BOOK_ID_LENGTH + 1),
+      expected: false,
+    },
+    {
+      label: "a 40-digit id over the length cap",
+      input: "9".repeat(40),
+      expected: false,
+    },
     { label: "a legacy short id", input: "b1", expected: false },
     { label: "a short numeric id", input: "210439", expected: false },
     {
@@ -69,8 +84,20 @@ describe("isRealBookId", () => {
     expect(isRealBookId(input)).toBe(expected);
   });
 
+  it("caps a real id at 32 digits, the familyShelfPrefs ref bookId cap (#316)", () => {
+    expect(MAX_BOOK_ID_LENGTH).toBe(32);
+  });
+
   it("agrees with the exported REAL_BOOK_ID_PATTERN on string input", () => {
-    for (const id of ["1".repeat(11), "1".repeat(12), REAL_ID, "b1", ""]) {
+    for (const id of [
+      "1".repeat(11),
+      "1".repeat(12),
+      REAL_ID,
+      "1".repeat(MAX_BOOK_ID_LENGTH),
+      "1".repeat(MAX_BOOK_ID_LENGTH + 1),
+      "b1",
+      "",
+    ]) {
       expect(isRealBookId(id)).toBe(REAL_BOOK_ID_PATTERN.test(id));
     }
   });
@@ -98,6 +125,20 @@ describe("dropNewMalformedBookIds", () => {
       incoming: ["b1"],
       stored: ["b1"],
       kept: ["b1"],
+      dropped: 0,
+    },
+    {
+      label: "drops a new all-digit id over the length cap (#316)",
+      incoming: ["9".repeat(40)],
+      stored: [REAL_ID],
+      kept: [],
+      dropped: 1,
+    },
+    {
+      label: "keeps an over-long id already in the stored record",
+      incoming: ["9".repeat(40)],
+      stored: ["9".repeat(40)],
+      kept: ["9".repeat(40)],
       dropped: 0,
     },
     {

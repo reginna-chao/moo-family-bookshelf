@@ -24,9 +24,10 @@ import {
  * at all), ignores any value the client sends (the Extension sync spreads the
  * read record into its PUT body), and writes nothing on 409 / 400. Every other
  * `user:{id}` writer — PATCH books, PUT family-prefs, the family displayName
- * PUT — carries the stored list through untouched; GET returns it. A real id
- * longer than `MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH` is stored as a book but is
- * never tombstoned, so it cannot grow the list across PUTs (#312 review C1).
+ * PUT — carries the stored list through untouched; GET returns it. An id
+ * longer than `MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH` is never tombstoned, so it
+ * cannot grow the list across PUTs (#312 review C1); since #316 a PUT drops a
+ * NEW one, so only a grandfathered stored record can still hold such an id.
  *
  * Requests run WITHOUT `DEV_MODE` and spread the Rate Limiting binding stubs,
  * like a production deploy; each case gets a fresh KV, so the hourly
@@ -200,30 +201,32 @@ describe("PUT /api/user/:id/books — what gets tombstoned", () => {
   });
 
   it("never tombstones a removed id longer than the length cap (#312 C1)", async () => {
+    // A PUT now drops a new over-long id (#316), so only a record stored
+    // before that bound can still hold one: seed it directly, grandfathered.
     const longId = "9".repeat(200);
+    await seedRecord({
+      books: [book(longId, BoolFlag.FALSE), book(Y, BoolFlag.TRUE)],
+    });
 
-    let res = await putBooks({ books: [book(longId, BoolFlag.FALSE)] });
-    expect(res.status).toBe(200);
-    // Positive companion: the over-long book itself is stored as a book.
-    expect((await storedRecord())?.books.map((b) => b.bookId)).toEqual([
-      longId,
-    ]);
-
-    res = await putBooks({ books: [] });
+    const res = await putBooks({ books: [book(Y, BoolFlag.TRUE)] });
 
     expect(res.status).toBe(200);
+    // Positive companion: the save landed and really removed the long id.
+    expect((await storedRecord())?.books.map((b) => b.bookId)).toEqual([Y]);
     expect(await storedHasKey()).toBe(false);
   });
 
   it("tombstones a 15-digit id removed alongside an over-long one", async () => {
+    // Seeded directly: a PUT drops a new over-long id (#316), see the C1 case.
     const longId = "9".repeat(200);
-    await putBooks({
+    await seedRecord({
       books: [book(longId, BoolFlag.FALSE), book(X, BoolFlag.FALSE)],
     });
 
     const res = await putBooks({ books: [] });
 
     expect(res.status).toBe(200);
+    expect((await storedRecord())?.books).toEqual([]);
     expect(await storedList()).toEqual([X]);
   });
 
