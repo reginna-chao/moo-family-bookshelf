@@ -84,6 +84,9 @@
 
 ## 支持開發
 
+如果這個專案對你有幫助，歡迎贊助！
+
+<a href="https://ko-fi.com/rcwork" target="_blank"><img src="assets/kofi-button.webp" alt="Buy me a coffee on Ko-fi" height="40"></a>
 <a href="https://rcwork.bobaboba.me/" target="_blank"><img src="assets/boba-button.svg" alt="Give me a Boba!" height="40"></a>
 
 ## 授權

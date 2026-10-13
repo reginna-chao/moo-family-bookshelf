@@ -80,6 +80,9 @@ Want to contribute or self-host the backend? See [CONTRIBUTING.md](CONTRIBUTING.
 
 ## Support
 
+If this project helps you, sponsorship is very welcome!
+
+<a href="https://ko-fi.com/rcwork" target="_blank"><img src="assets/kofi-button.webp" alt="Buy me a coffee on Ko-fi" height="40"></a>
 <a href="https://rcwork.bobaboba.me/" target="_blank"><img src="assets/boba-button.svg" alt="Give me a Boba!" height="40"></a>
 
 ## License
