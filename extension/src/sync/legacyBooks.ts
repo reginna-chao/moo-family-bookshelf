@@ -46,7 +46,8 @@ function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
  * unchanged: until the scrape produces the book's real id, the legacy entry is
  * the only record of that book's share setting, so dropping it would silently
  * unshare the book. The next sync that produces the real id resolves it
- * through this same rule. Pruning books removed from Readmoo is #241.
+ * through this same rule. Pruning books removed from Readmoo (#241) is
+ * `pruneRemovedBooks` in `pruneBooks.ts`, which never touches legacy ids.
  *
  * Order is preserved, the input is not mutated, and the same array is
  * returned when nothing is removed.

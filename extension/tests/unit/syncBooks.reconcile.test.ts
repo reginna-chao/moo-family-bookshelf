@@ -1,10 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * `syncBooks` reconciliation (#236): the order scrape → GET saved → breaker →
- * borrow list (once) → merge → id-change resolution → PUT → lastSyncAt →
- * auto-return. A failed read or a tripped breaker must stop BEFORE any upload;
- * id-change resolution only runs on a complete scrape with a known borrow list.
+ * `syncBooks` reconciliation (#236): the order GET saved (prune candidates) →
+ * scrape → GET saved (upload basis) → breaker → borrow list (once) → merge →
+ * id-change resolution → pruning (#241) → PUT → lastSyncAt → auto-return. A
+ * failed pre-scrape read must stop BEFORE the scrape, a tripped breaker before
+ * any upload; id-change resolution and pruning only run on a complete scrape
+ * with a known borrow list.
+ *
+ * Pruning may only remove books the pre-scrape GET held: a book another device
+ * stores while this sync scrapes, or between its first PUT and the 409 re-read,
+ * is absent from the scrape yet must survive with its share flag. The
+ * "a book another device stores mid-sync" block drives that race through a fake
+ * server that honours `expectedLastUpdated` like the Worker.
+ *
+ * The upload basis is the POST-scrape read, never the pre-scrape one: the
+ * Worker's `PUT /family-prefs` keeps the stored `lastUpdated`, so a sync PUT
+ * spread from the pre-scrape record would pass its precondition and silently
+ * overwrite family-shelf prefs saved during the scrape. "the upload basis" pins
+ * the first PUT to the post-scrape record's prefs and stamp.
  *
  * Two consecutive syncs — F2 regression (#236): a sync that cannot judge renames
  * must leave the pair resolvable by the next one. The fake server stores exactly
@@ -152,8 +166,12 @@ function serverRecord(books: BookEntry[]) {
   return { data: { books, displayName: "小明", keepMe: "unknown-field" } };
 }
 
-function mockScrape(books: ScrapedBook[], complete = true): void {
-  vi.mocked(scrapeLibrary).mockResolvedValue({ books, complete });
+function mockScrape(
+  books: ScrapedBook[],
+  complete = true,
+  libraryIds: ReadonlySet<string> | null = null,
+): void {
+  vi.mocked(scrapeLibrary).mockResolvedValue({ books, complete, libraryIds });
 }
 
 function uploadedPayload(api: MockApi): PersonalBooks {
@@ -204,6 +222,7 @@ describe("syncBooks — reconciliation", () => {
     vi.mocked(scrapeArchivedBooks).mockResolvedValue({
       books: [],
       complete: true,
+      libraryIds: null,
     });
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -230,9 +249,40 @@ describe("syncBooks — reconciliation", () => {
       });
       expect(api.updatePersonalBooks).not.toHaveBeenCalled();
       expect(wroteLastSyncAt()).toBe(false);
-      // Nothing after the read runs: no borrow list, no auto-return.
+      // Nothing after the read runs: no scrape, no borrow list, no auto-return.
+      expect(scrapeLibrary).not.toHaveBeenCalled();
       expect(api.listBorrowRequests).not.toHaveBeenCalled();
       expect(api.updateBorrowStatus).not.toHaveBeenCalled();
+    });
+
+    it("fails the sync without scraping when the read itself rejects", async () => {
+      mockScrape(SCRAPED_BOOKS);
+      const api = createApi(serverRecord(SERVER_BOOKS));
+      api.getPersonalBooks.mockRejectedValue(new Error("網路中斷"));
+
+      const result = await runSync(api, true);
+
+      expect(result).toEqual({ success: false, books: [], error: "網路中斷" });
+      expect(scrapeLibrary).not.toHaveBeenCalled();
+      expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+      expect(wroteLastSyncAt()).toBe(false);
+    });
+
+    it("reads the saved list before it scrapes, and again after it", async () => {
+      mockScrape(SCRAPED_BOOKS);
+      const api = createApi(serverRecord(SERVER_BOOKS));
+
+      const result = await runSync(api, false);
+
+      expect(result.success).toBe(true);
+      expect(api.getPersonalBooks).toHaveBeenCalledTimes(2);
+      const scrapeOrder = vi.mocked(scrapeLibrary).mock.invocationCallOrder[0];
+      expect(api.getPersonalBooks.mock.invocationCallOrder[0]).toBeLessThan(
+        scrapeOrder,
+      );
+      expect(api.getPersonalBooks.mock.invocationCallOrder[1]).toBeGreaterThan(
+        scrapeOrder,
+      );
     });
 
     it("uploads the scrape as a first sync when the record is simply absent", async () => {
@@ -246,6 +296,46 @@ describe("syncBooks — reconciliation", () => {
       // Positive companion of the "no lastSyncAt" assertion above.
       expect(wroteLastSyncAt()).toBe(true);
     });
+  });
+
+  // See the header → "The upload basis is the POST-scrape read".
+  describe("the upload basis", () => {
+    const PRE_STAMP = "2026-10-01T00:00:00.000Z";
+    const PREFS_BEFORE = { hidden: ["owner-a:1"], favorites: [] };
+    const PREFS_DURING = { hidden: [], favorites: ["owner-b:2"] };
+
+    it.each([
+      {
+        name: "keeps the stored stamp (as the Worker does)",
+        postStamp: PRE_STAMP,
+      },
+      { name: "bumps the stamp", postStamp: "2026-10-01T00:00:07.000Z" },
+    ])(
+      "uploads family-shelf prefs saved during the scrape when that save $name",
+      async ({ postStamp }) => {
+        mockScrape(SCRAPED_BOOKS);
+        const api = createApi(serverRecord(SERVER_BOOKS));
+        const record = (prefs: object, lastUpdated: string) => ({
+          data: {
+            ...serverRecord(SERVER_BOOKS).data,
+            familyShelfPrefs: prefs,
+            lastUpdated,
+          },
+        });
+        api.getPersonalBooks
+          .mockResolvedValueOnce(record(PREFS_BEFORE, PRE_STAMP))
+          .mockResolvedValueOnce(record(PREFS_DURING, postStamp));
+
+        const result = await runSync(api, false);
+
+        expect(result.success).toBe(true);
+        const body = uploadedPayload(api) as PersonalBooks & {
+          expectedLastUpdated?: string;
+        };
+        expect(body.familyShelfPrefs).toEqual(PREFS_DURING);
+        expect(body.expectedLastUpdated).toBe(postStamp);
+      },
+    );
   });
 
   describe("circuit breaker", () => {
@@ -310,6 +400,7 @@ describe("syncBooks — reconciliation", () => {
         vi.mocked(scrapeArchivedBooks).mockResolvedValue({
           books: [],
           complete: archiveComplete,
+          libraryIds: null,
         });
         // 20 active (all found) + 60 archived (not scraped this time).
         const active = Array.from({ length: 20 }, (_, i) =>
@@ -390,6 +481,7 @@ describe("syncBooks — reconciliation", () => {
       vi.mocked(scrapeArchivedBooks).mockResolvedValue({
         books: [],
         complete: false,
+        libraryIds: null,
       });
       mockScrape(SCRAPED_BOOKS);
       const api = createApi(serverRecord(SERVER_BOOKS));
@@ -466,6 +558,210 @@ describe("syncBooks — reconciliation", () => {
         BorrowStatus.RETURNED,
       );
       expect(result.autoReturnedRequestIds).toEqual([`req-${NEW_ID}`]);
+    });
+  });
+
+  // #241: pruning runs after id-change resolution, under the same gates.
+  describe("pruning books Readmoo no longer holds", () => {
+    const GONE_ID = "210000000000004";
+    const LOANED_ID = "210000000000005";
+    /** KEPT is on the shelf, LOANED only in Readmoo's loaned list, GONE nowhere. */
+    const PRUNE_SERVER = [
+      savedBook(KEPT_ID, "沒變的書"),
+      savedBook(GONE_ID, "退款的書", { isShared: BoolFlag.TRUE }),
+      savedBook(LOANED_ID, "借給別人的書"),
+    ];
+    const PRUNE_SCRAPE = [scrapedBook(KEPT_ID, "沒變的書")];
+    const LIBRARY_IDS = new Set([KEPT_ID, LOANED_ID]);
+
+    it("uploads the list without the gone book and reports the removed counts", async () => {
+      mockScrape(PRUNE_SCRAPE, true, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), []);
+
+      const result = await runSync(api, true);
+
+      expect(result.success).toBe(true);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, LOANED_ID]);
+      expect(result.books.map((b) => b.bookId)).toEqual([KEPT_ID, LOANED_ID]);
+      expect(result.removedBooks).toEqual([
+        { bookId: GONE_ID, isShared: BoolFlag.TRUE },
+      ]);
+      expect(result.removedBookCount).toBe(1);
+      expect(result.removedSharedCount).toBe(1);
+      expect(result.renamedBookCount).toBe(0);
+    });
+
+    it.each([
+      {
+        name: "the scrape is incomplete",
+        complete: false,
+        requests: [] as BorrowRequest[] | Error,
+      },
+      {
+        name: "the borrow list is unavailable",
+        complete: true,
+        requests: new Error("borrow list down") as BorrowRequest[] | Error,
+      },
+    ])("removes nothing when $name", async ({ complete, requests }) => {
+      mockScrape(PRUNE_SCRAPE, complete, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), requests);
+
+      const result = await runSync(api, true);
+
+      expect(result.success).toBe(true);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, GONE_ID, LOANED_ID]);
+      expect(result.removedBookCount).toBe(0);
+      expect(result.removedSharedCount).toBe(0);
+      expect(result.removedBooks).toEqual([]);
+    });
+
+    it("keeps the gone book while it is lent out through MooFamily", async () => {
+      mockScrape(PRUNE_SCRAPE, true, LIBRARY_IDS);
+      const api = createApi(serverRecord(PRUNE_SERVER), [
+        makeLentRequest(GONE_ID),
+      ]);
+
+      const result = await runSync(api, true);
+
+      expect(uploadedIds(api)).toEqual([KEPT_ID, GONE_ID, LOANED_ID]);
+      expect(result.removedBookCount).toBe(0);
+    });
+
+    it("reports a renamed old id as renamed, not removed", async () => {
+      mockScrape(SCRAPED_BOOKS, true, new Set([KEPT_ID, NEW_ID]));
+      const api = createApi(serverRecord(SERVER_BOOKS), []);
+
+      const result = await runSync(api, true);
+
+      expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+      expect(result.removedBookCount).toBe(0);
+      expect(uploadedIds(api)).toEqual([KEPT_ID, NEW_ID]);
+    });
+  });
+
+  // See the header → "Pruning may only remove books the pre-scrape GET held".
+  describe("a book another device stores mid-sync", () => {
+    const Y_ID = "210000000000006";
+    const X_BOOK = savedBook(KEPT_ID, "沒變的書");
+    const PRE_SCRAPE_STAMP = "2026-10-01T00:00:00.000Z";
+
+    interface ConflictState {
+      books: BookEntry[];
+      lastUpdated: string;
+    }
+
+    /** Stores what a PUT sends; a stale `expectedLastUpdated` writes nothing and answers 409. */
+    function createConflictServer(
+      initial: BookEntry[],
+      beforePut?: (index: number, state: ConflictState) => void,
+    ) {
+      const state: ConflictState = {
+        books: initial,
+        lastUpdated: PRE_SCRAPE_STAMP,
+      };
+      const puts: Array<{ books: BookEntry[]; conflict: boolean }> = [];
+      const getPersonalBooks = vi.fn(async () => ({
+        data: JSON.parse(
+          JSON.stringify({ ...state, displayName: "小明" }),
+        ) as PersonalBooks,
+      }));
+      const updatePersonalBooks = vi.fn(
+        async (_userId: string, payload: PersonalBooks) => {
+          const body = JSON.parse(JSON.stringify(payload)) as PersonalBooks & {
+            expectedLastUpdated?: string;
+          };
+          beforePut?.(puts.length, state);
+          const conflict = body.expectedLastUpdated !== state.lastUpdated;
+          puts.push({ books: body.books, conflict });
+          if (conflict) {
+            return {
+              error: {
+                code: "BOOKS_CONFLICT",
+                message: "Books record changed since it was read",
+              },
+            };
+          }
+          state.books = body.books;
+          state.lastUpdated = `server-write-${puts.length}`;
+          return { data: { ok: true } };
+        },
+      );
+      const client = {
+        getPersonalBooks,
+        updatePersonalBooks,
+        listBorrowRequests: vi.fn(async () => []),
+        updateBorrowStatus: vi.fn(),
+      } as unknown as ApiClient;
+      return { client, state, puts, getPersonalBooks };
+    }
+
+    /** Another device's sync stores Y (shared) — Readmoo on THIS device does not list it. */
+    function otherDeviceStoresY(state: ConflictState): void {
+      state.books = [
+        ...state.books,
+        savedBook(Y_ID, "另一台裝置的書", { isShared: BoolFlag.TRUE }),
+      ];
+      state.lastUpdated = "2026-10-01T00:00:05.000Z";
+    }
+
+    function syncWith(client: ApiClient) {
+      return syncBooks({
+        navigate: false,
+        userId: USER_ID,
+        apiClient: client,
+        familyId: FAMILY_ID,
+      });
+    }
+
+    /** `conflicts`: the outcome of each PUT; the last one is the landed one. */
+    function expectYKeptShared(
+      result: Awaited<ReturnType<typeof syncBooks>>,
+      server: ReturnType<typeof createConflictServer>,
+      conflicts: boolean[],
+    ): void {
+      expect(result.success).toBe(true);
+      expect(server.puts.map((p) => p.conflict)).toEqual(conflicts);
+      const landed = server.puts[conflicts.length - 1].books;
+      expect(landed.map((b) => b.bookId)).toEqual([KEPT_ID, Y_ID]);
+      expect(landed.find((b) => b.bookId === Y_ID)?.isShared).toBe(
+        BoolFlag.TRUE,
+      );
+      expect(result.books).toEqual(landed);
+      expect(result.removedBookCount).toBe(0);
+      expect(result.removedBooks).toEqual([]);
+      expect(result.removedSharedCount).toBe(0);
+    }
+
+    it("keeps a shared book stored between the first PUT and its conflict re-read", async () => {
+      mockScrape([scrapedBook(KEPT_ID, "沒變的書")], true, new Set([KEPT_ID]));
+      const server = createConflictServer([X_BOOK], (index, state) => {
+        if (index === 0) otherDeviceStoresY(state);
+      });
+
+      const result = await syncWith(server.client);
+
+      expectYKeptShared(result, server, [true, false]);
+      // Pre-scrape read, post-scrape read, conflict re-read.
+      expect(server.getPersonalBooks).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps a shared book stored while this device was scraping", async () => {
+      const server = createConflictServer([X_BOOK]);
+      vi.mocked(scrapeLibrary).mockImplementation(async () => {
+        otherDeviceStoresY(server.state);
+        return {
+          books: [scrapedBook(KEPT_ID, "沒變的書")],
+          complete: true,
+          libraryIds: new Set([KEPT_ID]),
+        };
+      });
+
+      const result = await syncWith(server.client);
+
+      // The post-scrape read already holds Y, so the first PUT lands; Y stays outside the
+      // pre-scrape prune candidates, so it is kept although this scrape never saw it.
+      expectYKeptShared(result, server, [false]);
+      expect(server.getPersonalBooks).toHaveBeenCalledTimes(2);
     });
   });
 

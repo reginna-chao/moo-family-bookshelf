@@ -135,9 +135,9 @@ export async function scrapeArchivedBooks(
     await waitForLibraryReload(10000);
 
     // Step 6: Scrape books and mark as archived
-    const { books, complete } = await scrapeLibrary(opts);
+    const { books, complete, libraryIds } = await scrapeLibrary(opts);
     const archived = books.map((b) => ({ ...b, isArchived: BoolFlag.TRUE }));
-    return { books: archived, complete };
+    return { books: archived, complete, libraryIds };
   } catch {
     return failedScrape();
   } finally {

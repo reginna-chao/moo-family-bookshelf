@@ -3,7 +3,7 @@
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { BoolFlag } from "../api/client";
-import { requestFiberData, requestLibraryListTotal } from "./fiber-data";
+import { requestFiberData, requestLibraryFiberData } from "./fiber-data";
 import { queryWithLegacyFallback } from "./readmoo-dom";
 import {
   paginateLibrary,
@@ -129,7 +129,8 @@ export { scrapeUserEmail, scrapeDisplayName } from "./scraper-profile";
  * Fiber data is requested twice: before pagination for the first screen, and
  * again after it so cards rendered by later scrolls are stamped too (the
  * bridge skips cards already stamped). The list total comes from that second
- * request, read together with the card count it is compared against.
+ * request, read together with the card count it is compared against, as are
+ * the account's library ids (`ScrapeResult.libraryIds`).
  */
 export async function scrapeLibrary(
   opts?: ScrapeBooksOptions,
@@ -138,7 +139,7 @@ export async function scrapeLibrary(
   try {
     await requestFiberData();
     const belowPageCap = await paginateLibrary(opts?.onProgress);
-    const listTotal = await requestLibraryListTotal();
+    const { listTotal, libraryIds } = await requestLibraryFiberData();
     const items = document.querySelectorAll(READMOO_SELECTORS.libraryItem);
     const books: ScrapedBook[] = [];
     let skippedCount = 0;
@@ -153,7 +154,7 @@ export async function scrapeLibrary(
       listTotal,
       itemCount: items.length,
     });
-    return { books, complete };
+    return { books, complete, libraryIds };
   } finally {
     window.scrollTo(0, originalScrollY);
   }

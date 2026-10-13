@@ -10,6 +10,9 @@ import { dropResolvedLegacyBooks } from "./legacyBooks";
  *   legacy entries resolved to a real one, which are dropped by
  *   `dropResolvedLegacyBooks` (#234); ids in `keepFlagsFor` (the user's
  *   unsaved toggles) are never promoted by that step
+ *
+ * Pruning books removed from Readmoo is `pruneRemovedBooks` in
+ * `pruneBooks.ts`, run by `resolveForUpload` — never here.
  */
 export function mergeBooks(
   scraped: ScrapedBook[],

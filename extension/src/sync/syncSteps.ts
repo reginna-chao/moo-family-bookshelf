@@ -1,5 +1,5 @@
 /** The steps of `syncBooks` (sync/syncBooks.ts) that write nothing — scrape, borrow-list fetch,
- *  id-change resolution of the merged list — kept apart so the orchestrator stays short. */
+ *  id-change resolution and pruning of the merged list — kept apart so the orchestrator stays short. */
 
 import { ApiClient, BookEntry, BoolFlag, BorrowRequest } from "../api/client";
 import { readSyncArchived } from "../storage/syncArchived";
@@ -10,6 +10,7 @@ import {
   type ScrapeResult,
 } from "../content/scraper";
 import { combineScrapeResults } from "../content/scrapeResult";
+import { pruneRemovedBooks, type PruneResult } from "./pruneBooks";
 import {
   deferRenameCandidates,
   lentBookIdsOf,
@@ -97,34 +98,56 @@ export function holdBackRenameCandidates(
   return result;
 }
 
-export interface UploadPlan extends RenameResult {
+export interface UploadPlan extends RenameResult, Omit<PruneResult, "books"> {
   /** Brand-new entries held back because renames could not be judged. */
   deferredCount: number;
 }
 
+function nothingPruned(): Omit<PruneResult, "books"> {
+  return { removedBooks: [], removedCount: 0, removedSharedCount: 0 };
+}
+
 /**
- * Id-change resolution runs only on a COMPLETE scrape, and — with a family —
- * only when the borrow list was obtained (lent books must stay); otherwise the
- * merged list is uploaded minus its rename candidates. Writes nothing.
+ * Id-change resolution and pruning (#241) run only on a COMPLETE scrape, and —
+ * with a family — only when the borrow list was obtained (lent books must
+ * stay); pruning further needs the fiber library ids readable and covering the
+ * scrape (`pruneRemovedBooks`). Otherwise the merged list is uploaded minus its
+ * rename candidates and nothing is pruned. Pruning may only remove books in
+ * `options.preScrapeServerIds` (on the server before the scrape began): a book
+ * first seen in a later read is never a candidate. Rename resolution still
+ * judges against `savedBooks` (the current read). Writes nothing.
  */
 export function resolveForUpload(
   merged: BookEntry[],
   scrape: SyncScrape,
   savedBooks: BookEntry[],
   requests: BorrowRequest[] | null,
-  options: { familyId?: string; userId: string },
+  options: {
+    familyId?: string;
+    userId: string;
+    preScrapeServerIds: ReadonlySet<string>;
+  },
 ): UploadPlan {
   const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
   const borrowKnown = !options.familyId || requests !== null;
   if (!scrape.complete || !borrowKnown) {
     const held = holdBackRenameCandidates(merged, scrapedIds, savedBooks);
-    return { ...held, renamedBooks: [], renamedCount: 0 };
+    return { ...held, renamedBooks: [], renamedCount: 0, ...nothingPruned() };
   }
+  const serverIds = new Set(savedBooks.map((b) => b.bookId));
+  const lentBookIds = lentBookIdsOf(requests ?? [], options.userId);
   const resolved = resolveRenamedBooks(merged, {
     scrapedIds,
-    serverIds: new Set(savedBooks.map((b) => b.bookId)),
-    lentBookIds: lentBookIdsOf(requests ?? [], options.userId),
+    serverIds,
+    lentBookIds,
     syncArchived: scrape.syncArchived,
   });
-  return { ...resolved, deferredCount: 0 };
+  const pruned = pruneRemovedBooks(resolved.books, {
+    scrapedIds,
+    libraryIds: scrape.libraryIds,
+    lentBookIds,
+    serverIds: options.preScrapeServerIds,
+    syncArchived: scrape.syncArchived,
+  });
+  return { ...resolved, ...pruned, deferredCount: 0 };
 }

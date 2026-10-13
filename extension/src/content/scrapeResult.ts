@@ -6,6 +6,9 @@ import type { ScrapedBook } from "./scraper";
 export interface ScrapeResult {
   books: ScrapedBook[];
   complete: boolean;
+  /** Every id Readmoo holds for the account (fiber bridge); null when unreadable. A KEEP-set only,
+   *  never used to ADD books — see docs/architecture.md → Content Script 的擷取與注入. */
+  libraryIds: ReadonlySet<string> | null;
 }
 
 export interface LibraryScrapeStats {
@@ -31,7 +34,7 @@ export function isLibraryScrapeComplete(stats: LibraryScrapeStats): boolean {
 
 /** A failed or unconfirmable scrape — never treated as "zero books found". */
 export function failedScrape(): ScrapeResult {
-  return { books: [], complete: false };
+  return { books: [], complete: false, libraryIds: null };
 }
 
 /**
@@ -46,5 +49,7 @@ export function combineScrapeResults(
   return {
     books: [...library.books, ...archive.books],
     complete: library.complete && archive.complete,
+    // The main-view pass reads the whole account; the archive pass's value is ignored.
+    libraryIds: library.libraryIds,
   };
 }

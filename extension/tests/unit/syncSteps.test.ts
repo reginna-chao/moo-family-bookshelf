@@ -45,6 +45,7 @@ describe("scrapeForSync", () => {
     vi.mocked(scrapeLibrary).mockResolvedValue({
       books: [LIB_BOOK],
       complete: true,
+      libraryIds: null,
     });
   });
 
@@ -59,9 +60,30 @@ describe("scrapeForSync", () => {
     expect(result).toEqual({
       books: [LIB_BOOK],
       complete: true,
+      libraryIds: null,
       syncArchived: BoolFlag.FALSE,
       archiveCovered: false,
     });
+  });
+
+  it("carries the library pass's library ids, never the archive pass's", async () => {
+    const libraryIds = new Set([LIB_BOOK.bookId, ARCH_BOOK.bookId]);
+    await chrome.storage.local.set({ [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE });
+    vi.mocked(scrapeLibrary).mockResolvedValue({
+      books: [LIB_BOOK],
+      complete: true,
+      libraryIds,
+    });
+    vi.mocked(scrapeArchivedBooks).mockResolvedValue({
+      books: [ARCH_BOOK],
+      complete: true,
+      libraryIds: new Set([ARCH_BOOK.bookId]),
+    });
+
+    const result = await scrapeForSync();
+
+    expect(result.libraryIds).toBe(libraryIds);
+    expect(result.books).toEqual([LIB_BOOK, ARCH_BOOK]);
   });
 
   it.each([
@@ -74,6 +96,7 @@ describe("scrapeForSync", () => {
       vi.mocked(scrapeArchivedBooks).mockResolvedValue({
         books: archiveComplete ? [ARCH_BOOK] : [],
         complete: archiveComplete,
+        libraryIds: null,
       });
 
       const result = await scrapeForSync();
@@ -87,10 +110,15 @@ describe("scrapeForSync", () => {
 
   it("is incomplete when the library scrape is, even with a complete archive", async () => {
     await chrome.storage.local.set({ [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE });
-    vi.mocked(scrapeLibrary).mockResolvedValue({ books: [], complete: false });
+    vi.mocked(scrapeLibrary).mockResolvedValue({
+      books: [],
+      complete: false,
+      libraryIds: null,
+    });
     vi.mocked(scrapeArchivedBooks).mockResolvedValue({
       books: [ARCH_BOOK],
       complete: true,
+      libraryIds: null,
     });
 
     const result = await scrapeForSync();
@@ -144,24 +172,48 @@ describe("resolveForUpload", () => {
     { ...saved, bookId: NEW_ID, isShared: BoolFlag.FALSE },
     saved,
   ];
+  // The pre-scrape read held the same list every case passes as `savedBooks`.
+  const SAVED_IDS: ReadonlySet<string> = new Set([OLD_ID]);
 
-  function scrapeOf(complete: boolean): SyncScrape {
+  function scrapeOf(
+    complete: boolean,
+    libraryIds: ReadonlySet<string> | null = null,
+  ): SyncScrape {
     return {
       books: [scraped],
       complete,
+      libraryIds,
       syncArchived: BoolFlag.FALSE,
       archiveCovered: false,
     };
   }
 
-  function lentOld(): BorrowRequest {
+  /** OLD (shared) is gone from Readmoo: the scrape and the library ids hold only an unrelated NEW book. */
+  function goneFromReadmoo(complete: boolean): {
+    list: BookEntry[];
+    scrape: SyncScrape;
+  } {
+    const unrelated = { ...LIB_BOOK, bookId: NEW_ID, title: "別的書" };
+    return {
+      list: [
+        { ...saved, bookId: NEW_ID, title: "別的書", isShared: BoolFlag.FALSE },
+        saved,
+      ],
+      scrape: {
+        ...scrapeOf(complete, new Set([NEW_ID])),
+        books: [unrelated],
+      },
+    };
+  }
+
+  function lentOld(bookId = OLD_ID): BorrowRequest {
     return {
       requestId: "req-1",
       familyId: "fam-1",
       borrowerId: "user-2",
       borrowerName: "借書人",
       ownerId: USER_ID,
-      bookId: OLD_ID,
+      bookId,
       bookTitle: "書",
       bookAuthor: "",
       bookCoverUrl: "",
@@ -175,6 +227,7 @@ describe("resolveForUpload", () => {
     const result = resolveForUpload(merged, scrapeOf(true), [saved], [], {
       familyId: "fam-1",
       userId: USER_ID,
+      preScrapeServerIds: SAVED_IDS,
     });
 
     expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID]);
@@ -185,6 +238,7 @@ describe("resolveForUpload", () => {
   it("resolves without a family even though no borrow list was fetched", () => {
     const result = resolveForUpload(merged, scrapeOf(true), [saved], null, {
       userId: USER_ID,
+      preScrapeServerIds: SAVED_IDS,
     });
 
     expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
@@ -194,6 +248,7 @@ describe("resolveForUpload", () => {
     const result = resolveForUpload(merged, scrapeOf(true), [saved], [], {
       familyId: "fam-1",
       userId: USER_ID,
+      preScrapeServerIds: SAVED_IDS,
     });
 
     expect(result.deferredCount).toBe(0);
@@ -229,7 +284,7 @@ describe("resolveForUpload", () => {
         scrapeOf(complete),
         [saved],
         requests,
-        { familyId: "fam-1", userId: USER_ID },
+        { familyId: "fam-1", userId: USER_ID, preScrapeServerIds: SAVED_IDS },
       );
 
       // The OLD id stays (it may still be real); the NEW twin is not uploaded,
@@ -239,6 +294,9 @@ describe("resolveForUpload", () => {
         renamedBooks: [],
         renamedCount: 0,
         deferredCount: 1,
+        removedBooks: [],
+        removedCount: 0,
+        removedSharedCount: 0,
       });
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy).toHaveBeenCalledWith(
@@ -258,7 +316,7 @@ describe("resolveForUpload", () => {
         { ...scrapeOf(complete), books: [unrelated] },
         [saved],
         requests,
-        { familyId: "fam-1", userId: USER_ID },
+        { familyId: "fam-1", userId: USER_ID, preScrapeServerIds: SAVED_IDS },
       );
 
       expect(result).toEqual({
@@ -266,9 +324,175 @@ describe("resolveForUpload", () => {
         renamedBooks: [],
         renamedCount: 0,
         deferredCount: 0,
+        removedBooks: [],
+        removedCount: 0,
+        removedSharedCount: 0,
       });
       expect(result.books).toBe(plain);
       expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("prunes nothing even when Readmoo's library no longer holds a saved book", () => {
+      const { list, scrape } = goneFromReadmoo(complete);
+
+      const result = resolveForUpload(list, scrape, [saved], requests, {
+        familyId: "fam-1",
+        userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
+      });
+
+      expect(result.books).toBe(list);
+      expect(result.removedBooks).toEqual([]);
+      expect(result.removedCount).toBe(0);
+      expect(result.removedSharedCount).toBe(0);
+    });
+  });
+
+  // #241: pruning runs only where renames are judged, after them.
+  describe("pruning", () => {
+    it("removes a saved book Readmoo no longer holds on a complete scrape with a known borrow list", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+
+      const result = resolveForUpload(list, scrape, [saved], [], {
+        familyId: "fam-1",
+        userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
+      });
+
+      expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID]);
+      expect(result.removedBooks).toEqual([
+        { bookId: OLD_ID, isShared: BoolFlag.TRUE },
+      ]);
+      expect(result.removedCount).toBe(1);
+      expect(result.removedSharedCount).toBe(1);
+      expect(result.renamedBooks).toEqual([]);
+      expect(result.deferredCount).toBe(0);
+    });
+
+    it("also prunes without a family (no borrow list needed)", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+
+      const result = resolveForUpload(list, scrape, [saved], null, {
+        userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
+      });
+
+      expect(result.removedCount).toBe(1);
+    });
+
+    it("prunes nothing when the library ids are unknown", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+
+      const result = resolveForUpload(
+        list,
+        { ...scrape, libraryIds: null },
+        [saved],
+        [],
+        { familyId: "fam-1", userId: USER_ID, preScrapeServerIds: SAVED_IDS },
+      );
+
+      expect(result.books).toBe(list);
+      expect(result.removedCount).toBe(0);
+    });
+
+    it("keeps a saved book the user has lent out through MooFamily", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+
+      const result = resolveForUpload(list, scrape, [saved], [lentOld()], {
+        familyId: "fam-1",
+        userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
+      });
+
+      expect(result.books).toBe(list);
+      expect(result.removedCount).toBe(0);
+    });
+
+    it("prunes a book lent through MooFamily by SOMEONE ELSE (only the owner's loans shield)", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+      const othersLoan = { ...lentOld(), ownerId: "user-9" };
+
+      const result = resolveForUpload(list, scrape, [saved], [othersLoan], {
+        familyId: "fam-1",
+        userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
+      });
+
+      expect(result.removedBooks.map((b) => b.bookId)).toEqual([OLD_ID]);
+    });
+
+    it.each([
+      { syncArchived: BoolFlag.FALSE, books: [NEW_ID, OLD_ID], removed: [] },
+      { syncArchived: BoolFlag.TRUE, books: [NEW_ID], removed: [OLD_ID] },
+    ])(
+      "passes the scrape's 同步封存書 setting (syncArchived=$syncArchived) to pruning for an archived saved book",
+      ({ syncArchived, books, removed }) => {
+        const { list, scrape } = goneFromReadmoo(true);
+        const archivedSaved = { ...saved, isArchived: BoolFlag.TRUE };
+        const archivedList = [list[0], archivedSaved];
+
+        const result = resolveForUpload(
+          archivedList,
+          { ...scrape, syncArchived },
+          [archivedSaved],
+          [],
+          { familyId: "fam-1", userId: USER_ID, preScrapeServerIds: SAVED_IDS },
+        );
+
+        expect(result.books.map((b) => b.bookId)).toEqual(books);
+        expect(result.removedBooks.map((b) => b.bookId)).toEqual(removed);
+      },
+    );
+
+    it("reports an old id paired by a rename as renamed, not removed", () => {
+      // NEW is the same-title twin of OLD; Readmoo's library lists NEW only.
+      const result = resolveForUpload(
+        merged,
+        scrapeOf(true, new Set([NEW_ID])),
+        [saved],
+        [],
+        { familyId: "fam-1", userId: USER_ID, preScrapeServerIds: SAVED_IDS },
+      );
+
+      expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+      expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID]);
+      expect(result.removedBooks).toEqual([]);
+      expect(result.removedCount).toBe(0);
+    });
+
+    // The race fixed in #241: another device stored OLD after this sync's pre-scrape read.
+    it("keeps a saved book the pre-scrape read did not hold, even though Readmoo lacks it", () => {
+      const { list, scrape } = goneFromReadmoo(true);
+
+      const result = resolveForUpload(list, scrape, [saved], [], {
+        familyId: "fam-1",
+        userId: USER_ID,
+        preScrapeServerIds: new Set<string>(),
+      });
+
+      expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID, OLD_ID]);
+      expect(result.books[1].isShared).toBe(BoolFlag.TRUE);
+      expect(result.removedBooks).toEqual([]);
+      expect(result.removedCount).toBe(0);
+      expect(result.removedSharedCount).toBe(0);
+    });
+
+    it("still judges renames against the current read, not the pre-scrape ids", () => {
+      // OLD is only in the current read; its same-title NEW twin still pairs with it.
+      const result = resolveForUpload(
+        merged,
+        scrapeOf(true, new Set([NEW_ID])),
+        [saved],
+        [],
+        {
+          familyId: "fam-1",
+          userId: USER_ID,
+          preScrapeServerIds: new Set<string>(),
+        },
+      );
+
+      expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+      expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID]);
     });
   });
 
@@ -281,6 +505,7 @@ describe("resolveForUpload", () => {
       {
         familyId: "fam-1",
         userId: USER_ID,
+        preScrapeServerIds: SAVED_IDS,
       },
     );
 

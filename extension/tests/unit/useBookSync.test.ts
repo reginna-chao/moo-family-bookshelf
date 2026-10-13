@@ -500,15 +500,19 @@ describe("useBookSync", () => {
     });
   });
 
-  // #236: the personal shelf shows a notice when a sync moved books to their
-  // new Readmoo id; the count reflects the last SUCCESSFUL sync only.
-  describe("renamedBookCount", () => {
-    it("starts at 0", () => {
+  // #236 / #241: the personal shelf shows notices when a sync moved books to a
+  // new Readmoo id or removed books; the counts reflect the last SUCCESSFUL sync only.
+  describe("syncNoticeCounts", () => {
+    it("starts with every count at 0", () => {
       const { result } = renderHook(() => useBookSync(makeOptions()));
-      expect(result.current.renamedBookCount).toBe(0);
+      expect(result.current.syncNoticeCounts).toEqual({
+        renamedBookCount: 0,
+        removedBookCount: 0,
+        removedSharedCount: 0,
+      });
     });
 
-    it("reports the count of a successful auto-sync", async () => {
+    it("reports the renamed count of a successful auto-sync", async () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
       vi.mocked(syncBooks).mockResolvedValue({
         success: true,
@@ -522,7 +526,10 @@ describe("useBookSync", () => {
       });
 
       expect(syncBooks).toHaveBeenCalledOnce();
-      expect(result.current.renamedBookCount).toBe(2);
+      expect(result.current.syncNoticeCounts.renamedBookCount).toBe(2);
+      // A sync that reports no removal leaves the removed counts at 0.
+      expect(result.current.syncNoticeCounts.removedBookCount).toBe(0);
+      expect(result.current.syncNoticeCounts.removedSharedCount).toBe(0);
     });
 
     it("updates on a successful manual sync and keeps the value across a failed one", async () => {
@@ -545,20 +552,67 @@ describe("useBookSync", () => {
       await act(async () => {
         await result.current.triggerManualSync();
       });
-      expect(result.current.renamedBookCount).toBe(3);
+      expect(result.current.syncNoticeCounts.renamedBookCount).toBe(3);
 
       // A failed sync uploaded nothing → the last success's count stands.
       await act(async () => {
         await result.current.triggerManualSync();
       });
       expect(result.current.syncStatus).toBe("error");
-      expect(result.current.renamedBookCount).toBe(3);
+      expect(result.current.syncNoticeCounts.renamedBookCount).toBe(3);
 
       // A success that reports nothing renamed clears the notice.
       await act(async () => {
         await result.current.triggerManualSync();
       });
-      expect(result.current.renamedBookCount).toBe(0);
+      expect(result.current.syncNoticeCounts.renamedBookCount).toBe(0);
+    });
+
+    it("reflects the removed counts of the last successful sync, not of a failed one", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce({
+          success: true,
+          books: [],
+          removedBooks: [
+            { bookId: "210000000000041", isShared: BoolFlag.TRUE },
+            { bookId: "210000000000042", isShared: BoolFlag.FALSE },
+          ],
+          removedBookCount: 2,
+          removedSharedCount: 1,
+        })
+        .mockResolvedValueOnce({
+          success: false,
+          books: [],
+          error: "讀墨可能改版了，已暫停同步書櫃",
+          removedBookCount: 7,
+          removedSharedCount: 7,
+        })
+        .mockResolvedValueOnce({ success: true, books: [] });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncNoticeCounts).toEqual({
+        renamedBookCount: 0,
+        removedBookCount: 2,
+        removedSharedCount: 1,
+      });
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncStatus).toBe("error");
+      expect(result.current.syncNoticeCounts.removedBookCount).toBe(2);
+      expect(result.current.syncNoticeCounts.removedSharedCount).toBe(1);
+
+      // A later success that removed nothing clears the notice.
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncNoticeCounts.removedBookCount).toBe(0);
+      expect(result.current.syncNoticeCounts.removedSharedCount).toBe(0);
     });
   });
 

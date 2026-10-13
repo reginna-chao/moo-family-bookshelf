@@ -18,6 +18,7 @@ import {
   landedLastUpdatedOf,
 } from "moo-family-bookshelf-shared/personal/fullPutConflict";
 import { mergeBooks } from "./mergeBooks";
+import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
 import { loadSavedBooksForSync, type LoadSavedResult } from "./savedBooks";
 import { assertSyncNotPaused } from "./syncBreaker";
@@ -35,6 +36,9 @@ export interface SyncUploadContext {
   displayName: string;
   scrape: SyncScrape;
   scrapedIds: ReadonlySet<string>;
+  /** Ids the server held before the scrape began; only bounds pruning (constant across re-reads, so a
+   *  book another device adds meanwhile is never pruned). The upload basis is the post-scrape read. */
+  preScrapeServerIds: ReadonlySet<string>;
   /** Fetched once per sync and reused by every attempt; null = fetch failed. */
   requests: BorrowRequest[] | null;
 }
@@ -42,12 +46,24 @@ export interface SyncUploadContext {
 export interface SyncUploadResult {
   books: BookEntry[];
   renamedBooks: RenamedBook[];
+  /** Saved books pruned because Readmoo no longer holds them (`sync/pruneBooks.ts`). */
+  removedBooks: RemovedBook[];
+  removedCount: number;
+  removedSharedCount: number;
   /** The stored record's `lastUpdated` the landed PUT answered; undefined when the PUT response carries no usable `lastUpdated`. */
   lastUpdated?: string;
 }
 
 interface SyncUpload extends Omit<SyncUploadResult, "lastUpdated"> {
   record: PersonalBooks & { expectedLastUpdated?: string };
+}
+
+/** GET the saved record; throws on a failed read. No breaker check. Writes nothing. */
+export async function readSavedBooksForSync(
+  ctx: Pick<SyncUploadContext, "apiClient" | "userId">,
+): Promise<LoadSavedResult> {
+  const response = await ctx.apiClient.getPersonalBooks(ctx.userId);
+  return loadSavedBooksForSync(response);
 }
 
 /** GET the saved record; throws on a failed read or a redesign-shaped scrape. Writes nothing. */
@@ -57,25 +73,25 @@ export async function fetchSavedBooksForSync(
     "apiClient" | "userId" | "scrape" | "scrapedIds"
   >,
 ): Promise<LoadSavedResult> {
-  const response = await ctx.apiClient.getPersonalBooks(ctx.userId);
-  const saved = loadSavedBooksForSync(response);
+  const saved = await readSavedBooksForSync(ctx);
   assertSyncNotPaused(saved.books, ctx.scrapedIds, ctx.scrape.archiveCovered);
   return saved;
 }
 
-/** Merge, id-change resolution and the upload record for one read. Writes nothing. */
+/** Merge, id-change resolution, pruning and the upload record for one read. Writes nothing. */
 function buildSyncUpload(
   ctx: SyncUploadContext,
   saved: LoadSavedResult,
 ): SyncUpload {
   const merged = mergeBooks(ctx.scrape.books, saved.books);
-  const { books, renamedBooks } = resolveForUpload(
+  const plan = resolveForUpload(
     merged,
     ctx.scrape,
     saved.books,
     ctx.requests,
     ctx,
   );
+  const { books } = plan;
   const record = {
     ...saved.raw,
     schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -86,7 +102,14 @@ function buildSyncUpload(
     // Undefined is dropped by JSON.stringify, so no precondition is sent.
     expectedLastUpdated: expectedLastUpdatedOf(saved.raw),
   };
-  return { record, books, renamedBooks };
+  return {
+    record,
+    books,
+    renamedBooks: plan.renamedBooks,
+    removedBooks: plan.removedBooks,
+    removedCount: plan.removedCount,
+    removedSharedCount: plan.removedSharedCount,
+  };
 }
 
 /**
@@ -101,14 +124,14 @@ export async function uploadSyncBooksRereadingOnConflict(
 ): Promise<SyncUploadResult> {
   let saved = firstRead;
   for (let attempt = 1; ; attempt += 1) {
-    const { record, books, renamedBooks } = buildSyncUpload(ctx, saved);
+    const { record, ...result } = buildSyncUpload(ctx, saved);
     const response = await ctx.apiClient.updatePersonalBooks(
       ctx.userId,
       record,
     );
     if (!response.error) {
       const lastUpdated = landedLastUpdatedOf(response.data);
-      return { books, renamedBooks, lastUpdated };
+      return { ...result, lastUpdated };
     }
     const failure = booksSaveErrorText(
       response.error,

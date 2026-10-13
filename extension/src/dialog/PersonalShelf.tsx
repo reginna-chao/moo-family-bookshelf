@@ -78,7 +78,7 @@ export function PersonalShelf({
     lastSyncRenamedBooks,
     lastSyncLastUpdated,
     progressMessage,
-    renamedBookCount,
+    syncNoticeCounts,
   } = useBookSync({
     userId,
     apiClient,
@@ -286,7 +286,7 @@ export function PersonalShelf({
       <PersonalShelfSyncNotices
         progressMessage={progressMessage}
         syncError={syncStatus === "error" ? syncError : ""}
-        renamedBookCount={renamedBookCount}
+        counts={syncNoticeCounts}
       />
 
       {syncArchived === BoolFlag.TRUE && (

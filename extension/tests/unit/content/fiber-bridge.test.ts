@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { ATTR_LIST_TOTAL } from "@/content/fiber-data";
+import { ATTR_LIBRARY_IDS, ATTR_LIST_TOTAL } from "@/content/fiber-data";
 
 /**
  * Main-world fiber bridge (`src/content/fiber-bridge.ts`), list-total half
@@ -8,6 +8,14 @@ import { ATTR_LIST_TOTAL } from "@/content/fiber-data";
  * `.library-item` (else from `.books .row`) — as `data-moo-list-total` on
  * `<html>`, removes the attribute whenever that cannot be read, and always
  * answers with `moo-fiber-data`.
+ *
+ * Library-ids half (#241): from the SAME host lookup it publishes the deduped
+ * `book.id`s of `itemList`, `archivedLibraryItems` and `loanedLibraryItems`
+ * as `data-moo-library-ids` (comma-joined; `""` = three empty lists). The
+ * attribute is removed when there is no host, when any of the three is not an
+ * array, or when reading them throws — a partial union would let the pruning
+ * drop a book Readmoo still holds. The attribute names are imported from
+ * `fiber-data.ts`, whose own test pins the literals the bridge writes.
  *
  * The module registers its listener at import time and exposes no teardown, so
  * it is imported ONCE for this file (Vitest isolates each test file's
@@ -45,6 +53,28 @@ function host(list: unknown): FakeFiber {
   return { memoizedProps: { filteredItemList: list }, return: null };
 }
 
+/** A library item as Readmoo's host lists hold it. */
+function item(id: unknown): { book: { id: unknown } } {
+  return { book: { id } };
+}
+
+/** A host carrying the three library lists (each an empty array unless overridden). */
+function libraryHost(
+  lists: Record<string, unknown> = {},
+  filteredItemList: unknown[] = [],
+): FakeFiber {
+  return {
+    memoizedProps: {
+      filteredItemList,
+      itemList: [],
+      archivedLibraryItems: [],
+      loanedLibraryItems: [],
+      ...lists,
+    },
+    return: null,
+  };
+}
+
 function mountCard(childFiber: unknown): HTMLElement {
   const card = document.createElement("div");
   card.className = "library-item";
@@ -67,6 +97,7 @@ beforeAll(async () => {
 beforeEach(() => {
   document.body.innerHTML = "";
   root.removeAttribute(ATTR_LIST_TOTAL);
+  root.removeAttribute(ATTR_LIBRARY_IDS);
   fiberDataEvents = 0;
   document.addEventListener("moo-fiber-data", countFiberData);
 });
@@ -75,6 +106,7 @@ afterEach(() => {
   document.removeEventListener("moo-fiber-data", countFiberData);
   document.body.innerHTML = "";
   root.removeAttribute(ATTR_LIST_TOTAL);
+  root.removeAttribute(ATTR_LIBRARY_IDS);
 });
 
 describe("fiber-bridge list total", () => {
@@ -194,5 +226,158 @@ describe("fiber-bridge list total", () => {
     expect(root.getAttribute(ATTR_LIST_TOTAL)).toBe("2");
     expect(card.hasAttribute("data-moo-book-id")).toBe(false);
     expect(fiberDataEvents).toBe(1);
+  });
+});
+
+describe("fiber-bridge library ids", () => {
+  const OWNED = "210439468000401";
+  const ARCHIVED = "210439468000402";
+  const LOANED = "210439468000403";
+
+  it("publishes the deduped union of the three lists with the list total, from one request", () => {
+    mountCard(
+      chain(
+        3,
+        libraryHost(
+          {
+            itemList: [item(OWNED), item(Number(ARCHIVED))],
+            archivedLibraryItems: [item(ARCHIVED)],
+            loanedLibraryItems: [item(LOANED), item(OWNED)],
+          },
+          [1, 2],
+        ),
+      ),
+    );
+
+    request();
+
+    expect(root.getAttribute(ATTR_LIBRARY_IDS)).toBe(
+      `${OWNED},${ARCHIVED},${LOANED}`,
+    );
+    expect(root.getAttribute(ATTR_LIST_TOTAL)).toBe("2");
+    expect(fiberDataEvents).toBe(1);
+  });
+
+  it("skips items without a string or number book.id", () => {
+    mountCard(
+      chain(
+        1,
+        libraryHost({
+          itemList: [
+            null,
+            {},
+            { book: null },
+            item(undefined),
+            item({ id: OWNED }),
+            item(true),
+            item(OWNED),
+          ],
+        }),
+      ),
+    );
+
+    request();
+
+    expect(root.getAttribute(ATTR_LIBRARY_IDS)).toBe(OWNED);
+  });
+
+  it("publishes an empty value when all three lists are empty arrays", () => {
+    root.setAttribute(ATTR_LIBRARY_IDS, OWNED);
+    mountCard(chain(1, libraryHost()));
+
+    request();
+
+    // Present but empty: a known-empty library, not an unreadable one.
+    expect(root.getAttribute(ATTR_LIBRARY_IDS)).toBe("");
+    expect(root.getAttribute(ATTR_LIST_TOTAL)).toBe("0");
+  });
+
+  it("reads the lists from the `.books .row` host when no card is rendered", () => {
+    document.body.innerHTML = `<div class="books"><div class="row"></div></div>`;
+    const row = document.querySelector(".books .row");
+    if (!row) throw new Error("fixture missing .books .row");
+    attachFiber(
+      row,
+      chain(2, libraryHost({ archivedLibraryItems: [item(ARCHIVED)] })),
+    );
+
+    request();
+
+    expect(root.getAttribute(ATTR_LIBRARY_IDS)).toBe(ARCHIVED);
+  });
+
+  describe("removes the attribute (a partial or stale list never survives)", () => {
+    beforeEach(() => {
+      root.setAttribute(ATTR_LIBRARY_IDS, OWNED);
+    });
+
+    it.each([
+      { list: "itemList", value: undefined },
+      { list: "archivedLibraryItems", value: undefined },
+      { list: "loanedLibraryItems", value: undefined },
+      { list: "loanedLibraryItems", value: { length: 0 } },
+      { list: "archivedLibraryItems", value: null },
+    ])(
+      "when $list is $value, while the list total is still published",
+      ({ list, value }) => {
+        mountCard(
+          chain(
+            1,
+            libraryHost({ itemList: [item(OWNED)], [list]: value }, [1]),
+          ),
+        );
+
+        request();
+
+        expect(root.hasAttribute(ATTR_LIBRARY_IDS)).toBe(false);
+        expect(root.getAttribute(ATTR_LIST_TOTAL)).toBe("1");
+      },
+    );
+
+    it("when no host is found", () => {
+      mountCard(chain(5, null));
+
+      request();
+
+      expect(root.hasAttribute(ATTR_LIBRARY_IDS)).toBe(false);
+      expect(fiberDataEvents).toBe(1);
+    });
+
+    it("when nothing to start from is on the page", () => {
+      request();
+
+      expect(root.hasAttribute(ATTR_LIBRARY_IDS)).toBe(false);
+    });
+
+    it("when reading a list throws, and still publishes the total and answers", () => {
+      const hostile = libraryHost({}, [1, 2, 3]);
+      if (!hostile.memoizedProps) throw new Error("fixture missing props");
+      Object.defineProperty(hostile.memoizedProps, "loanedLibraryItems", {
+        get(): never {
+          throw new Error("hostile list");
+        },
+        enumerable: true,
+      });
+      mountCard(chain(1, hostile));
+
+      expect(() => request()).not.toThrow();
+      expect(root.hasAttribute(ATTR_LIBRARY_IDS)).toBe(false);
+      expect(root.getAttribute(ATTR_LIST_TOTAL)).toBe("3");
+      expect(fiberDataEvents).toBe(1);
+    });
+
+    it("when an item's book throws on read", () => {
+      const hostileItem = {
+        get book(): never {
+          throw new Error("hostile item");
+        },
+      };
+      mountCard(
+        chain(1, libraryHost({ itemList: [item(OWNED), hostileItem] })),
+      );
+
+      expect(() => request()).not.toThrow();
+      expect(root.hasAttribute(ATTR_LIBRARY_IDS)).toBe(false);
+    });
   });
 });

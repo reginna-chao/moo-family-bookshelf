@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag } from "@/api/client";
 import type { ScrapeResult } from "@/content/scraper";
-import { installListTotalPublisher } from "../../helpers/listTotalBridge";
+import {
+  installLibraryIdsPublisher,
+  installListTotalPublisher,
+} from "../../helpers/listTotalBridge";
 
 /**
  * Pins the `finally` contract of `scrapeArchivedBooks` (scraper-archive.ts):
@@ -93,6 +96,7 @@ afterEach(() => {
 
 describe("scrapeArchivedBooks", () => {
   let cleanupTotal: (() => void) | null = null;
+  let cleanupIds: (() => void) | null = null;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -104,6 +108,8 @@ describe("scrapeArchivedBooks", () => {
   afterEach(() => {
     cleanupTotal?.();
     cleanupTotal = null;
+    cleanupIds?.();
+    cleanupIds = null;
     vi.doUnmock("@/content/fiber-data");
     vi.restoreAllMocks();
     resetPageState();
@@ -133,6 +139,25 @@ describe("scrapeArchivedBooks", () => {
     expect(window.location.hash).toBe("");
   });
 
+  it("passes the inner scrape's library ids through (#241)", async () => {
+    cleanupTotal = installListTotalPublisher("cards");
+    cleanupIds = installLibraryIdsPublisher([
+      "210439468000107",
+      "210439468000108",
+    ]);
+    mountFakeLibrary({ reopenOnCleanup: true });
+    const scrapeArchivedBooks = await loadScrapeArchivedBooks();
+
+    const promise = scrapeArchivedBooks();
+    await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
+    const result = await promise;
+
+    expect(result.complete).toBe(true);
+    expect(result.libraryIds).toEqual(
+      new Set(["210439468000107", "210439468000108"]),
+    );
+  });
+
   it("falls back to #/library when the filter button is missing", async () => {
     const scrapeArchivedBooks = await loadScrapeArchivedBooks();
 
@@ -141,7 +166,7 @@ describe("scrapeArchivedBooks", () => {
     const result = await promise;
 
     // A failed archive scrape is incomplete — never "zero archived books".
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
     expect(window.location.hash).toBe("#/library");
   });
 
@@ -168,7 +193,9 @@ describe("scrapeArchivedBooks", () => {
       .mockRejectedValue(new Error("fiber bridge unavailable"));
     vi.doMock("@/content/fiber-data", () => ({
       requestFiberData,
-      requestLibraryListTotal: vi.fn().mockResolvedValue(1),
+      requestLibraryFiberData: vi
+        .fn()
+        .mockResolvedValue({ listTotal: 1, libraryIds: null }),
       injectFiberBridge: () => false,
     }));
     const { clicks } = mountFakeLibrary({ reopenOnCleanup: true });
@@ -180,7 +207,7 @@ describe("scrapeArchivedBooks", () => {
 
     // Positive companion: the failure really came from inside the scrape step.
     expect(requestFiberData).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
     expect(clicks).toEqual([
       "filter",
       "archive",
@@ -202,7 +229,7 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toEqual({ books: [], complete: true });
+    expect(result).toEqual({ books: [], complete: true, libraryIds: null });
   });
 
   it("reports zero archived books as INCOMPLETE when no total is published", async () => {
@@ -216,7 +243,7 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   });
 
   it("reports zero rendered archived books as INCOMPLETE when the total says some exist", async () => {
@@ -229,7 +256,7 @@ describe("scrapeArchivedBooks", () => {
     await vi.advanceTimersByTimeAsync(FULL_RUN_MS);
     const result = await promise;
 
-    expect(result).toEqual({ books: [], complete: false });
+    expect(result).toEqual({ books: [], complete: false, libraryIds: null });
   });
 
   it("passes through an incomplete archive scrape (an unreadable archived card)", async () => {
