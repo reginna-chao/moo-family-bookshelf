@@ -31,6 +31,14 @@ import { describe, it, expect } from "vitest";
  * (`export type { FamilyBookshelf }`, `export { PERSONAL_BOOKS_SCHEMA_VERSION }
  * from`) does not match: the keyword is followed by `{`, not a name.
  *
+ * Where a consolidated name may live: `shared/src/api/types.ts` itself, or a
+ * sibling module it re-exports wholesale with `export * from "./<module>"`
+ * (`verifyTypes.ts` / `publicShelfTypes.ts`, split out to keep types.ts under
+ * the line cap). Every import of `moo-family-bookshelf-shared/api/types` still
+ * sees them, so the façades are unaffected; the positive anchor reads the
+ * whole set, and a dedicated case pins the two known re-exports so a dropped
+ * `export *` cannot shrink the set unnoticed.
+ *
  * Why the last case uses no normalisation: each suite runs only its own copy,
  * so a copy left un-updated guards one app only. The files sit at the same
  * depth and every path above is repo-relative, so they can be literally the
@@ -40,6 +48,7 @@ import { describe, it, expect } from "vitest";
 const REPO_ROOT = resolve(__dirname, "../../..");
 
 const SHARED_TYPES_MODULE = "moo-family-bookshelf-shared/api/types";
+const SHARED_TYPES_PATH = "shared/src/api/types.ts";
 
 /** Every name that graduated into `shared/src/api/types.ts`. */
 const CONSOLIDATED_NAMES = [
@@ -101,16 +110,33 @@ function readRepoFile(repoRelativePath: string): string {
   return readFileSync(resolve(REPO_ROOT, repoRelativePath), "utf-8");
 }
 
+/** `shared/src/api/types.ts` plus every sibling module it `export *`s.
+ *  See the header → "Where a consolidated name may live". */
+function sharedTypeSources(): string[] {
+  const types = readRepoFile(SHARED_TYPES_PATH);
+  const siblings = [...types.matchAll(/^export \* from "\.\/(\w+)";$/gm)].map(
+    (m) => readRepoFile(`shared/src/api/${m[1]}.ts`),
+  );
+  return [types, ...siblings];
+}
+
 describe("wire-type façades", () => {
   it("still finds every consolidated name declared in shared/", () => {
     // Positive anchor: the negative checks below would pass vacuously if a
     // name had simply been deleted everywhere.
-    const shared = readRepoFile("shared/src/api/types.ts");
+    const shared = sharedTypeSources().join("\n");
     for (const name of CONSOLIDATED_NAMES) {
       expect(shared, `${name} is no longer declared in shared/`).toMatch(
         localDeclarationOf(name),
       );
     }
+  });
+
+  it("reads types.ts together with the modules it re-exports wholesale", () => {
+    const types = readRepoFile(SHARED_TYPES_PATH);
+    expect(types).toContain('export * from "./verifyTypes";');
+    expect(types).toContain('export * from "./publicShelfTypes";');
+    expect(sharedTypeSources()).toHaveLength(3);
   });
 
   it.each(FACADES)(

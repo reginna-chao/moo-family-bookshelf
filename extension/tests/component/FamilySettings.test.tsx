@@ -26,8 +26,9 @@ import {
 } from "@/constants";
 
 /**
- * FamilySettings: display name, members, sync code / invite, leaving, the un-kick entry, and the
- * family endpoint-switch confirmation.
+ * FamilySettings: display name, members, sync code / invite, leaving, the un-kick entry, the
+ * family endpoint-switch confirmation, and the 新書預設開放 switch (#238, a server-side setting read
+ * once per mount through `getPersonalBooks` and saved through `updateNewBookDefault`).
  *
  * QR stub: FamilySettings mounts InviteQrCode, which does a real `await import("qrcode")` plus a PNG
  * encode on every mount (its effect keys on [inviteUrl] — src/dialog/InviteQrCode.tsx). Nothing here
@@ -93,8 +94,12 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       .fn()
       .mockResolvedValue({ data: { cleared: BoolFlag.TRUE } }),
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
-    getPersonalBooks: vi.fn(),
+    // A record without the setting: the 新書預設開放 switch loads off and ready ("new book default toggle").
+    getPersonalBooks: vi.fn().mockResolvedValue({ data: { books: [] } }),
     updatePersonalBooks: vi.fn(),
+    updateNewBookDefault: vi
+      .fn()
+      .mockResolvedValue({ data: { ok: true, newBookDefaultShared: 1 } }),
     updateDisplayName: vi.fn().mockResolvedValue({
       data: { userId: "user-abc12345", displayName: "" },
     }),
@@ -1010,6 +1015,153 @@ describe("FamilySettings", () => {
           .getByRole("switch", { name: "同步封存書籍" })
           .getAttribute("aria-checked"),
       ).toBe("true");
+    });
+  });
+
+  // #238. Copy is pinned against the production hook in
+  // tests/unit/dialog/useFamilySettingsNewBookDefault.test.ts; keep these literals in sync with it.
+  describe("new book default toggle (新書預設開放)", () => {
+    const NEW_BOOK_SWITCH = { name: "新書預設開放" };
+    const HINT =
+      "打開後，同步時個人書櫃裡還沒有的書（例如新買的書、從封存移回書櫃的書）會自動開放給家人，也會出現在你的公開書櫃。第一次同步，或一次新增超過 100 本書時，不會自動開放，封存的書也不會";
+
+    async function renderSettled(apiClient: ApiClient) {
+      await act(async () => {
+        renderFamilySettings({ apiClient });
+      });
+      // Let the mount read resolve and commit.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+
+    function newBookSwitch() {
+      return screen.getByRole("switch", NEW_BOOK_SWITCH);
+    }
+
+    it("is disabled with the hint-styled sync-first message when the user has no record yet", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+      });
+      await renderSettled(apiClient);
+
+      expect(newBookSwitch()).toBeDisabled();
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("false");
+      const message = screen.getByText("同步一次書單後就能設定");
+      expect(message).toHaveClass("moo-settings__hint");
+      expect(message).not.toHaveClass("moo-settings__error-text");
+      fireEvent.click(newBookSwitch());
+      expect(apiClient.updateNewBookDefault).not.toHaveBeenCalled();
+    });
+
+    it("renders off and enabled with its hint when the record has no setting yet", async () => {
+      const apiClient = createMockApiClient();
+      await renderSettled(apiClient);
+
+      expect(apiClient.getPersonalBooks).toHaveBeenCalledWith("user-abc12345");
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("false");
+      expect(newBookSwitch()).toBeEnabled();
+      expect(screen.getByText(HINT)).toBeInTheDocument();
+      expect(
+        screen.queryByText("載入設定失敗，請稍後再試"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("reflects a stored value of 1", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockResolvedValue({
+          data: { books: [], newBookDefaultShared: BoolFlag.TRUE },
+        }),
+      });
+      await renderSettled(apiClient);
+
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("is disabled while the setting is still loading", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockReturnValue(new Promise(() => {})),
+      });
+      await renderSettled(apiClient);
+
+      expect(newBookSwitch()).toBeDisabled();
+      fireEvent.click(newBookSwitch());
+      expect(apiClient.updateNewBookDefault).not.toHaveBeenCalled();
+    });
+
+    it("saves TRUE through the API when switched on", async () => {
+      const apiClient = createMockApiClient();
+      await renderSettled(apiClient);
+
+      fireEvent.click(newBookSwitch());
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("true");
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(apiClient.updateNewBookDefault).toHaveBeenCalledTimes(1);
+      expect(apiClient.updateNewBookDefault).toHaveBeenCalledWith(
+        "user-abc12345",
+        BoolFlag.TRUE,
+      );
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("true");
+      // It is a server setting, not a local one.
+      expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ newBookDefaultShared: expect.anything() }),
+      );
+    });
+
+    it("rolls back, disables the switch and shows the hint-styled unsupported message on a 404", async () => {
+      const apiClient = createMockApiClient({
+        updateNewBookDefault: vi.fn().mockResolvedValue({
+          error: { code: "NOT_FOUND", message: "Not found" },
+        }),
+      });
+      await renderSettled(apiClient);
+
+      fireEvent.click(newBookSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("false");
+      expect(newBookSwitch()).toBeDisabled();
+      const message = screen.getByText("伺服器尚未支援這個設定");
+      expect(message).toHaveClass("moo-settings__hint");
+      expect(message).not.toHaveClass("moo-settings__error-text");
+    });
+
+    it("rolls back and shows the error-styled retry message when the save fails", async () => {
+      const apiClient = createMockApiClient({
+        updateNewBookDefault: vi.fn().mockResolvedValue({
+          error: { code: "INTERNAL_ERROR", message: "boom" },
+        }),
+      });
+      await renderSettled(apiClient);
+
+      fireEvent.click(newBookSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("false");
+      expect(newBookSwitch()).toBeEnabled();
+      expect(screen.getByText("儲存失敗，請稍後再試")).toHaveClass(
+        "moo-settings__error-text",
+      );
+    });
+
+    it("stays disabled with the load-failed message when the read fails", async () => {
+      const apiClient = createMockApiClient({
+        getPersonalBooks: vi.fn().mockRejectedValue(new Error("offline")),
+      });
+      await renderSettled(apiClient);
+
+      expect(newBookSwitch()).toBeDisabled();
+      expect(newBookSwitch().getAttribute("aria-checked")).toBe("false");
+      expect(screen.getByText("載入設定失敗，請稍後再試")).toHaveClass(
+        "moo-settings__error-text",
+      );
     });
   });
 

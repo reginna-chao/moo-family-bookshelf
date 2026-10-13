@@ -25,6 +25,7 @@ import {
   deletePublicShelves,
   deletePublicSnapshot,
 } from "../kv/publicShelves";
+import { readNewBookDefault, deleteNewBookDefault } from "../kv/newBookDefault";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
@@ -386,6 +387,12 @@ const getUserBooksRoute = createRoute({
   path: "/{id}/books",
   tags: ["User"],
   summary: "Get user books",
+  description:
+    "The caller's stored books record (`data: null` when none). Once the " +
+    "caller has saved the new-book default (`PUT /api/user/{id}/new-book-default`), " +
+    "the response also carries `newBookDefaultShared` (BoolFlag 0/1) — but only " +
+    "when a books record exists: with no record the response is `data: null` and " +
+    "the setting is not reported until the first sync creates the record.",
   request: {
     params: UserIdParam,
   },
@@ -409,13 +416,20 @@ userRoutes.openapi(getUserBooksRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "Cannot access another user's data");
   }
 
-  const record = await getUserBooksRecord(c.env.KV, userId);
+  const [record, newBookDefaultShared] = await Promise.all([
+    getUserBooksRecord(c.env.KV, userId),
+    readNewBookDefault(c.env.KV, userId),
+  ]);
 
   if (!record) {
     return c.json({ data: null });
   }
 
-  return c.json({ data: record });
+  // Merged from its own key, never stored in `user:{id}`; never set ⇒ field absent, response unchanged.
+  if (newBookDefaultShared === null) {
+    return c.json({ data: record });
+  }
+  return c.json({ data: { ...record, newBookDefaultShared } });
 });
 
 // PUT /api/user/:id/books
@@ -938,6 +952,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
   await Promise.all([
     deleteUserBooksRecord(c.env.KV, userId),
     deletePublicShelves(c.env.KV, userId),
+    deleteNewBookDefault(c.env.KV, userId),
     deleteMemberFamilyId(c.env.KV, userId),
     deleteAuthToken(c.env.KV, userId),
     ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),

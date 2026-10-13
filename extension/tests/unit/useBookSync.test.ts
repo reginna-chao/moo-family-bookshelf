@@ -500,8 +500,8 @@ describe("useBookSync", () => {
     });
   });
 
-  // #236 / #241: the personal shelf shows notices when a sync moved books to a
-  // new Readmoo id or removed books; the counts reflect the last SUCCESSFUL sync only.
+  // #236 / #241 / #238: notices for moved, removed and auto-shared books;
+  // the counts reflect the last SUCCESSFUL sync only.
   describe("syncNoticeCounts", () => {
     it("starts with every count at 0", () => {
       const { result } = renderHook(() => useBookSync(makeOptions()));
@@ -509,6 +509,8 @@ describe("useBookSync", () => {
         renamedBookCount: 0,
         removedBookCount: 0,
         removedSharedCount: 0,
+        autoSharedCount: 0,
+        autoShareHeldCount: 0,
       });
     });
 
@@ -598,6 +600,8 @@ describe("useBookSync", () => {
         renamedBookCount: 0,
         removedBookCount: 2,
         removedSharedCount: 1,
+        autoSharedCount: 0,
+        autoShareHeldCount: 0,
       });
 
       await act(async () => {
@@ -613,6 +617,50 @@ describe("useBookSync", () => {
       });
       expect(result.current.syncNoticeCounts.removedBookCount).toBe(0);
       expect(result.current.syncNoticeCounts.removedSharedCount).toBe(0);
+    });
+
+    // #238 新書預設開放: same last-success rule for the auto-share counts.
+    it("reflects the auto-share counts of the last successful sync, not of a failed one", async () => {
+      vi.mocked(syncBooks)
+        .mockResolvedValueOnce({
+          success: true,
+          books: [],
+          autoSharedCount: 4,
+          autoShareHeldCount: 0,
+        })
+        .mockResolvedValueOnce({
+          success: false,
+          books: [],
+          error: "讀墨可能改版了，已暫停同步書櫃",
+          autoSharedCount: 9,
+          autoShareHeldCount: 9,
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          books: [],
+          autoShareHeldCount: 130,
+        });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncNoticeCounts.autoSharedCount).toBe(4);
+      expect(result.current.syncNoticeCounts.autoShareHeldCount).toBe(0);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncStatus).toBe("error");
+      expect(result.current.syncNoticeCounts.autoSharedCount).toBe(4);
+      expect(result.current.syncNoticeCounts.autoShareHeldCount).toBe(0);
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+      expect(result.current.syncNoticeCounts.autoSharedCount).toBe(0);
+      expect(result.current.syncNoticeCounts.autoShareHeldCount).toBe(130);
     });
   });
 

@@ -158,6 +158,8 @@ export interface PersonalBooks {
   lastUpdated: string;
   /** Viewer-private family-shelf preferences (v1.5.0). */
   familyShelfPrefs?: { hidden: string[]; favorites: string[] };
+  /** 新書預設開放 (#238): absent = FALSE; written only via `PUT /api/user/:id/new-book-default`. */
+  newBookDefaultShared?: BoolFlag;
   /** Preserve unknown fields from future schema versions */
   [key: string]: unknown;
 }
@@ -170,27 +172,6 @@ export const PERSONAL_BOOKS_SCHEMA_VERSION = 1;
 export interface VersionInfo {
   apiVersion: number;
   serverVersion: string;
-}
-
-/** PWA login verification shapes — `GET` / `PUT /api/user/:id/verify` and
- *  `POST /api/user/:id/verify/otp`. */
-
-export type VerifyMethod = "pin" | "pattern" | "code" | "none";
-
-export interface VerifyInfo {
-  method: VerifyMethod;
-  prompted: number;
-}
-
-export interface SetVerifyBody {
-  method: VerifyMethod;
-  secret?: string;
-  prompted?: number;
-}
-
-export interface OtpInfo {
-  code: string;
-  expiresAt: number;
 }
 
 /** Member settings — `PATCH /api/family/:id/member/:uid`. */
@@ -219,24 +200,7 @@ export interface UnkickResult {
   cleared: BoolFlag;
 }
 
-/** Public-shelf records — `/api/user/:id/public-shelf*` (owner side) and the
- *  `GET /api/public/:shareToken` snapshot a link viewer reads. */
-
-export type SelectionMode = "all-shared";
-
-export interface PublicShelf {
-  shelfId: string;
-  shareToken: string;
-  title: string;
-  expiresDays: number | null;
-  createdAt: number;
-  expiresAt: number | null;
-  selectionMode: SelectionMode;
-}
-
-export interface PublicShelfData {
-  title: string;
-  books: BookEntry[];
-  createdAt: number;
-  expiresAt: number | null;
-}
+// Verification and public-shelf records live in their own modules; re-exported so every
+// `api/types` import path keeps working.
+export * from "./verifyTypes";
+export * from "./publicShelfTypes";

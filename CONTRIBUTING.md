@@ -264,7 +264,7 @@ Every push/PR triggers:
 
 ## Security Notes
 
-- All book data defaults to not-shared; users must explicitly opt-in.
+- All book data defaults to not-shared; users must explicitly opt-in, per book or once through the new-book default-sharing setting in the Extension (off by default). With it on, books new to the server (not only new purchases — e.g. a book moved back from the archive) are shared at sync time — never on the first sync, never archived books, never more than 100 new books at once.
 - Data is protected by TLS in transit and auth tokens for access control.
 - Never hardcode keys or sensitive information in source code.
 - `.env`, `.dev.vars`, and files containing secrets must not be committed to git.

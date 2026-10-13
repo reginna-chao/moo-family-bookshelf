@@ -1,3 +1,4 @@
+import { AUTO_SHARE_MAX_NEW } from "../sync/autoShare";
 import type { SyncNoticeCounts } from "./lastSync";
 
 /** Notice shown after a sync moved books to their new Readmoo id (#236). */
@@ -11,12 +12,22 @@ export function removedBooksNotice(count: number, sharedCount: number): string {
   return sharedCount > 0 ? `${base}，其中 ${sharedCount} 本原本設為分享` : base;
 }
 
+/** Notice shown after a sync marked books new to the server as shared (新書預設開放, #238). */
+export function autoSharedBooksNotice(count: number): string {
+  return `已自動開放 ${count} 本新加入個人書櫃的書給家人，也會出現在你的公開書櫃`;
+}
+
+/** Notice shown when 新書預設開放 left a sync's new books unshared because there were too many. */
+export function autoShareHeldNotice(count: number): string {
+  return `這次新增了 ${count} 本書，一次超過 ${AUTO_SHARE_MAX_NEW} 本不會自動開放，請自己選要開放哪些`;
+}
+
 export interface PersonalShelfSyncNoticesProps {
   /** Live scrape progress; empty when no scrape is running. */
   progressMessage: string;
   /** Sync error to show; empty when the last sync did not fail. */
   syncError: string;
-  /** Renamed / removed book counts of the last successful sync. */
+  /** Renamed / removed / auto-shared book counts of the last successful sync. */
   counts: SyncNoticeCounts;
 }
 
@@ -43,6 +54,16 @@ export function PersonalShelfSyncNotices({
             counts.removedBookCount,
             counts.removedSharedCount,
           )}
+        </p>
+      )}
+      {counts.autoSharedCount > 0 && (
+        <p role="status" className="moo-shelf__sync-notice">
+          {autoSharedBooksNotice(counts.autoSharedCount)}
+        </p>
+      )}
+      {counts.autoShareHeldCount > 0 && (
+        <p role="status" className="moo-shelf__sync-notice">
+          {autoShareHeldNotice(counts.autoShareHeldCount)}
         </p>
       )}
     </>

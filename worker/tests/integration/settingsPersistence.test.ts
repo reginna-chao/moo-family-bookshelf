@@ -28,6 +28,15 @@ type Json = any;
  * joins it (non-owner, so leaving does not tear down the family), then USER1
  * saves the mixed book list. It returns the join token so the caller can leave
  * / read as USER1.
+ *
+ * newBookDefaultShared (#238): the per-user "newly synced books default to
+ * shared" setting is a personal setting, so Inv-5 covers it. It lives in its
+ * own key `newbookdefault:{id}`, written only by `PUT /new-book-default`; no
+ * writer of `user:{id}` (PUT and PATCH /books, PUT /family-prefs, the
+ * displayName PUT in `routes/family.ts`) may reset it or copy it into the
+ * books record, and leave → join another family must not reset it. Each
+ * writer case also asserts the write it made, so a request that never reached
+ * the record cannot pass as "the setting survived".
  */
 
 let kv: KVNamespace;
@@ -236,5 +245,149 @@ describe("Invariant #5 — personal settings persist across unbind/rebind", () =
     const owner = memberEntry(json, OWNER2);
     expect(owner).toBeDefined();
     expect(owner.books).toEqual([]);
+  });
+});
+
+// See the header → "newBookDefaultShared".
+describe("Invariant #5 — newBookDefaultShared survives every other writer", () => {
+  /** Standard fixture + the setting turned on through its only writer. */
+  async function seedWithNewBookDefaultOn() {
+    const seeded = await seedUserInFamilyAWithBooks();
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/new-book-default`,
+      { newBookDefaultShared: BoolFlag.TRUE },
+      seeded.tokenUser1A,
+    );
+    expect(res.status).toBe(200);
+    return seeded;
+  }
+
+  async function storedRecord(): Promise<UserBooksRecord | null> {
+    return (await kv.get(kvKeys.user(USER1), "json")) as UserBooksRecord | null;
+  }
+
+  async function storedSetting(): Promise<unknown> {
+    return kv.get(kvKeys.newBookDefault(USER1), "json");
+  }
+
+  /** What the client reads back: GET /books merges the setting in. */
+  async function readBack(token: string): Promise<Json> {
+    const res = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      token,
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as Json).data;
+  }
+
+  const ON = { newBookDefaultShared: BoolFlag.TRUE };
+
+  it.each<{
+    label: string;
+    write: (familyA: string, token: string) => Response | Promise<Response>;
+    /** Positive companion: proves the writer really rewrote `user:{id}`. */
+    landed: (rec: UserBooksRecord) => void;
+  }>([
+    {
+      label: "PUT /books (body carrying a stale 0)",
+      write: (_familyA, token) =>
+        request(
+          "PUT",
+          `/api/user/${USER1}/books`,
+          {
+            ...USER1_BOOKS,
+            books: USER1_BOOKS.books.slice(0, 1),
+            newBookDefaultShared: BoolFlag.FALSE,
+          },
+          token,
+        ),
+      landed: (rec) => expect(rec.books.map((b) => b.bookId)).toEqual([B1]),
+    },
+    {
+      label: "PATCH /books",
+      write: (_familyA, token) =>
+        request(
+          "PATCH",
+          `/api/user/${USER1}/books`,
+          { changes: [{ bookId: B2, isShared: BoolFlag.TRUE }] },
+          token,
+        ),
+      landed: (rec) => expect(rec.books[1].isShared).toBe(BoolFlag.TRUE),
+    },
+    {
+      label: "PUT /family-prefs",
+      write: (_familyA, token) =>
+        request(
+          "PUT",
+          `/api/user/${USER1}/family-prefs`,
+          { hidden: [`${OWNER1}:${B1}`] },
+          token,
+        ),
+      landed: (rec) =>
+        expect(rec.familyShelfPrefs?.hidden).toEqual([`${OWNER1}:${B1}`]),
+    },
+    {
+      label: "the displayName PUT",
+      write: (familyA, token) =>
+        request(
+          "PUT",
+          `/api/family/${familyA}/member/${USER1}/displayName`,
+          { displayName: "Renamed" },
+          token,
+        ),
+      landed: (rec) => expect(rec.displayName).toBe("Renamed"),
+    },
+  ])("keeps the setting at 1 through $label", async ({ write, landed }) => {
+    const { familyA, tokenUser1A } = await seedWithNewBookDefaultOn();
+    expect(await storedSetting()).toEqual(ON);
+
+    const res = await write(familyA, tokenUser1A);
+    expect(res.status).toBe(200);
+
+    const after = await storedRecord();
+    expect(after).not.toBeNull();
+    landed(after!);
+    expect(await storedSetting()).toEqual(ON);
+    // The books record never carries a copy a later stale write could replay.
+    expect("newBookDefaultShared" in after!).toBe(false);
+    expect((await readBack(tokenUser1A)).newBookDefaultShared).toBe(
+      BoolFlag.TRUE,
+    );
+  });
+
+  it("keeps the setting through leave → join a DIFFERENT family, and GET /books still returns it", async () => {
+    const { familyA, tokenUser1A } = await seedWithNewBookDefaultOn();
+
+    const leaveRes = await request(
+      "DELETE",
+      `/api/family/${familyA}/member/${USER1}`,
+      undefined,
+      tokenUser1A,
+    );
+    expect(leaveRes.status).toBe(200);
+    expect(await storedSetting()).toEqual(ON);
+
+    const { familyId: familyB } = await createFamily(OWNER2);
+    const joinRes = await request("POST", `/api/family/${familyB}/join`, {
+      userId: USER1,
+      displayName: "User1",
+    });
+    expect(joinRes.status).toBe(200);
+    const tokenUser1B = ((await joinRes.json()) as Json).data
+      .authToken as string;
+
+    const getRes = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      tokenUser1B,
+    );
+    expect(getRes.status).toBe(200);
+    const json = (await getRes.json()) as Json;
+    expect(json.data.newBookDefaultShared).toBe(BoolFlag.TRUE);
+    expect(json.data.books).toHaveLength(3);
   });
 });

@@ -2,7 +2,6 @@
  *  and (B) the manual sync button (no throttle). See docs/architecture.md → 書單同步. */
 
 import browser from "webextension-polyfill";
-import { ApiClient, BookEntry } from "../api/client";
 import {
   AUTO_SYNC_INTERVAL_KEY,
   LAST_SYNC_AT_KEY,
@@ -12,12 +11,12 @@ import {
 // Re-export ApiClient so the content script can import it from content-sync.js
 // instead of needing a separate content-api.js entry point.
 export { ApiClient } from "../api/client";
-import { type ScrapeProgressCallback } from "../content/scraper";
+// The option / result types moved to syncTypes.ts; re-exported so existing importers keep working.
+export type { SyncBooksOptions, SyncBooksResult } from "./syncTypes";
+import type { SyncBooksOptions, SyncBooksResult } from "./syncTypes";
 import { NAV_SETTLE_MS, settleMsLeft, wait } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { runAutoReturn } from "./autoReturn";
-import type { RemovedBook } from "./pruneBooks";
-import type { RenamedBook } from "./renamedBooks";
 import { fetchBorrowRequestsForSync, scrapeForSync } from "./syncSteps";
 import {
   fetchSavedBooksForSync,
@@ -58,40 +57,6 @@ async function canSyncByInterval(timestampKey: string): Promise<boolean> {
 /** Check if enough time has passed since the last full upload sync. */
 export function canAutoSync(): Promise<boolean> {
   return canSyncByInterval(LAST_SYNC_AT_KEY);
-}
-
-export interface SyncBooksOptions {
-  /** Navigate to #/library before scraping (and restore hash after) */
-  navigate: boolean;
-  /** The userId for API calls */
-  userId: string;
-  /** API client instance */
-  apiClient: ApiClient;
-  /** Optional progress callback for the paginated scrape (Wave G) */
-  onProgress?: ScrapeProgressCallback;
-  /** When present, the borrow list is fetched once before upload: lent books are shielded from
-   *  id-change resolution, and reappeared books get their LENT requests marked RETURNED after it. */
-  familyId?: string;
-}
-
-export interface SyncBooksResult {
-  success: boolean;
-  books: BookEntry[];
-  error?: string;
-  /** RequestIds of LENT requests auto-marked RETURNED this sync (best-effort); callers derive the
-   *  count via `.length` and apply the local status change. */
-  autoReturnedRequestIds?: string[];
-  /** Saved books replaced by their new Readmoo id this sync (`sync/renamedBooks.ts`). */
-  renamedBooks?: RenamedBook[];
-  /** Always `renamedBooks.length` on success. */
-  renamedBookCount?: number;
-  /** Saved books pruned because Readmoo no longer holds them (`sync/pruneBooks.ts`). */
-  removedBooks?: RemovedBook[];
-  /** On success: `removedBooks.length`, and how many of those were shared. */
-  removedBookCount?: number;
-  removedSharedCount?: number;
-  /** The `lastUpdated` this sync's own landed PUT stored (`SyncUploadResult`). */
-  lastUpdated?: string;
 }
 
 /**

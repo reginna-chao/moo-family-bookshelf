@@ -104,6 +104,16 @@ export function parseRecoveryFlag(value: unknown): BoolFlag | null {
   return null;
 }
 
+/**
+ * Classify a REQUIRED `BoolFlag` body field: exactly `0` / `1` ⇒ that flag,
+ * anything else — absent included, unlike {@link parseRecoveryFlag} — ⇒
+ * `null`, and the caller answers 400. Used by `PUT /api/user/:id/new-book-default`.
+ */
+export function parseRequiredBoolFlag(value: unknown): BoolFlag | null {
+  if (value === BoolFlag.FALSE || value === BoolFlag.TRUE) return value;
+  return null;
+}
+
 /** Upper bound for `expectedLastUpdated`; a stored `lastUpdated` is a 24-char ISO string. */
 export const EXPECTED_LAST_UPDATED_MAX_LENGTH = 64;
 

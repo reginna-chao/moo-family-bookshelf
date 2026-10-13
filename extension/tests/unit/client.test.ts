@@ -769,6 +769,48 @@ describe("ApiClient", () => {
     });
   });
 
+  // 新書預設開放 (#238): the settings switch relies on a 404 NOT_FOUND reaching it unchanged.
+  describe("updateNewBookDefault", () => {
+    const userId = "b".repeat(64);
+
+    it.each([BoolFlag.TRUE, BoolFlag.FALSE])(
+      "sends PUT to /api/user/:id/new-book-default with { newBookDefaultShared: %s }",
+      async (flag) => {
+        globalThis.fetch = mockFetchSuccess({
+          ok: true,
+          newBookDefaultShared: flag,
+        });
+
+        const result = await client.updateNewBookDefault(userId, flag);
+
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `${MOCK_ENDPOINT}/api/user/${userId}/new-book-default`,
+          expect.objectContaining({
+            method: "PUT",
+            body: JSON.stringify({ newBookDefaultShared: flag }),
+          }),
+        );
+        expect(result.data).toEqual({ ok: true, newBookDefaultShared: flag });
+      },
+    );
+
+    it("rejects a non-hex userId before issuing a request", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await expect(
+        client.updateNewBookDefault("invalid-id", BoolFlag.TRUE),
+      ).rejects.toThrow("Invalid userId");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a 404 NOT_FOUND through the envelope", async () => {
+      globalThis.fetch = mockFetchError("NOT_FOUND", "Not found", 404);
+      const result = await client.updateNewBookDefault(userId, BoolFlag.TRUE);
+      expect(result.data).toBeUndefined();
+      expect(result.error).toEqual({ code: "NOT_FOUND", message: "Not found" });
+    });
+  });
+
   describe("createFamily", () => {
     it("sends POST to /api/family with userId and displayName", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });

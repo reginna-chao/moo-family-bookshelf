@@ -8,7 +8,7 @@ against the tiers below BEFORE raising it; P2 and non-goals are not raised at al
 
 - **P0 — ships broken.**
   Privacy leak or data disclosure; violation of any invariant in `.claude/rules/security-ux-invariants.md`;
-  a book shared without explicit opt-in; auth-token or permission bypass; unrecoverable state left
+  a book shared without explicit opt-in (the 新書預設開放 setting, turned on by the user, IS the opt-in for books new to the server — see `AGENTS.md` → Security & Privacy Rules → Default closed); auth-token or permission bypass; unrecoverable state left
   behind on an error path.
 
 - **P1 — another surface trips over it.**

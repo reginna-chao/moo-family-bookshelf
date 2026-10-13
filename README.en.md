@@ -10,7 +10,7 @@ Easily browse books shared by family members on your Readmoo family account.
 
 - **Family Bookshelf** — See your family's shared books at a glance, no account sharing needed
 - **Borrow between members** — Request a family member's shared book; the owner approves with one click and the Readmoo lending flow runs automatically
-- **You decide what to share** — All books are private by default; only books you manually enable will appear on the family bookshelf
+- **You decide what to share** — All books are private by default and you share them one by one; you can also turn on "new-book default sharing" in the settings, after which books not yet in your personal shelf (e.g. new purchases, or books moved back from the archive) are shared with your family automatically when you sync
 - **Data security** — All data is transmitted over TLS and protected by auth tokens for access control
 - **Settings persist across families** — Leaving or switching families won't reset your sharing preferences
 - **Mobile friendly** — Browse the family bookshelf on your phone via the mobile web app
@@ -55,7 +55,7 @@ Also available on Firefox Desktop and Firefox for Android™.
 
 1. **Create a family** — Click "Family Bookshelf" on any Readmoo page, create a family, and get a sync code
 2. **Invite family members** — Share the sync code with your family; they enter it to join
-3. **Choose books to share** — In "Personal Shelf", toggle each book on or off, then save to sync
+3. **Choose books to share** — In "Personal Shelf", toggle each book on or off, then save to sync; to share books not yet in your personal shelf (e.g. new purchases) automatically when you sync, turn on "new-book default sharing" in the settings
 4. **Browse the family bookshelf** — See all shared books from every family member in "Family Bookshelf"
 
 Mobile users can browse the family bookshelf via the mobile web app (we recommend syncing from the desktop extension at least once first).

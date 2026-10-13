@@ -5,8 +5,9 @@ import { NO_SYNC, lastSyncOf, syncNoticeCountsOf } from "@/dialog/lastSync";
 /**
  * `dialog/lastSync.ts`: the last successful sync as useBookSync holds it, and
  * the notice counts the personal shelf reads from it — renamed books (#236)
- * and books removed because Readmoo no longer holds them (#241). Counts the
- * sync result leaves out default to a value that shows no notice.
+ * books removed because Readmoo no longer holds them (#241), and books
+ * auto-shared or held back by 新書預設開放 (#238). Counts the sync result
+ * leaves out default to a value that shows no notice.
  */
 
 const REMOVED_A = "210000000000051";
@@ -20,6 +21,8 @@ describe("NO_SYNC", () => {
       renamedBookCount: 0,
       removedBookCount: 0,
       removedSharedCount: 0,
+      autoSharedCount: 0,
+      autoShareHeldCount: 0,
     });
   });
 });
@@ -32,6 +35,8 @@ describe("lastSyncOf", () => {
     expect(sync.renamedBookCount).toBe(0);
     expect(sync.removedBookCount).toBe(0);
     expect(sync.removedSharedCount).toBe(0);
+    expect(sync.autoSharedCount).toBe(0);
+    expect(sync.autoShareHeldCount).toBe(0);
     expect(sync.lastUpdated).toBeUndefined();
   });
 
@@ -78,6 +83,25 @@ describe("lastSyncOf", () => {
     expect(sync.removedBookCount).toBe(3);
   });
 
+  it("carries the result's auto-share counts", () => {
+    const sync = lastSyncOf({
+      success: true,
+      books: [],
+      autoSharedCount: 3,
+      autoShareHeldCount: 0,
+    });
+    expect(sync.autoSharedCount).toBe(3);
+    expect(sync.autoShareHeldCount).toBe(0);
+
+    const held = lastSyncOf({
+      success: true,
+      books: [],
+      autoShareHeldCount: 140,
+    });
+    expect(held.autoSharedCount).toBe(0);
+    expect(held.autoShareHeldCount).toBe(140);
+  });
+
   it("falls back to the renamed list's length when the result carries no renamed count", () => {
     const sync = lastSyncOf({
       success: true,
@@ -90,7 +114,7 @@ describe("lastSyncOf", () => {
 });
 
 describe("syncNoticeCountsOf", () => {
-  it("returns exactly the three notice counts of the sync", () => {
+  it("returns exactly the notice counts of the sync", () => {
     const sync = lastSyncOf({
       success: true,
       books: [],
@@ -98,6 +122,8 @@ describe("syncNoticeCountsOf", () => {
       renamedBookCount: 1,
       removedBookCount: 4,
       removedSharedCount: 2,
+      autoSharedCount: 5,
+      autoShareHeldCount: 0,
       lastUpdated: "2026-10-01T00:00:00.000Z",
     });
 
@@ -105,6 +131,8 @@ describe("syncNoticeCountsOf", () => {
       renamedBookCount: 1,
       removedBookCount: 4,
       removedSharedCount: 2,
+      autoSharedCount: 5,
+      autoShareHeldCount: 0,
     });
   });
 
@@ -113,6 +141,8 @@ describe("syncNoticeCountsOf", () => {
       renamedBookCount: 0,
       removedBookCount: 0,
       removedSharedCount: 0,
+      autoSharedCount: 0,
+      autoShareHeldCount: 0,
     });
   });
 });

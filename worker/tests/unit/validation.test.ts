@@ -3,6 +3,7 @@ import {
   EXPECTED_LAST_UPDATED_MAX_LENGTH,
   isJsonObject,
   parseRecoveryFlag,
+  parseRequiredBoolFlag,
   sanitizeCoverUrl,
   sanitizeDisplayName,
   sanitizeExpectedLastUpdated,
@@ -352,6 +353,33 @@ describe("parseRecoveryFlag", () => {
     { label: "an array", value: [1] },
   ])("rejects $label as malformed", ({ value }) => {
     expect(parseRecoveryFlag(value)).toBeNull();
+  });
+});
+
+describe("parseRequiredBoolFlag", () => {
+  it.each<{ label: string; value: unknown; expected: BoolFlag }>([
+    { label: "0", value: 0, expected: BoolFlag.FALSE },
+    { label: "1", value: 1, expected: BoolFlag.TRUE },
+  ])("classifies $label as $expected", ({ value, expected }) => {
+    expect(parseRequiredBoolFlag(value)).toBe(expected);
+  });
+
+  // Unlike parseRecoveryFlag, an absent field is malformed too.
+  it.each<{ label: string; value: unknown }>([
+    { label: "undefined (field absent)", value: undefined },
+    { label: "null", value: null },
+    { label: "true", value: true },
+    { label: "false", value: false },
+    { label: 'the string "1"', value: "1" },
+    { label: 'the string "0"', value: "0" },
+    { label: "2", value: 2 },
+    { label: "-1", value: -1 },
+    { label: "0.5", value: 0.5 },
+    { label: "NaN", value: Number.NaN },
+    { label: "an object", value: { newBookDefaultShared: 1 } },
+    { label: "an array", value: [1] },
+  ])("rejects $label as malformed", ({ value }) => {
+    expect(parseRequiredBoolFlag(value)).toBeNull();
   });
 });
 

@@ -10,7 +10,7 @@ MooFamily Bookshelf is a Chrome Extension that injects a Dialog into the Readmoo
 
 Key design decisions:
 
-- **Privacy first**: all books default to not-shared; users opt-in per book.
+- **Privacy first**: all books default to not-shared; users opt-in per book, or opt in once for future books with the 新書預設開放 setting (off by default; see Security & Privacy Rules → Default closed).
 - **Personal settings persist across families**: sharing preferences are tied to the user, not the family group. Unbinding from a family does not reset settings.
 - **Family is a prerequisite**: the Dialog shows an onboarding screen until the user creates or joins a family.
 - **Child accounts excluded**: Readmoo child accounts cannot use the web interface, so they are out of scope.
@@ -221,7 +221,7 @@ Two-layer data architecture:
 
 1. **Personal sharing settings** (`user:{user_id}`) — per-user, persists across family changes.
    - Contains: book list with per-book `is_shared` flag, display name, last updated timestamp.
-   - All books default to `is_shared: false`. New purchases also default to false.
+   - All books default to `is_shared: false`. New purchases also default to false, unless the user turned on 新書預設開放 (`newBookDefaultShared: BoolFlag.TRUE`, stored in its own key `newbookdefault:{user_id}` — written only by `PUT /api/user/:id/new-book-default`, merged into the `GET /api/user/:id/books` response, never touched by any books write path): the Extension sync then marks books new to the server as shared.
    - Changes require explicit "save" action before syncing to server.
 
 2. **Family group** (`family:{family_id}`) — list of member user IDs.
@@ -258,10 +258,11 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ### Personal Settings
 
-| Method | Path                  | Description                               |
-| ------ | --------------------- | ----------------------------------------- |
-| `GET`  | `/api/user/:id/books` | Get personal book list + sharing settings |
-| `PUT`  | `/api/user/:id/books` | Update sharing settings                   |
+| Method | Path                             | Description                                             |
+| ------ | -------------------------------- | ------------------------------------------------------- |
+| `GET`  | `/api/user/:id/books`            | Get personal book list + sharing settings               |
+| `PUT`  | `/api/user/:id/books`            | Update sharing settings                                 |
+| `PUT`  | `/api/user/:id/new-book-default` | Set 新書預設開放 (`newBookDefaultShared`, a `BoolFlag`) |
 
 ### Family Group
 
@@ -281,7 +282,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 ## Security & Privacy Rules
 
 - **Transport security**: all data protected by TLS in transit and auth tokens for access control.
-- **Default closed**: every book defaults to not-shared. Never auto-share.
+- **Default closed**: every book defaults to not-shared. The ONLY auto-share is 新書預設開放 (#238): the user's own toggle in Settings, off by default, IS the opt-in. With it on, the Extension sync (`extension/src/sync/autoShare.ts`) marks books new to the server as shared — never on the first sync, never for more than `AUTO_SHARE_MAX_NEW` (100) new books at once, never for the target of a resolved id change (rename or legacy-id resolution) or any new id whose title matches a saved book this scrape did not find (an unpaired id change), never for an archived book. Nothing else may auto-share.
 - **Save to sync**: changes only upload after explicit save action.
 - **Unbind isolation**: leaving a family immediately removes user from member list; other members can no longer see their books.
 - **Settings persist**: personal sharing preferences survive family unbind/rebind.

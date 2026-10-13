@@ -19,7 +19,8 @@ export function isLegacyBookEntry(entry: BookEntry): boolean {
   return !isRealBookId(entry.bookId);
 }
 
-function titleKey(entry: BookEntry): string {
+/** The trimmed title same-title matching compares; "" for a missing or non-string title. */
+export function titleKey(entry: BookEntry): string {
   return typeof entry.title === "string" ? entry.title.trim() : "";
 }
 
