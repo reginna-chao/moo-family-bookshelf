@@ -1357,7 +1357,11 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 
 ### KV 備份與事故還原
 
-正式 KV 的每日備份由 GitHub Actions 執行 Node.js 腳本，寫入私人 R2；Worker 本身不新增排程、管理 API 或 R2 binding。備份讀取憑證與還原寫入憑證分開，還原只接受不同於來源的空白隔離 namespace，完成回讀與服務驗證後才由管理者另行決定是否切換正式 binding。KV 的最終一致與跨 key 修改意味著備份不是交易快照。
+正式 KV 的每日備份由獨立 Cloudflare Worker 的 Cron 執行，透過 bindings 讀取 KV、分段上傳私人 R2 並讀回核對；服務 API Worker 的路由與 binding 不變。備份 Worker 使用 Workers Paid，獨立配置及部署，不提供公開管理入口。GitHub Actions 只驗證程式，沒有每日備份排程，因此 repository 長期未更新不影響備份。
+
+成功後以條件寫入更新 `latest.json`，再清理超過 14 天的非最新備份；`snapshots/` 與 `latest.json` 不設物件刪除 lifecycle，長期失敗也不因保留期限而刪掉最後成功備份。完成後向 Healthchecks.io 發無內容的成功訊號；外部平台以 24 小時 Period 加 12 小時 Grace 獨立監看，逾期寄 Email，正常時不要求人工定期查看。
+
+還原仍由本機 CLI 執行，只接受不同於來源的空白隔離 namespace；寫入憑證不交給備份 Worker。完成回讀與受保護的服務驗證後，才由管理者另行決定是否切換正式 binding。KV binding 本身不是唯讀授權，讀取／列舉兩輪也不能證明跨 key 同一時點一致，備份仍不是交易快照。
 
 資料範圍、保留政策與已知限制見 [KV 備份計畫](kv-backup-plan.md)，啟用及演練步驟見 [部署指南](../worker/DEPLOY.md#kv-每日備份與還原演練)。程式合併與排程啟用是兩個步驟；外部設定與真實還原演練完成前，不宣稱正式備份已上線。
 

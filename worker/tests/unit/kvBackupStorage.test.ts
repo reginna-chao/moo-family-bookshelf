@@ -106,22 +106,17 @@ describe("R2 storage and CLI boundaries", () => {
     expect(result.stderr).not.toContain("r2");
   });
 
-  it("keeps daily credentials out of installation and restore paths", () => {
-    const workflow = readFileSync(
-      resolve("../.github/workflows/kv-backup.yml"),
-      "utf8",
-    );
-    expect(workflow).toContain('cron: "17 3 * * *"');
-    expect(workflow).toContain("vars.KV_BACKUP_ENABLED == 'true'");
-    expect(workflow).toContain("github.ref == 'refs/heads/main'");
-    expect(workflow).toContain("contents: read");
-    expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("run: node scripts/kv-backup.mjs");
-    expect(workflow.indexOf("env:")).toBeGreaterThan(
-      workflow.indexOf("pnpm install --frozen-lockfile"),
-    );
-    expect(workflow).not.toMatch(
-      /upload-artifact|KV_RESTORE_API_TOKEN|pull_request_target/,
+  it("keeps the Cloudflare backup disabled until explicit activation", () => {
+    const config = readFileSync(resolve("wrangler.backup.toml"), "utf8");
+    expect(config).toContain('BACKUP_ENABLED = "false"');
+    expect(config).toMatch(/^crons = \[\]$/m);
+    expect(config).toContain('main = "src/backup/index.ts"');
+    expect(config).toContain('binding = "BACKUP_KV"');
+    expect(config).toContain('binding = "BACKUP_BUCKET"');
+    expect(config).toContain("workers_dev = false");
+    expect(config).toContain("preview_urls = false");
+    expect(existsSync(resolve("../.github/workflows/kv-backup.yml"))).toBe(
+      false,
     );
   });
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { isDeepStrictEqual } from "node:util";
 
 export const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -17,7 +18,7 @@ export const PREFIXES = [
 ];
 const IGNORED = ["auth:", "token:", "otp:", "qr:", "verifyfail:", "ratelimit:"];
 const OBJECT_PATH =
-  /^daily\/\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f-]{36}\.(jsonl|manifest\.json)$/;
+  /^(?:daily|snapshots)\/\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f-]{36}\.(jsonl|manifest\.json)$/;
 
 export class BackupError extends Error {}
 
