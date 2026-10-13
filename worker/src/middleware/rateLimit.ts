@@ -475,7 +475,8 @@ export async function peekPerUserRateLimit(
  * pre-write count, so a burst can exceed `max` by as much as the caller's own
  * concurrency — there is no fixed overshoot factor. This applies to every
  * counter still on KV: the hourly scopes (`verify`, `verify-write`,
- * `put-books`, `family-prefs`, `family-write`, `public-shelf`), the
+ * `put-books`, `family-prefs`, `new-book-default`, `family-write`,
+ * `public-shelf`), the
  * verification attempt ceiling in `services/verification.ts`, and the
  * missing-binding fallback in {@link chargeIpCounterInKv}. The per-minute
  * scopes normally bypass this path entirely — see {@link bindingForWindow}.

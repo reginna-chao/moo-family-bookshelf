@@ -107,6 +107,7 @@ import * as familiesDal from "../../src/kv/families";
 import * as usersDal from "../../src/kv/users";
 import * as publicShelvesDal from "../../src/kv/publicShelves";
 import * as verifyDal from "../../src/kv/verify";
+import * as newBookDefaultDal from "../../src/kv/newBookDefault";
 import { writeBorrowPointer } from "../../src/services/borrowIndex";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -245,6 +246,7 @@ describe("src/routes/** KV access boundary", () => {
       "family.ts",
       "publicShelf.ts",
       "user.ts",
+      "userNewBookDefault.ts",
       "verify.ts",
     ]);
   });
@@ -322,6 +324,11 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
       "putQrTokenRecord",
       "deleteQrToken",
     ],
+  ],
+  [
+    "src/kv/newBookDefault.ts",
+    newBookDefaultDal,
+    ["readNewBookDefault", "putNewBookDefault", "deleteNewBookDefault"],
   ],
 ];
 
@@ -469,5 +476,45 @@ describe("publicshelves:{userId} single-writer invariant", () => {
     // half runs the full detector. See the header → "THE DETECTORS".
     expect(specifierRe("deletePublicShelves").test(module!.source)).toBe(true);
     expect(canWritePublicShelves(module!.source)).toBe(false);
+  });
+});
+
+// --- (iii) newbookdefault:{userId} stays single-writer (#238) ---
+
+const NEW_BOOK_DEFAULT_ROUTE = "routes/userNewBookDefault.ts";
+
+/** Modules under `src/` that can reach `putNewBookDefault` (named specifier or DAL wildcard). */
+function newBookDefaultPutImporters(files: ScannedFile[]): string[] {
+  return files
+    .filter(
+      (file) =>
+        specifierRe("putNewBookDefault").test(file.source) ||
+        wildcardBindingRe("kv/newBookDefault").test(file.source),
+    )
+    .map((file) => file.path);
+}
+
+describe("newbookdefault:{userId} single-writer invariant", () => {
+  it("finds an injected extra importer (detector companion)", () => {
+    const injected = newBookDefaultPutImporters([
+      ...SRC_FILES,
+      {
+        path: "routes/__named__.ts",
+        source: `import { readNewBookDefault, putNewBookDefault } from "../kv/newBookDefault";`,
+      },
+      {
+        path: "routes/__namespace__.ts",
+        source: `import * as dal from "../kv/newBookDefault";`,
+      },
+    ]);
+    expect(injected).toContain("routes/__named__.ts");
+    expect(injected).toContain("routes/__namespace__.ts");
+  });
+
+  it("is imported by routes/userNewBookDefault.ts and by nothing else", () => {
+    // Equality, so the books routes (readers / the account wipe) can never gain the put.
+    expect(newBookDefaultPutImporters(SRC_FILES)).toEqual([
+      NEW_BOOK_DEFAULT_ROUTE,
+    ]);
   });
 });

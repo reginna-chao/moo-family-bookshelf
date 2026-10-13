@@ -12,6 +12,10 @@ export interface SyncNoticeCounts {
   removedBookCount: number;
   /** How many of the removed books were shared. */
   removedSharedCount: number;
+  /** Books new to the server marked shared by 新書預設開放. */
+  autoSharedCount: number;
+  /** New books 新書預設開放 left unshared because there were too many. */
+  autoShareHeldCount: number;
 }
 
 /** The last SUCCESSFUL sync, held as one value so its parts never mismatch. */
@@ -28,6 +32,8 @@ export const NO_SYNC: LastSync = {
   renamedBookCount: 0,
   removedBookCount: 0,
   removedSharedCount: 0,
+  autoSharedCount: 0,
+  autoShareHeldCount: 0,
 };
 
 export function lastSyncOf(result: SyncBooksResult): LastSync {
@@ -39,6 +45,8 @@ export function lastSyncOf(result: SyncBooksResult): LastSync {
     removedBookCount:
       result.removedBookCount ?? result.removedBooks?.length ?? 0,
     removedSharedCount: result.removedSharedCount ?? 0,
+    autoSharedCount: result.autoSharedCount ?? 0,
+    autoShareHeldCount: result.autoShareHeldCount ?? 0,
     lastUpdated: result.lastUpdated,
   };
 }
@@ -49,5 +57,7 @@ export function syncNoticeCountsOf(sync: LastSync): SyncNoticeCounts {
     renamedBookCount: sync.renamedBookCount,
     removedBookCount: sync.removedBookCount,
     removedSharedCount: sync.removedSharedCount,
+    autoSharedCount: sync.autoSharedCount,
+    autoShareHeldCount: sync.autoShareHeldCount,
   };
 }

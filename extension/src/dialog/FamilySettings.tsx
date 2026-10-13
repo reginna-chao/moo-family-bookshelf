@@ -20,6 +20,7 @@ import { FamilySettingsDeleteBlock } from "./FamilySettingsDeleteBlock";
 import { FamilySettingsReportLinks } from "./FamilySettingsReportLinks";
 import { useFamilySettingsCopy } from "./useFamilySettingsCopy";
 import { useFamilySettingsSyncArchived } from "./useFamilySettingsSyncArchived";
+import { useFamilySettingsNewBookDefault } from "./useFamilySettingsNewBookDefault";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -82,6 +83,9 @@ export function FamilySettings({
     setSyncCode(encodeSyncCode({ familyId, apiHost }));
   }, [familyId, adoptedEndpoint]);
 
+  // After the hooks above, so their effect order stays as documented; reads the server once per mount.
+  const newBookDefault = useFamilySettingsNewBookDefault(apiClient, userId);
+
   return (
     <div>
       <EndpointSwitchPanel
@@ -102,6 +106,7 @@ export function FamilySettings({
           userId={userId}
           syncArchived={syncArchived}
           onToggleSyncArchived={handleToggleSyncArchived}
+          newBookDefault={newBookDefault}
           autoSyncInterval={autoSyncInterval}
           onAutoSyncIntervalChange={setAutoSyncInterval}
           iconSize={iconSize}

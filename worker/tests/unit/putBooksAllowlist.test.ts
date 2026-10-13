@@ -92,6 +92,15 @@ import { USER1 } from "../helpers/ids";
  * faithfully serve it back. It pins "the attacker cannot plant that string in
  * KV in the first place"; the keep/blank verdict itself is pinned once in
  * `tests/unit/validation.test.ts` → BASE_SENSITIVE_URLS.
+ *
+ * newBookDefaultShared (#238): the per-user "newly synced books default to
+ * shared" setting lives in its own key, `newbookdefault:{userId}`, written ONLY
+ * by `PUT /new-book-default`. The books PUT builds `user:{id}` from the
+ * allowlist and must neither store a body copy of the field nor touch that
+ * key: every client sync spreads a possibly stale copy of the record, so
+ * trusting the body would let one device's sync undo a toggle made on another
+ * — and on a fresh account it would let a sync turn the default-open setting
+ * on without the user ever choosing it.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -514,6 +523,77 @@ describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
     // never from the client body — so a fresh record has it undefined, not the junk.
     expect(rec.publicSharing).toBeUndefined();
   });
+
+  // newBookDefaultShared is written only by PUT /new-book-default (#238).
+  // See the header → "newBookDefaultShared".
+  it("does NOT store a body newBookDefaultShared anywhere when no setting exists yet", async () => {
+    const token = await auth();
+    const res = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        books: [{ bookId: B1, isShared: BoolFlag.FALSE }],
+        newBookDefaultShared: BoolFlag.TRUE,
+      },
+      token,
+    );
+    expect(res.status).toBe(200);
+
+    const json = (await res.json()) as Json;
+    expect("newBookDefaultShared" in json.data).toBe(false);
+    const stored = await kv.get<Record<string, unknown>>(
+      kvKeys.user(USER1),
+      "json",
+    );
+    // Positive companion: the record WAS written, so the absent field is meaningful.
+    expect(stored?.books).toHaveLength(1);
+    expect("newBookDefaultShared" in (stored ?? {})).toBe(false);
+    expect(await kv.get(kvKeys.newBookDefault(USER1))).toBeNull();
+  });
+
+  it.each<{
+    label: string;
+    existing: BoolFlag;
+    body: { newBookDefaultShared?: BoolFlag };
+  }>([
+    {
+      label: "stored 1, body 0",
+      existing: BoolFlag.TRUE,
+      body: { newBookDefaultShared: BoolFlag.FALSE },
+    },
+    { label: "stored 1, body absent", existing: BoolFlag.TRUE, body: {} },
+    {
+      label: "stored 0, body 1",
+      existing: BoolFlag.FALSE,
+      body: { newBookDefaultShared: BoolFlag.TRUE },
+    },
+  ])(
+    "leaves the stored newBookDefaultShared untouched whatever the body says ($label)",
+    async ({ existing, body }) => {
+      const token = await auth();
+      const setting = JSON.stringify({ newBookDefaultShared: existing });
+      await kv.put(kvKeys.newBookDefault(USER1), setting);
+
+      const res = await request(
+        "PUT",
+        `/api/user/${USER1}/books`,
+        { books: [{ bookId: B1, isShared: BoolFlag.TRUE }], ...body },
+        token,
+      );
+      expect(res.status).toBe(200);
+
+      expect(await kv.get(kvKeys.newBookDefault(USER1))).toBe(setting);
+      const stored = await kv.get<Record<string, unknown>>(
+        kvKeys.user(USER1),
+        "json",
+      );
+      expect("newBookDefaultShared" in (stored ?? {})).toBe(false);
+      // The save itself landed — the setting survived a real books write.
+      expect(stored?.books).toEqual([
+        expect.objectContaining({ bookId: B1, isShared: BoolFlag.TRUE }),
+      ]);
+    },
+  );
 
   it("does NOT persist unknown fields inside a book entry", async () => {
     const token = await auth();

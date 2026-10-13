@@ -13,6 +13,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * precondition is optional, a mismatch writes nothing, and every accepted write
  * gets a fresh server-assigned `lastUpdated`. PUT bodies are logged as the
  * JSON wire body (`ApiClient.updatePersonalBooks` sends `JSON.stringify(data)`).
+ *
+ * 新書預設開放 (#238, `sync/autoShare.ts`): the upload of each attempt marks
+ * books new to the server as shared when that attempt's read carries
+ * `newBookDefaultShared: 1` (the Worker's GET merges the setting into the
+ * record; the fake server simply stores it on the record). Because the setting
+ * and the server's book ids are both read per attempt, a 409 re-read recomputes
+ * them: a setting turned off mid-sync shares nothing, and a book another device
+ * uploaded meanwhile is no longer new. Rename targets, books carrying the
+ * title of a saved book the scrape missed (an id change left unpaired, e.g.
+ * because the old copy is lent out) and archived books are never auto-shared.
  */
 
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
@@ -35,11 +45,12 @@ import {
 } from "@/content/scraper";
 import {
   BoolFlag,
+  BorrowStatus,
   type ApiClient,
   type BookEntry,
   type BorrowRequest,
 } from "@/api/client";
-import { LAST_SYNC_AT_KEY } from "@/constants";
+import { LAST_SYNC_AT_KEY, SYNC_ARCHIVED_KEY } from "@/constants";
 
 const USER_ID = "user-123";
 const FAMILY_ID = "fam-1";
@@ -742,6 +753,261 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         BoolFlag.TRUE,
       );
       expect(wroteLastSyncAt()).toBe(false);
+    });
+  });
+
+  // #238: the setting and the server ids come from each attempt's read. See the header → "新書預設開放".
+  describe("新書預設開放 (auto-share new books)", () => {
+    function withSetting(record: StoredRecord, flag: unknown): StoredRecord {
+      return { ...record, newBookDefaultShared: flag };
+    }
+
+    it("uploads a book new to the server as shared when the stored setting is 1, and counts it", async () => {
+      mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+      const server = createFakeServer(
+        withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+      );
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      const body = server.puts[0].body;
+      expect(isSharedOf(body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      // The book the server already held keeps its own (unshared) flag.
+      expect(isSharedOf(body.books, BOOK_A)).toBe(BoolFlag.FALSE);
+      expect(result.autoSharedCount).toBe(1);
+      expect(result.autoShareHeldCount).toBe(0);
+      expect(isSharedOf(result.books, BOOK_B)).toBe(BoolFlag.TRUE);
+    });
+
+    it.each([
+      { name: "0", flag: BoolFlag.FALSE },
+      { name: "absent", flag: undefined },
+      { name: "true (not a BoolFlag)", flag: true },
+      { name: '"1" (not a BoolFlag)', flag: "1" },
+    ])(
+      "leaves the new book unshared when the stored setting is $name",
+      async ({ flag }) => {
+        mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+        const record = storedRecord([savedBook(BOOK_A)]);
+        const server = createFakeServer(
+          flag === undefined ? record : withSetting(record, flag),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(isSharedOf(server.puts[0].body.books, BOOK_B)).toBe(
+          BoolFlag.FALSE,
+        );
+        expect(result.autoSharedCount).toBe(0);
+        expect(result.autoShareHeldCount).toBe(0);
+      },
+    );
+
+    it("never auto-shares on the first sync, even with the setting on", async () => {
+      mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+      const server = createFakeServer(
+        withSetting(storedRecord([]), BoolFlag.TRUE),
+      );
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      expect(server.puts[0].body.books.map((b) => b.isShared)).toEqual([
+        BoolFlag.FALSE,
+        BoolFlag.FALSE,
+      ]);
+      expect(result.autoSharedCount).toBe(0);
+    });
+
+    it.each([
+      {
+        name: "turned off between the reads: the landed PUT shares nothing",
+        first: BoolFlag.TRUE,
+        reread: BoolFlag.FALSE,
+        firstShared: BoolFlag.TRUE,
+        landedShared: BoolFlag.FALSE,
+        count: 0,
+      },
+      {
+        name: "turned on between the reads: the landed PUT shares the new book",
+        first: BoolFlag.FALSE,
+        reread: BoolFlag.TRUE,
+        firstShared: BoolFlag.FALSE,
+        landedShared: BoolFlag.TRUE,
+        count: 1,
+      },
+    ])(
+      "recomputes the setting from the 409 re-read — $name",
+      async ({ first, reread, firstShared, landedShared, count }) => {
+        mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+        const server = createFakeServer(
+          withSetting(storedRecord([savedBook(BOOK_A)]), first),
+          {
+            beforePut: (index, state) => {
+              if (index !== 0) return;
+              state.stored = withSetting(
+                storedRecord([savedBook(BOOK_A)], "race"),
+                reread,
+              );
+            },
+          },
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+        expect(isSharedOf(server.puts[0].body.books, BOOK_B)).toBe(firstShared);
+        expect(isSharedOf(server.puts[1].body.books, BOOK_B)).toBe(
+          landedShared,
+        );
+        expect(result.autoSharedCount).toBe(count);
+      },
+    );
+
+    it("treats a book the 409 re-read already holds as not new", async () => {
+      mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+      const server = createFakeServer(
+        withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+        {
+          // Another device uploaded B (unshared) between this sync's read and its PUT.
+          beforePut: (index, state) => {
+            if (index !== 0) return;
+            state.stored = withSetting(
+              storedRecord([savedBook(BOOK_A), savedBook(BOOK_B)], "race"),
+              BoolFlag.TRUE,
+            );
+          },
+        },
+      );
+
+      const result = await runSync(server.client);
+
+      expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+      expect(isSharedOf(server.puts[0].body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(isSharedOf(server.puts[1].body.books, BOOK_B)).toBe(
+        BoolFlag.FALSE,
+      );
+      expect(result.autoSharedCount).toBe(0);
+    });
+
+    it("does not auto-share the target of a rename, while sharing a genuinely new book", async () => {
+      mockScrape([
+        scrapedBook(KEPT_ID),
+        scrapedBook(NEW_ID, RENAMED_TITLE),
+        scrapedBook(BOOK_B),
+      ]);
+      const server = createFakeServer(
+        withSetting(
+          storedRecord([
+            savedBook(KEPT_ID),
+            savedBook(OLD_ID, BoolFlag.FALSE, RENAMED_TITLE),
+          ]),
+          BoolFlag.TRUE,
+        ),
+      );
+
+      const result = await runSync(server.client, false);
+
+      expect(result.success).toBe(true);
+      expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+      const body = server.puts[0].body;
+      expect(isSharedOf(body.books, NEW_ID)).toBe(BoolFlag.FALSE);
+      // Positive companion: the run did auto-share, so the exclusion is not vacuous.
+      expect(isSharedOf(body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(result.autoSharedCount).toBe(1);
+    });
+
+    it("does not auto-share a book titled like a saved book the scrape missed when the id change is not paired", async () => {
+      mockScrape([
+        scrapedBook(KEPT_ID),
+        scrapedBook(NEW_ID, RENAMED_TITLE),
+        scrapedBook(BOOK_B),
+      ]);
+      const server = createFakeServer(
+        withSetting(
+          storedRecord([
+            savedBook(KEPT_ID),
+            savedBook(OLD_ID, BoolFlag.FALSE, RENAMED_TITLE),
+          ]),
+          BoolFlag.TRUE,
+        ),
+      );
+      // OLD is lent out, which shields it from id-change resolution: NEW is never paired with it.
+      server.listBorrowRequests.mockResolvedValue([
+        {
+          requestId: "req-old",
+          familyId: FAMILY_ID,
+          borrowerId: "user-borrower",
+          borrowerName: "借書人",
+          ownerId: USER_ID,
+          bookId: OLD_ID,
+          bookTitle: RENAMED_TITLE,
+          bookAuthor: "",
+          bookCoverUrl: "",
+          status: BorrowStatus.LENT,
+          createdAt: "2020-01-01T00:00:00.000Z",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      expect(result.renamedBooks).toEqual([]);
+      const body = server.puts[0].body;
+      expect(isSharedOf(body.books, NEW_ID)).toBe(BoolFlag.FALSE);
+      // Positive companion: the genuinely new book IS auto-shared.
+      expect(isSharedOf(body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(result.autoSharedCount).toBe(1);
+    });
+
+    it("does not auto-share a new archived book synced by 同步封存書籍", async () => {
+      await chrome.storage.local.set({ [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE });
+      mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
+      vi.mocked(scrapeArchivedBooks).mockResolvedValue({
+        books: [{ ...scrapedBook(GONE_ID), isArchived: BoolFlag.TRUE }],
+        complete: true,
+        libraryIds: null,
+      });
+      const server = createFakeServer(
+        withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+      );
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      const archived = server.puts[0].body.books.find(
+        (b) => b.bookId === GONE_ID,
+      );
+      expect(archived).toMatchObject({
+        isArchived: BoolFlag.TRUE,
+        isShared: BoolFlag.FALSE,
+      });
+      expect(isSharedOf(server.puts[0].body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(result.autoSharedCount).toBe(1);
+    });
+
+    it("shares none of more than 100 new books and reports them held", async () => {
+      const fresh = Array.from(
+        { length: 101 },
+        (_, i) => `2108${String(i).padStart(11, "0")}`,
+      );
+      mockScrape([scrapedBook(BOOK_A), ...fresh.map((id) => scrapedBook(id))]);
+      const server = createFakeServer(
+        withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+      );
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      expect(
+        server.puts[0].body.books.filter((b) => b.isShared === BoolFlag.TRUE),
+      ).toEqual([]);
+      expect(result.autoSharedCount).toBe(0);
+      expect(result.autoShareHeldCount).toBe(101);
     });
   });
 });

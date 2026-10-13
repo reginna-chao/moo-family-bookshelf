@@ -12,7 +12,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
   "src/api/auth-refresh.ts": 398,
-  "src/api/client.ts": 743,
+  "src/api/client.ts": 732,
   "src/content/index.ts": 400,
   "src/content/mobileLayout.ts": 257,
   "src/content/readmoo-lend.ts": 392,

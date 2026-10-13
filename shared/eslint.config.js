@@ -26,7 +26,7 @@ const BROWSER_ONLY_GLOBALS = [
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
   "src/api/entityText.ts": 246,
-  "src/api/types.ts": 242,
+  "src/api/types.ts": 206,
   "src/config/readmoo.ts": 374,
 };
 

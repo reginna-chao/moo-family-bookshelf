@@ -5,6 +5,7 @@ import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { userRoutes } from "./routes/user";
+import { userNewBookDefaultRoutes } from "./routes/userNewBookDefault";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
 import { borrowRoutes } from "./routes/borrow";
@@ -147,6 +148,7 @@ app.get("/api/_docs", async (c) => {
 
 // Routes
 app.route("/api/user", userRoutes);
+app.route("/api/user", userNewBookDefaultRoutes);
 app.route("/api/user", verifyRoutes);
 app.route("/api/user", publicShelfRoutes);
 app.route("/api/family", familyRoutes);

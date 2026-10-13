@@ -128,6 +128,7 @@ export const kvKeys = {
   borrow: (requestId: string) => `borrow:${requestId}`,
   borrowsByFamily: (familyId: string) => `borrows:family:${familyId}`,
   publicShelves: (userId: string) => `publicshelves:${userId}`,
+  newBookDefault: (userId: string) => `newbookdefault:${userId}`,
   publicShelf: (token: string) => `public:${token}`,
 } as const;
 
@@ -311,6 +312,22 @@ export interface UserBooksRecord {
   /** Per-viewer private family-shelf prefs (v1.5.0+), copy-scoped `"{ownerId}:{bookId}"` refs: `hidden` from
    *  the viewer's own view, `favorites` (我的最愛, v1.6.0+). Each list capped at `MAX_FAMILY_PREF_ENTRIES`. */
   familyShelfPrefs?: { hidden: string[]; favorites: string[] };
+}
+
+/**
+ * `newbookdefault:{userId}` — the per-user "newly synced books default to
+ * shared" setting (#238). Persistent, no TTL. TRUE ⇒ the Extension marks books
+ * new to the server as shared at sync time; absent / unreadable / FALSE ⇒
+ * default-closed.
+ *
+ * Split out of `user:{userId}` for the same reason as `publicshelves:{userId}`:
+ * that record is a read-modify-write blob with no CAS, so any books / prefs
+ * write carrying a stale read could roll an "off" back to "on". Single writer:
+ * `PUT /api/user/:id/new-book-default`; `GET /api/user/:id/books` merges it into
+ * its response; `DELETE /api/user/:id` deletes it.
+ */
+export interface NewBookDefaultRecord {
+  newBookDefaultShared: BoolFlag;
 }
 
 /**

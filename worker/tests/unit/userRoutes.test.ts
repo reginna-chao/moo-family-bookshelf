@@ -3,7 +3,7 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { createRateLimitBindings } from "../helpers/rateLimitBindings";
-import { BoolFlag, kvKeys } from "../../src/kv/schema";
+import { BoolFlag, kvKeys, type UserBooksRecord } from "../../src/kv/schema";
 import { generateAuthToken } from "../../src/middleware/auth";
 import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
@@ -176,6 +176,86 @@ describe("GET /api/user/:id/books", () => {
     expect(json.data.books).toHaveLength(1);
     expect(json.data.books[0].bookId).toBe(B1);
     expect(json.data.lastUpdated).toBeDefined();
+  });
+
+  // `newbookdefault:{id}` is merged into the response only when the key exists;
+  // anything but exactly 1 reads as 0 (default-closed).
+  it.each<{
+    label: string;
+    stored: string | null;
+    expected: BoolFlag | undefined;
+  }>([
+    {
+      label: "1",
+      stored: JSON.stringify({ newBookDefaultShared: 1 }),
+      expected: BoolFlag.TRUE,
+    },
+    {
+      label: "0",
+      stored: JSON.stringify({ newBookDefaultShared: 0 }),
+      expected: BoolFlag.FALSE,
+    },
+    { label: "never set", stored: null, expected: undefined },
+    {
+      label: "an out-of-range 2",
+      stored: JSON.stringify({ newBookDefaultShared: 2 }),
+      expected: BoolFlag.FALSE,
+    },
+    {
+      label: "boolean true",
+      stored: JSON.stringify({ newBookDefaultShared: true }),
+      expected: BoolFlag.FALSE,
+    },
+    { label: "unparseable", stored: "{not json", expected: BoolFlag.FALSE },
+    { label: "JSON null", stored: "null", expected: BoolFlag.FALSE },
+  ])(
+    "merges the newBookDefaultShared setting ($label) into the record",
+    async ({ stored, expected }) => {
+      const { authToken } = await createFamilyAndGetToken(USER1);
+      const record: UserBooksRecord = {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Test",
+        books: [],
+        lastUpdated: "2020-01-01T00:00:00.000Z",
+      };
+      await kv.put(kvKeys.user(USER1), JSON.stringify(record));
+      if (stored !== null) await kv.put(kvKeys.newBookDefault(USER1), stored);
+
+      const res = await request(
+        "GET",
+        `/api/user/${USER1}/books`,
+        undefined,
+        authToken,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Json;
+      expect(json.data).toEqual(
+        expected === undefined
+          ? record
+          : { ...record, newBookDefaultShared: expected },
+      );
+      expect("newBookDefaultShared" in json.data).toBe(expected !== undefined);
+    },
+  );
+
+  it("answers data: null when there is no books record, even with a saved setting", async () => {
+    const { authToken } = await createFamilyAndGetToken(USER1);
+    await kv.put(
+      kvKeys.newBookDefault(USER1),
+      JSON.stringify({ newBookDefaultShared: BoolFlag.TRUE }),
+    );
+
+    const res = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      undefined,
+      authToken,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: null });
   });
 });
 

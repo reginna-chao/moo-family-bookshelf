@@ -12,6 +12,8 @@ These invariants MUST be respected by all security audits and code reviews.
 
 **Invariant 3**: The save-before-sync pattern MUST be enforced. Local changes to sharing preferences are NOT uploaded until the user explicitly presses "Save". No background auto-sync of unsaved state.
 
+**Sanctioned exception — 新書預設開放 (#238)**: when the server-stored `newBookDefaultShared` is `BoolFlag.TRUE`, the Extension sync marks books NEW to the server as shared without a per-book save (`extension/src/sync/autoShare.ts`). The opt-in is the setting itself, saved by the user's own toggle in Settings (off by default). The exception never covers: the first sync (no record, or an empty one); a sync with more than `AUTO_SHARE_MAX_NEW` new books (then nothing is auto-shared); the target of a resolved id change (rename or legacy-id resolution), and any new id whose title matches a saved book this scrape did not find (an unpaired id change); an archived book (`isArchived === BoolFlag.TRUE`); or a book the user already has on the server — an existing book's flag is never changed by it. Any other auto-share is still a violation.
+
 ### Unbind Isolation
 
 **Invariant 4**: When a user leaves a family, their userId MUST be removed from the family member list immediately. Subsequent family bookshelf queries MUST NOT include the former member's books. This removal is non-reversible without re-joining. (A stale no-CAS write can re-list a removed member without a `member:{uid}` pointer; the invariant holds because member-level authorization requires listed AND pointed — see "Family-scoped authorization is BIDIRECTIONAL" in `.claude/rules/backend.md`.)

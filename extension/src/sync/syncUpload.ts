@@ -17,6 +17,7 @@ import {
   expectedLastUpdatedOf,
   landedLastUpdatedOf,
 } from "moo-family-bookshelf-shared/personal/fullPutConflict";
+import { autoShareContextFor, autoShareNewBooks } from "./autoShare";
 import { mergeBooks } from "./mergeBooks";
 import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
@@ -50,6 +51,10 @@ export interface SyncUploadResult {
   removedBooks: RemovedBook[];
   removedCount: number;
   removedSharedCount: number;
+  /** Books new to the server marked shared by 新書預設開放, and new books left unshared because there
+   *  were too many (`sync/autoShare.ts`). */
+  autoSharedCount: number;
+  autoShareHeldCount: number;
   /** The stored record's `lastUpdated` the landed PUT answered; undefined when the PUT response carries no usable `lastUpdated`. */
   lastUpdated?: string;
 }
@@ -78,7 +83,7 @@ export async function fetchSavedBooksForSync(
   return saved;
 }
 
-/** Merge, id-change resolution, pruning and the upload record for one read. Writes nothing. */
+/** Merge, id-change resolution, pruning, auto-share and the upload record for one read. Writes nothing. */
 function buildSyncUpload(
   ctx: SyncUploadContext,
   saved: LoadSavedResult,
@@ -91,7 +96,17 @@ function buildSyncUpload(
     ctx.requests,
     ctx,
   );
-  const { books } = plan;
+  // Never earlier: id-change resolution only promotes TRUE, so a flag set before it would stick.
+  const shareCtx = autoShareContextFor(
+    saved,
+    merged,
+    plan.renamedBooks,
+    ctx.scrapedIds,
+  );
+  const { books, autoSharedCount, autoShareHeldCount } = autoShareNewBooks(
+    plan.books,
+    shareCtx,
+  );
   const record = {
     ...saved.raw,
     schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -109,6 +124,8 @@ function buildSyncUpload(
     removedBooks: plan.removedBooks,
     removedCount: plan.removedCount,
     removedSharedCount: plan.removedSharedCount,
+    autoSharedCount,
+    autoShareHeldCount,
   };
 }
 

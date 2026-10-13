@@ -347,6 +347,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
       asSet([
         `delete ${kvKeys.user(USER2)}`,
         `delete ${kvKeys.publicShelves(USER2)}`,
+        `delete ${kvKeys.newBookDefault(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
         `delete ${kvKeys.authToken(memberToken)}`,

@@ -27,7 +27,6 @@ import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 export { validateEndpointUrl };
 
 import type {
-  ApiErrorPayload,
   ApiResponse,
   BorrowRequest,
   CreateBorrowPayload,
@@ -62,6 +61,7 @@ import {
   sanitizeFamilyMembersResponse,
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
+import { isClientSynthesized, synthesizeError } from "./synthesizedError";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -109,28 +109,6 @@ const NO_CONTENT_STATUS = 204;
 async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
   if (response.status === NO_CONTENT_STATUS) return {};
   return (await response.json()) as ApiResponse<T>;
-}
-
-/** Provenance marker for a client-built error envelope: `JSON.parse` never yields a symbol key, so no
- *  backend can forge it. See docs/architecture.md → 伺服器回傳資料的檢查 (`synthesized`). */
-const CLIENT_SYNTHESIZED = Symbol("client-synthesized error payload");
-
-interface SynthesizedErrorPayload extends ApiErrorPayload {
-  [CLIENT_SYNTHESIZED]: true;
-}
-
-/** Build an error payload that is provably not server-supplied. */
-function synthesizeError(
-  code: string,
-  message: string,
-): SynthesizedErrorPayload {
-  return { code, message, [CLIENT_SYNTHESIZED]: true };
-}
-
-/** True only for payloads built by `synthesizeError` above. */
-function isClientSynthesized(payload: ApiErrorPayload): boolean {
-  const marked: Partial<SynthesizedErrorPayload> = payload;
-  return marked[CLIENT_SYNTHESIZED] === true;
 }
 
 /** User-facing copy for a rate-limited auto-recovery; appends the wait, rounded up to whole minutes,
@@ -326,6 +304,17 @@ export class ApiClient {
     changes: Array<{ bookId: string; isShared: BoolFlag }>,
   ): Promise<ApiResponse<{ ok: boolean; applied: number }>> {
     return this.patch(`/api/user/${userId}/books`, { changes });
+  }
+
+  /** The 新書預設開放 setting (#238); 404 `NOT_FOUND` = a server that predates this setting. */
+  async updateNewBookDefault(
+    userId: string,
+    flag: BoolFlag,
+  ): Promise<ApiResponse<{ ok: boolean; newBookDefaultShared: BoolFlag }>> {
+    this.validateHexId(userId, "userId");
+    return this.put(`/api/user/${userId}/new-book-default`, {
+      newBookDefaultShared: flag,
+    });
   }
 
   /** Viewer-private family-shelf prefs (v1.5.0), server-side for Extension/PWA parity. A sent list
