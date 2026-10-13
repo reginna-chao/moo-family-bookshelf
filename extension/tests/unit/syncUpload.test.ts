@@ -23,6 +23,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * uploaded meanwhile is no longer new. Rename targets, books carrying the
  * title of a saved book the scrape missed (an id change left unpaired, e.g.
  * because the old copy is lent out) and archived books are never auto-shared.
+ * Neither is a book the read lists in the server-owned `removedUnsharedBookIds`
+ * (#312: removed while NOT shared, so it comes back unshared); that list is
+ * read per attempt too.
  */
 
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
@@ -987,6 +990,64 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         isShared: BoolFlag.FALSE,
       });
       expect(isSharedOf(server.puts[0].body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(result.autoSharedCount).toBe(1);
+    });
+
+    it("keeps a book the server lists as removed while unshared unshared when the scrape brings it back (#312)", async () => {
+      mockScrape([
+        scrapedBook(BOOK_A),
+        scrapedBook(GONE_ID),
+        scrapedBook(BOOK_B),
+      ]);
+      const server = createFakeServer({
+        ...withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+        removedUnsharedBookIds: [GONE_ID],
+      });
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      const body = server.puts[0].body;
+      expect(isSharedOf(body.books, GONE_ID)).toBe(BoolFlag.FALSE);
+      // Positive companion: the genuinely new book IS auto-shared.
+      expect(isSharedOf(body.books, BOOK_B)).toBe(BoolFlag.TRUE);
+      expect(result.autoSharedCount).toBe(1);
+      expect(result.autoShareHeldCount).toBe(0);
+    });
+
+    it("recomputes the removed-while-unshared list from the 409 re-read (#312)", async () => {
+      mockScrape([
+        scrapedBook(BOOK_A),
+        scrapedBook(GONE_ID),
+        scrapedBook(BOOK_B),
+      ]);
+      const server = createFakeServer(
+        withSetting(storedRecord([savedBook(BOOK_A)]), BoolFlag.TRUE),
+        {
+          // Another device removed GONE (unshared) between this sync's read and its PUT.
+          beforePut: (index, state) => {
+            if (index !== 0) return;
+            state.stored = {
+              ...withSetting(
+                storedRecord([savedBook(BOOK_A)], "race"),
+                BoolFlag.TRUE,
+              ),
+              removedUnsharedBookIds: [GONE_ID],
+            };
+          },
+        },
+      );
+
+      const result = await runSync(server.client);
+
+      expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+      expect(isSharedOf(server.puts[0].body.books, GONE_ID)).toBe(
+        BoolFlag.TRUE,
+      );
+      expect(isSharedOf(server.puts[1].body.books, GONE_ID)).toBe(
+        BoolFlag.FALSE,
+      );
+      expect(isSharedOf(server.puts[1].body.books, BOOK_B)).toBe(BoolFlag.TRUE);
       expect(result.autoSharedCount).toBe(1);
     });
 

@@ -220,7 +220,7 @@ When `CHANGELOG.md` is written: between releases, every `/develop` run writes it
 Two-layer data architecture:
 
 1. **Personal sharing settings** (`user:{user_id}`) — per-user, persists across family changes.
-   - Contains: book list with per-book `is_shared` flag, display name, last updated timestamp.
+   - Contains: book list with per-book `is_shared` flag, display name, last updated timestamp, and the server-owned `removedUnsharedBookIds` (ids of books removed while not shared — recomputed only by `PUT /api/user/:id/books`, ignored when a client sends it, capped at 1000 ids of at most 32 characters).
    - All books default to `is_shared: false`. New purchases also default to false, unless the user turned on 新書預設開放 (`newBookDefaultShared: BoolFlag.TRUE`, stored in its own key `newbookdefault:{user_id}` — written only by `PUT /api/user/:id/new-book-default`, merged into the `GET /api/user/:id/books` response, never touched by any books write path): the Extension sync then marks books new to the server as shared.
    - Changes require explicit "save" action before syncing to server.
 
@@ -282,7 +282,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 ## Security & Privacy Rules
 
 - **Transport security**: all data protected by TLS in transit and auth tokens for access control.
-- **Default closed**: every book defaults to not-shared. The ONLY auto-share is 新書預設開放 (#238): the user's own toggle in Settings, off by default, IS the opt-in. With it on, the Extension sync (`extension/src/sync/autoShare.ts`) marks books new to the server as shared — never on the first sync, never for more than `AUTO_SHARE_MAX_NEW` (100) new books at once, never for the target of a resolved id change (rename or legacy-id resolution) or any new id whose title matches a saved book this scrape did not find (an unpaired id change), never for an archived book. Nothing else may auto-share.
+- **Default closed**: every book defaults to not-shared. The ONLY auto-share is 新書預設開放 (#238): the user's own toggle in Settings, off by default, IS the opt-in. With it on, the Extension sync (`extension/src/sync/autoShare.ts`) marks books new to the server as shared — never on the first sync, never for more than `AUTO_SHARE_MAX_NEW` (100) new books at once, never for the target of a resolved id change (rename or legacy-id resolution) or any new id whose title matches a saved book this scrape did not find (an unpaired id change), never for an archived book, never for a book removed from the server list while not shared (tombstoned in `removedUnsharedBookIds` — newest 1000 only; accepted residual: a tombstone dropped by a stale no-CAS write within the ~60s KV read window, see `docs/architecture.md` → 個人開放設定 API). Nothing else may auto-share.
 - **Save to sync**: changes only upload after explicit save action.
 - **Unbind isolation**: leaving a family immediately removes user from member list; other members can no longer see their books.
 - **Settings persist**: personal sharing preferences survive family unbind/rebind.

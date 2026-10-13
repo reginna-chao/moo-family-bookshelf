@@ -312,7 +312,21 @@ export interface UserBooksRecord {
   /** Per-viewer private family-shelf prefs (v1.5.0+), copy-scoped `"{ownerId}:{bookId}"` refs: `hidden` from
    *  the viewer's own view, `favorites` (我的最愛, v1.6.0+). Each list capped at `MAX_FAMILY_PREF_ENTRIES`. */
   familyShelfPrefs?: { hidden: string[]; favorites: string[] };
+  /** SERVER-OWNED (#312): real ids of books removed while NOT shared, oldest first, capped at
+   *  `MAX_REMOVED_UNSHARED_BOOK_IDS`. Only the books PUT computes it; a client-sent value is ignored. */
+  removedUnsharedBookIds?: string[];
 }
+
+/**
+ * Cap on `UserBooksRecord.removedUnsharedBookIds` — the newest entries are
+ * kept. With each id at most `MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH` (32) chars,
+ * an entry serializes to ≤ 35 bytes (quotes + comma), so the list is ≤ ~35KB.
+ * No time-based expiry: a tombstone only ever keeps a book unshared.
+ */
+export const MAX_REMOVED_UNSHARED_BOOK_IDS = 1000;
+
+/** Longest bookId ever tombstoned (real Readmoo ids are 15 digits); a longer id is never listed. */
+export const MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH = 32;
 
 /**
  * `newbookdefault:{userId}` — the per-user "newly synced books default to
