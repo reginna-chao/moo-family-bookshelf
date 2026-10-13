@@ -15,8 +15,10 @@ import {
  * sync, a book the server already holds, a book that is the target of an id
  * change (a renamed book or a resolved legacy short-id entry — an old book under
  * a new id, never a purchase), a book carrying the title of a saved book this
- * scrape did not find (a possible id change that was not paired), an archived
- * book, and a burst of more than
+ * scrape did not find (a possible id change that was not paired), a book the
+ * server lists in `removedUnsharedBookIds` (#312: removed while NOT shared, so
+ * coming back it is an old book, stays unshared and does not count toward the
+ * cap), an archived book, and a burst of more than
  * `AUTO_SHARE_MAX_NEW` new books (a misread library: nothing is shared, the
  * count is reported, and one counts-only warning is logged).
  *
@@ -59,6 +61,7 @@ function ctx(
     serverIds: new Set([SERVER_A, SERVER_B]),
     renamedNewIds: new Set(),
     savedOnlyTitles: new Set(),
+    removedUnsharedIds: new Set(),
     ...overrides,
   };
 }
@@ -148,6 +151,11 @@ describe("autoShareNewBooks", () => {
       entry: book(NEW_A, { title: " 同名書 " }),
       overrides: { savedOnlyTitles: new Set(["同名書"]) },
     },
+    {
+      name: "a book the server lists as removed while unshared (#312)",
+      entry: book(NEW_A),
+      overrides: { removedUnsharedIds: new Set([NEW_A]) },
+    },
   ])("leaves $name untouched", ({ entry, overrides }) => {
     const books = [book(SERVER_B), entry];
 
@@ -182,6 +190,33 @@ describe("autoShareNewBooks", () => {
     const result = autoShareNewBooks(
       books,
       ctx(books, { savedOnlyTitles: new Set(["同名書"]) }),
+    );
+
+    expect(sharedIds(result.books)).toEqual([NEW_B]);
+    expect(result.autoSharedCount).toBe(1);
+  });
+
+  it("keeps a book removed while unshared unshared when it comes back, while sharing a genuinely new one (#312)", () => {
+    const books = [book(SERVER_A), book(NEW_A), book(NEW_B)];
+
+    const result = autoShareNewBooks(
+      books,
+      ctx(books, { removedUnsharedIds: new Set([NEW_A]) }),
+    );
+
+    expect(result.books[1]).toBe(books[1]);
+    expect(result.books[1].isShared).toBe(BoolFlag.FALSE);
+    // Positive companion: the run DID share something, so the exclusion is not vacuous.
+    expect(sharedIds(result.books)).toEqual([NEW_B]);
+    expect(result.autoSharedCount).toBe(1);
+  });
+
+  it("ignores a removed-while-unshared id the scrape does not bring back", () => {
+    const books = [book(SERVER_A), book(NEW_B)];
+
+    const result = autoShareNewBooks(
+      books,
+      ctx(books, { removedUnsharedIds: new Set([NEW_A]) }),
     );
 
     expect(sharedIds(result.books)).toEqual([NEW_B]);
@@ -246,6 +281,23 @@ describe("autoShareNewBooks", () => {
 
     expect(result.autoSharedCount).toBe(100);
     expect(result.autoShareHeldCount).toBe(0);
+  });
+
+  it("does not count books removed while unshared toward the cap (#312)", () => {
+    const ids = newIds(AUTO_SHARE_MAX_NEW + 1);
+    const returning = ids[AUTO_SHARE_MAX_NEW];
+    const books = ids.map((id) => book(id));
+
+    const result = autoShareNewBooks(
+      books,
+      ctx(books, { removedUnsharedIds: new Set([returning]) }),
+    );
+
+    expect(result.autoSharedCount).toBe(100);
+    expect(result.autoShareHeldCount).toBe(0);
+    expect(sharedIds(result.books)).toEqual(ids.slice(0, AUTO_SHARE_MAX_NEW));
+    expect(result.books[AUTO_SHARE_MAX_NEW].isShared).toBe(BoolFlag.FALSE);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("preserves the order and every other field of each book", () => {
@@ -362,6 +414,79 @@ describe("autoShareContextFor", () => {
     );
 
     expect([...context.renamedNewIds]).toEqual([RENAMED_TO]);
+  });
+
+  describe("removedUnsharedIds (#312)", () => {
+    function contextWith(raw: Record<string, unknown> | null) {
+      return autoShareContextFor(
+        { books: [book(SERVER_A)], raw },
+        [book(SERVER_A)],
+        [],
+        scraped,
+      );
+    }
+
+    it("reads the record's removedUnsharedBookIds into the set", () => {
+      const context = contextWith({ removedUnsharedBookIds: [NEW_A, NEW_B] });
+
+      expect([...context.removedUnsharedIds].sort()).toEqual([NEW_A, NEW_B]);
+    });
+
+    it.each([
+      { name: "absent", raw: {} },
+      { name: "undefined", raw: { removedUnsharedBookIds: undefined } },
+      { name: "null", raw: { removedUnsharedBookIds: null } },
+      { name: "a string", raw: { removedUnsharedBookIds: NEW_A } },
+      { name: "an object", raw: { removedUnsharedBookIds: { 0: NEW_A } } },
+      { name: "a number", raw: { removedUnsharedBookIds: 1 } },
+      { name: "a missing record (raw null)", raw: null },
+    ])("is empty when the value is $name, without throwing", ({ raw }) => {
+      const context = contextWith(raw);
+
+      expect(context.removedUnsharedIds.size).toBe(0);
+    });
+
+    it("keeps only real book ids from a mixed array", () => {
+      const context = contextWith({
+        removedUnsharedBookIds: [
+          NEW_A,
+          LEGACY_SHORT_ID,
+          "",
+          "21000000000020x",
+          Number(NEW_B),
+          null,
+          { bookId: NEW_B },
+          ["210000000000203"],
+          "210000000000204",
+        ],
+      });
+
+      expect([...context.removedUnsharedIds].sort()).toEqual([
+        NEW_A,
+        "210000000000204",
+      ]);
+    });
+
+    it("keeps a returning book unshared end-to-end while a genuinely new one is shared", () => {
+      const merged = [book(SERVER_A), book(NEW_A), book(NEW_B)];
+      const context = autoShareContextFor(
+        {
+          books: [book(SERVER_A)],
+          raw: {
+            newBookDefaultShared: BoolFlag.TRUE,
+            removedUnsharedBookIds: [NEW_A],
+          },
+        },
+        merged,
+        [],
+        new Set([SERVER_A, NEW_A, NEW_B]),
+      );
+
+      const result = autoShareNewBooks(merged, context);
+
+      expect(sharedIds(result.books)).toEqual([NEW_B]);
+      expect(result.autoSharedCount).toBe(1);
+    });
   });
 
   it("collects the trimmed titles of saved books this scrape did not find, skipping empty ones", () => {

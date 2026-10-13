@@ -31,6 +31,7 @@ import {
   resolvePublicShelves,
 } from "../services/publicShelf";
 import { settleDepartingBorrower } from "../services/borrowIndex";
+import { nextRemovedUnsharedBookIds } from "../services/removedUnsharedBooks";
 import { dissolveFamily } from "../services/familyDissolve";
 import {
   isJsonObject,
@@ -392,7 +393,10 @@ const getUserBooksRoute = createRoute({
     "caller has saved the new-book default (`PUT /api/user/{id}/new-book-default`), " +
     "the response also carries `newBookDefaultShared` (BoolFlag 0/1) — but only " +
     "when a books record exists: with no record the response is `data: null` and " +
-    "the setting is not reported until the first sync creates the record.",
+    "the setting is not reported until the first sync creates the record. " +
+    "The record may carry the server-owned `removedUnsharedBookIds` (ids of " +
+    "books removed while not shared, oldest first, at most 1000), which a " +
+    "client must not auto-share when such a book is synced back.",
   request: {
     params: UserIdParam,
   },
@@ -444,7 +448,9 @@ const putUserBooksRoute = createRoute({
     "conditional: when the stored `lastUpdated` differs, or no record exists, " +
     "the request answers 409 BOOKS_CONFLICT without writing the books record " +
     "or refreshing any public snapshot (it still counts against the hourly " +
-    "rate limit). Absent, null or an empty string means no precondition.",
+    "rate limit). Absent, null or an empty string means no precondition. " +
+    "`removedUnsharedBookIds` is server-owned: a value in the body is ignored, " +
+    "and the stored list is recomputed from the previous and the saved books.",
   request: {
     params: UserIdParam,
   },
@@ -584,6 +590,16 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
   // links resolve through it); once migrated it evaporates. .claude/rules/backend.md → KV Key Patterns.
   if (publicShelves.source !== "pointer" && existing?.publicSharing) {
     record.publicSharing = existing.publicSharing;
+  }
+
+  // Server-owned (#312): any client-sent value is ignored; stored only when non-empty.
+  const removedUnsharedBookIds = nextRemovedUnsharedBookIds(
+    existing?.removedUnsharedBookIds,
+    existing?.books,
+    record.books,
+  );
+  if (removedUnsharedBookIds.length > 0) {
+    record.removedUnsharedBookIds = removedUnsharedBookIds;
   }
 
   await putUserBooksRecord(c.env.KV, userId, record);

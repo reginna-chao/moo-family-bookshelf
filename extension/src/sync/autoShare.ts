@@ -1,6 +1,7 @@
-/** 新書預設開放 (#238): mark books new to the server as shared at sync time, run only AFTER id-change
- *  resolution and pruning (`syncUpload.ts`). See docs/architecture.md → 書單同步. */
+/** 新書預設開放 (#238): mark books new to the server (never one removed while unshared, #312) as shared
+ *  at sync time, run only AFTER id-change resolution and pruning (`syncUpload.ts`). See docs/architecture.md → 書單同步. */
 
+import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 import { BookEntry, BoolFlag } from "../api/client";
 import { isLegacyBookEntry, titleKey } from "./legacyBooks";
 import type { RenamedBook } from "./renamedBooks";
@@ -22,6 +23,9 @@ export interface AutoShareContext {
   /** Titles of current-read entries this scrape did not find; a new id carrying one may be an
    *  unpaired id change, so it is never auto-shared. */
   savedOnlyTitles: ReadonlySet<string>;
+  /** Server-owned `removedUnsharedBookIds` of that read (#312): books removed while NOT shared —
+   *  an old book coming back, never a new one. */
+  removedUnsharedIds: ReadonlySet<string>;
 }
 
 export interface AutoShareResult {
@@ -44,6 +48,7 @@ function isNewToServer(entry: BookEntry, ctx: AutoShareContext): boolean {
     ctx.scrapedIds.has(entry.bookId) &&
     !ctx.serverIds.has(entry.bookId) &&
     !ctx.renamedNewIds.has(entry.bookId) &&
+    !ctx.removedUnsharedIds.has(entry.bookId) &&
     !ctx.savedOnlyTitles.has(titleKey(entry)) &&
     entry.isShared !== BoolFlag.TRUE &&
     entry.isArchived !== BoolFlag.TRUE
@@ -53,12 +58,14 @@ function isNewToServer(entry: BookEntry, ctx: AutoShareContext): boolean {
 /**
  * Mark every book new to the server as shared, when the stored setting is on.
  * "New" = scraped this time, absent from the current read, not the target of
- * a resolved id change, not titled like a saved book this scrape did not find
- * (a possible unpaired id change), not already shared, and not archived (an
- * archived book first uploaded once 同步封存書籍 is on stays unshared). Nothing
- * changes when the setting is off, on a first sync, or when more than
- * `AUTO_SHARE_MAX_NEW` books are new (then `autoShareHeldCount` reports them,
- * with one counts-only warning).
+ * a resolved id change, not removed from the server while unshared (#312: it
+ * comes back unshared and does not count toward `AUTO_SHARE_MAX_NEW`), not
+ * titled like a saved book this scrape did not find (a possible unpaired id
+ * change), not already shared, and not archived (an archived book first
+ * uploaded once 同步封存書籍 is on stays unshared). Nothing changes when the
+ * setting is off, on a first sync, or when more than `AUTO_SHARE_MAX_NEW`
+ * books are new (then `autoShareHeldCount` reports them, with one counts-only
+ * warning).
  * Order is preserved, the input is not mutated, and the same array is
  * returned when nothing is marked. Writes nothing.
  */
@@ -104,10 +111,21 @@ function legacyTargetIds(
     .map((b) => b.bookId);
 }
 
+/** `removedUnsharedBookIds` of a read, checked at the boundary: a non-array is empty and only
+ *  real book ids are kept, so a malformed value never throws. */
+function removedUnsharedIdsOf(raw: SavedRead["raw"]): Set<string> {
+  const value: unknown = raw?.removedUnsharedBookIds;
+  if (!Array.isArray(value)) return new Set();
+  return new Set(
+    (value as unknown[]).filter((id): id is string => isRealBookId(id)),
+  );
+}
+
 /**
- * The `AutoShareContext` of one upload attempt: the setting and the server ids
- * come from that attempt's read, so a 409 re-read recomputes both. `merged` is
- * the `mergeBooks` output, before id-change resolution. Pure.
+ * The `AutoShareContext` of one upload attempt: the setting, the server ids and
+ * the removed-while-unshared ids come from that attempt's read, so a 409 re-read
+ * recomputes them all. `merged` is the `mergeBooks` output, before id-change
+ * resolution. Pure.
  */
 export function autoShareContextFor(
   saved: SavedRead,
@@ -134,5 +152,6 @@ export function autoShareContextFor(
         .map(titleKey)
         .filter((key) => key !== ""),
     ),
+    removedUnsharedIds: removedUnsharedIdsOf(saved.raw),
   };
 }
