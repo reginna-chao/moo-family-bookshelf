@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { listSavedKeys, readRecord } from "../../src/backup/source";
+import {
+  listSavedKeys,
+  readRecord,
+  verifySourceKeys,
+} from "../../src/backup/source";
 import {
   MultipartWriter,
   PART_BYTES,
@@ -31,9 +35,18 @@ import {
 } from "../helpers/kvBackupWorkerFixtures";
 
 /** Negative guards have positive companions: real category export, successful
- * multipart bytes, valid heartbeat, CAS replacement and expired-object deletion. */
+ * multipart bytes, valid heartbeat, CAS replacement and expired-object deletion.
+ *
+ * Mid-run expiry: `readRecord` answers null (skip) only for a listed key whose own
+ * expiration is at or before the run clock; `verifySourceKeys` tolerates exactly
+ * that key disappearing, and nothing else (a new key, a changed TTL, or an
+ * unexpired key going missing). Each acceptance row has a rejecting neighbour. */
+
 const budget = () =>
   new RunBudget({ now: () => NOW, sleep: async () => undefined });
+const emptyEntry = { value: null, metadata: null, cacheStatus: null };
+const PAST = NOW / 1000 - 60;
+const FUTURE = NOW / 1000 + 60;
 const oldKey = `snapshots/2026-09-01/2026-09-01T03-17-00-000Z_${UUID}.manifest.json`;
 const newKey = `snapshots/2026-10-13/2026-10-13T03-17-00-000Z_${UUID}.manifest.json`;
 const pointer = (manifestKey = oldKey) => ({
@@ -100,6 +113,56 @@ describe("KV streaming and resource guards", () => {
     ]);
   });
 
+  type Listed = { name: string; expiration?: number };
+  const initial: Listed[] = [
+    { name: "user:a" },
+    { name: "public:expired", expiration: PAST },
+    { name: "public:live", expiration: FUTURE },
+  ];
+  const relist = (keys: Listed[]) => async () => {
+    const f = await workerKv([]);
+    f.list.mockResolvedValue({
+      keys,
+      list_complete: true,
+      cacheStatus: null,
+    } as Awaited<ReturnType<typeof f.list>>);
+    return verifySourceKeys(
+      f.binding,
+      new Map(initial.map((key) => [key.name, key])),
+      budget(),
+    );
+  };
+  const [user, expired, live] = initial;
+
+  it.each([
+    ["an identical re-listing", [user, expired, live]],
+    ["an expired key absent from the re-listing", [user, live]],
+    ["an expired key still listed with the same expiration", initial],
+  ])("accepts %s", async (_case, keys) => {
+    await expect(relist(keys)()).resolves.toBeUndefined();
+  });
+
+  it.each([
+    [
+      "a key that appears only in the re-listing",
+      [...initial, { name: "user:b" }],
+    ],
+    ["an unexpired key absent from the re-listing", [user, expired]],
+    ["a key without expiration absent from the re-listing", [expired, live]],
+    [
+      "an expired key re-listed with a different expiration",
+      [user, { ...expired, expiration: FUTURE }, live],
+    ],
+    [
+      "a live key re-listed with a different expiration",
+      [user, expired, { ...live, expiration: FUTURE + 1 }],
+    ],
+  ])("rejects %s", async (_case, keys) => {
+    await expect(relist(keys)()).rejects.toThrow(
+      /^備份期間資料清單或到期時間改變，沒有發布成功備份。$/,
+    );
+  });
+
   it.each(["over-limit", "invalid-utf8", "invalid-json", "missing"])(
     "rejects %s streamed records",
     async (kind) => {
@@ -134,20 +197,73 @@ describe("KV streaming and resource guards", () => {
     const f = await workerKv([{ key: "user:a", value }]);
     expect(Buffer.byteLength(value)).toBe(MAX_VALUE_BYTES);
     expect(
-      (await readRecord(f.binding, { name: "user:a" }, budget())).value,
+      (await readRecord(f.binding, { name: "user:a" }, budget()))?.value,
     ).toBe(value);
+  });
+
+  it.each([
+    ["a past expiration", NOW / 1000 - 60],
+    ["an expiration equal to the run clock", NOW / 1000],
+  ])(
+    "skips a listed key with %s whose value has expired",
+    async (_case, expiration) => {
+      const f = await workerKv([]);
+      f.getWithMetadata.mockResolvedValue(emptyEntry);
+      await expect(
+        readRecord(f.binding, { name: "public:x", expiration }, budget()),
+      ).resolves.toBeNull();
+    },
+  );
+
+  it.each([
+    ["a future expiration", NOW / 1000 + 1],
+    ["no expiration", undefined],
+  ])(
+    "rejects a listed key with %s whose value vanished",
+    async (_case, expiration) => {
+      const f = await workerKv([]);
+      f.getWithMetadata.mockResolvedValue(emptyEntry);
+      const read = readRecord(
+        f.binding,
+        { name: "public:x", expiration },
+        budget(),
+      );
+      await expect(read).rejects.toBeInstanceOf(BackupError);
+      await expect(read).rejects.toThrow(/^已列舉的 KV 資料不存在。$/);
+    },
+  );
+
+  it("still exports a listed key past its expiration while KV keeps serving it", async () => {
+    const f = await workerKv([
+      { key: "public:x", value: '{"expiresAt":null}' },
+    ]);
+    const expiration = NOW / 1000 - 60;
+    await expect(
+      readRecord(f.binding, { name: "public:x", expiration }, budget()),
+    ).resolves.toEqual({
+      key: "public:x",
+      value: '{"expiresAt":null}',
+      expiration,
+    });
   });
 
   it("bounds retries, request count and elapsed time without leaking errors", async () => {
     const b = budget();
+    const cloudflare = /^Cloudflare 備份操作失敗，已停止此次作業。$/;
     const operation = vi.fn().mockRejectedValue(new Error("secret"));
-    await expect(b.call(operation)).rejects.toThrow("Cloudflare 備份操作失敗");
+    await expect(b.call(operation)).rejects.toThrow(cloudflare);
     expect(operation).toHaveBeenCalledTimes(2);
     operation.mockClear();
-    await expect(b.call(operation, false)).rejects.toThrow();
+    const once = b.call(operation, false);
+    await expect(once).rejects.toBeInstanceOf(BackupError);
+    await expect(once).rejects.toThrow(cloudflare);
+    await expect(once).rejects.not.toThrow("secret");
     expect(operation).toHaveBeenCalledOnce();
-    const terminal = vi.fn().mockRejectedValue(new BackupError("bounded"));
-    await expect(b.call(terminal)).rejects.toThrow();
+    const inner = new BackupError("bounded");
+    const terminal = vi.fn().mockRejectedValue(inner);
+    const rethrown = b.call(terminal);
+    await expect(rethrown).rejects.toBe(inner);
+    await expect(rethrown).rejects.toThrow(/^bounded$/);
     expect(terminal).toHaveBeenCalledOnce();
     const limited = budget();
     for (let i = 0; i < 9000; i++) await limited.call(async () => undefined);

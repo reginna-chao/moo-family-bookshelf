@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   BackupError,
   classifyKey,
@@ -27,9 +26,8 @@ export async function listSavedKeys(kv: KVNamespace, budget: RunBudget) {
       throw new BackupError("KV 列舉回應格式錯誤。");
     for (const key of page.keys) {
       const prefix = classifyKey(key.name);
-      const fingerprint = createHash("sha256").update(key.name).digest("hex");
-      if (seen.has(fingerprint)) throw new BackupError("KV 列舉含重複資料。");
-      seen.add(fingerprint);
+      if (seen.has(key.name)) throw new BackupError("KV 列舉含重複資料。");
+      seen.add(key.name);
       if (seen.size > MAX_KEYS)
         throw new BackupError("KV 列舉超過資料筆數限制。");
       if (!prefix) continue;
@@ -56,10 +54,14 @@ export async function readRecord(
   kv: KVNamespace,
   key: ListedKey,
   budget: RunBudget,
-): Promise<BackupRecord> {
+): Promise<BackupRecord | null> {
   const result = await budget.call(async () => {
     const entry = await kv.getWithMetadata(key.name, "stream");
-    if (!entry.value) throw new BackupError("已列舉的 KV 資料不存在。");
+    if (!entry.value) {
+      // A listed key whose own TTL has passed expired benignly; anything else vanished.
+      if (hasExpired(key, budget)) return null;
+      throw new BackupError("已列舉的 KV 資料不存在。");
+    }
     const bytes = await readBounded(entry.value, MAX_VALUE_BYTES, budget);
     const value = new TextDecoder("utf-8", {
       fatal: true,
@@ -80,13 +82,16 @@ export async function verifySourceKeys(
   budget: RunBudget,
 ) {
   const current = await listSavedKeys(kv, budget);
-  if (
-    current.size !== initial.size ||
-    [...initial].some(
-      ([name, entry]) =>
-        !current.has(name) ||
-        current.get(name)?.expiration !== entry.expiration,
-    )
-  )
+  const appeared = [...current.keys()].some((name) => !initial.has(name));
+  const changed = [...initial].some(([name, entry]) => {
+    const listed = current.get(name);
+    if (listed) return listed.expiration !== entry.expiration;
+    return !hasExpired(entry, budget);
+  });
+  if (appeared || changed)
     throw new BackupError("備份期間資料清單或到期時間改變，沒有發布成功備份。");
+}
+
+function hasExpired(key: ListedKey, budget: RunBudget) {
+  return key.expiration !== undefined && key.expiration * 1000 <= budget.now();
 }

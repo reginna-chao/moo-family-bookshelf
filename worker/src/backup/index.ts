@@ -32,12 +32,16 @@ async function exportSnapshot(
   const prefixCounts: Record<string, number> = Object.fromEntries(
     PREFIXES.map((prefix) => [prefix, 0]),
   );
+  let written = 0;
   try {
     for (const entry of keys.values()) {
       const record = await readRecord(env.BACKUP_KV, entry, budget);
+      // Expired mid-run: skip it; count and prefixCounts cover written records only.
+      if (!record) continue;
       const prefix = classifyKey(record.key);
       if (!prefix) throw new BackupError("備份包含不允許的資料類別。");
       prefixCounts[prefix]++;
+      written++;
       await writer.write(Buffer.from(JSON.stringify(record) + "\n"));
     }
     await verifySourceKeys(env.BACKUP_KV, keys, budget);
@@ -49,15 +53,25 @@ async function exportSnapshot(
       sourceNamespaceId: env.SOURCE_NAMESPACE_ID,
       startedAt,
       completedAt: new Date(budget.now()).toISOString(),
-      count: keys.size,
+      count: written,
       prefixCounts,
       ...integrity,
       dataObjectPath: key,
     };
   } catch (error) {
-    // Completed objects remain uncommitted; incomplete uploads are aborted.
-    await upload.abort().catch(() => undefined);
+    // A completed but unverified object is deleted (this run's key only); an
+    // incomplete upload is aborted. Cleanup is best-effort; the original error wins.
+    if (writer.completed) await deleteQuietly(env.BACKUP_BUCKET, key, budget);
+    else await upload.abort().catch(() => undefined);
     throw error;
+  }
+}
+
+async function deleteQuietly(bucket: R2Bucket, key: string, budget: RunBudget) {
+  try {
+    await budget.call(() => bucket.delete(key), false);
+  } catch {
+    // The budget may already be spent; the unpublished object is never referenced.
   }
 }
 
@@ -112,8 +126,13 @@ export default {
           byteLength: manifest.byteLength,
         }),
       );
-    } catch {
-      console.error("每日 KV 備份作業未完成；請檢查設定、執行限制與獨立告警。");
+    } catch (error) {
+      // BackupError messages are repo-authored constants; nothing else is logged.
+      console.error(
+        error instanceof BackupError
+          ? error.message
+          : "每日 KV 備份作業未完成；請檢查設定、執行限制與獨立告警。",
+      );
       throw new Error("每日 KV 備份作業失敗。");
     }
   },

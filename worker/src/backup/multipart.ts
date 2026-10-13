@@ -13,11 +13,17 @@ export class MultipartWriter {
   private used = 0;
   private total = 0;
   private readonly parts: R2UploadedPart[] = [];
+  private isCompleted = false;
 
   constructor(
     private readonly upload: R2MultipartUpload,
     private readonly budget: RunBudget,
   ) {}
+
+  /** True once R2 has committed the object, so cleanup must delete it rather than abort. */
+  get completed() {
+    return this.isCompleted;
+  }
 
   async write(bytes: Uint8Array) {
     this.total += bytes.byteLength;
@@ -51,6 +57,7 @@ export class MultipartWriter {
     if (!this.total) throw new BackupError("不能完成空白備份。");
     if (this.used) await this.flush();
     await this.budget.call(() => this.upload.complete(this.parts), false);
+    this.isCompleted = true;
     return { sha256: this.hash.digest("hex"), byteLength: this.total };
   }
 }

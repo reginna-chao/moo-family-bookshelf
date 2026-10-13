@@ -94,19 +94,18 @@ function isOldSnapshot(object: R2Object, cutoff: number) {
 
 export async function cleanOldSnapshots(bucket: R2Bucket, budget: RunBudget) {
   const cutoff = budget.now() - RETENTION_MS;
+  const latest = await readLatest(bucket, budget);
+  if (!latest) throw new BackupError("最後成功備份資訊遺失，沒有刪除舊備份。");
+  const protectedKeys = new Set([
+    latest.pointer.manifestKey,
+    latest.pointer.manifestKey.replace(/\.manifest\.json$/, ".jsonl"),
+  ]);
   let cursor: string | undefined;
   const cursors = new Set<string>();
   for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
     const page = await budget.call(() =>
       bucket.list({ prefix: "snapshots/", cursor, limit: 1000 }),
     );
-    const latest = await readLatest(bucket, budget);
-    if (!latest)
-      throw new BackupError("最後成功備份資訊遺失，沒有刪除舊備份。");
-    const protectedKeys = new Set([
-      latest.pointer.manifestKey,
-      latest.pointer.manifestKey.replace(/\.manifest\.json$/, ".jsonl"),
-    ]);
     const deletions = page.objects
       .filter(
         (object) =>

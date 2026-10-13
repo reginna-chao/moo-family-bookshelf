@@ -56,7 +56,7 @@ Healthchecks.io 獨立計時
 ## 4. 匯出、核對與資源上限
 
 1. 驗證設定、分頁列舉全部 key；拒絕異常 cursor、重複 key 與未知 prefix。
-2. 依序讀取保存範圍，保留原始字串與 metadata，以列舉取得的 expiration 保存期限。讀取後再次列舉，保存範圍的 key 集合與 expiration 必須一致；改變便失敗。
+2. 依序讀取保存範圍，保留原始字串與 metadata，以列舉取得的 expiration 保存期限；列舉後因自身到期而消失的 key 直接略過，不寫入備份。讀取後再次列舉：不得出現新 key、未到期 key 不得消失、仍在的 key expiration 必須一致；違反便失敗。manifest 的 `count`／`prefixCounts` 只計入實際寫入 JSONL 的筆數。
 3. 邊產生 JSONL 邊計算 SHA-256，以 5 MiB 分段上傳 R2，避免把整份備份放入記憶體。最後一段可較小。
 4. 下載 R2 資料，以串流重新核對 bytes 與 SHA-256；只有驗證成功才發布 manifest，再更新 `latest.json`。
 5. 清理舊備份並回報成功 heartbeat。任何失敗不得用舊備份發成功訊號；保留已提交的有效備份供復原。

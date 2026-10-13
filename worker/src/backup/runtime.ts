@@ -46,12 +46,9 @@ export class RunBudget {
       try {
         return await operation();
       } catch (error) {
-        if (
-          error instanceof BackupError ||
-          !retry ||
-          attempt === 1 ||
-          this.retries >= 100
-        )
+        // Our own messages are constant and safe to keep; remote errors are not.
+        if (error instanceof BackupError) throw error;
+        if (!retry || attempt === 1 || this.retries >= 100)
           throw new BackupError("Cloudflare 備份操作失敗，已停止此次作業。");
         this.retries++;
         await this.sleep(500);

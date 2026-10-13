@@ -63,6 +63,56 @@ describe("R2 storage and CLI boundaries", () => {
     },
   );
 
+  const MiB = 1024 * 1024;
+  const timeoutFor = (bytes: number) =>
+    120_000 + 2_000 * Math.ceil(bytes / MiB);
+
+  async function recordTimeouts(action: Parameters<typeof withR2Store>[1]) {
+    const timeouts: number[] = [];
+    await withR2Store(
+      { accountId: ACCOUNT, bucket: "backup-bucket", token: "r2-only" },
+      action,
+      {
+        run: async (_file, _args, options) => {
+          timeouts.push(options.timeout);
+          return { stdout: "", stderr: "" };
+        },
+        env: { PATH: process.env.PATH },
+      },
+    );
+    return timeouts;
+  }
+
+  it.each([
+    [0, 120_000],
+    [7, 122_000],
+    [MiB, 122_000],
+    [MiB + 1, 124_000],
+  ])(
+    "gives a put of %i bytes a child-process timeout of %i ms",
+    async (bytes, expected) => {
+      expect(timeoutFor(bytes)).toBe(expected);
+      const timeouts = await recordTimeouts((store) =>
+        store.put(DATA_KEY, Buffer.alloc(bytes, 1)),
+      );
+      expect(timeouts).toEqual([expected]);
+    },
+  );
+
+  it.each([
+    [MANIFEST_KEY, 1, 122_000],
+    [DATA_KEY, 256, 632_000],
+  ])(
+    "scales the timeout of a get of %s to its %i MiB download limit",
+    async (key, limitMiB, expected) => {
+      expect(timeoutFor(limitMiB * MiB)).toBe(expected);
+      const timeouts = await recordTimeouts(async (store) => {
+        await store.get(key);
+      });
+      expect(timeouts).toEqual([expected]);
+    },
+  );
+
   it.each(["kv-backup", "kv-restore"])(
     "runs the real %s --help without credentials",
     (name) => {

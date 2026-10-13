@@ -80,6 +80,12 @@ export async function withR2Store(
         mode: 0o600,
         flag: "wx",
       });
+      const limit = key.endsWith(".manifest.json")
+        ? 1024 * 1024
+        : MAX_ARCHIVE_BYTES;
+      // Large objects need more than the flat 2 minutes: add 2 s per MiB moved.
+      const bytes = verb === "put" ? data.length : limit;
+      const timeout = 120_000 + 2_000 * Math.ceil(bytes / (1024 * 1024));
       try {
         await run(
           process.execPath,
@@ -99,15 +105,12 @@ export async function withR2Store(
             cwd: directory,
             env: childEnv,
             windowsHide: true,
-            timeout: 120_000,
+            timeout,
             maxBuffer: 1024 * 1024,
             encoding: "utf8",
           },
         );
         if (verb === "get") {
-          const limit = key.endsWith(".manifest.json")
-            ? 1024 * 1024
-            : MAX_ARCHIVE_BYTES;
           if ((await stat(file)).size > limit)
             throw new BackupError("下載的備份超過容量限制。");
           return await readFile(file);
