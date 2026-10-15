@@ -1,230 +1,190 @@
-# KV 自動備份計畫
+# KV 自動備份計畫：Free 方案 Cron Worker 直接備份至 R2
 
-> **狀態**：設計階段，尚未實作
-> **建立日期**：2026-04-14
-> **暫緩原因**：上線前優先順序調整，待正式有用戶流量或重大 migration 前再啟動
-> **下次動作**：由開發者決定重啟時機
+> **狀態**：計畫已確認，待實作與驗收。
+> **更新日期**：2026-10-15
+> **取代**：2026-04-14 的初版設計、PR #315 的「Workers Paid 完整備份」版，以及「Cloudflare 觸發 → GitHub Actions 備份」草案。
+> **目標**：零月費、不依賴 GitHub 排程、每日自動備份、最後成功備份保護、獨立 Email 告警；完整性核對改在還原時執行。
+> **規劃規模**：現況小（幾十個家庭、數 MB），以「中」為設計目標（百位家庭、數十 MB）。
 
 ---
 
 ## 1. 背景與動機
 
-### 為什麼需要備份
+- Cloudflare KV 沒有官方備份服務；真正的風險不是硬體故障，而是應用層 bug（誤刪、寫壞 schema、遷移腳本出錯）。
+- 單人維護的 side project，手動備份一定會被遺忘；自動化之外還要有「沒跑也會有人知道」的機制。
+- 服務進入長期維護後，公開 repository 的 GitHub `schedule` workflow 會因 60 天無活動被停用，所以排程不能放在 GitHub。
+- 上一版在 Cloudflare Worker 內做每日 SHA-256 核對，CPU 需求超過 Free 方案每次 10 ms 的限制，必須訂 Workers Paid（每月 US$5 起）。本版把計算搬走，讓 Worker 只做搬運，留在 Free。
 
-- Cloudflare KV 沒有官方備份服務，帳號或應用層資料毀損時無法還原
-- **真正的風險不是 Cloudflare 硬體故障，而是應用層 bug**（例如誤刪、寫壞 schema、遷移腳本出錯）
-- 手動備份流程在單人維護的 side project 容易被遺忘，自動化比「有意識地手動跑」可靠
-- 備份同時可作為免費的 cron health check（定時失敗時 Cloudflare Dashboard 會顯示）
-
-### 為什麼之前 Gemini 上線準備報告 (`docs/launch-readiness-report.md`) 提到這一點不算緊急
-
-- 目前沒有實際用戶流量，「失去的資料」主要是測試資料
-- `user:*` 不含 PII（僅書單與分享設定），降低了備份的迫切性
-- 其他 key（auth/otp/ratelimit）本身就有 TTL，備份也沒意義
-
-→ 因此本計畫是「上線後盡快做」而非「上線前必做」。
-
----
-
-## 2. 設計決策總覽
-
-| 項目             | 決定                                                                  | 理由                                                                    |
-| ---------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 備份頻率         | **每日 03:00 UTC**（= 台灣時間 11:00）                                | KV 讀取量小（~1000 keys/day），free tier 綽綽有餘；daily 比 weekly 安全 |
-| 保留期           | **14 天**                                                             | 兩週恢復窗口足夠應付「上週某個 bug 誤刪」                               |
-| 格式             | **JSONL**（每行一個 key-value pair）                                  | 支援 streaming 序列化、容易 grep、資料變大也能處理                      |
-| 環境範圍         | **只有 production**，dev 完全不備份                                   | dev 沒有值得保存的資料；簡化設定                                        |
-| Bucket 名稱      | **`moo-family-bookshelf-backups`**                                    | 與 Worker / Pages 命名前綴一致                                          |
-| 物件路徑         | `daily/YYYY-MM-DD.jsonl`                                              | 扁平結構，方便 list 與 lifecycle rule                                   |
-| Restore 機制     | **本機 script + wrangler**，互動式雙段確認                            | 比 admin endpoint 安全，必需有 wrangler 權限才能執行                    |
-| 手動觸發         | 加一個 `POST /api/admin/backup` 端點，需 `BACKUP_TRIGGER_TOKEN`       | 上線 / migration 前可一鍵 snapshot                                      |
-| 失敗告警         | **v1 不做**，依賴 Cloudflare Dashboard Cron Trigger 紀錄              | YAGNI，真有需要再加 webhook                                             |
-| 備份 metadata    | **不備份**（worker 全部 source 沒用到 KV metadata，已 grep 驗證）     | 無意義                                                                  |
-| 備份內容額外加密 | **不加**（R2 預設 private + 資料為明文 JSON / 雜湊 / UUID，不含 PII） | 降低實作複雜度                                                          |
-| 單一 region      | **OK**（不做 multi-region 備份）                                      | 初期不需要                                                              |
-
----
-
-## 3. 備份範圍（要備 / 不備什麼）
-
-### 要備份
-
-| Key Pattern              | 內容型態                    | 備份理由                                                       |
-| ------------------------ | --------------------------- | -------------------------------------------------------------- |
-| `user:{userId}`          | 明文 JSON（書櫃與分享設定） | 核心資料：書櫃與分享設定                                       |
-| `family:{familyId}`      | 明文 JSON                   | 家庭群組（成員 UUID 列表，非 PII）                             |
-| `member:{userId}`        | 明文字串（familyId）        | 反向查找，restore 必需                                         |
-| `verify:{userId}`        | 明文 JSON（雜湊 + salt）    | PWA 登入驗證設定；雜湊過的非 PII                               |
-| `publicshelves:{userId}` | 明文 JSON（公開書櫃清單）   | 現行公開連結的唯一來源；與 `user:*` 必須同進同出（見下方註記） |
-| `public:{shareToken}`    | 明文 JSON                   | 用戶主動建立的公開書櫃                                         |
-
-> ⚠️ **`publicshelves:*` 不可漏備**：公開書櫃清單已從 `user:{userId}` 拆出獨立存放（見 `docs/architecture.md`），讀取端會以它判定連結是否仍有效。若只還原 `user:*` 而不還原 `publicshelves:*`，所有已搬遷用戶會退回舊欄位 fallback，等同讓「已撤銷的公開連結」全部復活——正是這個 key 當初被拆出來要防止的事故類型。
-
-### 不備份
-
-| Key Pattern         | 不備份原因                |
-| ------------------- | ------------------------- |
-| `auth:{userId}`     | 90 天 TTL，重新登入可重建 |
-| `token:{tokenHash}` | 同上                      |
-| `otp:{userId}`      | 5 分鐘 TTL，無意義        |
-| `ratelimit:*`       | 2 分鐘 TTL，無意義        |
-
----
-
-## 4. 架構
-
-### 新增目錄結構
+## 2. 架構
 
 ```
-worker/
-├── src/
-│   └── backup/
-│       ├── types.ts          # BackupManifest / BackupEntry 型別
-│       ├── exporter.ts       # KV → JSONL 序列化（含分頁）
-│       └── scheduled.ts      # Cron 入口（呼叫 exporter → 寫 R2）
-├── scripts/
-│   └── restore-from-r2.ts    # 本機 restore 工具
-└── tests/
-    ├── helpers/
-    │   └── mockR2.ts         # R2 mock
-    └── unit/
-        └── backup.test.ts    # 序列化 + 過濾邏輯測試
+Cloudflare Free Worker 每日 Cron（03:17 UTC，台灣 11:17）
+→ 分頁列舉正式 KV（binding）
+→ 逐筆以串流讀取 value，原始 bytes 直通寫入 R2 multipart 分段
+→ 再次列舉，比對 key 集合與到期時間
+→ 發布 manifest 與 latest.json（R2 原生條件寫入）
+→ 清理超過 14 天且不是最後成功的備份
+→ 通知 Healthchecks 成功
+
+Healthchecks 獨立監看
+→ 約 36 小時沒有成功訊號
+→ 寄送 Email 告警
 ```
 
-### 修改項目
+Worker 只做搬運與計數：不算雜湊、不解析 value、不複製大塊記憶體。所有完整性與格式驗證在本機還原 CLI 執行。
 
-- `worker/src/index.ts`：新增 `export const scheduled: ExportedHandler<Env>["scheduled"]`
-- `worker/wrangler.toml`：新增 `[[env.production.r2_buckets]]` + `[triggers] crons`
-- `worker/src/routes/`：新增 `admin.ts` 路由（`POST /api/admin/backup`，需 `BACKUP_TRIGGER_TOKEN`）
-- `worker/src/kv/schema.ts`：新增 `BACKUPABLE_PREFIXES` 常數列表
-- `.github/workflows/cicd.yml`：可能需要新增 `BACKUP_TRIGGER_TOKEN` secret 的處理（視部署流程決定）
+備份時機是每天固定一次，不是資料更新時觸發：KV 沒有變更事件，寫入時備份只能耦合進正式 API 的每個寫入路徑，而且仍不是一致快照。代價是最多損失一天的變更；要縮短可以把 Cron 改成每 6 小時（KV 讀取與 R2 儲存仍在免費額度內），每小時則會超出 Free 的 KV 讀取上限。
 
----
+## 3. 費用與超限行為
 
-## 5. 前置準備（由開發者手動完成）
+| 項目         | 方案                                                            | 超限行為                                     | 升級條件                                           |
+| ------------ | --------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| Workers      | Free：每日 100,000 請求、每次 10 ms CPU、每帳號 5 個 Cron       | 請求失敗（Error 1027），不自動收費           | 正式 API 接近 100,000／日，或備份 CPU 實測超過門檻 |
+| KV           | Free：每日讀 100,000、寫 1,000、刪 1,000、列舉 1,000；儲存 1 GB | 該類操作失敗，不自動收費                     | 用量預警到達 70%                                   |
+| R2 Standard  | 免費額度：每月 10 GB、Class A 100 萬次、Class B 1,000 萬次      | **按量計費**，不是硬停；需先開通並綁付款方式 | 不升級，但設 Cloudflare 帳單用量通知               |
+| Healthchecks | 免費方案（可建 20 個 check）                                    | —                                            | —                                                  |
 
-### 步驟 1：啟用 R2（一次性）
+備份每日用量估算（中型規模 5,000 筆）：KV 列舉約 10 次、讀取 5,000 次；R2 Class A 約 20 次、Class B 數次、刪除數次。皆在免費額度內，每月目標 US$0。
 
-1. 登入 [https://dash.cloudflare.com](https://dash.cloudflare.com)
-2. 左側選單 → **R2**
-3. 點「Enable R2」按鈕
-4. 同意計費條款（免費額度內不會實際收費：10 GB 儲存 + 每月 100 萬次 Class A 操作）
+Cron 觸發也計入 Workers 每日請求數，與正式 API Worker 共用同一份額度。
 
-> ⚠️ 這個步驟必須先完成，否則 `wrangler r2 bucket create` 會失敗。
+## 4. 備份範圍
 
-### 步驟 2：建立 bucket
+要備份（與 `scripts/kv-backup/format.mjs` 的 `PREFIXES` 一致，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：
 
-```bash
-cd worker
-wrangler r2 bucket create moo-family-bookshelf-backups
-```
+`user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`kicked:`
 
-驗證：
+不備份（短期憑證與計數）：`auth:`、`token:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`
 
-```bash
-wrangler r2 bucket list
-```
+出現未列入兩邊的 key 類別時，備份停止並失敗，由告警反映；新增 key 家族必須同時更新允許清單。
 
-### 步驟 3：設定 Lifecycle Rule（14 天自動刪除）
+## 5. 每日備份流程
 
-可透過 wrangler 或 Cloudflare Dashboard 設定。Dashboard 路徑：
-**R2 → moo-family-bookshelf-backups → Settings → Object Lifecycle Rules → Add Rule**
+1. 檢查 `BACKUP_ENABLED`、來源 ID、Healthchecks UUID；讀取現有 `latest.json`。
+2. 分頁列舉 KV；拒絕異常 cursor、重複 key、未知類別；超過 5,000 筆停止。
+3. 逐筆以 `getWithMetadata(key, "stream")` 讀取。列舉時 expiration 已過且讀不到的 key 直接略過；其他遺失視為失敗。
+4. 寫入 JSONL：`{"key":…,"expiration":…,"metadata":…,"value":<原始 JSON bytes>}`。value 本身是 JSON 的類別（除 `member:` 外全部）以原始 bytes 嵌入，不序列化、不解析；`member:` 的短字串包成 JSON 字串。
+5. 分段上傳用 `FixedLengthStream` 傳遞 chunk 參考，5 MiB 一段；累加每筆與總 byte 長度。
+6. 再次列舉：不得出現新 key、未到期 key 不得消失、仍在的 key expiration 必須一致；違反便失敗。
+7. 完成 multipart；manifest 記 `count`、`prefixCounts`、每筆長度表、總長、R2 回報的 size；以 `etagDoesNotMatch: "*"` 寫入。
+8. `latest.json` 以 ETag 條件寫入更新；`completedAt` 較舊或來源不同時不覆寫。
+9. 清理 `snapshots/` 下超過 14 天且不是最新一對的物件。
+10. 全部成功後才向 Healthchecks 發送空 POST。
 
-- Rule name: `delete-after-14-days`
-- Prefix: `daily/`
-- Action: `Delete objects` after `14 days`
+KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化，不能發現 value 被覆寫。
 
-### 步驟 4：設定 Worker Secret
+## 6. 最後成功備份保護
 
-```bash
-cd worker
-wrangler secret put BACKUP_TRIGGER_TOKEN --env production
-# 貼上一個長 random string（建議用 `openssl rand -hex 32` 產生）
-```
+- 每次備份使用獨立檔名：`snapshots/YYYY-MM-DD/<timestamp>_<uuid>.jsonl` 與同名 `.manifest.json`。
+- `latest.json` 只指向已完成上傳、長度一致的備份；更新用 R2 原生 `onlyIf` 條件寫入，並行發布衝突視為失敗。
+- 只在新備份成功後清理；最後成功備份即使超過 14 天仍保留。
+- R2 不設涵蓋 `snapshots/`、`latest.json` 或整個 bucket 的物件到期刪除規則。**保留**「未完成 multipart upload 一天後自動清除」規則：Worker 被平台中止時 catch 不會執行，殘留靠它清。
+- 失敗清理只處理本次未發布的物件。
 
----
+## 7. 完整性驗證（改在還原時）
 
-## 6. 實作步驟（待執行）
+每日不做 SHA-256，改為：
 
-### Spike：驗證 Miniflare R2 支援（必做，不可跳過）
+- Worker 端：每筆 byte 長度、總長、R2 回報的 object size 寫入 manifest。
+- 還原 CLI：下載後核對總長與每筆長度、每行可解析、每筆 value 符合既有 schema、`count`／`prefixCounts` 相符；任一不符即拒絕還原。
+- 接受的取捨：備份當天不會知道檔案是否損壞，最晚在下次還原演練或真正還原時才發現。緩解：每月一次對最新備份跑 dry-run 還原（只下載核對、不寫入），由管理者手動執行。
 
-- 在 `worker/wrangler.toml` 加一個 `[[r2_buckets]]` binding
-- 跑 `pnpm dev`（local Miniflare）確認不會炸
-- 跑 `pnpm test` 確認不會炸
-- 寫一個 5 行測試：往 mock R2 寫入物件、讀回來
-- **如果 Miniflare R2 不可用，停下來重新評估方案**（例如改用 Scheduled Worker + wrangler secrets + HTTP API 直接打到 R2）
+## 8. 10 ms CPU 門檻與驗收
 
-### 正式實作順序
+Worker 內無法量 CPU（時鐘凍結），本機 Miniflare 不限 CPU。唯一可靠方式：
 
-1. `src/backup/types.ts` — 型別定義
-2. `src/backup/exporter.ts` — KV list 分頁迴圈 + JSONL 序列化 + 過濾邏輯
-3. `src/backup/scheduled.ts` — cron handler + R2 寫入
-4. `src/index.ts` — 加上 `export const scheduled`
-5. `src/routes/admin.ts` — 手動觸發端點
-6. `wrangler.toml` — R2 binding + cron trigger
-7. `tests/helpers/mockR2.ts` + `tests/unit/backup.test.ts`
-8. `scripts/restore-from-r2.ts` — 互動式 restore 工具
+1. 部署到 Free 帳號，暫設每小時 Cron，對真實資料跑至少 5 次。
+2. 讀 Workers 儀表板 CPU time：p99 **≤ 5 ms** 定案；5–10 ms 視為風險，記錄並定期複查；> 10 ms 代表會被砍，走第 14 節退路。
+3. 同時記錄 wall-clock（Cron 上限 15 分鐘）與 KV／R2 用量。
 
-### 委派方式
+設計上的 CPU 來源只剩：列舉結果處理（5,000 筆 key 字串）、每個 chunk 的 enqueue 回呼、manifest 序列化（長度表約 5,000 項）。中型規模估計 1–3 ms。
 
-這是純後端 feature，用 `/develop A` 執行完整生命週期（會以 backend scope dispatch coder / tester / reviewer 並跑 Fix Cycle）。
+## 9. 獨立 Email 告警
 
----
+採用 Healthchecks.io：Period 24 小時、Grace 12 小時、已驗證 Email。只有本次備份完整流程成功才 ping；不傳資料。約 36 小時沒有成功訊號即寄信。
 
-## 7. 風險與開放問題
+這封信的意思不是「備份失敗」，而是「連續一天半沒有任何一次成功備份」。它涵蓋跑了但失敗、被 10 ms CPU 砍掉、Cron 被刪、`BACKUP_ENABLED` 被關、帳號停權等所有情況，而且不需要備份程式還活著才能發出。沒信就是正常，有信就去查。
 
-| #   | 議題                                                       | 嚴重度 | 處理方式                                                                                            |
-| --- | ---------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
-| R1  | KV `list()` 單次回 1000 keys，需要分頁                     | 中     | exporter 必須處理 `cursor` 迴圈，否則資料量變大會漏備份                                             |
-| R2  | Backup 是 eventually-consistent snapshot，不是 transaction | 低     | KV 本身的限制，無解；在 manifest 註記 backup 時間範圍                                               |
-| R3  | Restore 會覆寫現有資料                                     | 高     | restore script 必須兩段確認（顯示要還原的 key 數量 + 提示輸入確認字串如 `RESTORE FROM 2026-04-14`） |
-| R4  | Daily cron 失敗無人知道                                    | 中     | v1 不解，依賴 CF Dashboard Cron Trigger 紀錄；若有實際漏備份事件再加 webhook                        |
-| R5  | R2 free tier 限制：10 GB 儲存、Class A 每月 100 萬次       | 低     | 估算資料量 ~5-10 MB × 14 snapshots = 140 MB，遠低於上限                                             |
-| R6  | **Miniflare R2 支援未驗證**，可能影響本機開發              | 高     | 實作前必須先跑 spike 驗證                                                                           |
+為什麼不用全 Cloudflare 方案：Email Workers 需要網域以 zone 形式在 Cloudflare 上，本專案網域不在 Cloudflare；而且看門狗 Worker 與備份 Worker 同帳號、同一份 Free 額度，帳號層級故障時兩者一起停、沒有人收到信。Cloudflare Notifications 沒有「排程未執行」的通知類型。
 
----
+## 10. 免費額度預警
 
-## 8. Restore 策略
+- 先驗證 Cloudflare GraphQL Analytics API 能否在 Free 取得 KV 操作數與儲存量，及資料延遲。
+- 可取得：日後加一個看門狗 Worker，在備份成功後查詢，接近 70% 門檻時 ping Healthchecks 的第二個 check；無法取得用量時不當作正常，分開呈現。
+- 不可取得：改為文件化的每月手動檢查。
+- 本階段不自動升級；免費 KV 超額時操作會失敗，不會自動轉成付費。
 
-### 使用情境
+建議初始預警門檻：KV 讀 70,000／日、寫 700／日、列舉 700／日、刪 700／日、儲存 700 MB。門檻是初始建議值，不是可支撐人數的承諾。
 
-- 發生誤刪、寫壞資料、或 migration 失敗需要回滾
-- 只在真的出事時手動執行，不是日常流程
+## 11. 憑證與資料保護
 
-### Restore Script 要求
+- 備份 Worker 只用 KV／R2 bindings，不持有 REST token；`HEALTHCHECKS_UUID` 為 Worker secret。
+- 沒有公開入口：`fetch` 一律 404、`workers_dev = false`、`preview_urls = false`。
+- 日誌只記筆數、bytes、manifest 路徑與 `BackupError` 的常數訊息；`worker/tests/unit/kvBackupErrorMessages.test.ts` 釘住訊息必須是字面值。
+- GitHub 不持有任何備份相關 secret；CI 只做備份 Worker 的 dry-run build，不部署。
+- 還原憑證只在可信任本機使用，演練後撤銷。
 
-1. 讀取指定日期的 `daily/YYYY-MM-DD.jsonl` from R2
-2. 解析每行 JSON，顯示：
-   - 總 key 數
-   - 各 prefix 的 key 數量
-   - backup 的原始產生時間
-3. **第一段確認**：顯示「即將覆寫 production KV 的 N 個 keys，從 X 日期的 backup」，要求輸入 `yes`
-4. **第二段確認**：要求輸入確認字串 `RESTORE FROM YYYY-MM-DD`（必須手打，不能複製貼上）
-5. 執行 `KV.put(key, value)`，對每個 backup 項目逐一寫入
-6. 寫入完成後顯示統計：成功 / 失敗數
-7. 失敗的 key 列出到 `restore-errors-{timestamp}.log`
+## 12. 還原方式
 
-### 執行方式
+沿用本機 CLI `scripts/kv-restore.mjs`：
 
-```bash
-cd worker
-pnpm tsx scripts/restore-from-r2.ts --date=2026-04-14 --env=production
-```
+- 預設 dry-run；真正寫入需 `--apply`、互動輸入 `yes` 與 `RESTORE <目標ID>`，以及 `--max-writes` 寫入預算。
+- 寫入目標必須是不同於正式來源的全新空白 namespace；不自動切換正式服務的 KV binding。
+- 依第 7 節驗證長度、筆數、schema；略過已到期或即將到期的資料，保留原始到期時間；完成後逐筆回讀。
+- value 以 `JSON.stringify(parsed)` 寫回，與 Worker 原本寫入的格式語意相等（key 順序與空白可能不同）。
 
----
+首次啟用及重要格式變更後，須完成隔離還原演練。
 
-## 9. 尚未決定的事
+## 13. 實作與驗收
 
-- **Spike 結果出來前，不要開始正式實作**。如果 Miniflare R2 有嚴重 bug，可能需要整個方案重新設計。
-- **Restore script 的 wrangler 權限**：是讓開發者用自己的 wrangler API token 跑，還是用 GitHub Actions 跑？目前傾向前者（更安全、不留 audit trail）。
-- **是否需要備份 `docs/launch-readiness-report.md` 中提到的其他要點（如 Sentry）？** 與本計畫無關，另行處理。
+### 實作（程式）
 
----
+- [ ] 從 `feat/kv-backup` 分支歷史帶入 `scripts/kv-backup/`（format、restore、cli）、對應測試、`worker/src/backup/{retention,heartbeat,runtime,source}.ts`；移除 `multipart.ts` 的雜湊與 `verifyObject`、`readRecord` 的解碼與解析。
+- [ ] 新寫串流 JSONL writer（`FixedLengthStream` 分段、原始 bytes 嵌入、長度累計）。
+- [ ] manifest 改為長度表；`format.mjs` 的 `validateArchive` 改為長度／schema 驗證；restore CLI 配合。
+- [ ] 刪除 REST 匯出工具 `scripts/kv-backup.mjs`，或明確標為手動備援。
+- [ ] `wrangler.backup.toml` 改為 Free 設定（移除 `cpu_ms`）；CI 保留 dry-run build。
+- [ ] 本機 Miniflare 演練：真實 `scheduled` handler 對中型合成資料跑通，還原 CLI 驗證通過。
+- [ ] 更新 `worker/DEPLOY.md`（啟用章節含下方分工）、`docs/architecture.md`。
 
-## 10. 參考資料
+### 啟用與驗收（分工）
 
-- Cloudflare KV 文件：[https://developers.cloudflare.com/kv/](https://developers.cloudflare.com/kv/)
-- Cloudflare R2 文件：[https://developers.cloudflare.com/r2/](https://developers.cloudflare.com/r2/)
-- Cron Triggers：[https://developers.cloudflare.com/workers/configuration/cron-triggers/](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
-- Miniflare R2 支援：[https://miniflare.dev/storage/r2](https://miniflare.dev/storage/r2)
-- 相關討論紀錄：本文件為 2026-04-14 `/team-lead`（現已整併為 `/develop`）session 設計討論的結論保存
+要登入儀表板、輸入秘密、按互動確認、看信箱的由管理者做；能用本機已登入的 wrangler 完成的可由 agent 代勞。
+
+| 步驟                                                               | 誰                           |
+| ------------------------------------------------------------------ | ---------------------------- |
+| 開通 R2 並綁付款方式                                               | 管理者                       |
+| Healthchecks 帳號、check（24 h + 12 h）、Email 驗證、取得 UUID     | 管理者                       |
+| 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版  | agent（wrangler）            |
+| `wrangler secret put HEALTHCHECKS_UUID`                            | 管理者（終端機輸入）         |
+| 每小時 Cron 跑 3–5 次、讀 `latest.json` 核對                       | agent                        |
+| 讀儀表板 CPU p99（第 8 節門檻）                                    | 管理者                       |
+| 建隔離 namespace                                                   | agent                        |
+| 建還原用 API token、設本機環境變數                                 | 管理者                       |
+| 還原 dry-run                                                       | 任一                         |
+| 還原 `--apply` 與資料核對                                          | 管理者（程式拒絕非互動執行） |
+| 故意失敗一次，確認 `latest.json` 未動、仍可 dry-run 還原           | agent                        |
+| Healthchecks 改 1 分鐘 + 1 分鐘，不 ping，等真的收到 Email，再改回 | 管理者                       |
+| Cloudflare Billing 用量通知                                        | 管理者                       |
+| 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                      | agent 部署、管理者確認       |
+| 運維紀錄、每月 dry-run 提醒                                        | 管理者                       |
+
+合併 PR 不代表已啟用，須完成以上全部。
+
+## 14. 退路
+
+CPU 實測超標或規模成長到 Free 不夠時：
+
+1. 訂 Workers Paid，恢復 `feat/kv-backup` 分支歷史中的每日 SHA-256 核對版本（格式相容，只多雜湊欄位）。
+2. 或改走「Cron Worker 觸發 GitHub Actions」版：Cloudflare 只持有 GitHub PAT 觸發 `workflow_dispatch`，備份本體由 Actions 以 Node 工具執行。
+
+兩條路都沿用備份格式、最後成功保護與 Healthchecks 告警。
+
+## 官方依據
+
+- Workers 限制（Free 10 ms CPU、100,000 請求／日、Cron 5 個）：https://developers.cloudflare.com/workers/platform/limits/
+- KV 免費額度與超限失敗：https://developers.cloudflare.com/kv/platform/pricing/
+- R2 免費額度與計費：https://developers.cloudflare.com/r2/pricing/
+- R2 Workers API（條件寫入、multipart）：https://developers.cloudflare.com/r2/api/workers/workers-api-reference/
+- GitHub `schedule` 的 60 天無活動停用規則：https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+- Healthchecks：https://healthchecks.io/docs/
