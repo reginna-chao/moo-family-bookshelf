@@ -78,7 +78,7 @@ KV binding 的批次讀取：一次最多 100 個 key、算 1 次內部 subreque
 2. 分頁列舉 KV；拒絕異常 cursor、重複 key、未知類別；超過 `MAX_SAVED_KEYS`（5,000，Free 與 Paid 相同）停止。
 3. **自適應批次讀取** `getWithMetadata([keys], "text")`：起始每批 100 筆；回應超過 25 MB（413）時把該批對半拆開重試，拆到 1 筆仍失敗才視為備份失敗；重試計入請求計數。列舉時 expiration 已過且讀不到的 key 直接略過；其他遺失視為失敗。
 4. 寫入 JSONL（格式 **version 2**）：`{"key":…,"expiration":…,"metadata":…,"value":<原始 JSON 文字>}`。value 本身是 JSON 的類別（除 `member:` 外全部）以原始文字直接嵌入，不解析、不重新序列化；`member:` 的短字串包成 JSON 字串。
-5. 以 `TextEncoder` 編碼後填入 5 MiB 分段上傳；累加每筆與總 byte 長度。總長超過 `MAX_ARCHIVE_BYTES`（Free 設定檔 **25 MB**）即停止並失敗——這是 CPU 會超過 10 ms 的推估點，用明確錯誤取代被平台靜默砍掉。
+5. 以 `TextEncoder` 編碼後填入 5 MiB 分段上傳；累加每筆與總 byte 長度。總長超過 `MAX_ARCHIVE_BYTES`（Free 設定檔 **15 MB**）即停止並失敗——這是依第 8 節估算 CPU 可能接近 10 ms 的點，用明確錯誤取代被平台靜默砍掉；第 8 節實測後依結果調整這個數字。
 6. 再次列舉：不得出現新 key、未到期 key 不得消失、仍在的 key expiration 必須一致；違反便失敗。
 7. 完成 multipart；manifest 記 `version: 2`、`count`、`prefixCounts`、每筆長度表、總長、R2 回報的 size、**本次內部與對外請求計數**；以 `etagDoesNotMatch: "*"` 寫入。
 8. `latest.json` 以 ETag 條件寫入更新；`completedAt` 較舊或來源不同時不覆寫。
@@ -119,15 +119,15 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 以下任一成立，就進入第 14 節的升級流程；判定來源是 manifest 計數與儀表板，不是人數。門檻約為上限的 70%：
 
-| 指標                  | Free 上限                                 | 分界        | 偵測方式                                      |
-| --------------------- | ----------------------------------------- | ----------- | --------------------------------------------- |
-| 封存總長              | 25 MB（第 5 節第 5 步的硬停，CPU 推估點） | **≥ 10 MB** | Worker 計數；超過時不 ping「容量正常」→ Email |
-| 保存範圍筆數          | 5,000（硬停）                             | **≥ 3,500** | 同上                                          |
-| 單次內部請求計數      | 1,000（平台）                             | **≥ 700**   | 同上                                          |
-| CPU p99               | 10 ms（平台）                             | **≥ 7 ms**  | 儀表板（手動，每月檢查一次）                  |
-| KV 每日讀取（全帳號） | 100,000（平台）                           | ≥ 70,000    | 第 10 節的用量預警                            |
+| 指標                  | Free 上限                                             | 分界        | 偵測方式                                      |
+| --------------------- | ----------------------------------------------------- | ----------- | --------------------------------------------- |
+| 封存總長              | 15 MB（第 5 節第 5 步的硬停，CPU 推估點，依實測調整） | **≥ 10 MB** | Worker 計數；超過時不 ping「容量正常」→ Email |
+| 保存範圍筆數          | 5,000（硬停）                                         | **≥ 3,500** | 同上                                          |
+| 單次內部請求計數      | 1,000（平台）                                         | **≥ 700**   | 同上                                          |
+| CPU p99               | 10 ms（平台）                                         | **≥ 7 ms**  | 儀表板（手動，每月檢查一次）                  |
+| KV 每日讀取（全帳號） | 100,000（平台）                                       | ≥ 70,000    | 第 10 節的用量預警                            |
 
-25 MB 與 5,000 筆是專案自設的保守上限，不是平台數字：前者是推估 CPU 會接近 10 ms 的點，後者與 Paid 設定檔一致以便切換時格式與測試不變。到硬停時備份會明確失敗，從收到升級提醒到完成訂閱與切換需要幾天，70% 的分界是為了留緩衝。
+15 MB 與 5,000 筆是專案自設的保守上限，不是平台數字：前者是推估 CPU 會接近 10 ms 的點（第 8 節實測後調整），後者與 Paid 設定檔一致以便切換時格式與測試不變。封存總長的分界 10 MB 是 15 MB 的約 70%，與其他列相同比例。到硬停時備份會明確失敗，從收到升級提醒到完成訂閱與切換需要幾天，70% 的分界是為了留緩衝。
 
 ## 10. 獨立 Email 告警與免費額度預警
 
@@ -169,7 +169,7 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 ### 實作（程式）
 
 - [ ] 從 `feat/kv-backup` 分支歷史帶入 `scripts/kv-backup/`（format、restore、cli）、對應測試、`worker/src/backup/{retention,heartbeat,runtime,source}.ts`；移除 `multipart.ts` 的雜湊與 `verifyObject`。
-- [ ] `source.ts` 改為自適應批次 `getWithMetadata([keys], "text")`（100 起、413 對半拆、1 筆仍失敗才中止）；`runtime.ts` 的 `RunBudget` 分別計數內部與對外請求並寫入 manifest；`MAX_SAVED_KEYS` 5,000、Free 設定檔 `MAX_ARCHIVE_BYTES` 25 MB。
+- [ ] `source.ts` 改為自適應批次 `getWithMetadata([keys], "text")`（100 起、413 對半拆、1 筆仍失敗才中止）；`runtime.ts` 的 `RunBudget` 分別計數內部與對外請求並寫入 manifest；`MAX_SAVED_KEYS` 5,000、Free 設定檔 `MAX_ARCHIVE_BYTES` 15 MB（第 8 節實測後調整）。
 - [ ] JSONL writer 改為 version 2（原始 JSON 文字嵌入、長度累計、`TextEncoder` 編碼）。
 - [ ] `format.mjs` 的 `validateArchive` 改為長度／schema 驗證，接受 version 1 與 2；restore CLI 依類別寫回。
 - [ ] `heartbeat.ts` 支援兩個 check；第 11 步的三項容量判定。
