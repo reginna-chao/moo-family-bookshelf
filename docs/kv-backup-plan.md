@@ -50,7 +50,7 @@ Cron 觸發也計入 Workers 每日請求數，與正式 API Worker 共用同一
 
 ## 4. 備份範圍
 
-要備份（與 `scripts/kv-backup/format.mjs` 的 `PREFIXES` 一致，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：
+要備份（實作 PR 帶入後，與 `scripts/kv-backup/format.mjs` 的 `PREFIXES` 一致，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：
 
 `user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`kicked:`
 
@@ -167,7 +167,7 @@ Worker 內無法量 CPU（時鐘凍結），本機 Miniflare 不限 CPU。唯一
 | Healthchecks 改 1 分鐘 + 1 分鐘，不 ping，等真的收到 Email，再改回 | 管理者                       |
 | Cloudflare Billing 用量通知                                        | 管理者                       |
 | 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                      | agent 部署、管理者確認       |
-| 運維紀錄、每月 dry-run 提醒                                        | 管理者                       |
+| 維運紀錄、每月 dry-run 提醒                                        | 管理者                       |
 
 合併 PR 不代表已啟用，須完成以上全部。
 
