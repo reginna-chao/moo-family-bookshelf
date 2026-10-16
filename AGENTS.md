@@ -62,13 +62,19 @@ moo-family-bookshelf/
 │   └── package.json
 ├── worker/                      # Cloudflare Workers backend (self-hostable)
 │   ├── src/
-│   │   └── index.ts
+│   │   ├── index.ts
+│   │   └── backup/            # Separate Free-tier Cron Worker: daily KV → R2 backup (docs/kv-backup-plan.md)
 │   ├── tests/
 │   │   ├── unit/              # Unit tests (routes, middleware)
 │   │   └── integration/      # Integration tests (Hono app + in-memory mock KV)
 │   ├── vitest.config.ts
 │   ├── wrangler.toml
-│   └── DEPLOY.md               # Self-hosting guide
+│   ├── wrangler.backup.toml    # Backup Worker config template (copy to the gitignored wrangler.backup.local.toml)
+│   └── DEPLOY.md               # Self-hosting guide + backup activation / restore drill
+├── scripts/
+│   ├── kv-backup/               # Archive format (shared with the backup Worker) + restore CLI modules
+│   ├── kv-restore.mjs           # Restore a backup into an EMPTY isolated KV namespace (dry-run by default)
+│   └── test-kv-backup-runtime.mjs # Local Miniflare drill of the real scheduled handler
 ├── pwa/                         # PWA mobile viewer (Phase 3)
 ├── site/                        # GitHub Pages landing page
 │   └── index.html

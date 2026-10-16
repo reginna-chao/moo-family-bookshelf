@@ -48,6 +48,13 @@ worker/src/
 │   ├── newBookDefault.ts # Data access: newbookdefault:{uid}
 │   ├── publicShelves.ts # Data access: publicshelves:{uid} / public:{token}
 │   └── verify.ts        # Data access: verify:{uid} / otp:{uid} / qr:{token}
+├── backup/            # SEPARATE Free-tier Cron Worker (wrangler.backup.toml), never deployed by CI — docs/kv-backup-plan.md
+│   ├── index.ts       # scheduled(): list → batch read → v2 JSONL multipart → manifest + latest.json CAS → retention → 2 Healthchecks pings
+│   ├── runtime.ts     # Free profile constants, RunBudget (internal vs external request counting), isWithinCapacity
+│   ├── source.ts      # KV listing + adaptive getWithMetadata([keys]) batches (413 → halve); no JSON.parse of values
+│   ├── multipart.ts   # 5 MiB R2 multipart writer, 15 MB archive cap
+│   ├── retention.ts   # latest.json conditional publish + 14-day cleanup sparing the latest pair
+│   └── heartbeat.ts   # Healthchecks ping (empty POST, body must be "OK")
 └── utils/
     ├── bodyLimit.ts  # Per-route request-body limit (bodyLimitFor) — 256KB default, 2MB for PUT /api/user/:id/books; 413 PAYLOAD_TOO_LARGE message
     ├── crypto.ts     # hashSecret / timingSafeEqual primitives
