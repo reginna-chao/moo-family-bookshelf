@@ -1,7 +1,7 @@
 # KV 自動備份計畫：Free 方案 Cron Worker 備份至 R2，超過分界改 Workers Paid
 
-> **狀態**：計畫已確認，待實作與驗收。
-> **更新日期**：2026-10-15
+> **狀態**：程式已實作（PR #322，2026-10-16），啟用與驗收待執行，步驟見 `worker/DEPLOY.md`。
+> **更新日期**：2026-10-16
 > **取代**：2026-04-14 的初版設計、PR #315 的「Workers Paid 完整備份」版，以及「Cloudflare 觸發 → GitHub Actions 備份」草案。
 > **目標**：小規模階段零月費、不依賴 GitHub 排程、每日自動備份、最後成功備份保護、獨立 Email 告警；完整性核對改在還原時執行。
 > **規模與分界**：現況小（幾十個家庭、數 MB）。Free 方案的瓶頸是每次執行 10 ms CPU，資料量到達第 9 節的分界時，改訂 Workers Paid 並切換到每日雜湊核對版（第 14 節）。不採用跨平台（GitHub Actions）備援，避免多一個平台的憑證與失敗面。
@@ -168,16 +168,16 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 ### 實作（程式）
 
-- [ ] 從 `feat/kv-backup` 分支歷史帶入 `scripts/kv-backup/`（format、restore、cli）、對應測試、`worker/src/backup/{retention,heartbeat,runtime,source}.ts`；移除 `multipart.ts` 的雜湊與 `verifyObject`。
-- [ ] `source.ts` 改為自適應批次 `getWithMetadata([keys], "text")`（100 起、413 對半拆、1 筆仍失敗才中止）；`runtime.ts` 的 `RunBudget` 分別計數內部與對外請求並寫入 manifest；`MAX_SAVED_KEYS` 5,000、Free 設定檔 `MAX_ARCHIVE_BYTES` 15 MB（第 8 節實測後調整）。
-- [ ] JSONL writer 改為 version 2（原始 JSON 文字嵌入、長度累計、`TextEncoder` 編碼）。
-- [ ] `format.mjs` 的 `validateArchive` 改為長度／schema 驗證，接受 version 1 與 2；restore CLI 依類別寫回。
-- [ ] `heartbeat.ts` 支援兩個 check；第 11 步的三項容量判定。
-- [ ] 刪除 REST 匯出工具 `scripts/kv-backup.mjs`，或明確標為手動備援。
-- [ ] `wrangler.backup.toml` 改為 Free 設定（移除 `cpu_ms`）；CI 保留 dry-run build。
-- [ ] 本機 Miniflare 演練：真實 `scheduled` handler 對小規模合成資料跑通，還原 CLI 驗證通過，`member:` 寫回逐字相等。
-- [ ] 測試案例必含：單筆合法但 100 筆合計超過 25 MB 時自動拆批、重試計入請求數；僅封存大小超過分界時不送「容量正常」；請求計數、筆數各自超過分界時同樣不送。
-- [ ] 更新 `worker/DEPLOY.md`（啟用章節含下方分工與升級流程）、`docs/architecture.md`。
+- [x] 從 `feat/kv-backup` 分支歷史帶入 `scripts/kv-backup/`（format、restore、cli）、對應測試、`worker/src/backup/{retention,heartbeat,runtime,source}.ts`；移除 `multipart.ts` 的雜湊與 `verifyObject`。
+- [x] `source.ts` 改為自適應批次 `getWithMetadata([keys], "text")`（100 起、413 對半拆、1 筆仍失敗才中止）；`runtime.ts` 的 `RunBudget` 分別計數內部與對外請求並寫入 manifest；`MAX_SAVED_KEYS` 5,000、Free 設定檔 `MAX_ARCHIVE_BYTES` 15 MB（第 8 節實測後調整）。
+- [x] JSONL writer 改為 version 2（原始 JSON 文字嵌入、長度累計、`TextEncoder` 編碼）。
+- [x] `format.mjs` 的 `validateArchive` 改為長度／schema 驗證，接受 version 1 與 2；restore CLI 依類別寫回。
+- [x] `heartbeat.ts` 支援兩個 check；第 11 步的三項容量判定。
+- [x] 刪除 REST 匯出工具 `scripts/kv-backup.mjs`，或明確標為手動備援。（已刪除）
+- [x] `wrangler.backup.toml` 改為 Free 設定（移除 `cpu_ms`）；CI 保留 dry-run build。
+- [x] 本機 Miniflare 演練：真實 `scheduled` handler 對小規模合成資料跑通，還原 CLI 驗證通過，`member:` 寫回逐字相等。
+- [x] 測試案例必含：單筆合法但 100 筆合計超過 25 MB 時自動拆批、重試計入請求數；僅封存大小超過分界時不送「容量正常」；請求計數、筆數各自超過分界時同樣不送（`worker/tests/unit/kvBackupCapacity.test.ts`）。
+- [x] 更新 `worker/DEPLOY.md`（啟用章節含下方分工與升級流程）、`docs/architecture.md`。
 
 ### 啟用與驗收（分工）
 

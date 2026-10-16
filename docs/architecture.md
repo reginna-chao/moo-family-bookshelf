@@ -1356,6 +1356,21 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **PATCH 的清單 key 讀取刻意與另兩個讀取平行發出**：只有通過「沒有任何變更」的短路之後才需要它，但延後讀取會讓一般路徑多一次循序往返，而無變更的 PATCH 只浪費一次平行的小讀取。沒有符合的書、也沒帶 `displayName` 的 PATCH 不寫 KV，也不刷新快照。
 - **`PUT /family-prefs` 不寫快照**：它照樣重新過濾每本書的封面與書籍連結（三條書單寫入路徑共用的懶惰清除），所以 KV 上的紀錄可能暫時比既有的公開快照乾淨，下一次書單寫入時兩者就會一致。
 
+### KV 備份與事故還原
+
+正式 KV 的每日備份由一個獨立的 Cloudflare Worker 執行，跑在 Workers Free 方案，與服務 API Worker 分開設定與部署（`worker/wrangler.backup.toml`，程式在 `worker/src/backup/`）；服務 API Worker 的路由與 binding 不受影響。每天 03:17 UTC 的 Cron 觸發後，Worker 透過 binding 分頁列舉 KV，以 `getWithMetadata([keys], "text")` 每批 100 個 key 讀取（回應超過 25 MB 的 413 就把該批對半拆開），把原始 JSON 文字寫成 version 2 的 JSONL，分段上傳到私人 R2；再列舉一次核對 key 集合與到期時間，接著寫 manifest、以 R2 原生的 ETag 條件寫入更新 `latest.json`，清理超過 14 天且不是最後成功的備份，最後 ping Healthchecks 的「備份成功」check。內部請求數、筆數與封存大小都低於分界時，才另外 ping「容量正常」，沒收到這個訊號就是該升級 Workers Paid 的提醒。GitHub 不排程也不部署它，CI 只做 dry-run build，所以 repository 長期沒有活動也不影響備份。
+
+Free 方案每次執行只有 10 ms CPU，因此 Worker 只做搬運與計數：不算雜湊、不解析 value，每筆的 byte 長度、總長與 R2 回報的物件大小記進 manifest。完整性核對全部移到本機還原 CLI（`scripts/kv-restore.mjs`，共用模組在 `scripts/kv-backup/`）：下載後核對總長與每筆長度、每行能否解析、每筆 value 是否符合現有儲存格式，以及 `count`／`prefixCounts`。代價是備份當天不知道檔案是否損壞，要到每月的 dry-run 或真正還原時才發現。還原只寫入與來源不同的全新空白 namespace，`member:` 寫回裸字串，其餘寫回原始 JSON 文字，寫完逐筆讀回；寫入憑證不交給備份 Worker，是否切換正式 binding 由管理者另行決定。
+
+已接受的殘餘風險：
+
+- **不是交易快照**：兩次列舉能發現 key 新增、消失或到期時間改變，發現不了讀取期間 value 被覆寫，跨 key 不保證是同一時點的狀態。
+- **value 不是合法 JSON 只在還原時才會發現**：Worker 原樣嵌入原始文字，不解析；KV 裡若有一筆壞掉的 value，當天的備份照樣發布，要到 dry-run 或還原時才被拒絕。
+- **批次讀取 413 的錯誤格式未經實測**：程式以錯誤訊息含 `413` 判斷並立即拆批；就算實際格式不同，該批也會走一般的「重試一次、仍失敗就對半拆」路徑，只是多花一次內部請求。
+- **CPU 無法在程式內計數**：超過 10 ms 會被平台直接中止，不會有明確的錯誤訊息；這種情況靠「備份成功」逾期信與每月檢查儀表板 CPU p99 發現。
+
+KV binding 本身不是唯讀授權，Worker 只呼叫 get／list，不代表被攻陷時沒有寫入能力；這是 binding 的平台限制。資料範圍、費用、升級分界與流程見 [KV 備份計畫](kv-backup-plan.md)，啟用、驗收、還原與告警處理步驟見 [部署指南](../worker/DEPLOY.md#kv-每日備份與還原演練)。程式合併與排程啟用是兩件事，部署指南的啟用步驟全部完成前，不宣稱正式備份已上線。
+
 ---
 
 ## API 版本相容性策略

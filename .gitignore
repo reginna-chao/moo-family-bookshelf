@@ -7,6 +7,7 @@ worker/pnpm-lock.yaml
 
 # Build output
 dist/
+dist-backup/
 dist-firefox/
 dist-firefox-amo/
 dist-firefox-direct/
@@ -41,6 +42,7 @@ Thumbs.db
 # Cloudflare
 .wrangler/
 wrangler.local.toml
+wrangler.backup.local.toml
 
 # Test
 coverage/

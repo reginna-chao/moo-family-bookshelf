@@ -23,6 +23,16 @@ const PREFIX_PUBLIC = "ratelimit:pub";
 const PREFIX_SENSITIVE_ONBOARDING = "ratelimit:sens";
 const PREFIX_SENSITIVE_LOOKUP = "ratelimit:sens:lookup";
 
+/** Every per-IP counter prefix; `worker/tests/unit/kvBackupKeyParity.test.ts` keeps the KV backup allow-list in step with them. */
+export const RATE_LIMIT_KEY_PREFIXES = [
+  PREFIX_STANDARD,
+  PREFIX_PUBLIC,
+  PREFIX_SENSITIVE_ONBOARDING,
+  PREFIX_SENSITIVE_LOOKUP,
+] as const;
+/** Per-userId counter prefix (`ratelimit:user:{scope}:{userId}[:{bucket}]`); same parity tripwire. */
+export const PER_USER_RATE_LIMIT_KEY_PREFIX = "ratelimit:user";
+
 /** The per-IP counter a request is charged against. */
 export interface RateLimitBucket {
   /** KV key prefix; the full key is `{prefix}:{ip}:{minuteBucket}`. */
@@ -440,7 +450,7 @@ export async function peekPerUserRateLimit(
   const windowMs = opts.windowSec * 1000;
   const now = Date.now();
   const bucket = Math.floor(now / windowMs);
-  const key = `ratelimit:user:${opts.scope}:${opts.userId}:${bucket}`;
+  const key = `${PER_USER_RATE_LIMIT_KEY_PREFIX}:${opts.scope}:${opts.userId}:${bucket}`;
 
   const current = await kv.get(key);
   const count = current ? parseInt(current, 10) : 0;
@@ -542,7 +552,7 @@ export async function enforcePerUserRateLimit(
     // The KV counter's key minus the window bucket the binding owns; the scope keeps counters
     // independent when two scopes share a binding (same limit).
     const { success } = await binding.limit({
-      key: `ratelimit:user:${opts.scope}:${opts.userId}`,
+      key: `${PER_USER_RATE_LIMIT_KEY_PREFIX}:${opts.scope}:${opts.userId}`,
     });
     if (success) return null;
 

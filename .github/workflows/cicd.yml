@@ -198,6 +198,10 @@ jobs:
       - name: Build (dev env)
         run: pnpm run build:dev
 
+      # The separate backup Worker is validated here, never deployed by CI/CD.
+      - name: Build (backup Worker)
+        run: pnpm run build:backup
+
   pwa-check:
     name: PWA — Lint, Typecheck, Test, Build
     needs: changes

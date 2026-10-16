@@ -1,0 +1,31 @@
+name = "moo-family-bookshelf-backup"
+main = "src/backup/index.ts"
+compatibility_date = "2026-09-15"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+# Copy to wrangler.backup.local.toml; configure and validate before enabling.
+# This Worker is deployed separately from the application Worker.
+# The two Healthchecks UUIDs are secrets, never vars:
+#   wrangler secret put HEALTHCHECKS_UUID / HEALTHCHECKS_CAPACITY_UUID
+[vars]
+BACKUP_ENABLED = "false"
+SOURCE_ACCOUNT_ID = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+SOURCE_NAMESPACE_ID = "YOUR_PROD_KV_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "BACKUP_KV"
+id = "YOUR_PROD_KV_NAMESPACE_ID"
+
+[[r2_buckets]]
+binding = "BACKUP_BUCKET"
+bucket_name = "moo-family-bookshelf-backups"
+
+[triggers]
+# Set to ["17 3 * * *"] in the local config after the activation checks.
+crons = []
+
+[observability]
+enabled = true
+head_sampling_rate = 1
