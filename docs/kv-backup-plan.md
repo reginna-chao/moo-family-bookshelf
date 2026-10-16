@@ -1,6 +1,6 @@
 # KV 自動備份計畫：Free 方案 Cron Worker 備份至 R2，超過分界改 Workers Paid
 
-> **狀態**：程式已實作（本 PR），啟用與驗收待執行，步驟見 `worker/DEPLOY.md`。
+> **狀態**：程式已實作（PR #322，2026-10-16），啟用與驗收待執行，步驟見 `worker/DEPLOY.md`。
 > **更新日期**：2026-10-16
 > **取代**：2026-04-14 的初版設計、PR #315 的「Workers Paid 完整備份」版，以及「Cloudflare 觸發 → GitHub Actions 備份」草案。
 > **目標**：小規模階段零月費、不依賴 GitHub 排程、每日自動備份、最後成功備份保護、獨立 Email 告警；完整性核對改在還原時執行。
