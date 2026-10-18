@@ -374,7 +374,7 @@ PowerShell 用 `Copy-Item -LiteralPath wrangler.backup.toml -Destination wrangle
 - `name`：備份 Worker 自己的名稱（範本的 `moo-family-bookshelf-backup` 即可），不得填服務 API Worker 的名稱。
 - 加一行頂層 `account_id = "<正式帳號的 32 位 ID>"`，放在第一個 `[vars]` 區段之前。
 - `[vars]` 的 `SOURCE_ACCOUNT_ID` 填同一個帳號 ID；`SOURCE_NAMESPACE_ID` 與 `[[kv_namespaces]]` 的 `id` 都填正式 KV namespace 的 ID（可用 `pnpm exec wrangler kv namespace list` 核對）。兩者都必須是 32 位小寫十六進位。
-- `[vars]` 的 `RESTORE_DRILL_NAMESPACE_ID` 填同一帳號內一個**空白**隔離 namespace 的 32 位 ID。這個 namespace 只建一次：`pnpm exec wrangler kv namespace create "KV_RESTORE_DRILL"`，之後一直保持空白（`pnpm backup:drill` 從不寫入，所以它會維持空白），也不要拿它做 `--apply`。只有 `pnpm backup:drill` 會讀這個值，備份 Worker 不使用它。
+- `[vars]` 的 `RESTORE_DRILL_NAMESPACE_ID` 填同一帳號內一個專供演練用的隔離 namespace 的 32 位 ID。這個 namespace 只建一次：`pnpm exec wrangler kv namespace create "KV_RESTORE_DRILL"`，把指令回傳的 32 位 ID（不是 `KV_RESTORE_DRILL` 這個名稱）填進來，之後每個月都用同一個，欄位不用再改。它裡面必須一直沒有任何 key：`pnpm backup:drill` 從不寫入，所以建好後會自然維持這個狀態，但不要拿它做 `--apply`。只有 `pnpm backup:drill` 會讀這個值，備份 Worker 不使用它。
 - `[[r2_buckets]]` 的 `bucket_name` 填上面建立的 bucket。
 - 維持 `BACKUP_ENABLED = "false"`、`crons = []`、`workers_dev = false`、`preview_urls = false`；不要加 route、`DEV_MODE` 或 `cpu_ms`（`cpu_ms` 是 Paid 才有的設定）。
 - 保留 `[observability] enabled = true`，但**不要**替這個 Worker 開 Workers traces（`[observability.traces]`）：fetch 的 trace 可能記下完整的 `https://hc-ping.com/<uuid>` URL，而 UUID 拿到就能偽造成功訊號。
@@ -413,7 +413,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
 #### 步驟 6：還原演練（見第 4 節）
 
-由 agent 另建一個全新的空白隔離 namespace 給 `--apply` 用（例如 `pnpm exec wrangler kv namespace create "KV_RESTORE_APPLY"`；不能用步驟 3 的 `RESTORE_DRILL_NAMESPACE_ID`，那個要一直保持空白），管理者建還原用的 API token 並設好本機環境變數，先跑 dry-run，再由管理者在互動終端機執行 `--apply`，最後用隔離 Worker 核對家庭成員判定。
+由 agent 另建一個全新的空白隔離 namespace 給 `--apply` 用（例如 `pnpm exec wrangler kv namespace create "KV_RESTORE_APPLY"`；不能用步驟 3 的 `RESTORE_DRILL_NAMESPACE_ID`，那個裡面必須一直沒有任何 key），管理者建還原用的 API token 並設好本機環境變數，先跑 dry-run，再由管理者在互動終端機執行 `--apply`，最後用隔離 Worker 核對家庭成員判定。
 
 #### 步驟 7：故意失敗一次（agent）
 
@@ -501,7 +501,7 @@ pnpm backup:drill
 - **憑證**：沿用本機 `wrangler login` 的登入身分，不需要任何環境變數，也不需要 API token。工具會先清掉 shell 繼承的 `CLOUDFLARE_*`、`CF_*`、`WRANGLER_*`、`KV_BACKUP_*`、`KV_RESTORE_*` 變數，所以終端機裡殘留的 token 不會被拿來用。尚未登入、或登入過期又無法自動更新時，先在 `worker/` 執行 `pnpm exec wrangler login`。
 - **做的事**：下載 `latest.json`，核對它的來源帳號與 namespace 和本機設定一致；再下載它指向的 manifest 與資料檔，做與上方「驗證內容」相同的完整驗證；接著列舉演練 namespace，確認它是空的。最後印出預計還原與略過的到期筆數，以及 manifest 的完成時間、`count`、`byteLength`、`requests.internal`／`requests.external`（version 1 沒有請求數，顯示「—」）。
 - **從不寫入**：工具沒有 `--apply`；演練用的 KV 用戶端只能列舉，讀取與寫入一律拒絕。筆數上限用工具上限 100,000 筆（`MAX_KEYS`），只為了回報完整筆數，不是寫入預算。
-- **演練 namespace 要一直保持空白**：裡面有任何 key，dry-run 就會失敗（「目標 namespace 不是空白，沒有開始還原。」）。
+- **演練 namespace 裡面要一直沒有任何 key**：只要有一個 key，dry-run 就會失敗（「目標 namespace 不是空白，沒有開始還原。」）。`RESTORE_DRILL_NAMESPACE_ID` 欄位本身每個月都填同一個 ID，不需要改動。
 - 跑完到 Healthchecks 的「月度 dry-run 提醒」check 按 **Ping Now**，並把結果記進維運紀錄（第 3 節步驟 9 列的項目）。這個提醒 check 的建法見第 3 節步驟 2，備份 Worker 不會 ping 它。
 - **中途中斷要手動清理**：按 Ctrl+C 或關掉終端機時，系統暫存資料夾（Windows 是 `%TEMP%`，其他系統是 `$TMPDIR` 或 `/tmp`）裡的 `moo-kv-backup-*` 暫存資料夾可能留下來，裡面有下載下來的明文備份，請手動刪除。正常跑完或自己失敗結束的執行會自動刪掉它。
 
