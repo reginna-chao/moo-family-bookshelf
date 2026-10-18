@@ -270,7 +270,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 | 寫入的筆數（`count`）    | < 3,500 筆                  |
 | 封存總長（`byteLength`） | < 10 MB（10,000,000 bytes） |
 
-這裡的內部請求數是送 ping 當下的總數，包含寫 manifest、更新 `latest.json` 與清理舊備份，會比 manifest 裡的 `requests.internal` 多幾次；完整數字在 Worker log 的 `kv_backup_success` 那一行（`internalRequests`）。CPU 不在這三項裡，也沒有數字分界：正式環境（Free）每天那一次執行實測 25–28 ms，已超過 10 ms，目前被平台容忍，但官方不保證容忍的幅度；判定看每次 Cron 執行的 outcome，出現 `exceededCpu` 就升級（計畫第 8、9 節）。分界的由來見計畫第 9 節，升級步驟見計畫第 14 節與本章第 7 節。
+這裡的內部請求數是送 ping 當下的總數，包含寫 manifest、更新 `latest.json` 與清理舊備份，會比 manifest 裡的 `requests.internal` 多幾次；完整數字在 Worker log 的 `kv_backup_success` 那一行（`internalRequests`）。CPU 不在這三項裡，也沒有數字分界：正式環境（Free）啟用驗收的三次每小時執行實測 25–28 ms，已超過 10 ms，當時沒有被中止，但官方不保證容忍的幅度；判定看每次 Cron 執行的結果（`wrangler tail` 的 `outcome`，或 GraphQL 的 `dimensions.status`），出現 `exceededCpu` 就升級（計畫第 8、9 節）。分界的由來見計畫第 9 節，升級步驟見計畫第 14 節與本章第 7 節。
 
 ### 2. 備份格式與保存
 
@@ -400,7 +400,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
    核對：`latest.json` 指向最新的那份 manifest；`requests.internal` 遠低於 700、`count` 低於 3,500、`byteLength` 低於 10,000,000；兩個 Healthchecks check 都收到了這次的 ping。Worker log 的 `kv_backup_success` 一行有本次的最終請求數與 `capacityOk`。
 
-3. 管理者記下 Workers 儀表板這個 Worker 的 CPU time（分位數與尖峰），但驗收以 outcome 為準：在 Cron 時間前後掛著 `pnpm exec wrangler tail --config wrangler.backup.local.toml`，或事後用 GraphQL `workersInvocationsAdaptive` 查，**每次執行的 outcome 都是 `ok` 就過；出現 `exceededCpu` 就走第 7 節的升級流程**。Free 下的正式實測是每次 25–28 ms（20 筆、192,848 bytes），已超過 10 ms 的上限，每天一次目前被平台容忍，但官方不保證容忍的幅度（計畫第 8、9 節）；是否升級 Paid 依計畫第 9 節的觸發條件與第 14 節的流程。本機看不到 CPU，tail 的 `cpuTime` 一律是 0。同時記下 wall-clock 時間與 KV／R2 用量。
+3. 管理者記下 Workers 儀表板這個 Worker 的 CPU time（分位數與尖峰），但驗收以每次執行的結果為準：在 Cron 時間前後掛著 `pnpm exec wrangler tail --config wrangler.backup.local.toml`，事件的 `outcome` 是 `ok` 就過；或事後用 GraphQL `workersInvocationsAdaptive` 查，`dimensions.status` 是 `success` 就過（兩邊的成功值不同）。**任一邊出現 `exceededCpu` 就走第 7 節的升級流程。** 不能用「沒收到逾期信」代替這個核對：中止發生在「備份成功」ping 之後時，Healthchecks 不會寄信（計畫第 9 節）。Free 下的正式實測是每次 25–28 ms（20 筆、192,848 bytes，啟用驗收的三次每小時執行），已超過 10 ms 的上限，當時沒有被中止，但官方不保證容忍的幅度（計畫第 8、9 節）；是否升級 Paid 依計畫第 9 節的觸發條件與第 14 節的流程。本機看不到 CPU，tail 的 `cpuTime` 一律是 0。同時記下 wall-clock 時間與 KV／R2 用量。
 4. 驗收結束就把 `crons` 改回 `[]` 並重新部署。長期每小時跑會超出 Free 的 KV 每日讀取額度（計畫第 2、3 節），不要忘記改回。
 
 #### 步驟 6：還原演練（見第 4 節）
