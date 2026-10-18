@@ -260,7 +260,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 
 - **批次讀取**：`getWithMetadata([keys], "text")` 每批 100 個 key（`READ_BATCH_SIZE`），一批算 1 次內部請求。批次回應超過 25 MB 時 KV 回 413，Worker 立刻把這一批對半拆開重讀；其他錯誤先隔 500 ms 重試一次，仍失敗也對半拆。拆到只剩 1 筆還讀不到，才讓備份失敗。重試與拆批都計入內部請求，每次執行最多重試 100 次。
 - **碰到上限時**：本次備份失敗。程式會嘗試中止進行中的 multipart upload（已完成但尚未發布的檔案則刪除），但這一步本身也算一次內部請求：碰到的是內部請求上限或 12 分鐘時限時，清理會被略過，殘留的未完成 upload 交給第 2 節的「一天後自動清除」規則。`latest.json` 不更新，兩個 check 都不 ping，最後成功備份保持原樣；約 36 小時後「備份成功」check 寄 Email。
-- **CPU 不在程式能計數的範圍**：Free 每次執行 10 ms CPU，超過會被平台直接中止，`catch` 也不會執行，殘留的未完成 upload 靠第 2 節的 R2 規則清除。CPU 只能看儀表板（第 3 節步驟 5）。
+- **CPU 不在程式能計數的範圍**：Free 每次 Cron 觸發 10 ms CPU，持續超過會被平台直接中止（outcome `exceededCpu`），`catch` 也不會執行，殘留的未完成 upload 靠第 2 節的 R2 規則清除。CPU 只能從正式環境的儀表板、`wrangler tail` 或 GraphQL 看（第 3 節步驟 5）；本機 tail 的 `cpuTime` 一律是 0。
 
 **「容量正常」的分界**（`CAPACITY_LIMITS`，約為上限的 70%）：三項都**低於**分界才 ping「容量正常」，任一項達到就不 ping，這就是升級提醒，備份本身照常進行。
 
@@ -270,7 +270,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 | 寫入的筆數（`count`）    | < 3,500 筆                  |
 | 封存總長（`byteLength`） | < 10 MB（10,000,000 bytes） |
 
-這裡的內部請求數是送 ping 當下的總數，包含寫 manifest、更新 `latest.json` 與清理舊備份，會比 manifest 裡的 `requests.internal` 多幾次；完整數字在 Worker log 的 `kv_backup_success` 那一行（`internalRequests`）。CPU p99 ≥ 7 ms 也是分界，但只能每月手動看儀表板。分界的由來見計畫第 9 節，升級步驟見計畫第 14 節與本章第 7 節。
+這裡的內部請求數是送 ping 當下的總數，包含寫 manifest、更新 `latest.json` 與清理舊備份，會比 manifest 裡的 `requests.internal` 多幾次；完整數字在 Worker log 的 `kv_backup_success` 那一行（`internalRequests`）。CPU 不在這三項裡，也沒有數字分界：正式環境（Free）每天那一次執行實測 25–28 ms，已超過 10 ms，目前被平台容忍，但官方不保證容忍的幅度；判定看每次 Cron 執行的 outcome，出現 `exceededCpu` 就升級（計畫第 8、9 節）。分界的由來見計畫第 9 節，升級步驟見計畫第 14 節與本章第 7 節。
 
 ### 2. 備份格式與保存
 
@@ -317,7 +317,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 | 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版         | agent（wrangler）            |
 | `wrangler secret put` 兩個 UUID                                           | 管理者（終端機輸入）         |
 | 每小時 Cron 跑 3–5 次、讀 manifest 核對請求計數、封存大小與 `latest.json` | agent                        |
-| 讀儀表板 CPU p99（第 8 節門檻）                                           | 管理者                       |
+| 記錄儀表板 CPU、核對每次 Cron 的 outcome（第 8 節）                       | 管理者                       |
 | 建隔離 namespace                                                          | agent                        |
 | 建還原用 API token、設本機環境變數                                        | 管理者                       |
 | 還原 dry-run                                                              | 任一                         |
@@ -326,9 +326,9 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 | 兩個 check 各改 1 分鐘 + 1 分鐘，不 ping，等真的收到兩封 Email，再改回    | 管理者                       |
 | Cloudflare Billing 用量通知                                               | 管理者                       |
 | 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                             | agent 部署、管理者確認       |
-| 維運紀錄、每月 dry-run 提醒、每月儀表板 CPU 檢查                          | 管理者                       |
+| 維運紀錄、每月 dry-run 提醒、每月 Cron outcome 與儀表板 CPU 檢查          | 管理者                       |
 
-表中的「第 8 節門檻」指計畫第 8 節，也就是下方步驟 5 的 CPU 判定。
+表中的「第 8 節」指計畫第 8 節，也就是下方步驟 5 的 CPU 判定。
 
 #### 步驟 1：開通 R2（管理者）
 
@@ -400,7 +400,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
    核對：`latest.json` 指向最新的那份 manifest；`requests.internal` 遠低於 700、`count` 低於 3,500、`byteLength` 低於 10,000,000；兩個 Healthchecks check 都收到了這次的 ping。Worker log 的 `kv_backup_success` 一行有本次的最終請求數與 `capacityOk`。
 
-3. 管理者在 Workers 儀表板看這個 Worker 的 CPU time p99：**≤ 5 ms 定案；5–7 ms 記錄下來並定期複查；> 7 ms 視為已到分界**，走第 7 節的升級流程。同時記下 wall-clock 時間與 KV／R2 用量。
+3. 管理者記下 Workers 儀表板這個 Worker 的 CPU time（分位數與尖峰），但驗收以 outcome 為準：在 Cron 時間前後掛著 `pnpm exec wrangler tail --config wrangler.backup.local.toml`，或事後用 GraphQL `workersInvocationsAdaptive` 查，**每次執行的 outcome 都是 `ok` 就過；出現 `exceededCpu` 就走第 7 節的升級流程**。Free 下的正式實測是每次 25–28 ms（20 筆、192,848 bytes），已超過 10 ms 的上限，每天一次目前被平台容忍，但官方不保證容忍的幅度（計畫第 8、9 節）；是否升級 Paid 依計畫第 9 節的觸發條件與第 14 節的流程。本機看不到 CPU，tail 的 `cpuTime` 一律是 0。同時記下 wall-clock 時間與 KV／R2 用量。
 4. 驗收結束就把 `crons` 改回 `[]` 並重新部署。長期每小時跑會超出 Free 的 KV 每日讀取額度（計畫第 2、3 節），不要忘記改回。
 
 #### 步驟 6：還原演練（見第 4 節）
@@ -428,7 +428,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
 本機設定改成 `BACKUP_ENABLED = "true"`、`crons = ["17 3 * * *"]` 並部署。至少觀察到一次正式的每日執行成功（R2 有新的 manifest、`latest.json` 已更新、兩個 check 都恢復正常），才算啟用完成。
 
-把每次演練的時間、程式版本、筆數、bytes、請求數、略過的到期筆數與結果記在私人維運紀錄，不記家庭資料或秘密。之後每月一次：對最新備份跑還原 dry-run，並看一次儀表板的 CPU p99。
+把每次演練的時間、程式版本、筆數、bytes、請求數、略過的到期筆數與結果記在私人維運紀錄，不記家庭資料或秘密。之後每月一次：對最新備份跑還原 dry-run，並查一次最近每日執行的 outcome 與儀表板的 CPU。
 
 ### 4. 還原
 
@@ -513,7 +513,7 @@ node scripts/test-kv-backup-runtime.mjs
 
 ### 7. 升級到 Workers Paid
 
-升級的觸發條件是第 1 節的分界（收到「容量正常」逾期信，或儀表板 CPU p99 ≥ 7 ms）。完整步驟見[計畫第 14 節](../docs/kv-backup-plan.md#14-升級流程改-workers-paid)，摘要：
+升級的觸發條件是第 1 節的分界（收到「容量正常」逾期信，或任一次 Cron 執行的 outcome 是 `exceededCpu`）。完整步驟見[計畫第 14 節](../docs/kv-backup-plan.md#14-升級流程改-workers-paid)，摘要：
 
 1. 訂閱 Workers Paid（每月 US$5 起）。
 2. 切換到 Paid 設定：`MAX_ARCHIVE_BYTES` 提高到 256 MiB，每筆上限 4 MiB、`MAX_SAVED_KEYS` 5,000 不變；加回每日 SHA-256 核對與下載回讀，`wrangler.backup.local.toml` 加回 `cpu_ms`。批次讀取的 25 MB 回應上限在 Paid 仍然存在，自動拆批不可移除。
