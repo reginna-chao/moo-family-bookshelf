@@ -110,17 +110,17 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 1. 部署到 Free 帳號，暫設每小時 Cron，對真實資料跑至少 5 次。
 2. 讀每次 manifest 的請求計數與封存總長：必須低於第 9 節的分界。
-3. 記下 Workers 儀表板的 CPU time 數字，但判定以每次 Cron 執行的結果為準：`wrangler tail` 事件的 `outcome` 必須是 `ok`，GraphQL `workersInvocationsAdaptive` 的 `dimensions.status` 必須是 `success`（兩邊的成功值不同，被中止則都記為 `exceededCpu`）；出現 `exceededCpu` 就依第 9 節進入升級流程。
+3. 記下 Workers 儀表板的 CPU time 數字，但判定以每次 Cron 執行的結果為準。驗收期間掛著 `wrangler tail`：事件的 `outcome` 必須是 `ok`，被中止是 `exceededCpu`。事後回查用 GraphQL `workersInvocationsAdaptive`：`dimensions.status` 必須是 `success`，被中止是 `exceededResources`（涵蓋 CPU 與記憶體超限）。兩邊的值不同，不能互相套用。出現任何一次中止，就依第 9 節進入升級流程。
 4. 同時記錄 wall-clock 與 KV／R2 用量。
 
 ### 實測（2026-10-17 調查）
 
-**開發機的量法。** 本機 Miniflare 的 KV／R2 是同一個 workerd 行程裡的 JS 模擬器，呼叫 binding 時會同步跑進模擬器，profile 會把模擬器的時間記在 binding 呼叫上，所以 Miniflare 的數字不能拿來對照正式環境。可用的量法是：在 workerd 內把 KV／R2／`fetch()` 全換成同一個 isolate 裡的 JS stub，量 wall-clock 再扣掉空請求的基準；stub 沒有 I/O，wall 就近似 isolate 的 CPU。機器 i7-13620H、Windows 11、workerd 1.20260915.1，冷 isolate 取 6 次重啟行程的中位數：
+**開發機的量法。** 本機 Miniflare 的 KV／R2 是同一個 workerd 行程裡的 JS 模擬器，呼叫 binding 時會同步跑進模擬器，profile 會把模擬器的時間記在 binding 呼叫上，所以 Miniflare 的數字不能拿來對照正式環境。可用的量法是：在 workerd 內把 KV／R2／`fetch()` 全換成同一個 isolate 裡的 JS stub，量 wall-clock 再扣掉空請求的基準；stub 沒有 I/O，wall 就近似 isolate 的 CPU。機器 i7-13620H、Windows 11、workerd 1.20260915.1，冷 isolate 取 6 次重啟行程的中位數。量測腳本沒有入庫，以下是 2026-10-17 的一次性量測；`worker/src/backup/` 改動後要重量，得照上述方法重寫 stub 腳本：
 
-| 資料量                  | 冷 isolate | 暖 isolate | 只做 JSONL 編碼 |
-| ----------------------- | ---------- | ---------- | --------------- |
-| 20 筆／238 KB（仿正式） | 5.9 ms     | 1.8 ms     | 0.3 ms          |
-| 490 筆／4.96 MB         | 22.1 ms    | 15.6 ms    | 11.6 ms         |
+| 資料量                                       | 冷 isolate | 暖 isolate | 只做 JSONL 編碼 |
+| -------------------------------------------- | ---------- | ---------- | --------------- |
+| 20 筆／238 KB（仿正式，略大於正式的 192 KB） | 5.9 ms     | 1.8 ms     | 0.3 ms          |
+| 490 筆／4.96 MB                              | 22.1 ms    | 15.6 ms    | 11.6 ms         |
 
 編碼成本隨封存大小線性成長，約 2.3 ms／MB；冷、暖之差約 4 ms 是第一次執行的延遲編譯與暖機。關掉 nodejs_compat、把 `node:*` 換成 stub 再量，冷 6.1 ms、暖 1.8 ms，沒有差別。
 
@@ -128,31 +128,31 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 以下是對差距的**推論**，不是量測。25–28 ms 與開發機冷跑 5.9 ms 的差距，推測來自兩件程式改不掉的事：其一，相隔一小時且沒有 HTTP 流量的 Cron 每次都落在全新的冷 isolate（每天一次只會更冷），社群案例顯示正式機器的冷啟動首次執行是本機冷跑的 2–5 倍，套到 5.9 ms 就是 12–30 ms，涵蓋實測值；其二，14 次 binding／`fetch()` 呼叫在 runtime 端的序列化與回應解析，依間接證據反推約 2–6 ms，本機沒有等價物可量。程式層最樂觀只能省約 1.5–3 ms（少 4 次呼叫、精簡冷啟動），仍在 10 ms 上限的兩倍以上。
 
-結論：原本「小規模 1–3 ms、中規模 20–40 ms」的估算錯了一個數量級，正式規模在 Free 下就已經 25–28 ms。資料量仍然影響 CPU（開發機冷跑從 238 KB 的 5.9 ms 增到 4.96 MB 的 22.1 ms，約 2.3 ms／MB），但它是疊在固定成本上的增量，而正式規模的固定成本已經超過 10 ms，所以不存在「資料量到哪裡 CPU 會接近 10 ms」的門檻。驗收期間的 25–28 ms 沒有被中止，官方只說偶爾超過會被容忍、容忍幅度沒有數字（口徑見第 9 節）；「每天一次算偶爾超過」是推論，要靠正式啟用後連續 7–14 次每日執行的結果驗證，所以驗收改看每次執行的結果，不看分位數。請求數方面，正式規模實測內部 12、對外 2；中規模（5,000 筆、50 MB）推估內部約 10（列舉）+ 50（批次）+ 16（R2）= 76，距 1,000 上限很遠，請求數不是分界。
+結論：原本「小規模 1–3 ms、中規模 20–40 ms」的估算錯了一個數量級，正式規模在 Free 下就已經 25–28 ms。資料量仍然影響 CPU（開發機冷跑從 238 KB 的 5.9 ms 增到 4.96 MB 的 22.1 ms，約 2.3 ms／MB），但它是疊在固定成本上的增量，而正式規模的固定成本已經超過 10 ms，所以不存在「資料量到哪裡 CPU 會接近 10 ms」的門檻。驗收期間的 25–28 ms 沒有被中止，官方只說偶爾超過會被容忍、容忍幅度沒有數字（口徑見第 9 節）；「每天一次算偶爾超過」是推論，要靠正式啟用後連續 7–14 次每日執行的結果驗證（排在第 13 節的啟用步驟裡），所以驗收改看每次執行的結果，不看分位數。請求數方面，正式規模實測內部 12、對外 2；中規模（5,000 筆、50 MB）推估內部約 10（列舉）+ 50（批次）+ 16（R2）= 76，距 1,000 上限很遠，請求數不是分界。
 
 ## 9. 升級分界：什麼時候改 Workers Paid
 
-以下任一成立，就進入第 14 節的升級流程；判定來源是 manifest 計數、Cron 執行的 outcome 與儀表板，不是人數。計數類的門檻約為上限的 70%：
+以下任一成立，就進入第 14 節的升級流程；判定來源是 manifest 計數、Cron 執行的結果與儀表板，不是人數。計數類的門檻約為上限的 70%：
 
-| 指標                  | Free 上限                               | 分界                               | 偵測方式                                                                                                                                                                      |
-| --------------------- | --------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 封存總長              | 15 MB（第 5 節第 5 步的硬停，專案自設） | **≥ 10 MB**                        | Worker 計數；超過時不 ping「容量正常」→ Email                                                                                                                                 |
-| 保存範圍筆數          | 5,000（硬停）                           | **≥ 3,500**                        | 同上                                                                                                                                                                          |
-| 單次內部請求計數      | 1,000（平台）                           | **≥ 700**                          | 同上                                                                                                                                                                          |
-| 每次 Cron 的 CPU      | 10 ms（平台）                           | **執行結果出現一次 `exceededCpu`** | `wrangler tail` 的 `outcome`（成功是 `ok`）或 GraphQL `workersInvocationsAdaptive` 的 `dimensions.status`（成功是 `success`）；手動，每月檢查一次。儀表板分位數只記錄，不判定 |
-| KV 每日讀取（全帳號） | 100,000（平台）                         | ≥ 70,000                           | 第 10 節的用量預警                                                                                                                                                            |
+| 指標                  | Free 上限                               | 分界                     | 偵測方式                                                                                                                                                                                                                                               |
+| --------------------- | --------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 封存總長              | 15 MB（第 5 節第 5 步的硬停，專案自設） | **≥ 10 MB**              | Worker 計數；超過時不 ping「容量正常」→ Email                                                                                                                                                                                                          |
+| 保存範圍筆數          | 5,000（硬停）                           | **≥ 3,500**              | 同上                                                                                                                                                                                                                                                   |
+| 單次內部請求計數      | 1,000（平台）                           | **≥ 700**                | 同上                                                                                                                                                                                                                                                   |
+| 每次 Cron 的 CPU      | 10 ms（平台）                           | **執行結果出現一次中止** | 每月用 GraphQL `workersInvocationsAdaptive` 回查（可回看三個月）：`dimensions.status` 成功是 `success`、中止是 `exceededResources`。`wrangler tail`（`outcome` 成功 `ok`、中止 `exceededCpu`）只在驗收期間掛著看，不能回查。儀表板分位數只記錄，不判定 |
+| KV 每日讀取（全帳號） | 100,000（平台）                         | ≥ 70,000                 | 第 10 節的用量預警                                                                                                                                                                                                                                     |
 
 15 MB 與 5,000 筆是專案自設的保守上限，不是平台數字。15 MB 原本是推估 CPU 會接近 10 ms 的點，第 8 節實測後這個前提不成立：正式規模（20 筆、192 KB）在 Free 下就已經 25–28 ms，資料量每多 1 MB 約再加 2.3 ms 編碼，是疊在已超標的固定成本上的增量，所以資料量門檻不是 CPU 的分界。保留 15 MB 的理由改為：它讓備份在超過時明確失敗，而不是在平台沒有保證的容忍範圍裡一路變慢；Paid 下它則只是容量上限。5,000 筆與 Paid 設定檔一致，以便切換時格式與測試不變。封存總長的分界 10 MB 是 15 MB 的約 70%，與其他列相同比例。到硬停時備份會明確失敗，從收到升級提醒到完成訂閱與切換需要幾天，70% 的分界是為了留緩衝。
 
-**CPU 一列為什麼不是數字門檻。** Free 的 10 ms 是「每次 Cron 觸發」的上限（官方 limits 頁的 Cron 一列：「CPU time per Cron Trigger | 10 ms」）。正式環境的驗收執行實測 25–28 ms（第 8 節），原本的「p99 ≥ 7 ms」在 Free 下不可能達標，分位數不能再當分界。官方對超過時的說明是：「Each isolate has some built-in flexibility to allow for cases where your Worker infrequently runs over the configured limit.」「If your Worker starts hitting the limit consistently, its execution will be terminated according to the limit configured.」而儀表板的分位數也不等於有沒有被中止：「In some cases, higher quantiles may appear to exceed CPU time limits without generating invocation errors because of a mechanism in the Workers runtime that allows rollover CPU time for requests below the CPU limit.」（來源見「官方依據」的 Workers 限制與 Workers 指標兩條）。被中止時 outcome 是 `exceededCpu`、錯誤是 Error 1102「Worker exceeded resource limits」，儀表板 Metrics > Errors 顯示「Exceeded CPU Time Limits」。所以判定改看每次執行的結果：連續 7–14 次每日執行都成功（tail `outcome` 為 `ok`，GraphQL `dimensions.status` 為 `success`），就當作這個 Cron 落在容忍範圍；出現一次 `exceededCpu` 就升級。容忍的幅度與時間窗沒有任何官方數字，官方也沒有給出依頻率判定的規則；非官方案例顯示每分鐘一次的 Free Cron 落在冷 isolate 時會被截在 10.0 ms，「每分鐘一次算持續超過、每天一次算偶爾超過」是從這些案例與官方措辭得出的推論，由上述 7–14 次每日執行驗證。
+**CPU 一列為什麼不是數字門檻。** Free 的 10 ms 是「每次 Cron 觸發」的上限（官方 limits 頁的 Cron 一列：「CPU time per Cron Trigger | 10 ms」）。正式環境的驗收執行實測 25–28 ms（第 8 節），原本的「p99 ≥ 7 ms」在 Free 下不可能達標，分位數不能再當分界。官方對超過時的說明是：「Each isolate has some built-in flexibility to allow for cases where your Worker infrequently runs over the configured limit.」「If your Worker starts hitting the limit consistently, its execution will be terminated according to the limit configured.」而儀表板的分位數也不等於有沒有被中止：「In some cases, higher quantiles may appear to exceed CPU time limits without generating invocation errors because of a mechanism in the Workers runtime that allows rollover CPU time for requests below the CPU limit.」（來源見「官方依據」的 Workers 限制與 Workers 指標兩條）。被中止時 tail 事件的 `outcome` 是 `exceededCpu`，GraphQL 的 `dimensions.status` 是 `exceededResources`（官方指標頁的 Invocation statuses 表：Exceeded resources，涵蓋錯誤 1102 與 1027），錯誤是 Error 1102「Worker exceeded resource limits」，儀表板 Metrics > Errors 顯示「Exceeded CPU Time Limits」。所以判定改看每次執行的結果：連續 7–14 次每日執行都成功（GraphQL `dimensions.status` 為 `success`），就當作這個 Cron 落在容忍範圍；出現一次中止就升級。容忍的幅度與時間窗沒有任何官方數字，官方也沒有給出依頻率判定的規則；非官方案例顯示每分鐘一次的 Free Cron 落在冷 isolate 時會被截在 10.0 ms，「每分鐘一次算持續超過、每天一次算偶爾超過」是從這些案例與官方措辭得出的推論，由上述 7–14 次每日執行驗證。
 
-**被中止時留下的狀態，取決於中止在哪一步。** `worker/src/backup/index.ts` 的順序是：寫 manifest → 更新 `latest.json` → 清理舊備份 → ping「備份成功」→ ping「容量正常」。在更新 `latest.json` 之前中止：指標不動、兩個 check 都沒收到訊號，約 36 小時後「備份成功」寄信。在清理期間中止：`latest.json` 已指向這次完整上傳的備份，但沒有任何 ping，一樣會寄信，只是這封信代表的是「清理沒做完」而不是「沒有新還原點」。在「備份成功」ping 送達之後才中止：該 check 已重設計時、不會寄信，只有「容量正常」沒收到 ping，約 36 小時後寄的是容量逾期信，看起來像升級提醒。所以沒有收到「備份成功」逾期信不等於每次執行都成功，`exceededCpu` 必須從執行紀錄（tail 或 GraphQL）核對，Healthchecks 只負責成功訊號完全沒送出的情況。不論中止在哪一步，已發布的備份都是完整上傳的，沒有資料損毀風險；進行中的 multipart 由第 6 節的 R2 一天規則清除。
+**被中止時留下的狀態，取決於中止在哪一步。** `worker/src/backup/index.ts` 的順序是：寫 manifest → 更新 `latest.json` → 清理舊備份 → ping「備份成功」→ ping「容量正常」。在更新 `latest.json` 之前中止：指標不動、兩個 check 都沒收到訊號，約 36 小時後「備份成功」寄信。在清理期間中止：`latest.json` 已指向這次完整上傳的備份，但沒有任何 ping，一樣會寄信，只是這封信代表的是「清理沒做完」而不是「沒有新還原點」。在「備份成功」ping 送達之後才中止：該 check 已重設計時、不會寄信，只有「容量正常」沒收到 ping，約 36 小時後寄的是容量逾期信，看起來像升級提醒。所以沒有收到「備份成功」逾期信不等於每次執行都成功，中止必須從執行紀錄核對（GraphQL `dimensions.status`，或當時掛著的 tail），Healthchecks 只負責成功訊號完全沒送出的情況；收到容量逾期信而 manifest 三項都正常時，先查執行結果（`worker/DEPLOY.md` 第 6 節）。不論中止在哪一步，已發布的備份都是完整上傳的，沒有資料損毀風險；進行中的 multipart 由第 6 節的 R2 一天規則清除。
 
 ## 10. 獨立 Email 告警與免費額度預警
 
 採用 Healthchecks.io，兩個 check，都是 Period 24 小時、Grace 12 小時、已驗證 Email：
 
-- **備份成功**：只有本次備份完整流程成功才 ping。約 36 小時沒有訊號即寄信，涵蓋跑了但失敗、被 CPU 砍掉、Cron 被刪、`BACKUP_ENABLED` 被關、帳號停權等所有情況，不需要備份程式還活著才能發出。
+- **備份成功**：只有本次備份完整流程成功才 ping。約 36 小時沒有訊號即寄信，涵蓋跑了但失敗、在成功 ping 之前被 CPU 中止、Cron 被刪、`BACKUP_ENABLED` 被關、帳號停權等情況，不需要備份程式還活著才能發出。成功 ping 之後才被中止的情況它偵測不到，要靠執行結果核對（第 9 節）。
 - **容量正常**：只有第 5 節第 11 步的三項都低於分界時才 ping。沒有訊號代表該升級了，此時備份本身仍在運作。
 
 兩個 check 的信件主旨不同，收到時就知道是「備份停了」還是「該升級了」。不傳書單、備份內容或憑證。
@@ -202,23 +202,24 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 要登入儀表板、輸入秘密、按互動確認、看信箱的由管理者做；能用本機已登入的 wrangler 完成的可由 agent 代勞。
 
-| 步驟                                                                      | 誰                           |
-| ------------------------------------------------------------------------- | ---------------------------- |
-| 開通 R2 並綁付款方式                                                      | 管理者                       |
-| Healthchecks 帳號、兩個 check（24 h + 12 h）、Email 驗證、取得兩個 UUID   | 管理者                       |
-| 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版         | agent（wrangler）            |
-| `wrangler secret put` 兩個 UUID                                           | 管理者（終端機輸入）         |
-| 每小時 Cron 跑 3–5 次、讀 manifest 核對請求計數、封存大小與 `latest.json` | agent                        |
-| 記錄儀表板 CPU、核對每次 Cron 的 outcome（第 8 節）                       | 管理者                       |
-| 建隔離 namespace                                                          | agent                        |
-| 建還原用 API token、設本機環境變數                                        | 管理者                       |
-| 還原 dry-run                                                              | 任一                         |
-| 還原 `--apply`、家庭成員判定核對                                          | 管理者（程式拒絕非互動執行） |
-| 故意失敗一次，確認 `latest.json` 未動、仍可 dry-run 還原                  | agent                        |
-| 兩個 check 各改 1 分鐘 + 1 分鐘，不 ping，等真的收到兩封 Email，再改回    | 管理者                       |
-| Cloudflare Billing 用量通知                                               | 管理者                       |
-| 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                             | agent 部署、管理者確認       |
-| 維運紀錄、每月 dry-run 提醒、每月 Cron outcome 與儀表板 CPU 檢查          | 管理者                       |
+| 步驟                                                                                 | 誰                           |
+| ------------------------------------------------------------------------------------ | ---------------------------- |
+| 開通 R2 並綁付款方式                                                                 | 管理者                       |
+| Healthchecks 帳號、兩個 check（24 h + 12 h）、Email 驗證、取得兩個 UUID              | 管理者                       |
+| 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版                    | agent（wrangler）            |
+| `wrangler secret put` 兩個 UUID                                                      | 管理者（終端機輸入）         |
+| 每小時 Cron 跑 3–5 次、讀 manifest 核對請求計數、封存大小與 `latest.json`            | agent                        |
+| 記錄儀表板 CPU、核對每次 Cron 的 outcome（第 8 節）                                  | 管理者                       |
+| 建隔離 namespace                                                                     | agent                        |
+| 建還原用 API token、設本機環境變數                                                   | 管理者                       |
+| 還原 dry-run                                                                         | 任一                         |
+| 還原 `--apply`、家庭成員判定核對                                                     | 管理者（程式拒絕非互動執行） |
+| 故意失敗一次，確認 `latest.json` 未動、仍可 dry-run 還原                             | agent                        |
+| 兩個 check 各改 1 分鐘 + 1 分鐘，不 ping，等真的收到兩封 Email，再改回               | 管理者                       |
+| Cloudflare Billing 用量通知                                                          | 管理者                       |
+| 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                                        | agent 部署、管理者確認       |
+| 啟用後 7–14 天每天核對執行結果（GraphQL `dimensions.status`），全部 `success` 才結案 | 管理者                       |
+| 維運紀錄、每月 dry-run 提醒、每月 GraphQL 執行結果與儀表板 CPU 檢查                  | 管理者                       |
 
 合併 PR 不代表已啟用，須完成以上全部。
 
