@@ -310,24 +310,24 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 
 要登入儀表板、輸入秘密、按互動確認、看信箱的由管理者做；能用本機已登入的 wrangler 完成的可由 agent 代勞（計畫第 13 節）：
 
-| 步驟                                                                                 | 誰                           |
-| ------------------------------------------------------------------------------------ | ---------------------------- |
-| 開通 R2 並綁付款方式                                                                 | 管理者                       |
-| Healthchecks 帳號、兩個 check（24 h + 12 h）、Email 驗證、取得兩個 UUID              | 管理者                       |
-| 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版                    | agent（wrangler）            |
-| `wrangler secret put` 兩個 UUID                                                      | 管理者（終端機輸入）         |
-| 每小時 Cron 跑 3–5 次、讀 manifest 核對請求計數、封存大小與 `latest.json`            | agent                        |
-| 記錄儀表板 CPU、核對每次 Cron 的 outcome（第 8 節）                                  | 管理者                       |
-| 建隔離 namespace                                                                     | agent                        |
-| 建還原用 API token、設本機環境變數                                                   | 管理者                       |
-| 還原 dry-run                                                                         | 任一                         |
-| 還原 `--apply`、家庭成員判定核對                                                     | 管理者（程式拒絕非互動執行） |
-| 故意失敗一次，確認 `latest.json` 未動、仍可 dry-run 還原                             | agent                        |
-| 兩個 check 各改 1 分鐘 + 1 分鐘，不 ping，等真的收到兩封 Email，再改回               | 管理者                       |
-| Cloudflare Billing 用量通知                                                          | 管理者                       |
-| 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                                        | agent 部署、管理者確認       |
-| 啟用後 7–14 天每天核對執行結果（GraphQL `dimensions.status`），全部 `success` 才結案 | 管理者                       |
-| 維運紀錄、每月 dry-run 提醒、每月 GraphQL 執行結果與儀表板 CPU 檢查                  | 管理者                       |
+| 步驟                                                                                                           | 誰                           |
+| -------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| 開通 R2 並綁付款方式                                                                                           | 管理者                       |
+| Healthchecks 帳號、兩個 check（24 h + 12 h）、Email 驗證、取得兩個 UUID；月度 dry-run 提醒 check（30 d + 7 d） | 管理者                       |
+| 建 bucket、生命週期規則、`wrangler.backup.local.toml`、部署停用版                                              | agent（wrangler）            |
+| `wrangler secret put` 兩個 UUID                                                                                | 管理者（終端機輸入）         |
+| 每小時 Cron 跑 3–5 次、讀 manifest 核對請求計數、封存大小與 `latest.json`                                      | agent                        |
+| 記錄儀表板 CPU、核對每次 Cron 的 outcome（第 8 節）                                                            | 管理者                       |
+| 建隔離 namespace                                                                                               | agent                        |
+| 建還原用 API token、設本機環境變數                                                                             | 管理者                       |
+| 還原 dry-run（每月例行用 `pnpm backup:drill`）                                                                 | 任一                         |
+| 還原 `--apply`、家庭成員判定核對                                                                               | 管理者（程式拒絕非互動執行） |
+| 故意失敗一次，確認 `latest.json` 未動、仍可 dry-run 還原                                                       | agent                        |
+| 兩個 check 各改 1 分鐘 + 1 分鐘，不 ping，等真的收到兩封 Email，再改回                                         | 管理者                       |
+| Cloudflare Billing 用量通知                                                                                    | 管理者                       |
+| 正式啟用 `crons=["17 3 * * *"]`、觀察一次成功                                                                  | agent 部署、管理者確認       |
+| 啟用後 7–14 天每天核對執行結果（GraphQL `dimensions.status`），全部 `success` 才結案                           | 管理者                       |
+| 維運紀錄、每月 dry-run 提醒、每月 GraphQL 執行結果與儀表板 CPU 檢查                                            | 管理者                       |
 
 表中的「第 8 節」指計畫第 8 節，也就是下方步驟 5 的 CPU 判定。
 
@@ -335,13 +335,19 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 
 在正式資料所在的帳號開通 R2 並綁付款方式。R2 超過免費額度是按量計費，不是硬停（計畫第 3 節）；建議同時在 Cloudflare Billing 設定用量通知。
 
-#### 步驟 2：建立兩個 Healthchecks check（管理者）
+#### 步驟 2：建立 Healthchecks check（管理者）
 
-在 Healthchecks.io 建兩個 check，都選 Simple schedule：**Period 24 hours、Grace Time 12 hours**，接上已驗證的 Email integration 並確認通知開關是開的。兩個 check 用不同名稱，例如「備份成功」與「容量正常」，收到信時從主旨就分得出是「備份停了」還是「該升級了」。
+在 Healthchecks.io 建兩個備份 check 加一個提醒 check。兩個備份 check 都選 Simple schedule：**Period 24 hours、Grace Time 12 hours**，接上已驗證的 Email integration 並確認通知開關是開的。兩個 check 用不同名稱，例如「備份成功」與「容量正常」，收到信時從主旨就分得出是「備份停了」還是「該升級了」。
 
 - 從 check URL `https://hc-ping.com/<uuid>` 記下兩個 UUID。UUID 視同秘密：拿到的人可以偽造成功訊號，所以不放 Git、聊天、截圖或 log。
 - 兩個 UUID 必須不同，Worker 遇到相同的會拒絕執行（「兩個獨立備份監看必須使用不同的 UUID。」）；格式必須是小寫 UUID。
 - Worker 對每個 check 送空內容的 POST，最多 3 次、每次 10 秒逾時，只有回 200 且內容是 `OK` 才算成功；不送 `/start`、`/fail`，也不傳任何備份內容。
+
+第三個是「月度 dry-run 提醒」check，提醒管理者每月跑一次 `pnpm backup:drill`：
+
+- 選 Simple schedule：**Period 30 days、Grace Time 7 days**，接上同一個已驗證的 Email integration，名稱取「月度 dry-run 提醒」。
+- 它的 UUID 不交給備份 Worker，也不放進 `wrangler secret put`：Worker 從不 ping 它。
+- 每次 `pnpm backup:drill` 成功後，管理者到這個 check 按 **Ping Now**。37 天內沒有跑演練，Healthchecks 就會寄信提醒。
 
 #### 步驟 3：建 bucket、本機設定，部署停用版（agent）
 
@@ -368,6 +374,7 @@ PowerShell 用 `Copy-Item -LiteralPath wrangler.backup.toml -Destination wrangle
 - `name`：備份 Worker 自己的名稱（範本的 `moo-family-bookshelf-backup` 即可），不得填服務 API Worker 的名稱。
 - 加一行頂層 `account_id = "<正式帳號的 32 位 ID>"`，放在第一個 `[vars]` 區段之前。
 - `[vars]` 的 `SOURCE_ACCOUNT_ID` 填同一個帳號 ID；`SOURCE_NAMESPACE_ID` 與 `[[kv_namespaces]]` 的 `id` 都填正式 KV namespace 的 ID（可用 `pnpm exec wrangler kv namespace list` 核對）。兩者都必須是 32 位小寫十六進位。
+- `[vars]` 的 `RESTORE_DRILL_NAMESPACE_ID` 填同一帳號內一個**空白**隔離 namespace 的 32 位 ID。這個 namespace 只建一次：`pnpm exec wrangler kv namespace create "KV_RESTORE_DRILL"`，之後一直保持空白（`pnpm backup:drill` 從不寫入，所以它會維持空白），也不要拿它做 `--apply`。只有 `pnpm backup:drill` 會讀這個值，備份 Worker 不使用它。
 - `[[r2_buckets]]` 的 `bucket_name` 填上面建立的 bucket。
 - 維持 `BACKUP_ENABLED = "false"`、`crons = []`、`workers_dev = false`、`preview_urls = false`；不要加 route、`DEV_MODE` 或 `cpu_ms`（`cpu_ms` 是 Paid 才有的設定）。
 - 保留 `[observability] enabled = true`，但**不要**替這個 Worker 開 Workers traces（`[observability.traces]`）：fetch 的 trace 可能記下完整的 `https://hc-ping.com/<uuid>` URL，而 UUID 拿到就能偽造成功訊號。
@@ -406,7 +413,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
 #### 步驟 6：還原演練（見第 4 節）
 
-由 agent 建一個全新的空白隔離 namespace（例如 `pnpm exec wrangler kv namespace create "KV_RESTORE_DRILL"`），管理者建還原用的 API token 並設好本機環境變數，先跑 dry-run，再由管理者在互動終端機執行 `--apply`，最後用隔離 Worker 核對家庭成員判定。
+由 agent 另建一個全新的空白隔離 namespace 給 `--apply` 用（例如 `pnpm exec wrangler kv namespace create "KV_RESTORE_APPLY"`；不能用步驟 3 的 `RESTORE_DRILL_NAMESPACE_ID`，那個要一直保持空白），管理者建還原用的 API token 並設好本機環境變數，先跑 dry-run，再由管理者在互動終端機執行 `--apply`，最後用隔離 Worker 核對家庭成員判定。
 
 #### 步驟 7：故意失敗一次（agent）
 
@@ -431,13 +438,13 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 
 接著連續 7–14 天，每天用 GraphQL `workersInvocationsAdaptive` 核對前一次執行的 `dimensions.status`（或在 03:17 UTC 前後掛著 tail 看 `outcome`），全部 `success` 才算啟用結案；出現一次 `exceededResources`（tail 是 `exceededCpu`）就走第 7 節。這段觀察是計畫第 8、9 節「每天一次算偶爾超過」這個推論的驗證，結果記進維運紀錄。
 
-把每次演練的時間、程式版本、筆數、bytes、請求數、略過的到期筆數與結果記在私人維運紀錄，不記家庭資料或秘密。之後每月一次：對最新備份跑還原 dry-run，並用 GraphQL `workersInvocationsAdaptive` 回查過去一個月每日執行的 `dimensions.status`（可回看三個月；tail 只有即時串流，不能回查），順便看儀表板的 CPU。
+把每次演練的時間、程式版本、筆數、bytes、請求數、略過的到期筆數與結果記在私人維運紀錄，不記家庭資料或秘密。之後每月一次：在 repo 根目錄執行 `pnpm backup:drill`，對最新備份跑還原 dry-run（第 4 節「每月 dry-run：`pnpm backup:drill`」），並用 GraphQL `workersInvocationsAdaptive` 回查過去一個月每日執行的 `dimensions.status`（可回看三個月；tail 只有即時串流，不能回查），順便看儀表板的 CPU。
 
 ### 4. 還原
 
-還原由本機 CLI `scripts/kv-restore.mjs` 執行，需要 Node 22 以上。它只寫入**同一帳號內、與正式來源不同的全新空白 namespace**，不會自動切換正式服務的 KV binding。
+還原由本機 CLI `scripts/kv-restore.mjs` 執行，需要 Node 22 以上。它只寫入**同一帳號內、與正式來源不同的全新空白 namespace**，不會自動切換正式服務的 KV binding。每月例行的 dry-run 改用 `pnpm backup:drill`，見本節最後的「每月 dry-run：`pnpm backup:drill`」。
 
-在可信任的本機終端機設定：
+下表的環境變數用於 `--apply` 還原，以及下方手動帶 `--backup` 的 dry-run；`pnpm backup:drill` 不需要它們。在可信任的本機終端機設定：
 
 | 變數                     | 內容                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
@@ -482,7 +489,23 @@ CLI 的行為：
 
 把備份時間之後已知的離開、移除、關閉分享與公開連結變更重新套用一次，再把正式 binding 指向還原後的 namespace；切換後請使用者重新確認自己的分享設定。備份也不是交易快照，同一份備份裡不同 key 的狀態未必來自同一時點。
 
-**每月 dry-run**：Worker 每天不算雜湊，封存檔有沒有損壞要到還原時才知道（計畫第 7 節）。所以每月對最新備份跑一次 dry-run，這是提早發現損壞的唯一方式。首次啟用與格式有重大變更後，也要完成一次隔離還原演練。
+#### 每月 dry-run：`pnpm backup:drill`
+
+Worker 每天不算雜湊，封存檔有沒有損壞要到還原時才知道（計畫第 7 節）。所以每月對最新備份跑一次 dry-run，這是提早發現損壞的唯一方式。在 repo 根目錄執行（Node 22 以上）：
+
+```bash
+pnpm backup:drill
+```
+
+- **設定來源**：只讀 `worker/wrangler.backup.local.toml` 的頂層 `account_id`、`[vars]` 的 `SOURCE_NAMESPACE_ID` 與 `RESTORE_DRILL_NAMESPACE_ID`、第一個 `[[r2_buckets]]` 的 `bucket_name`（第 3 節步驟 3）。檔案不存在或缺少欄位時，會指出缺的是哪一項。
+- **憑證**：沿用本機 `wrangler login` 的登入身分，不需要任何環境變數，也不需要 API token。工具會先清掉 shell 繼承的 `CLOUDFLARE_*`、`CF_*`、`WRANGLER_*`、`KV_BACKUP_*`、`KV_RESTORE_*` 變數，所以終端機裡殘留的 token 不會被拿來用。尚未登入、或登入過期又無法自動更新時，先在 `worker/` 執行 `pnpm exec wrangler login`。
+- **做的事**：下載 `latest.json`，核對它的來源帳號與 namespace 和本機設定一致；再下載它指向的 manifest 與資料檔，做與上方「驗證內容」相同的完整驗證；接著列舉演練 namespace，確認它是空的。最後印出預計還原與略過的到期筆數，以及 manifest 的完成時間、`count`、`byteLength`、`requests.internal`／`requests.external`（version 1 沒有請求數，顯示「—」）。
+- **從不寫入**：工具沒有 `--apply`；演練用的 KV 用戶端只能列舉，讀取與寫入一律拒絕。筆數上限用工具上限 100,000 筆（`MAX_KEYS`），只為了回報完整筆數，不是寫入預算。
+- **演練 namespace 要一直保持空白**：裡面有任何 key，dry-run 就會失敗（「目標 namespace 不是空白，沒有開始還原。」）。
+- 跑完到 Healthchecks 的「月度 dry-run 提醒」check 按 **Ping Now**，並把結果記進維運紀錄（第 3 節步驟 9 列的項目）。這個提醒 check 的建法見第 3 節步驟 2，備份 Worker 不會 ping 它。
+- **中途中斷要手動清理**：按 Ctrl+C 或關掉終端機時，系統暫存資料夾（Windows 是 `%TEMP%`，其他系統是 `$TMPDIR` 或 `/tmp`）裡的 `moo-kv-backup-*` 暫存資料夾可能留下來，裡面有下載下來的明文備份，請手動刪除。正常跑完或自己失敗結束的執行會自動刪掉它。
+
+`--apply` 還原，或要對最新以外的某一份備份做 dry-run，仍照上方用 `scripts/kv-restore.mjs` 並設定表中的兩個 token。首次啟用與格式有重大變更後，也要完成一次隔離還原演練。
 
 ### 5. 本機演練
 

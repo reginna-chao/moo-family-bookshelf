@@ -2,9 +2,13 @@ import { parseArgs } from "node:util";
 import { createInterface } from "node:readline/promises";
 import { BackupError, requireId } from "./format.mjs";
 
-export function readConfig(env = process.env) {
+export function requireNode22() {
   if (Number(process.versions.node.split(".")[0]) < 22)
     throw new BackupError("備份工具需要 Node.js 22 或更新版本。");
+}
+
+export function readConfig(env = process.env) {
+  requireNode22();
   const required = (name) => {
     const value = env[name];
     if (typeof value !== "string" || !value.trim())

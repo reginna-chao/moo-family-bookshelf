@@ -13,6 +13,9 @@ preview_urls = false
 BACKUP_ENABLED = "false"
 SOURCE_ACCOUNT_ID = "YOUR_CLOUDFLARE_ACCOUNT_ID"
 SOURCE_NAMESPACE_ID = "YOUR_PROD_KV_NAMESPACE_ID"
+# Read only by `pnpm backup:drill` (the Worker ignores it): an EMPTY isolated
+# namespace in the same account, never the source.
+RESTORE_DRILL_NAMESPACE_ID = "YOUR_EMPTY_DRILL_KV_NAMESPACE_ID"
 
 [[kv_namespaces]]
 binding = "BACKUP_KV"

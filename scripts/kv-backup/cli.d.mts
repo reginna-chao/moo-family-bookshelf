@@ -1,4 +1,5 @@
 import type { Confirmation } from "./types.mjs";
+export function requireNode22(): void;
 export function readConfig(env?: NodeJS.ProcessEnv): {
   accountId: string;
   namespaceId: string;

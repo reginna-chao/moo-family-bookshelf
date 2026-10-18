@@ -12,9 +12,11 @@ import { describe, expect, it } from "vitest";
  * could carry a KV key name (a userId / familyId) or remote error text into
  * them. This grep pins that premise for every file under `worker/src/backup/`
  * (enumerated, so a new file is covered automatically) plus
- * `scripts/kv-backup/format.mjs`, which the Worker imports. The other
- * `scripts/kv-backup/*.mjs` modules (cli, restore, api, storage) are
- * CLI-only, never bundled into the Worker, and deliberately out of scope.
+ * `scripts/kv-backup/format.mjs`, which the Worker imports. The CLI-only
+ * `scripts/kv-restore-drill.mjs`, `scripts/kv-backup/drillConfig.mjs` and
+ * `scripts/kv-backup/storage.mjs` are held to the same rule because they build
+ * every message from a literal; cli, restore and api use templates by design
+ * and stay out of scope.
  *
  * THE DETECTOR. A construction is allowed only when its sole argument is one
  * double-quoted literal (optionally on the next line, optionally with a trailing
@@ -30,6 +32,9 @@ const SOURCES = [
     .filter((name) => name.endsWith(".ts"))
     .map((name) => join(BACKUP_DIR, name)),
   resolve(HERE, "../../../scripts/kv-backup/format.mjs"),
+  resolve(HERE, "../../../scripts/kv-restore-drill.mjs"),
+  resolve(HERE, "../../../scripts/kv-backup/drillConfig.mjs"),
+  resolve(HERE, "../../../scripts/kv-backup/storage.mjs"),
 ].map((path) => ({ path, source: readFileSync(path, "utf8") }));
 
 const NON_LITERAL = /new BackupError\((?!\s*"(?:[^"\\\n]|\\.)*"\s*,?\s*\))/;
