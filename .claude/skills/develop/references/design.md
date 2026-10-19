@@ -38,7 +38,7 @@ For DESIGN-intent requests (brand assets, add-icon, or visual-style exploration)
 
 1. Find the existing set: `ls assets/icons/ src/assets/icons/ public/icons/ extension/public/ 2>/dev/null`.
 2. Have the `designer` agent (or a quick read) extract current style: stroke width, linecap/linejoin, viewBox, color approach (`currentColor`?), filled/outlined.
-3. Present findings (location, count, style, grid) + the requested icon. Confirm if non-trivial — that confirmation is the GO gate of `SKILL.md` §2; skip the ceremony if straightforward (the one sanctioned exemption from the GO gate).
+3. Present findings (location, count, style, grid) + the requested icon. Confirm — that confirmation is the GO gate of `SKILL.md` §2 — unless the request is **straightforward**, which is a mechanical test, not a judgment: step 1 found an existing icon set, AND the new icon reuses that set's stroke width / linecap / viewBox / color approach / filled-vs-outlined unchanged, AND no new palette, grid or weight decision is needed. All three hold → skip the ceremony (the Add-icon exemption `SKILL.md` §2 names). Any one fails → present the findings as the plan and hold the GO gate.
 
 ### Phase 2 — Delegate
 
