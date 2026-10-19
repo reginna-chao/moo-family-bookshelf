@@ -41,6 +41,11 @@ import {
   sanitizeReadmooUrl,
   sanitizeExpectedLastUpdated,
   isValidFamilyPrefRef,
+  BOOK_TITLE_MAX_LENGTH,
+  BOOK_AUTHOR_MAX_LENGTH,
+  BOOK_ISBN_MAX_LENGTH,
+  BOOK_CATEGORY_MAX_LENGTH,
+  BOOK_URL_MAX_LENGTH,
 } from "../utils/validation";
 import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
@@ -295,14 +300,38 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/** Per-entry free-text ceilings of a PUT books entry, checked in this order. */
+const BOOK_TEXT_FIELD_LIMITS = [
+  ["title", BOOK_TITLE_MAX_LENGTH],
+  ["author", BOOK_AUTHOR_MAX_LENGTH],
+  ["isbn", BOOK_ISBN_MAX_LENGTH],
+  ["category", BOOK_CATEGORY_MAX_LENGTH],
+] as const;
+
+/** The 400 message for the first string field over its ceiling, or `null` when all fit. */
+function overLongBookFieldMessage(e: Record<string, unknown>): string | null {
+  for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
+    const value = e[field];
+    if (typeof value === "string" && value.length > max) {
+      return `Each book's ${field} must be at most ${max} characters`;
+    }
+  }
+  return null;
+}
+
 /**
  * Validate and normalize the `books` array from a PUT body. Rejects the whole
- * payload if any entry is not an object with a non-empty string `bookId`.
+ * payload if any entry is not an object with a non-empty string `bookId`, or
+ * if a string `title` / `author` / `isbn` / `category` exceeds its ceiling
+ * (`BOOK_*_MAX_LENGTH` in `utils/validation.ts`). Rejected, never truncated: a
+ * cut title would break the Extension's same-title rename / legacy-id matching,
+ * which guards 新書預設開放 against auto-sharing a renamed book.
  * Every entry is rebuilt from an explicit field allowlist so unvalidated client
- * fields never reach KV; isShared/isArchived are normalized to BoolFlag, and
- * both attacker-controlled URL fields — `coverUrl` (rendered as `<img src>`)
- * and `readmooUrl` (rendered as `<a href>`) — are whitelist-sanitized (blanked
- * when off-whitelist).
+ * fields never reach KV; non-string text fields become `""`, isShared /
+ * isArchived are normalized to BoolFlag, and both attacker-controlled URL
+ * fields — `coverUrl` (rendered as `<img src>`) and `readmooUrl` (rendered as
+ * `<a href>`) — are whitelist-sanitized (blanked when off-whitelist or over
+ * `BOOK_URL_MAX_LENGTH`).
  */
 export function parseBooks(
   rawBooks: unknown[],
@@ -331,6 +360,10 @@ export function parseBooks(
         code: "INVALID_PAYLOAD",
         message: "Each book requires a non-empty string bookId",
       };
+    }
+    const overLong = overLongBookFieldMessage(e);
+    if (overLong !== null) {
+      return { ok: false, code: "INVALID_PAYLOAD", message: overLong };
     }
     const book: BookEntry = {
       bookId: e.bookId,
@@ -451,7 +484,13 @@ const putUserBooksRoute = createRoute({
     "or refreshing any public snapshot (it still counts against the hourly " +
     "rate limit). Absent, null or an empty string means no precondition. " +
     "`removedUnsharedBookIds` is server-owned: a value in the body is ignored, " +
-    "and the stored list is recomputed from the previous and the saved books.",
+    "and the stored list is recomputed from the previous and the saved books. " +
+    `Per book, \`title\` may be at most ${BOOK_TITLE_MAX_LENGTH}, \`author\` ` +
+    `${BOOK_AUTHOR_MAX_LENGTH}, \`category\` ${BOOK_CATEGORY_MAX_LENGTH} and ` +
+    `\`isbn\` ${BOOK_ISBN_MAX_LENGTH} characters; exceeding any answers 400 ` +
+    "INVALID_PAYLOAD. A `coverUrl` or `readmooUrl` longer than " +
+    `${BOOK_URL_MAX_LENGTH} characters is stored as "" (blanked), like an ` +
+    "off-whitelist URL.",
   request: {
     params: UserIdParam,
   },
