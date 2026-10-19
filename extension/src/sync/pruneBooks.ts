@@ -3,6 +3,7 @@
 
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 import { BookEntry, BoolFlag } from "../api/client";
+import { titleKey } from "./legacyBooks";
 
 /** Never remove more than this share of the real-id books in one sync. */
 export const PRUNE_MAX_RATIO = 0.25;
@@ -22,6 +23,9 @@ export interface PruneContext {
   serverIds: ReadonlySet<string>;
   /** The 同步封存書 setting for this sync. */
   syncArchived: BoolFlag;
+  /** Title keys of scraped books left out of the upload (`FieldCapFit.skippedTitles`, #326): a saved
+   *  entry carrying one may be that book under its old id, so it is never removed. */
+  protectedTitles?: ReadonlySet<string>;
 }
 
 /** One saved book removed because Readmoo no longer holds it. */
@@ -61,7 +65,7 @@ function libraryCoversScrape(
 }
 
 /** A real-id server entry that neither this scrape, Readmoo's library nor a MooFamily loan explains,
- *  and not an archived book hidden by an unsynced archive. */
+ *  not an archived book hidden by an unsynced archive, and not titled like a left-out scraped book. */
 function isPruneCandidate(
   entry: BookEntry,
   ctx: PruneContext,
@@ -75,7 +79,8 @@ function isPruneCandidate(
     ctx.serverIds.has(entry.bookId) &&
     !ctx.scrapedIds.has(entry.bookId) &&
     !libraryIds.has(entry.bookId) &&
-    !ctx.lentBookIds.has(entry.bookId)
+    !ctx.lentBookIds.has(entry.bookId) &&
+    !ctx.protectedTitles?.has(titleKey(entry))
   );
 }
 

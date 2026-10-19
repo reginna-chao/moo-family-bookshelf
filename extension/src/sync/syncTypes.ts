@@ -39,6 +39,9 @@ export interface SyncBooksResult {
    *  were too many (`sync/autoShare.ts`). */
   autoSharedCount?: number;
   autoShareHeldCount?: number;
+  /** On success: new books left out because a field is over the server's cap, plus new books held back
+   *  for sharing a title with one of them (`sync/fieldCaps.ts`). */
+  fieldCapSkippedCount?: number;
   /** The `lastUpdated` this sync's own landed PUT stored (`SyncUploadResult`). */
   lastUpdated?: string;
 }

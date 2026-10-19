@@ -30,7 +30,10 @@ type Json = any;
  * `user:{id}` record stays byte-identical. Rejected, never truncated: a cut
  * title would break the Extension's same-title rename matching that guards
  * 新書預設開放. The message names the first failing field, entries checked in
- * order and fields in the order title, author, isbn, category.
+ * order and fields in the order title, author, isbn, category. Exception
+ * (#326): a value byte-identical to the one already stored in that field for
+ * the same bookId is grandfathered — pinned in `putBooksGrandfathered.test.ts`;
+ * every case here sends a value that is NOT stored, so all are rejected.
  *
  * Unchanged behaviour pinned alongside: a value exactly at the ceiling is
  * stored verbatim, and a NON-string value (array, number, object) is still

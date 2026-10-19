@@ -6,7 +6,8 @@ import { NO_SYNC, lastSyncOf, syncNoticeCountsOf } from "@/dialog/lastSync";
  * `dialog/lastSync.ts`: the last successful sync as useBookSync holds it, and
  * the notice counts the personal shelf reads from it — renamed books (#236)
  * books removed because Readmoo no longer holds them (#241), and books
- * auto-shared or held back by 新書預設開放 (#238). Counts the sync result
+ * auto-shared or held back by 新書預設開放 (#238), and new books left out
+ * because a text field is over the server's cap (#326). Counts the sync result
  * leaves out default to a value that shows no notice.
  */
 
@@ -23,6 +24,7 @@ describe("NO_SYNC", () => {
       removedSharedCount: 0,
       autoSharedCount: 0,
       autoShareHeldCount: 0,
+      fieldCapSkippedCount: 0,
     });
   });
 });
@@ -37,7 +39,18 @@ describe("lastSyncOf", () => {
     expect(sync.removedSharedCount).toBe(0);
     expect(sync.autoSharedCount).toBe(0);
     expect(sync.autoShareHeldCount).toBe(0);
+    expect(sync.fieldCapSkippedCount).toBe(0);
     expect(sync.lastUpdated).toBeUndefined();
+  });
+
+  it("carries the result's left-out count (#326)", () => {
+    const sync = lastSyncOf({
+      success: true,
+      books: [],
+      fieldCapSkippedCount: 2,
+    });
+
+    expect(sync.fieldCapSkippedCount).toBe(2);
   });
 
   it("carries the result's removed counts and stamp", () => {
@@ -124,6 +137,7 @@ describe("syncNoticeCountsOf", () => {
       removedSharedCount: 2,
       autoSharedCount: 5,
       autoShareHeldCount: 0,
+      fieldCapSkippedCount: 6,
       lastUpdated: "2026-10-01T00:00:00.000Z",
     });
 
@@ -133,6 +147,7 @@ describe("syncNoticeCountsOf", () => {
       removedSharedCount: 2,
       autoSharedCount: 5,
       autoShareHeldCount: 0,
+      fieldCapSkippedCount: 6,
     });
   });
 
@@ -143,6 +158,7 @@ describe("syncNoticeCountsOf", () => {
       removedSharedCount: 0,
       autoSharedCount: 0,
       autoShareHeldCount: 0,
+      fieldCapSkippedCount: 0,
     });
   });
 });

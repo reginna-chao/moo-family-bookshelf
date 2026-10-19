@@ -115,7 +115,9 @@ function nothingPruned(): Omit<PruneResult, "books"> {
  * rename candidates and nothing is pruned. Pruning may only remove books in
  * `options.preScrapeServerIds` (on the server before the scrape began): a book
  * first seen in a later read is never a candidate. Rename resolution still
- * judges against `savedBooks` (the current read). Writes nothing.
+ * judges against `savedBooks` (the current read). A title in
+ * `options.skippedTitles` (a scraped book left out of `merged`, #326) is never
+ * paired, and no saved book carrying it is pruned. Writes nothing.
  */
 export function resolveForUpload(
   merged: BookEntry[],
@@ -126,6 +128,7 @@ export function resolveForUpload(
     familyId?: string;
     userId: string;
     preScrapeServerIds: ReadonlySet<string>;
+    skippedTitles?: ReadonlySet<string>;
   },
 ): UploadPlan {
   const scrapedIds = new Set(scrape.books.map((b) => b.bookId));
@@ -141,6 +144,7 @@ export function resolveForUpload(
     serverIds,
     lentBookIds,
     syncArchived: scrape.syncArchived,
+    ambiguousTitles: options.skippedTitles,
   });
   const pruned = pruneRemovedBooks(resolved.books, {
     scrapedIds,
@@ -148,6 +152,7 @@ export function resolveForUpload(
     lentBookIds,
     serverIds: options.preScrapeServerIds,
     syncArchived: scrape.syncArchived,
+    protectedTitles: options.skippedTitles,
   });
   return { ...resolved, ...pruned, deferredCount: 0 };
 }

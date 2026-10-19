@@ -511,7 +511,23 @@ describe("useBookSync", () => {
         removedSharedCount: 0,
         autoSharedCount: 0,
         autoShareHeldCount: 0,
+        fieldCapSkippedCount: 0,
       });
+    });
+
+    it("reports the left-out count of a successful sync (#326)", async () => {
+      vi.mocked(syncBooks).mockResolvedValueOnce({
+        success: true,
+        books: [],
+        fieldCapSkippedCount: 2,
+      });
+
+      const { result } = renderHook(() => useBookSync(makeOptions()));
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(result.current.syncNoticeCounts.fieldCapSkippedCount).toBe(2);
     });
 
     it("reports the renamed count of a successful auto-sync", async () => {
@@ -602,6 +618,7 @@ describe("useBookSync", () => {
         removedSharedCount: 1,
         autoSharedCount: 0,
         autoShareHeldCount: 0,
+        fieldCapSkippedCount: 0,
       });
 
       await act(async () => {

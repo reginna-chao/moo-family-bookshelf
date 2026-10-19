@@ -7,6 +7,7 @@ import {
   BorrowRequest,
   BorrowStatus,
 } from "../api/client";
+import { titleKey } from "./legacyBooks";
 
 export interface RenameContext {
   /** Every bookId of a COMPLETE scrape (library + archive when synced). */
@@ -17,6 +18,9 @@ export interface RenameContext {
   lentBookIds: ReadonlySet<string>;
   /** The 同步封存書 setting for this sync. */
   syncArchived: BoolFlag;
+  /** Title keys of scraped books left out of `books` (`FieldCapFit.skippedTitles`, #326): one more
+   *  entry carries each, so such a title is never paired. */
+  ambiguousTitles?: ReadonlySet<string>;
 }
 
 /** One saved book moved to its new Readmoo id. */
@@ -42,10 +46,6 @@ export function lentBookIdsOf(
     (r) => r.status === BorrowStatus.LENT && r.ownerId === ownerId,
   );
   return new Set(lent.map((r) => r.bookId));
-}
-
-function titleKey(entry: BookEntry): string {
-  return typeof entry.title === "string" ? entry.title.trim() : "";
 }
 
 function countByTitle(books: readonly BookEntry[]): Map<string, number> {
@@ -111,8 +111,8 @@ export function deferRenameCandidates(
     : { books: kept, deferredCount };
 }
 
-/** Old entry → its new twin. A title carried by anything but exactly this old entry plus one
- *  brand-new entry is skipped, as is a target claimed by two old entries (ambiguous). */
+/** Old entry → its new twin. A title carried by anything but exactly this old entry plus one brand-new
+ *  entry (or in `ambiguousTitles`) is skipped, as is a target claimed by two old entries (ambiguous). */
 function pairRenamed(
   books: readonly BookEntry[],
   ctx: RenameContext,
@@ -128,6 +128,7 @@ function pairRenamed(
     const key = titleKey(entry);
     const target = newByTitle.get(key);
     if (!target || titleCounts.get(key) !== 2) continue;
+    if (ctx.ambiguousTitles?.has(key)) continue;
     if (!isReplaceableOld(entry, ctx)) continue;
     pairs.set(entry, target);
     claims.set(target, (claims.get(target) ?? 0) + 1);

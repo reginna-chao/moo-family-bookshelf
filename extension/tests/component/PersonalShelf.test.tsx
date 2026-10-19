@@ -41,6 +41,7 @@ const NO_NOTICE_COUNTS: SyncNoticeCounts = {
   removedSharedCount: 0,
   autoSharedCount: 0,
   autoShareHeldCount: 0,
+  fieldCapSkippedCount: 0,
 };
 
 const mockUseBookSync = vi.fn().mockReturnValue({

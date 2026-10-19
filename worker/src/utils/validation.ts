@@ -164,22 +164,14 @@ export const BORROW_BOOK_AUTHOR_MAX_LENGTH = 100;
  */
 export const BORROW_COVER_URL_MAX_LENGTH = 2048;
 
-/**
- * Upper bounds for the free-text fields of each `PUT /api/user/:id/books`
- * entry, measured with `.length` (UTF-16 code units) like the borrow ones.
- * Abuse ceilings, not display bounds: they stop one field from carrying
- * megabytes that every family member and public-shelf visitor then downloads
- * and renders. They do NOT bound the whole `user:{id}` record — that stays
- * bounded by `PUT_BOOKS_MAX_BODY_SIZE` (2MB) and `MAX_PUT_BOOKS`, an accepted
- * residual (`docs/architecture.md` → 已接受的殘餘風險).
- */
-export const BOOK_TITLE_MAX_LENGTH = 200;
-// Wider than BORROW_BOOK_AUTHOR_MAX_LENGTH on purpose: a 101-500 char author still syncs (its borrow
-// request is refused as before), because locking a user out of sync is the worse failure.
-export const BOOK_AUTHOR_MAX_LENGTH = 500;
-export const BOOK_CATEGORY_MAX_LENGTH = 100;
-/** The Extension never scrapes an ISBN; it only echoes the stored value (normally `""`). */
-export const BOOK_ISBN_MAX_LENGTH = 32;
+// PUT books text-field caps, shared with the Extension so the two cannot drift (#326). The whole
+// record stays bounded only by body size + MAX_PUT_BOOKS (docs/architecture.md → 已接受的殘餘風險).
+export {
+  BOOK_TITLE_MAX_LENGTH,
+  BOOK_AUTHOR_MAX_LENGTH,
+  BOOK_CATEGORY_MAX_LENGTH,
+  BOOK_ISBN_MAX_LENGTH,
+} from "moo-family-bookshelf-shared/api/bookFieldLimits";
 /**
  * Ceiling for a books `coverUrl` / `readmooUrl`; longer is blanked to `""`. Kept equal to the borrow
  * cover ceiling so a cover the bookshelf serves is never one the borrow route rejects as too long.

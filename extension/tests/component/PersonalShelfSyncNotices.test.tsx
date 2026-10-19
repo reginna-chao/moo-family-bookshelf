@@ -4,6 +4,7 @@ import {
   PersonalShelfSyncNotices,
   autoShareHeldNotice,
   autoSharedBooksNotice,
+  overLongBooksNotice,
   removedBooksNotice,
   renamedBooksNotice,
 } from "@/dialog/PersonalShelfSyncNotices";
@@ -14,10 +15,11 @@ import type { SyncNoticeCounts } from "@/dialog/lastSync";
  * the notices about the last successful sync — books moved to a new Readmoo
  * id (#236), books removed because Readmoo no longer holds them (#241), and
  * the 新書預設開放 pair (#238): books auto-shared, and new books held back
- * because one sync brought in more than the cap. The notice copy is pinned
- * here at its production builder; the removed notice has a with-shared and a
- * without-shared variant, one a prefix of the other, so both are asserted
- * with exact equality.
+ * because one sync brought in more than the cap. Last come new books left out
+ * because a title, author or category is over the server's cap (#326). The
+ * notice copy is pinned here at its production builder; the removed notice
+ * has a with-shared and a without-shared variant, one a prefix of the other,
+ * so both are asserted with exact equality.
  */
 
 function counts(overrides: Partial<SyncNoticeCounts> = {}): SyncNoticeCounts {
@@ -27,6 +29,7 @@ function counts(overrides: Partial<SyncNoticeCounts> = {}): SyncNoticeCounts {
     removedSharedCount: 0,
     autoSharedCount: 0,
     autoShareHeldCount: 0,
+    fieldCapSkippedCount: 0,
     ...overrides,
   };
 }
@@ -71,6 +74,14 @@ describe("autoShareHeldNotice", () => {
   it("pins the user-visible copy, cap included", () => {
     expect(autoShareHeldNotice(150)).toBe(
       "這次新增了 150 本書，一次超過 100 本不會自動開放，請自己選要開放哪些",
+    );
+  });
+});
+
+describe("overLongBooksNotice", () => {
+  it("pins the user-visible copy", () => {
+    expect(overLongBooksNotice(2)).toBe(
+      "有 2 本書這次沒有加進個人書櫃：書名、作者或分類太長，伺服器存不下，或是和這樣的書同名",
     );
   });
 });
@@ -200,6 +211,32 @@ describe("PersonalShelfSyncNotices", () => {
     expect(screen.queryByText(/不會自動開放/)).not.toBeInTheDocument();
   });
 
+  it("announces the left-out notice as a status with the production copy (#326)", () => {
+    render(
+      <PersonalShelfSyncNotices
+        progressMessage=""
+        syncError=""
+        counts={counts({ fieldCapSkippedCount: 3 })}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      "有 3 本書這次沒有加進個人書櫃：書名、作者或分類太長，伺服器存不下，或是和這樣的書同名",
+    );
+  });
+
+  it("shows no left-out notice when the count is 0", () => {
+    render(
+      <PersonalShelfSyncNotices
+        progressMessage=""
+        syncError=""
+        counts={counts({ renamedBookCount: 1 })}
+      />,
+    );
+    // Positive companion: the rename status IS rendered, so the query is live.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.queryByText(/太長，伺服器存不下/)).not.toBeInTheDocument();
+  });
+
   it("shows every notice together, in order", () => {
     render(
       <PersonalShelfSyncNotices
@@ -210,6 +247,7 @@ describe("PersonalShelfSyncNotices", () => {
           removedBookCount: 2,
           autoSharedCount: 3,
           autoShareHeldCount: 120,
+          fieldCapSkippedCount: 4,
         })}
       />,
     );
@@ -218,6 +256,7 @@ describe("PersonalShelfSyncNotices", () => {
       removedBooksNotice(2, 0),
       autoSharedBooksNotice(3),
       autoShareHeldNotice(120),
+      overLongBooksNotice(4),
     ]);
   });
 

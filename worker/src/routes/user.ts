@@ -53,6 +53,10 @@ import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
+import {
+  BOOK_TEXT_FIELD_LIMITS,
+  exceedsBookFieldCap,
+} from "moo-family-bookshelf-shared/api/bookFieldLimits";
 
 /** Refresh the snapshot of every shelf in `shelves`, which must come from `resolvePublicShelves` (this
  *  module only READS `publicshelves:{userId}`). Rationale: .claude/rules/backend.md → KV Key Patterns. */
@@ -300,19 +304,46 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Per-entry free-text ceilings of a PUT books entry, checked in this order. */
-const BOOK_TEXT_FIELD_LIMITS = [
-  ["title", BOOK_TITLE_MAX_LENGTH],
-  ["author", BOOK_AUTHOR_MAX_LENGTH],
-  ["isbn", BOOK_ISBN_MAX_LENGTH],
-  ["category", BOOK_CATEGORY_MAX_LENGTH],
-] as const;
+/** Every stored over-cap text value, by bookId, as `${field}:${value}` (no field name holds a colon). */
+function storedOverCapValues(
+  existingBooks: readonly BookEntry[] | undefined,
+): Map<string, Set<string>> {
+  const byBookId = new Map<string, Set<string>>();
+  for (const stored of existingBooks ?? []) {
+    for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
+      if (!exceedsBookFieldCap(stored[field], max)) continue;
+      const values = byBookId.get(stored.bookId) ?? new Set<string>();
+      values.add(`${field}:${stored[field]}`);
+      byBookId.set(stored.bookId, values);
+    }
+  }
+  return byBookId;
+}
 
-/** The 400 message for the first string field over its ceiling, or `null` when all fit. */
-function overLongBookFieldMessage(e: Record<string, unknown>): string | null {
-  for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
-    const value = e[field];
-    if (typeof value === "string" && value.length > max) {
+/**
+ * The 400 message for the first parsed entry (in order) with a text field over
+ * its cap (`BOOK_TEXT_FIELD_LIMITS` order: title, author, isbn, category), or
+ * `null` when none is. Over-cap values are rejected, never truncated: a cut
+ * title would break the Extension's same-title rename / legacy-id matching,
+ * which guards 新書預設開放 against auto-sharing a renamed book. A value
+ * identical to the one already stored in that field for the same bookId is
+ * grandfathered (#326), like stored malformed ids in `dropNewMalformedBookIds`:
+ * data saved before the caps existed keeps syncing, but no new over-cap value
+ * enters KV. Each field is checked on its own, so a grandfathered title does not
+ * exempt a new over-cap author of the same entry. Pure.
+ */
+export function overLongBookFieldMessage(
+  books: readonly BookEntry[],
+  existingBooks: readonly BookEntry[] | undefined,
+): string | null {
+  let grandfathered: Map<string, Set<string>> | undefined;
+  for (const book of books) {
+    for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
+      if (!exceedsBookFieldCap(book[field], max)) continue;
+      grandfathered ??= storedOverCapValues(existingBooks);
+      if (grandfathered.get(book.bookId)?.has(`${field}:${book[field]}`)) {
+        continue;
+      }
       return `Each book's ${field} must be at most ${max} characters`;
     }
   }
@@ -321,11 +352,9 @@ function overLongBookFieldMessage(e: Record<string, unknown>): string | null {
 
 /**
  * Validate and normalize the `books` array from a PUT body. Rejects the whole
- * payload if any entry is not an object with a non-empty string `bookId`, or
- * if a string `title` / `author` / `isbn` / `category` exceeds its ceiling
- * (`BOOK_*_MAX_LENGTH` in `utils/validation.ts`). Rejected, never truncated: a
- * cut title would break the Extension's same-title rename / legacy-id matching,
- * which guards 新書預設開放 against auto-sharing a renamed book.
+ * payload if any entry is not an object with a non-empty string `bookId`.
+ * Text-field length caps are NOT checked here: they need the stored record, so
+ * the PUT handler runs `overLongBookFieldMessage` on the parsed entries.
  * Every entry is rebuilt from an explicit field allowlist so unvalidated client
  * fields never reach KV; non-string text fields become `""`, isShared /
  * isArchived are normalized to BoolFlag, and both attacker-controlled URL
@@ -360,10 +389,6 @@ export function parseBooks(
         code: "INVALID_PAYLOAD",
         message: "Each book requires a non-empty string bookId",
       };
-    }
-    const overLong = overLongBookFieldMessage(e);
-    if (overLong !== null) {
-      return { ok: false, code: "INVALID_PAYLOAD", message: overLong };
     }
     const book: BookEntry = {
       bookId: e.bookId,
@@ -488,7 +513,9 @@ const putUserBooksRoute = createRoute({
     `Per book, \`title\` may be at most ${BOOK_TITLE_MAX_LENGTH}, \`author\` ` +
     `${BOOK_AUTHOR_MAX_LENGTH}, \`category\` ${BOOK_CATEGORY_MAX_LENGTH} and ` +
     `\`isbn\` ${BOOK_ISBN_MAX_LENGTH} characters; exceeding any answers 400 ` +
-    "INVALID_PAYLOAD. A `coverUrl` or `readmooUrl` longer than " +
+    "INVALID_PAYLOAD, unless the value is identical to the one already " +
+    "stored in that field for the same bookId (data saved before the caps " +
+    "existed keeps syncing). A `coverUrl` or `readmooUrl` longer than " +
     `${BOOK_URL_MAX_LENGTH} characters is stored as "" (blanked), like an ` +
     "off-whitelist URL.",
   request: {
@@ -581,6 +608,13 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     getMemberFamilyId(c.env.KV, userId),
     getPublicShelves(c.env.KV, userId),
   ]);
+
+  // Text-field caps need the stored record (unchanged stored values are grandfathered, #326);
+  // checked before the 409 so a bad body still answers 400 first.
+  const overLong = overLongBookFieldMessage(parsedBooks.books, existing?.books);
+  if (overLong !== null) {
+    return jsonError(c, 400, "INVALID_PAYLOAD", overLong);
+  }
 
   // Lost-update guard for read-merge-put clients (#249); narrows the window to
   // this handler's own read→put gap — see backend.md → API Design.
