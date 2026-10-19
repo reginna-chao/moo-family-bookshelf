@@ -74,6 +74,7 @@ moo-family-bookshelf/
 ├── scripts/
 │   ├── kv-backup/               # Archive format (shared with the backup Worker) + restore CLI modules
 │   ├── kv-restore.mjs           # Restore a backup into an EMPTY isolated KV namespace (dry-run by default)
+│   ├── kv-restore-drill.mjs     # `pnpm backup:drill`: monthly dry-run of the latest backup via the local wrangler login
 │   └── test-kv-backup-runtime.mjs # Local Miniflare drill of the real scheduled handler
 ├── pwa/                         # PWA mobile viewer (Phase 3)
 ├── site/                        # GitHub Pages landing page

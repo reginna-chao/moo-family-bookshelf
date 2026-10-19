@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { createKvClient } from "./kv-backup/api.mjs";
 import {
   confirmRestore,
+  formatRestoreSummary,
   parseOptions,
   readConfig,
   reportError,
@@ -52,11 +53,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       }),
     { env },
   );
-  console.log(
-    result.applied
-      ? `還原及逐筆讀回驗證完成：${result.count} 筆；略過已到期或即將到期 ${result.skipped} 筆。`
-      : `檢查完成，尚未寫入：預計還原 ${result.count} 筆；略過已到期或即將到期 ${result.skipped} 筆。`,
-  );
+  console.log(formatRestoreSummary(result));
   console.log(
     "本次工具上限不代表帳號今日剩餘寫入額度；正式切換前仍須檢查家庭、借閱與分享設定。",
   );

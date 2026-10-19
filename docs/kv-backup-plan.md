@@ -102,7 +102,7 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 
 - Worker 端：每筆 byte 長度、總長、R2 回報的 object size 寫入 manifest。
 - 還原 CLI：下載後核對總長與每筆長度、每行可解析、每筆 value 符合既有 schema、`count`／`prefixCounts` 相符；任一不符即拒絕還原。
-- 接受的取捨：備份當天不會知道檔案是否損壞，最晚在下次還原演練或真正還原時才發現。緩解：每月一次對最新備份跑 dry-run 還原（只下載核對、不寫入），由管理者手動執行。
+- 接受的取捨：備份當天不會知道檔案是否損壞，最晚在下次還原演練或真正還原時才發現。緩解：每月一次對最新備份跑 dry-run 還原（只下載核對、不寫入），由管理者手動執行（repo 根目錄 `pnpm backup:drill`）。
 
 ## 8. CPU 與請求數的驗收
 
@@ -178,6 +178,8 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 - 依第 7 節驗證長度、筆數、schema；略過已到期或即將到期的資料，保留原始到期時間；完成後逐筆回讀。
 - **寫回規則依類別**：`member:` 寫回原始字串（例如 `abcd-1234`，不能多一層引號，否則 `member:` 指向與家庭 ID 的字串比對會失效）；其餘類別寫回備份中的原始 JSON 文字，不重新序列化。
 - 還原驗收必須包含：以隔離 Worker 接上還原目標後，家庭成員判定（members GET、bookshelf GET）仍成立。
+
+第 7 節的每月 dry-run 另有 `pnpm backup:drill`（`scripts/kv-restore-drill.mjs`）：讀本機 `wrangler.backup.local.toml`、沿用 `wrangler login` 身分，不需要 token，也從不寫入；下載後的驗證與 `--apply` 寫入前相同。
 
 讀取器同時支援 version 1（`feat/kv-backup` 分支歷史的格式，value 為字串、manifest 含 sha256）與 version 2；version 1 僅供讀取舊演練產出，正式備份一律 version 2。
 
