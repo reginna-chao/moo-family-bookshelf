@@ -168,16 +168,20 @@ function createListOnlyKvClient(workspace, namespaceId) {
   return { listKeys, readKeys: refuse, writeRecords: refuse };
 }
 
-// Blocks up to ~2 s: a Windows child may still hold the cwd for a moment after
-// Ctrl+C, and the process is about to exit anyway. Gives up silently.
+// Handwritten retry (≤ ~2 s): on Node 22.22.2 rmSync ignores maxRetries / retryDelay
+// for a cwd a Windows child still holds after Ctrl+C — EBUSY in ~1 ms, no wait.
+const TRANSIENT_RM_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
+
+// Retries only the codes fs.rm's own retry covers; anything else gives up at once.
 function removeWorkspaceNow(directory) {
   const pause = new Int32Array(new SharedArrayBuffer(4));
   for (let attempt = 1; attempt <= 20; attempt++) {
     try {
       rmSync(directory, { recursive: true, force: true });
       return;
-    } catch {
-      if (attempt < 20) Atomics.wait(pause, 0, 0, 100);
+    } catch (error) {
+      if (!TRANSIENT_RM_CODES.has(error?.code) || attempt === 20) return;
+      Atomics.wait(pause, 0, 0, 100);
     }
   }
 }

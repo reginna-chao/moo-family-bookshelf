@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -52,10 +52,16 @@ import {
  * INTERRUPTS. `process.emit(signal)` runs `withWrangler`'s one-shot handler
  * synchronously inside the action, with `process.exit` mocked so the worker
  * survives; the workspace is located through the fake's recorded `--config`.
- * The cwd-lock case spawns a short-lived node child inside the workspace: on
- * Windows that blocks the removal until the child exits, so it exercises the
- * handler's bounded retry (on POSIX the first removal already succeeds). The
- * child is killed in `afterEach` if it is still alive.
+ * The cwd-lock case spawns a node child (`-e ""`, exits right after start-up)
+ * with the workspace as its cwd, just before the emit. Only on Windows does
+ * that cwd block the removal, so only there does the case exercise the
+ * handler's bounded retry (20 attempts, 100 ms apart); on POSIX the first
+ * removal already succeeds and the case reduces to the plain SIGTERM path.
+ * Clean-up guarantee: the nested `afterEach` kills the child if it is still
+ * alive, awaits its exit, then removes the captured workspace itself with the
+ * same 20 × 100 ms bounded retry, so a failed assertion (the handler giving up
+ * under load) never leaves the plaintext `moo-kv-backup-*` directory in the
+ * temp dir.
  */
 
 const BUCKET = "backup-bucket";
@@ -622,12 +628,32 @@ describe("withWrangler interrupt cleanup", () => {
   // See the header → "INTERRUPTS".
   describe("signal handler", () => {
     let child: ChildProcess | undefined;
+    let workspace = "";
 
-    afterEach(() => {
+    /** Removes `directory`, retrying up to 20 times 100 ms apart (rmSync's maxRetries is ignored here). */
+    function removeWithRetry(directory: string) {
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      for (let attempt = 1; attempt <= 20; attempt++) {
+        try {
+          rmSync(directory, { recursive: true, force: true });
+          return;
+        } catch {
+          if (attempt < 20) Atomics.wait(pause, 0, 0, 100);
+        }
+      }
+    }
+
+    afterEach(async () => {
       vi.restoreAllMocks();
-      if (child && child.exitCode === null && child.signalCode === null)
-        child.kill();
+      const running = child;
       child = undefined;
+      if (running && running.exitCode === null && running.signalCode === null) {
+        const exited = new Promise((done) => running.once("exit", done));
+        running.kill();
+        await exited;
+      }
+      if (workspace) removeWithRetry(workspace);
+      workspace = "";
     });
 
     /** Emits `signal` mid-action (after `beforeEmit`) and reports what the handler left behind. */
@@ -681,7 +707,8 @@ describe("withWrangler interrupt cleanup", () => {
 
     it("retries until a child process holding the workspace as cwd exits, then exits 143", async () => {
       const outcome = await interrupt("SIGTERM", (directory) => {
-        child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 300)"], {
+        workspace = directory;
+        child = spawn(process.execPath, ["-e", ""], {
           cwd: directory,
           stdio: "ignore",
         });
