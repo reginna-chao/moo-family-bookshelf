@@ -64,7 +64,7 @@ Mix/iterate per feedback ("A 的配色 + B 的 icon 風格"); propose 3 new if a
 
 ### Phase 4 — Produce (optional)
 
-Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief; that brief still goes through Mode 1's GO gate before any `designer` dispatch — the yes here picks the assets, it is not the GO. No → persist the agreed direction by dispatching the `designer` agent with the decided palette / font / icon-style / references as `context`, asking it to write `.skill-archive/design/style-direction.md`. (`/develop` never writes files itself — see `SKILL.md` §1; the `designer` agent has `Write`.)
+Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief; that brief still goes through Mode 1's GO gate before any `designer` dispatch — the yes here picks the assets, it is not the GO. No → the agreed direction (palette / font / icon-style / references) is restated in chat as the outcome; nothing is written yet. Then offer to persist it: present the save plan — the target file `.skill-archive/design/style-direction.md` and the content it will hold — and hold the GO gate (`SKILL.md` §2). Only on GO dispatch the `designer` agent with that direction as `context`, asking it to write the file; without GO no agent runs and no file changes. (`/develop` never writes files itself — see `SKILL.md` §1; the `designer` agent has `Write`.)
 
 → If producing, continue to **Review & Deliver**.
 
