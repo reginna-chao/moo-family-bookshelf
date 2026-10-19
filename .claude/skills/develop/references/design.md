@@ -20,7 +20,7 @@ For DESIGN-intent requests (brand assets, add-icon, or visual-style exploration)
 1. **Confirm the asset list** — only what the user asked for. Map each to how the `designer` agent will make it (favicon/logo/app icon = SVG via logo ref; UI icon set = SVG via icon ref; README banner / OG / social = SVG via banner ref).
 2. **Check existing brand** — `ls assets/ public/ extension/public/ site/ 2>/dev/null`; extract any existing logo, brand colors (CSS/Tailwind), icon style. Reuse — don't recreate what exists.
 3. **Compile a focused brief**: existing brand (logo path / colors / style), assets to create, platform constraints.
-4. **Present the brief. Wait for user confirmation.**
+4. **Present the brief as the plan, then hold the GO gate** (`SKILL.md` §2): AskUserQuestion with 「GO，開始執行」 / 「修改計畫」, or a typed `GO`. Iterate on the brief until GO; no `designer` is dispatched before it.
 
 ### Phase 2 — Delegate to `designer`
 
@@ -38,7 +38,7 @@ For DESIGN-intent requests (brand assets, add-icon, or visual-style exploration)
 
 1. Find the existing set: `ls assets/icons/ src/assets/icons/ public/icons/ extension/public/ 2>/dev/null`.
 2. Have the `designer` agent (or a quick read) extract current style: stroke width, linecap/linejoin, viewBox, color approach (`currentColor`?), filled/outlined.
-3. Present findings (location, count, style, grid) + the requested icon. Confirm if non-trivial; skip the ceremony if straightforward.
+3. Present findings (location, count, style, grid) + the requested icon. Confirm — that confirmation is the GO gate of `SKILL.md` §2 — unless the request is **straightforward**, which is a mechanical test, not a judgment: step 1 found an existing icon set, AND the new icon reuses that set's stroke width / linecap / viewBox / color approach / filled-vs-outlined unchanged, AND no new palette, grid or weight decision is needed. All three hold → skip the ceremony (the Add-icon exemption `SKILL.md` §2 names). Any one fails → present the findings as the plan and hold the GO gate.
 
 ### Phase 2 — Delegate
 
@@ -64,7 +64,7 @@ Mix/iterate per feedback ("A 的配色 + B 的 icon 風格"); propose 3 new if a
 
 ### Phase 4 — Produce (optional)
 
-Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief (dispatch `designer`). No → persist the agreed direction by dispatching the `designer` agent with the decided palette / font / icon-style / references as `context`, asking it to write `.skill-archive/design/style-direction.md`. (`/develop` never writes files itself — see `SKILL.md` §1; the `designer` agent has `Write`.)
+Ask 「要開始製作嗎？需要哪些資產？」. Yes → switch to **Mode 1** with the agreed direction as the brief; that brief still goes through Mode 1's GO gate before any `designer` dispatch — the yes here picks the assets, it is not the GO. No → the agreed direction (palette / font / icon-style / references) is restated in chat as the outcome; nothing is written yet. Then offer to persist it: present the save plan — the target file `.skill-archive/design/style-direction.md` and the content it will hold — and hold the GO gate (`SKILL.md` §2). Only on GO dispatch the `designer` agent with that direction as `context`, asking it to write the file. A decline (「不用存」, 「不用了」 — the abandon outcome of `SKILL.md` §2) ends the run with a Stop Block: the direction stays in the conversation only, no agent runs, no file changes. (`/develop` never writes files itself — see `SKILL.md` §1; the `designer` agent has `Write`.)
 
 → If producing, continue to **Review & Deliver**.
 

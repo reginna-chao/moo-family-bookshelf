@@ -14,7 +14,8 @@ Read-only toward source code: cite `file:line`, never paste long excerpts.
 
 - Dispatch history: per phase — which agents (coder / tester / reviewer /
   security-auditor / designer), parallel vs serialized, retries.
-- Gates: requirements-confirmation rounds, mockup gate, verify-before-test retries,
+- Gates: GO-gate rounds (plan revisions before GO — code route's Phase 1 analysis or
+  design route's brief), mockup gate, verify-before-test retries,
   Fix Cycle rounds (CRITICAL auto-fixed count, SUGGESTION adopted/rejected),
   cross-scope findings, security-scan verdict.
 - User corrections / interruptions (verbatim) — each is a U# candidate.
