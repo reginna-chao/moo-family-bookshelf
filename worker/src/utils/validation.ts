@@ -165,6 +165,28 @@ export const BORROW_BOOK_AUTHOR_MAX_LENGTH = 100;
 export const BORROW_COVER_URL_MAX_LENGTH = 2048;
 
 /**
+ * Upper bounds for the free-text fields of each `PUT /api/user/:id/books`
+ * entry, measured with `.length` (UTF-16 code units) like the borrow ones.
+ * Abuse ceilings, not display bounds: they stop one field from carrying
+ * megabytes that every family member and public-shelf visitor then downloads
+ * and renders. They do NOT bound the whole `user:{id}` record — that stays
+ * bounded by `PUT_BOOKS_MAX_BODY_SIZE` (2MB) and `MAX_PUT_BOOKS`, an accepted
+ * residual (`docs/architecture.md` → 已接受的殘餘風險).
+ */
+export const BOOK_TITLE_MAX_LENGTH = 200;
+// Wider than BORROW_BOOK_AUTHOR_MAX_LENGTH on purpose: a 101-500 char author still syncs (its borrow
+// request is refused as before), because locking a user out of sync is the worse failure.
+export const BOOK_AUTHOR_MAX_LENGTH = 500;
+export const BOOK_CATEGORY_MAX_LENGTH = 100;
+/** The Extension never scrapes an ISBN; it only echoes the stored value (normally `""`). */
+export const BOOK_ISBN_MAX_LENGTH = 32;
+/**
+ * Ceiling for a books `coverUrl` / `readmooUrl`; longer is blanked to `""`. Kept equal to the borrow
+ * cover ceiling so a cover the bookshelf serves is never one the borrow route rejects as too long.
+ */
+export const BOOK_URL_MAX_LENGTH = BORROW_COVER_URL_MAX_LENGTH;
+
+/**
  * Keep a coverUrl only when it is empty (scraper placeholder) or on the
  * Readmoo cover-host whitelist; anything else is blanked to "". Sanitize
  * instead of reject: one attacker-crafted cover in a sync payload must not
@@ -188,9 +210,12 @@ export const BORROW_COVER_URL_MAX_LENGTH = 2048;
  *   snapshot — a permanent one may never be rewritten. Response transform
  *   only (that handler writes no KV), and CSP-independent: a self-hosted PWA
  *   on a host that ignores `_headers` ships no `img-src` whitelist.
+ *
+ * A value longer than `BOOK_URL_MAX_LENGTH` is blanked before the whitelist parse ever sees it.
  */
 export function sanitizeCoverUrl(value: unknown): string {
   const url = typeof value === "string" ? value : "";
+  if (url.length > BOOK_URL_MAX_LENGTH) return "";
   return url === "" || isAllowedCoverUrl(url) ? url : "";
 }
 
@@ -232,9 +257,12 @@ export function sanitizeCoverUrl(value: unknown): string {
  *   snapshot — a permanent one may never be rewritten. Response transform
  *   only (that handler writes no KV). No CSP can stand in for it either: a
  *   navigation to an arbitrary origin is not something `img-src` constrains.
+ *
+ * A value longer than `BOOK_URL_MAX_LENGTH` is blanked before the whitelist parse ever sees it.
  */
 export function sanitizeReadmooUrl(value: unknown): string {
   const url = typeof value === "string" ? value : "";
+  if (url.length > BOOK_URL_MAX_LENGTH) return "";
   return url === "" || isAllowedBookUrl(url) ? url : "";
 }
 
