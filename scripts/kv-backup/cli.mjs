@@ -24,23 +24,31 @@ export function readConfig(env = process.env) {
   };
 }
 
-export function parseOptions(args) {
+/** Strict `parseArgs` (no positionals) for both CLIs; any parse failure is one literal error. */
+export function parseCliOptions(args, options) {
   try {
-    return parseArgs({
-      args,
-      strict: true,
-      allowPositionals: false,
-      options: {
-        help: { type: "boolean", short: "h" },
-        backup: { type: "string" },
-        "target-namespace": { type: "string" },
-        apply: { type: "boolean", default: false },
-        "max-writes": { type: "string", default: "1000" },
-      },
-    }).values;
+    return parseArgs({ args, strict: true, allowPositionals: false, options })
+      .values;
   } catch {
     throw new BackupError("參數格式不正確，請使用 --help 查看用法。");
   }
+}
+
+export function parseOptions(args) {
+  return parseCliOptions(args, {
+    help: { type: "boolean", short: "h" },
+    backup: { type: "string" },
+    "target-namespace": { type: "string" },
+    apply: { type: "boolean", default: false },
+    "max-writes": { type: "string", default: "1000" },
+  });
+}
+
+/** The one-line result both the restore CLI and the drill print. */
+export function formatRestoreSummary({ applied, count, skipped }) {
+  return applied
+    ? `還原及逐筆讀回驗證完成：${count} 筆；略過已到期或即將到期 ${skipped} 筆。`
+    : `檢查完成，尚未寫入：預計還原 ${count} 筆；略過已到期或即將到期 ${skipped} 筆。`;
 }
 
 export async function confirmRestore({ targetNamespaceId, count, maxWrites }) {

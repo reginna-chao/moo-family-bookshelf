@@ -1,8 +1,12 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import {
+  formatRestoreSummary,
+  parseCliOptions,
+} from "../../../scripts/kv-backup/cli.mjs";
 import {
   parseBackupLocalConfig,
   readDrillConfig,
@@ -13,6 +17,7 @@ import {
   wranglerEnvironment,
   type WranglerRun,
 } from "../../../scripts/kv-backup/storage.mjs";
+import type { ManifestV2 } from "../../../scripts/kv-backup/types.mjs";
 import { main } from "../../../scripts/kv-restore-drill.mjs";
 import {
   ACCOUNT,
@@ -43,6 +48,14 @@ import {
  * NO-WRITE GUARANTEE. Asserted structurally: every recorded call is either
  * `r2 object get` or `kv key list`, and `readKeys` / `writeRecords` of the
  * list-only client always reject. Messages are asserted exactly.
+ *
+ * INTERRUPTS. `process.emit(signal)` runs `withWrangler`'s one-shot handler
+ * synchronously inside the action, with `process.exit` mocked so the worker
+ * survives; the workspace is located through the fake's recorded `--config`.
+ * The cwd-lock case spawns a short-lived node child inside the workspace: on
+ * Windows that blocks the removal until the child exits, so it exercises the
+ * handler's bounded retry (on POSIX the first removal already succeeds). The
+ * child is killed in `afterEach` if it is still alive.
  */
 
 const BUCKET = "backup-bucket";
@@ -60,6 +73,18 @@ const REFUSED = "演練工具只能列舉 KV，不支援讀取或寫入。";
 const MISSING_R2_TOKEN = "缺少 KV_BACKUP_R2_API_TOKEN。";
 const missingField = (what: string) =>
   `worker/wrangler.backup.local.toml 缺少${what}，請依 worker/DEPLOY.md「KV 每日備份與還原演練」第 3 節補上。`;
+const BAD_ACCOUNT_ID =
+  "worker/wrangler.backup.local.toml 的頂層 account_id 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。";
+const BAD_SOURCE_ID =
+  "worker/wrangler.backup.local.toml 的 [vars] SOURCE_NAMESPACE_ID 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。";
+const BAD_DRILL_ID =
+  "worker/wrangler.backup.local.toml 的 [vars] RESTORE_DRILL_NAMESPACE_ID 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。";
+const SAME_NAMESPACE =
+  "禁止寫入來源或正式 namespace，請建立新的隔離 namespace。";
+const NOT_EMPTY = "目標 namespace 不是空白，沒有開始還原。";
+const LENGTHS = "備份大小或每筆長度驗證失敗，沒有寫入任何資料。";
+const LINE = "備份資料行格式不正確。";
+const BAD_ARGS = "參數格式不正確，請使用 --help 查看用法。";
 
 interface LocalConfig {
   account?: string;
@@ -122,6 +147,18 @@ afterEach(async () => {
   vi.useRealTimers();
   await rm(scratch, { recursive: true, force: true });
 });
+
+/** Same-length copy of `data` with `from` replaced by `to` inside the single occurrence of `anchor`. */
+function flipByte(data: Buffer, anchor: string, from: string, to: string) {
+  const at = data.indexOf(anchor);
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(data.indexOf(anchor, at + 1)).toBe(-1);
+  expect(Buffer.byteLength(from)).toBe(Buffer.byteLength(to));
+  const copy = Buffer.from(data);
+  copy.write(to, at + Buffer.from(anchor).indexOf(from));
+  expect(copy.equals(data)).toBe(false);
+  return copy;
+}
 
 async function writeConfig(text: string): Promise<string> {
   const path = join(scratch, "wrangler.backup.local.toml");
@@ -233,12 +270,47 @@ describe("parseBackupLocalConfig", () => {
   });
 
   it.each([
-    ["the template placeholder", { drill: "YOUR_EMPTY_DRILL_KV_NAMESPACE_ID" }],
-    ["an uppercase id", { drill: TARGET.toUpperCase() }],
-    ["a 31-character account", { account: "a".repeat(31) }],
-    ["an empty source", { source: "" }],
-  ])("rejects %s with the id literal", (_label, override: LocalConfig) => {
-    expect(() => parseBackupLocalConfig(localToml(override))).toThrow(BAD_ID);
+    [
+      "the template placeholder",
+      { drill: "YOUR_EMPTY_DRILL_KV_NAMESPACE_ID" },
+      BAD_DRILL_ID,
+    ],
+    ["an uppercase id", { drill: TARGET.toUpperCase() }, BAD_DRILL_ID],
+    ["a 31-character account", { account: "a".repeat(31) }, BAD_ACCOUNT_ID],
+    ["an empty source", { source: "" }, BAD_SOURCE_ID],
+  ])(
+    "rejects %s with that field's id literal",
+    (_label, override: LocalConfig, message) => {
+      expect(() => parseBackupLocalConfig(localToml(override))).toThrow(
+        message,
+      );
+    },
+  );
+
+  it("reads a config written entirely with single-quoted literal strings", () => {
+    const text = localToml().replace(/"/g, "'");
+    expect(text).not.toContain('"');
+    expect(text).toContain(`account_id = '${ACCOUNT}'`);
+    expect(parseBackupLocalConfig(text)).toEqual(EXPECTED);
+  });
+
+  it("keeps a # inside a single-quoted value and drops a trailing comment", () => {
+    const text = localToml().replace(
+      `bucket_name = "${BUCKET}"`,
+      "bucket_name = 'my#bucket' # trailing",
+    );
+    expect(parseBackupLocalConfig(text).bucket).toBe("my#bucket");
+  });
+
+  it("treats an invalid literal string ('a'b') as a missing field", () => {
+    const text = localToml().replace(
+      `bucket_name = "${BUCKET}"`,
+      "bucket_name = 'a'b'",
+    );
+    expect(text).toContain("bucket_name = 'a'b'");
+    expect(() => parseBackupLocalConfig(text)).toThrow(
+      missingField(" [[r2_buckets]] 的 bucket_name"),
+    );
   });
 });
 
@@ -347,9 +419,6 @@ function fakeWrangler(
   };
   return { calls, run };
 }
-
-const listCalls = (calls: Call[]) =>
-  calls.filter((call) => call.args.slice(1, 4).join(" ") === "kv key list");
 
 describe("withR2Store without a token", () => {
   it.each([
@@ -516,6 +585,148 @@ describe("withWrangler R2 store: latest.json", () => {
   );
 });
 
+describe("withWrangler interrupt cleanup", () => {
+  const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const counts = () => SIGNALS.map((signal) => process.listenerCount(signal));
+
+  // Never emits a signal: the registered handler calls process.exit.
+  it.each([
+    ["an action that resolves", async () => "done"],
+    [
+      "an action that throws",
+      async (): Promise<string> => {
+        throw new Error("action failed");
+      },
+    ],
+  ])(
+    "holds one listener per signal during %s and none afterwards",
+    async (label, body) => {
+      const before = counts();
+      let inside: number[] = [];
+      const result = withWrangler(
+        { accountId: ACCOUNT },
+        async () => {
+          inside = counts();
+          return body();
+        },
+        { run: fakeWrangler().run, env: {} },
+      );
+      if (label === "an action that throws")
+        await expect(result).rejects.toThrow("action failed");
+      else await expect(result).resolves.toBe("done");
+      expect(inside).toEqual(before.map((count) => count + 1));
+      expect(counts()).toEqual(before);
+    },
+  );
+
+  // See the header → "INTERRUPTS".
+  describe("signal handler", () => {
+    let child: ChildProcess | undefined;
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      if (child && child.exitCode === null && child.signalCode === null)
+        child.kill();
+      child = undefined;
+    });
+
+    /** Emits `signal` mid-action (after `beforeEmit`) and reports what the handler left behind. */
+    async function interrupt(
+      signal: (typeof SIGNALS)[number],
+      beforeEmit?: (directory: string) => void,
+    ) {
+      const exit = vi
+        .spyOn(process, "exit")
+        .mockImplementation(() => undefined as never);
+      const { calls, run } = fakeWrangler(
+        new Map([[DATA_KEY, Buffer.from("archive")]]),
+      );
+      const before = counts();
+      let directory = "";
+      let existedBeforeEmit = false;
+      let existsAfterEmit = true;
+      const result = await withWrangler(
+        { accountId: ACCOUNT },
+        async ({ r2 }) => {
+          await r2(BUCKET).get(DATA_KEY);
+          const { args } = calls[0];
+          directory = dirname(args[args.indexOf("--config") + 1]);
+          existedBeforeEmit = existsSync(directory);
+          beforeEmit?.(directory);
+          process.emit(signal);
+          existsAfterEmit = existsSync(directory);
+          return "done";
+        },
+        { run, env: {} },
+      );
+      return { exit, result, before, existedBeforeEmit, existsAfterEmit };
+    }
+
+    it.each([
+      ["SIGINT", 130],
+      ["SIGTERM", 143],
+      ["SIGHUP", 129],
+    ] as const)(
+      "%s removes the workspace synchronously and exits %i",
+      async (signal, code) => {
+        const outcome = await interrupt(signal);
+        expect(outcome.existedBeforeEmit).toBe(true);
+        expect(outcome.existsAfterEmit).toBe(false);
+        expect(outcome.exit).toHaveBeenCalledTimes(1);
+        expect(outcome.exit).toHaveBeenCalledWith(code);
+        expect(outcome.result).toBe("done");
+        expect(counts()).toEqual(outcome.before);
+      },
+    );
+
+    it("retries until a child process holding the workspace as cwd exits, then exits 143", async () => {
+      const outcome = await interrupt("SIGTERM", (directory) => {
+        child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 300)"], {
+          cwd: directory,
+          stdio: "ignore",
+        });
+      });
+      expect(child?.pid).toBeTypeOf("number");
+      expect(outcome.existedBeforeEmit).toBe(true);
+      expect(outcome.existsAfterEmit).toBe(false);
+      expect(outcome.exit).toHaveBeenCalledTimes(1);
+      expect(outcome.exit).toHaveBeenCalledWith(143);
+      expect(counts()).toEqual(outcome.before);
+    });
+  });
+});
+
+describe("parseCliOptions and formatRestoreSummary", () => {
+  const options = {
+    help: { type: "boolean", short: "h" },
+    backup: { type: "string" },
+  } as const;
+
+  it("returns the parsed values of declared options", () => {
+    expect(parseCliOptions(["-h", "--backup", "x.jsonl"], options)).toEqual({
+      help: true,
+      backup: "x.jsonl",
+    });
+  });
+
+  it.each([
+    ["an unknown option", ["--nope"]],
+    ["a positional argument", ["positional"]],
+    ["a string option without its value", ["--backup"]],
+  ])("rejects %s with the one literal", (_label, args) => {
+    expect(() => parseCliOptions(args, options)).toThrow(BAD_ARGS);
+  });
+
+  it.each([
+    [false, "檢查完成，尚未寫入：預計還原 7 筆；略過已到期或即將到期 2 筆。"],
+    [true, "還原及逐筆讀回驗證完成：7 筆；略過已到期或即將到期 2 筆。"],
+  ])("formats applied=%s as its exact sentence", (applied, sentence) => {
+    expect(formatRestoreSummary({ applied, count: 7, skipped: 2 })).toBe(
+      sentence,
+    );
+  });
+});
+
 describe("kv-restore-drill main", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -577,6 +788,7 @@ describe("kv-restore-drill main", () => {
       "請到 Healthchecks 的月度 dry-run 提醒 check 按 Ping Now，並把這次結果記進維運紀錄。",
     ]);
     expect(trace(calls)).toEqual([
+      `kv:${TARGET}`,
       `r2:${BUCKET}/latest.json`,
       `r2:${BUCKET}/${MANIFEST_KEY}`,
       `r2:${BUCKET}/${DATA_KEY}`,
@@ -638,38 +850,91 @@ describe("kv-restore-drill main", () => {
       BAD_PATH,
     ],
   ])(
-    "stops on a latest.json with %s before any other call",
+    "stops on a latest.json with %s after the empty check, downloading nothing else",
     async (_label, latest, message) => {
       const { calls, lines, result } = await drill(
         bucketObjects(latest).objects,
       );
       await expect(result).rejects.toThrow(message);
-      expect(trace(calls)).toEqual([`r2:${BUCKET}/latest.json`]);
+      expect(trace(calls)).toEqual([
+        `kv:${TARGET}`,
+        `r2:${BUCKET}/latest.json`,
+      ]);
       expect(lines).toEqual([]);
     },
   );
 
-  it("refuses a drill namespace that is not empty", async () => {
+  it("refuses a drill namespace that is not empty before any download", async () => {
     const { calls, lines, result } = await drill(bucketObjects().objects, {
       listed: () => ({ stdout: '[{"name":"user:x"}]', stderr: "" }),
     });
-    await expect(result).rejects.toThrow(
-      "目標 namespace 不是空白，沒有開始還原。",
-    );
-    expect(listCalls(calls)).toHaveLength(1);
+    await expect(result).rejects.toThrow(NOT_EMPTY);
+    expect(trace(calls)).toEqual([`kv:${TARGET}`]);
+    expect(calls.filter((call) => call.args[1] === "r2")).toEqual([]);
     expect(lines).toEqual([]);
   });
 
-  it("refuses a drill namespace equal to the source before downloading the backup", async () => {
+  it("refuses a drill namespace equal to the source before any Wrangler call", async () => {
     const { calls, lines, result } = await drill(bucketObjects().objects, {
       config: localToml({ drill: SOURCE }),
     });
-    await expect(result).rejects.toThrow(
-      "禁止寫入來源或正式 namespace，請建立新的隔離 namespace。",
-    );
-    expect(trace(calls)).toEqual([`r2:${BUCKET}/latest.json`]);
+    await expect(result).rejects.toThrow(SAME_NAMESPACE);
+    expect(calls).toEqual([]);
     expect(lines).toEqual([]);
   });
+
+  // validateArchive literals: see kvRestore.test.ts (LENGTHS / LINE / COUNTS).
+  it.each([
+    [
+      "a manifest whose first line length is one byte too long",
+      (manifest: ManifestV2) => {
+        manifest.lineLengths[0] += 1;
+      },
+      (data: Buffer) => data,
+      LENGTHS,
+    ],
+    [
+      "a manifest count one lower than its line lengths",
+      (manifest: ManifestV2) => {
+        manifest.count -= 1;
+      },
+      (data: Buffer) => data,
+      LENGTHS,
+    ],
+    [
+      "a flipped byte inside a value that breaks the line's JSON",
+      () => undefined,
+      (data: Buffer) => flipByte(data, '"books": []', "[", "x"),
+      NOT_JSON,
+    ],
+    [
+      "a flipped closing brace at the end of the first line",
+      () => undefined,
+      (data: Buffer) => flipByte(data, "] }}\n", "}\n", "]\n"),
+      LINE,
+    ],
+  ])(
+    "rejects a corrupted archive (%s) before the second empty check",
+    async (_label, editManifest, editData, message) => {
+      const { manifest, data } = seededArchive();
+      editManifest(manifest);
+      const objects = new Map<string, Buffer>([
+        ["latest.json", latestJson()],
+        [MANIFEST_KEY, Buffer.from(JSON.stringify(manifest))],
+        [DATA_KEY, editData(data)],
+      ]);
+      expect(objects.get(DATA_KEY)).toHaveLength(data.length);
+      const { calls, lines, result } = await drill(objects);
+      await expect(result).rejects.toThrow(message);
+      expect(lines).toEqual([]);
+      expect(trace(calls)).toEqual([
+        `kv:${TARGET}`,
+        `r2:${BUCKET}/latest.json`,
+        `r2:${BUCKET}/${MANIFEST_KEY}`,
+        `r2:${BUCKET}/${DATA_KEY}`,
+      ]);
+    },
+  );
 
   it("prints the usage for --help without reading the config or running Wrangler", async () => {
     const run = vi.fn<WranglerRun>();

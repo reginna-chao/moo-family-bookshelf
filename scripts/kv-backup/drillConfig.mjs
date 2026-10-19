@@ -1,22 +1,32 @@
 import { readFile } from "node:fs/promises";
-import { BackupError, requireId } from "./format.mjs";
+import { BackupError } from "./format.mjs";
 
 const HEADER = /^(\[\[?)\s*([A-Za-z0-9_.-]+)\s*(\]\]?)$/;
-const STRING_ASSIGNMENT = /^([A-Za-z0-9_-]+)\s*=\s*"((?:[^"\\]|\\.)*)"$/;
+// `key = "basic"` (escapes kept verbatim) or `key = 'literal'` (no escapes, no `'`).
+const STRING_ASSIGNMENT =
+  /^([A-Za-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')$/;
+const HEX_ID = /^[0-9a-f]{32}$/;
 
-// Drops a `#` comment unless it sits inside a double-quoted string.
+// Drops a `#` comment unless it sits inside a double- or single-quoted string.
 function stripComment(line) {
-  let quoted = false;
+  let quote = "";
   for (let index = 0; index < line.length; index++) {
     const char = line[index];
-    if (quoted && char === "\\") index++;
-    else if (char === '"') quoted = !quoted;
-    else if (char === "#" && !quoted) return line.slice(0, index);
+    if (quote === '"' && char === "\\") index++;
+    else if (char === quote) quote = "";
+    else if (!quote && (char === '"' || char === "'")) quote = char;
+    else if (!quote && char === "#") return line.slice(0, index);
   }
   return line;
 }
 
-// Collects `key = "value"` per table: "" = top level, "[vars]", "[[r2_buckets]]#0" …
+// `error` is built at the call site so every BackupError message stays a literal.
+function requireHexId(value, error) {
+  if (!HEX_ID.test(value)) throw error;
+  return value;
+}
+
+// Collects `key = "value"` / `key = 'value'` per table: "" = top level, "[vars]", "[[r2_buckets]]#0" …
 // An unrecognised `[` header switches to "[?]", so its keys match no lookup.
 function scanStrings(text) {
   const values = new Map();
@@ -44,7 +54,7 @@ function scanStrings(text) {
     const assignment = STRING_ASSIGNMENT.exec(line);
     if (!assignment) continue;
     const key = `${table} ${assignment[1]}`;
-    if (!values.has(key)) values.set(key, assignment[2]);
+    if (!values.has(key)) values.set(key, assignment[2] ?? assignment[3]);
   }
   return values;
 }
@@ -54,7 +64,8 @@ function scanStrings(text) {
  * text: top-level `account_id`, `[vars].SOURCE_NAMESPACE_ID`,
  * `[vars].RESTORE_DRILL_NAMESPACE_ID` and the first `[[r2_buckets]]`
  * `bucket_name`. A section-aware line scanner, not a TOML parser: only
- * double-quoted string assignments are read. Pure.
+ * single-line double-quoted or single-quoted (literal) string assignments are
+ * read. The three ids must be 32 lowercase hex chars, each with its own error. Pure.
  */
 export function parseBackupLocalConfig(text) {
   const values = scanStrings(typeof text === "string" ? text : "");
@@ -79,10 +90,32 @@ export function parseBackupLocalConfig(text) {
       "worker/wrangler.backup.local.toml 缺少 [[r2_buckets]] 的 bucket_name，請依 worker/DEPLOY.md「KV 每日備份與還原演練」第 3 節補上。",
     );
   return {
-    accountId: requireId(accountId),
-    sourceNamespaceId: requireId(sourceNamespaceId),
-    drillNamespaceId: requireId(drillNamespaceId),
+    ...requireDrillIds({ accountId, sourceNamespaceId, drillNamespaceId }),
     bucket,
+  };
+}
+
+// One error per field, so a name or template placeholder points at its own line.
+function requireDrillIds({ accountId, sourceNamespaceId, drillNamespaceId }) {
+  return {
+    accountId: requireHexId(
+      accountId,
+      new BackupError(
+        "worker/wrangler.backup.local.toml 的頂層 account_id 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。",
+      ),
+    ),
+    sourceNamespaceId: requireHexId(
+      sourceNamespaceId,
+      new BackupError(
+        "worker/wrangler.backup.local.toml 的 [vars] SOURCE_NAMESPACE_ID 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。",
+      ),
+    ),
+    drillNamespaceId: requireHexId(
+      drillNamespaceId,
+      new BackupError(
+        "worker/wrangler.backup.local.toml 的 [vars] RESTORE_DRILL_NAMESPACE_ID 必須是 32 位小寫十六進位 ID（不是名稱或範本佔位值）。",
+      ),
+    ),
   };
 }
 

@@ -6,6 +6,8 @@ import type {
   Manifest,
   Timing,
 } from "./types.mjs";
+/** Rejects unless the target namespace lists no keys at all. */
+export function requireEmpty(client: KvClient): Promise<void>;
 export function verifyRestored(
   client: KvClient,
   records: BackupRecord[],

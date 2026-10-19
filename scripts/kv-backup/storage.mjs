@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { rmSync } from "node:fs";
 import {
   chmod,
   mkdtemp,
@@ -7,7 +8,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -27,6 +28,7 @@ const wranglerEntry = resolve(
 const MiB = 1024 * 1024;
 // The pointer the backup Worker publishes; the only key outside the snapshot layout.
 const LATEST_KEY = "latest.json";
+const INTERRUPT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 function hasToken(token) {
   return typeof token === "string" && token.trim() !== "";
@@ -166,11 +168,48 @@ function createListOnlyKvClient(workspace, namespaceId) {
   return { listKeys, readKeys: refuse, writeRecords: refuse };
 }
 
+// Blocks up to ~2 s: a Windows child may still hold the cwd for a moment after
+// Ctrl+C, and the process is about to exit anyway. Gives up silently.
+function removeWorkspaceNow(directory) {
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    try {
+      rmSync(directory, { recursive: true, force: true });
+      return;
+    } catch {
+      if (attempt < 20) Atomics.wait(pause, 0, 0, 100);
+    }
+  }
+}
+
+// One-shot SIGINT/SIGTERM/SIGHUP handlers: remove `directory`, then exit 128 + n
+// (exit, not re-kill — Windows cannot raise most signals). `dispose()` unregisters.
+function installInterruptCleanup(directory) {
+  const handlers = INTERRUPT_SIGNALS.map((signal) => {
+    const handler = () => {
+      try {
+        removeWorkspaceNow(directory);
+      } finally {
+        process.exit(128 + constants.signals[signal]);
+      }
+    };
+    process.once(signal, handler);
+    return [signal, handler];
+  });
+  return () => {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+  };
+}
+
 /**
  * Runs `action` inside ONE private temporary Wrangler workspace (0700 dir,
  * 0600 `wrangler.json`, scrubbed env) shared by an R2 store factory and a
  * list-only KV client factory; the workspace is removed afterwards. `token`
  * is optional — without it Wrangler uses the local `wrangler login` identity.
+ * While the workspace exists, SIGINT / SIGTERM / SIGHUP remove it and exit the
+ * process with 128 + the signal number; those listeners are gone on return.
+ * That interrupt cleanup is best-effort (bounded retries for ~2 s); a SIGKILL
+ * or a crash still leaves the directory behind.
  */
 export async function withWrangler(
   { accountId, token },
@@ -179,6 +218,7 @@ export async function withWrangler(
 ) {
   requireId(accountId);
   const directory = await mkdtemp(join(tmpdir(), "moo-kv-backup-"));
+  const disposeInterruptCleanup = installInterruptCleanup(directory);
   try {
     await chmod(directory, 0o700);
     const config = join(directory, "wrangler.json");
@@ -202,6 +242,7 @@ export async function withWrangler(
       kv: (namespaceId) => createListOnlyKvClient(workspace, namespaceId),
     });
   } finally {
+    disposeInterruptCleanup();
     await rm(directory, { recursive: true, force: true });
   }
 }

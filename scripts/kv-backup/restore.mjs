@@ -9,7 +9,8 @@ import {
   validateArchive,
 } from "./format.mjs";
 
-async function requireEmpty(client) {
+/** Rejects unless the target namespace lists no keys at all. */
+export async function requireEmpty(client) {
   if ((await client.listKeys()).length)
     throw new BackupError("目標 namespace 不是空白，沒有開始還原。");
 }
