@@ -174,7 +174,9 @@ export const BORROW_COVER_URL_MAX_LENGTH = 2048;
  * residual (`docs/architecture.md` → 已接受的殘餘風險).
  */
 export const BOOK_TITLE_MAX_LENGTH = 200;
-export const BOOK_AUTHOR_MAX_LENGTH = 100;
+// Wider than BORROW_BOOK_AUTHOR_MAX_LENGTH on purpose: a 101-500 char author still syncs (its borrow
+// request is refused as before), because locking a user out of sync is the worse failure.
+export const BOOK_AUTHOR_MAX_LENGTH = 500;
 export const BOOK_CATEGORY_MAX_LENGTH = 100;
 /** The Extension never scrapes an ISBN; it only echoes the stored value (normally `""`). */
 export const BOOK_ISBN_MAX_LENGTH = 32;
