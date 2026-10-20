@@ -62,7 +62,7 @@ Check implementation quality, not just existence.
 
 - **6A Auth**: every non-public endpoint requires a valid Bearer token; reject the `if (userId) {check}` anti-pattern (use `if (!userId) return 401`); `isPublicRoute` list minimal.
 - **6B Authz**: IDOR — authenticated `callerUserId` is sole identity source; flag `body.userId` used for permission; membership verified before family data — listed AND pointed (`isActiveMember`), never the member list alone; owner-only checks need `callerUserId === record.ownerId` AND active membership (`.claude/rules/backend.md` → "Family-scoped authorization is BIDIRECTIONAL").
-- **6C Input**: validated at handler; KV key injection via user input; request body size limit cannot be bypassed.
+- **6C Input**: validated at handler; KV key injection via user input; request body size limit cannot be bypassed. Any server state kept across requests (a list, set or counter) is bounded by count × max bytes per entry — compute that product. A per-request body cap does not bound what accumulates over many requests, and a regex `{n,}` is not a length cap.
 - **6D Rate limiting**: on sensitive endpoints; non-spoofable IP source (`cf-connecting-ip` safe, sole `x-forwarded-for` not); counter atomicity (KV read-then-write race); tier separation (public stricter than authed, separate key prefixes).
 - **6E CORS**: not `*` in prod; allowlist reviewed; localhost dev-gated; anchored subdomain regex (`^...$`, test `readmoo.com.evil.com`); no ReDoS in origin regex; preview/staging origins explicit.
 - **6F Response**: no internal details in errors; security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, HSTS, `X-XSS-Protection: 0`); auth validated before returning data.
@@ -92,6 +92,7 @@ Checklist scanners miss logic bugs — but this is where MooFamily's real securi
 - **Public share token scope** (`public:{share_token}`): is a token scoped to a single shelf, does its TTL actually expire the KV entry, and can a revoked token still resolve?
 - **Race / non-atomic state**: join/leave, save, or public-token create that check-then-write non-atomically on KV — can concurrent calls double-add, resurrect a removed member, or lose a save?
 - **Membership-gate bypass**: can any family feature be reached without passing the family-membership gate the design requires?
+- **Book-list step stacking**: a change to when a book is shared, dropped or removed is checked against every other step of the sync pipeline (`docs/architecture.md` → 書單同步: id change, legacy id, prune, auto-share) and the load path. Does stacking it on an existing step share a book the user never opted into, or lose a not-shared setting? A book one step drops is invisible to every later id / title match.
 
 ## Output
 

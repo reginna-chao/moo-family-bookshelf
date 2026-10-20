@@ -96,7 +96,8 @@ Then a **Changes Overview** table (file → one-line summary).
 ## Guidelines
 
 - Be precise (exact file:line). Be constructive (every criticism carries a fix). Be honest (don't soften CRITICAL).
-- Do NOT run the full test suite — the orchestrator owns suite runs, and a duplicate concurrent run causes CPU-contention flakes. `pnpm typecheck` / `pnpm lint` and targeted single-file runs (`npx vitest run <path>`) are yours.
+- Do NOT run the full test suite — the orchestrator owns suite runs, and a duplicate concurrent run causes CPU-contention flakes. `pnpm typecheck` / `pnpm lint` and targeted single-file runs (`npx vitest run <path>`) are yours. A probe needing its own vitest config gets a standalone config that lists only the probe — never `mergeConfig` over the package config, whose `include` array merges into the whole suite.
+- Run it, don't only read it: for a boundary rule in a pure function or a handler, write a probe in the scratchpad (`tsx` calling the module; `createMockKV()` + `app.request` for the Worker) and report the observed output. Your sharpest past findings came from probes, not from reading.
 - Verify claims empirically, never from memory: execute concrete examples found in docs/comments (parse the URL, run the snippet) before endorsing or refuting them; when a change claims to mirror platform behavior, read the installed emulator's source under `node_modules` (e.g. miniflare); for async state-machine fixes (debounce, in-flight, queues), check the fix covers all four quadrants — success×failure crossed with queued×in-flight.
 - Prose the change writes into `.claude/rules/`, `docs/`, file headers or comments is a claim like code: enumerate EVERY instance a sentence describes (not the common ones) and check each against the code, grep that every anchor it points at (heading, section, symbol) still exists, and flag `file:line` pointers — they rot.
 - Don't nitpick formatting a linter handles (assume ESLint + Prettier).

@@ -38,7 +38,7 @@ These files are authoritative.
 3. **Check patterns**: read existing tests for conventions before writing.
 4. **Plan cases**: list cases with one-line descriptions.
 5. **Write tests** following `.claude/rules/test.md`.
-6. **Run** the scope's test command; fix failures in the TEST code. Run the full suite AT MOST ONCE — iterate with targeted `npx vitest run <path>` runs (note: `pnpm test -- <path>` does NOT filter), close with one full run. A failure under full-suite concurrency is re-checked by running that file alone (flake triage); repeated stress runs and N-times-green acceptance belong to the invoker after you return — a long in-agent verification loop trips the no-progress watchdog.
+6. **Run** the scope's test command; fix failures in the TEST code. Run the full suite AT MOST ONCE — iterate with targeted `npx vitest run <path>` runs (note: `pnpm test -- <path>` does NOT filter), close with one full run — skip it when the invoker says it runs the suites itself (parallel testers). A failure under full-suite concurrency is re-checked by running that file alone (flake triage); repeated stress runs and N-times-green acceptance belong to the invoker after you return — a long in-agent verification loop trips the no-progress watchdog.
 7. **Report.**
 
 ## Conventions (both scopes)
@@ -65,7 +65,8 @@ These files are authoritative.
 - **No repo-wide formatters.** Never run `pnpm format` / `prettier --write` without an explicit file list — format only files you touched.
 - **No new E2E scenarios.** You MAY fix existing E2E tests broken by production changes (updated imports, renamed exports, changed selectors), but do not author new E2E flows.
 - **Mutation checks never edit the shared production file in place** — follow `.claude/rules/test.md` → "Guard tests must prove they can fail". When a check would need a production edit, return the mutation steps and the expected-red test under Open Questions so the invoker runs it.
-- **Git — read-only** (`status` / `diff` / `log` / `show`); no `add`, `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`. `Test Files` in your return is the invoker's staging list — every test path you created, changed or deleted.
+- **Git — read-only** (`status` / `diff` / `log` / `show`); no `add` (`add -N` included), `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`. Check EOL the index-free way in `.claude/rules/global.md` → "Edit can rewrite EOLs". `Test Files` in your return is the invoker's staging list — every test path you created, changed or deleted.
+- **Detect a moving target.** Record `git diff --cached | git hash-object --stdin` when you start and again before you report; if they differ, production changed under you — say so at the top of your return and name the files.
 
 ## Return Summary
 
