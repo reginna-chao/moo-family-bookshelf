@@ -14,6 +14,11 @@ import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
  * Account A's cache left in the browser profile must never become account B's
  * shelf when B onboards; a cache with another owner, or in the legacy ownerless
  * bare-array format, is deleted without asking or writing to the server.
+ *
+ * #328: a failed upload (an `{ error }` answer or a thrown request) keeps the
+ * cache and never rejects, so the next attempt — onboarding's first book sync
+ * (`useAutoSetup.syncBooks`) — can retry it. The cache is removed only after a
+ * successful upload or when the server already holds a record.
  */
 
 const USER_ID = "user-abc";
@@ -31,13 +36,19 @@ const CACHED = [
   },
 ];
 
-function makeApi(getResponse: unknown | Error): ApiClient {
+function settle(response: unknown | Error) {
+  return response instanceof Error
+    ? vi.fn().mockRejectedValue(response)
+    : vi.fn().mockResolvedValue(response);
+}
+
+function makeApi(
+  getResponse: unknown | Error,
+  updateResponse: unknown | Error = { data: { ok: true } },
+): ApiClient {
   return {
-    getPersonalBooks:
-      getResponse instanceof Error
-        ? vi.fn().mockRejectedValue(getResponse)
-        : vi.fn().mockResolvedValue(getResponse),
-    updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    getPersonalBooks: settle(getResponse),
+    updatePersonalBooks: settle(updateResponse),
   } as unknown as ApiClient;
 }
 
@@ -119,6 +130,51 @@ describe("migratePersonalBooksCache", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     },
   );
+
+  // #328: see the header.
+  describe("a failed upload while the server has no record (#328)", () => {
+    const FAILED_UPLOADS = [
+      {
+        name: "answers with an error",
+        update: { error: { code: "INTERNAL_ERROR", message: "x" } },
+      },
+      { name: "throws", update: new Error("network down") },
+    ];
+
+    it.each(FAILED_UPLOADS)(
+      "keeps the cache and resolves when the upload $name",
+      async ({ update }) => {
+        const api = makeApi({ data: null }, update);
+
+        await expect(
+          migratePersonalBooksCache(USER_ID, api),
+        ).resolves.toBeUndefined();
+
+        expect(api.updatePersonalBooks).toHaveBeenCalledTimes(1);
+        expect(await cacheStillThere()).toBe(true);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(FAILED_UPLOADS)(
+      "uploads the kept cache on the next attempt, then removes it (upload $name first)",
+      async ({ update }) => {
+        await migratePersonalBooksCache(
+          USER_ID,
+          makeApi({ data: null }, update),
+        );
+        const retryApi = makeApi({ data: null });
+
+        await migratePersonalBooksCache(USER_ID, retryApi);
+
+        expect(retryApi.updatePersonalBooks).toHaveBeenCalledWith(
+          USER_ID,
+          expect.objectContaining({ userId: USER_ID, books: CACHED }),
+        );
+        expect(await cacheStillThere()).toBe(false);
+      },
+    );
+  });
 
   describe("a cache that is not the onboarding account's (#272)", () => {
     it("uploads the cache for the account that owns it (positive companion)", async () => {
