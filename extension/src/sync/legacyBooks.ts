@@ -1,5 +1,9 @@
 import { BookEntry, BoolFlag } from "../api/client";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
+import {
+  BOOK_TITLE_MAX_LENGTH,
+  exceedsBookFieldCap,
+} from "moo-family-bookshelf-shared/api/bookFieldLimits";
 
 // The real-book-id rule lives in `shared/` so the scraper, this cleanup and the Worker's PUT books
 // boundary cannot drift; re-exported so existing `../sync/legacyBooks` importers keep working.
@@ -40,6 +44,12 @@ function indexRealByTitle(
   return index;
 }
 
+/** False for an over-cap title (#326): its scraped real twins are sent as `OVER_CAP_TITLE_PLACEHOLDER`,
+ *  so a lone real book still storing that title (not scraped this sync) would be a false twin. */
+function legacyTitleCanResolve(key: string): boolean {
+  return !exceedsBookFieldCap(key, BOOK_TITLE_MAX_LENGTH);
+}
+
 /**
  * Remove each legacy (short-id, see `isLegacyBookEntry`) entry that resolves to
  * a real entry — exactly one real entry with the same trimmed, non-empty
@@ -56,6 +66,8 @@ function indexRealByTitle(
  *
  * A title in `ambiguousTitles` (a scraped book left out of `books`, #326)
  * counts as one more real entry carrying it, so its legacy entry is kept.
+ * A legacy entry whose trimmed title is over `BOOK_TITLE_MAX_LENGTH` never
+ * resolves and is always kept (#326, see `legacyTitleCanResolve`).
  *
  * Order is preserved, the input is not mutated, and the same array is
  * returned when nothing is removed.
@@ -66,10 +78,11 @@ export function dropResolvedLegacyBooks(
   ambiguousTitles?: ReadonlySet<string>,
 ): BookEntry[] {
   const realByTitle = indexRealByTitle(books, ambiguousTitles);
-  const resolveTarget = (entry: BookEntry): BookEntry | null =>
-    isLegacyBookEntry(entry)
-      ? (realByTitle.get(titleKey(entry)) ?? null)
-      : null;
+  const resolveTarget = (entry: BookEntry): BookEntry | null => {
+    if (!isLegacyBookEntry(entry)) return null;
+    const key = titleKey(entry);
+    return legacyTitleCanResolve(key) ? (realByTitle.get(key) ?? null) : null;
+  };
 
   const promoted = new Set<BookEntry>();
   let removedAny = false;

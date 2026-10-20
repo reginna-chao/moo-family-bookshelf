@@ -35,10 +35,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * or category sent as `""` (counted in `fieldCapBlankedCount`) — an ordinary
  * new book in every other respect, auto-shared by 新書預設開放 like any other.
  * A book the read holds is uploaded with the saved value in place of each
- * over-cap author or category, and its changed over-cap title replaced by
- * `OVER_CAP_TITLE_PLACEHOLDER` (never a cut, which could equal a legacy
- * entry's 200-unit title and take its share flag), keeping its share flag.
- * The counts are the landed attempt's.
+ * over-cap author or category, and its over-cap title, changed or not,
+ * replaced by `OVER_CAP_TITLE_PLACEHOLDER` (never a cut or a pre-cap stored
+ * title, either of which could equal a legacy entry's title and take its
+ * share flag), keeping its share flag. The counts are the landed attempt's.
  *
  * Same-title books: a blanked book keeps its title, so it takes part in every
  * same-title step (rename pairing, legacy resolution) exactly as if it fit.
@@ -52,7 +52,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * A left-out title still counts in the same-title steps (`skippedTitles`), but
  * since the Worker accepts no new over-cap title, only a title stored before
  * the caps existed can equal one: such a saved book is never pruned, and its
- * same-title legacy entry is not resolved this sync.
+ * same-title legacy entry is not resolved this sync. Since a saved book's
+ * pre-cap over-cap title is sent as the placeholder, that legacy entry never
+ * resolves onto its real twin afterwards either — the accepted cost (less
+ * sharing, never more), and why a left-out copy cannot move it at load.
+ * A saved book NOT scraped this sync still sends its stored, possibly pre-cap
+ * title, so `dropResolvedLegacyBooks` never resolves a legacy entry whose
+ * title is over the cap at all — at sync or at load.
  */
 
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
@@ -1724,11 +1730,11 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           legacyShared: BoolFlag.TRUE,
         },
         {
-          name: "resolves the pre-cap legacy entry onto its real twin without the left-out copy (contrast)",
+          name: "no longer resolves a pre-cap legacy entry onto its real twin even without a left-out copy (the accepted cost)",
           withSkipped: false,
-          ids: [KEPT_ID],
-          realShared: BoolFlag.TRUE,
-          legacyShared: undefined,
+          ids: [KEPT_ID, LEGACY_ID],
+          realShared: BoolFlag.FALSE,
+          legacyShared: BoolFlag.TRUE,
         },
       ])("$name", async ({ withSkipped, ids, realShared, legacyShared }) => {
         mockScrape([
@@ -1749,8 +1755,94 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         expect(body.map((b) => b.bookId)).toEqual(ids);
         expect(isSharedOf(body, KEPT_ID)).toBe(realShared);
         expect(isSharedOf(body, LEGACY_ID)).toBe(legacyShared);
+        expect(body.find((b) => b.bookId === KEPT_ID)?.title).toBe(
+          OVER_CAP_TITLE_PLACEHOLDER,
+        );
         expect(result.fieldCapSkippedCount).toBe(withSkipped ? 1 : 0);
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
       });
+
+      // Before the placeholder rule A kept T, and the Personal Shelf load resolved L onto A.
+      it("keeps a shared pre-cap legacy entry unresolved at load when one same-title twin is renamed and a new one left out", async () => {
+        const preCapTitle = "a".repeat(BOOK_TITLE_MAX_LENGTH + 1);
+        mockScrape([
+          scrapedBook(BOOK_A, preCapTitle),
+          scrapedBook(THIRD_ID, "短書名"),
+          scrapedBook(BOOK_B, preCapTitle),
+        ]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(BOOK_A, BoolFlag.FALSE, preCapTitle),
+            savedBook(THIRD_ID, BoolFlag.FALSE, preCapTitle),
+            savedBook(LEGACY_ID, BoolFlag.TRUE, preCapTitle),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts).toHaveLength(1);
+        const body = server.puts[0].body.books;
+        expect(rows(body)).toEqual([
+          [BOOK_A, OVER_CAP_TITLE_PLACEHOLDER, BoolFlag.FALSE],
+          [THIRD_ID, "短書名", BoolFlag.FALSE],
+          [LEGACY_ID, preCapTitle, BoolFlag.TRUE],
+        ]);
+        expect(result.fieldCapSkippedCount).toBe(1);
+        // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
+        // Second guard: even had A been sent titled T, an over-cap legacy title never resolves
+        // (`legacyTitleCanResolve`), so L keeps its flag and A stays unshared.
+        const withStoredTitle = body.map((b) =>
+          b.bookId === BOOK_A ? { ...b, title: preCapTitle } : b,
+        );
+        expect(dropResolvedLegacyBooks(withStoredTitle)).toBe(withStoredTitle);
+        expect(rows(withStoredTitle)).toEqual([
+          [BOOK_A, preCapTitle, BoolFlag.FALSE],
+          [THIRD_ID, "短書名", BoolFlag.FALSE],
+          [LEGACY_ID, preCapTitle, BoolFlag.TRUE],
+        ]);
+      });
+
+      // Before the over-cap legacy guard, L resolved onto R (its lone twin still storing T) at sync time.
+      it.each([
+        { reason: "archived while 同步封存書籍 is off", archived: true },
+        { reason: "Readmoo's library ids unknown", archived: false },
+      ])(
+        "never shares an unscraped saved book still storing a pre-cap title when its scraped twin is sent as the placeholder ($reason)",
+        async ({ archived }) => {
+          const preCapTitle = "a".repeat(BOOK_TITLE_MAX_LENGTH + 1);
+          mockScrape(
+            [scrapedBook(BOOK_A, preCapTitle)],
+            archived ? new Set([BOOK_A]) : null,
+          );
+          const unscraped = {
+            ...savedBook(BOOK_B, BoolFlag.FALSE, preCapTitle),
+            isArchived: archived ? BoolFlag.TRUE : BoolFlag.FALSE,
+          };
+          const server = createFakeServer(
+            storedRecord([
+              savedBook(LEGACY_ID, BoolFlag.TRUE, preCapTitle),
+              savedBook(BOOK_A, BoolFlag.FALSE, preCapTitle),
+              unscraped,
+            ]),
+          );
+
+          const result = await runSync(server.client);
+
+          expect(result.success).toBe(true);
+          expect(server.puts).toHaveLength(1);
+          const body = server.puts[0].body.books;
+          expect(rows(body)).toEqual([
+            [BOOK_A, OVER_CAP_TITLE_PLACEHOLDER, BoolFlag.FALSE],
+            [LEGACY_ID, preCapTitle, BoolFlag.TRUE],
+            [BOOK_B, preCapTitle, BoolFlag.FALSE],
+          ]);
+          expect(result.removedBookCount).toBe(0);
+          // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+          expect(dropResolvedLegacyBooks(body)).toBe(body);
+        },
+      );
     });
   });
 });

@@ -22,17 +22,18 @@ export interface FieldCapFit {
   /** Books new to the server uploaded with each over-cap author / category sent as `""`. Each book
    *  counts once. */
   blankedCount: number;
-  /** Saved books sent with an over-cap field fitted: a changed title replaced by the placeholder, an
-   *  unchanged one, an author or a category replaced by the stored value. Each book counts once. */
+  /** Saved books sent with an over-cap field fitted: a title replaced by the placeholder, an author
+   *  or a category replaced by the stored value. Each book counts once. */
   keptStoredCount: number;
 }
 
 /**
- * The title sent for a saved book renamed on Readmoo to an over-cap title. A
- * fixed value, not a cut: a cut can equal another book's stored title, and
- * same-title matching would then move that entry's share flag onto this book.
- * Only saved books ever carry the placeholder — a new over-cap book is left
- * out and legacy entries predate it — so same-title matching never pairs on it.
+ * The title sent for every saved book whose scraped title is over the cap,
+ * renamed or not. A fixed value, not a cut: a cut (or the stored title) can
+ * equal another book's title, and same-title matching would then move that
+ * entry's share flag onto this book. Only saved books ever carry the
+ * placeholder — a new over-cap book is left out and legacy entries predate
+ * it — so same-title matching never pairs on it.
  */
 export const OVER_CAP_TITLE_PLACEHOLDER = "（書名太長，無法顯示）";
 
@@ -41,15 +42,8 @@ function storedText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** An over-cap scraped title as sent: an unchanged pre-cap title goes back as stored (the Worker admits it);
- *  a changed one becomes `OVER_CAP_TITLE_PLACEHOLDER`. */
-function fitSavedTitle(book: ScrapedBook, stored: BookEntry): string {
-  if (titleKey(book) === titleKey(stored)) return storedText(stored.title);
-  return OVER_CAP_TITLE_PLACEHOLDER;
-}
-
-/** A saved book as sent: an over-cap title per `fitSavedTitle`; an over-cap author / category takes the stored
- *  value, sent as-is even when over the cap (the Worker admits it unchanged). Returns `book` when none is over. */
+/** A saved book as sent: an over-cap title becomes `OVER_CAP_TITLE_PLACEHOLDER`; an over-cap author / category
+ *  takes the stored value, sent as-is even when over the cap (the Worker admits it unchanged). */
 function fitSavedBook(book: ScrapedBook, stored: BookEntry): ScrapedBook {
   if (overCapBookField(book) === null) return book;
   const fitted = { ...book };
@@ -57,7 +51,7 @@ function fitSavedBook(book: ScrapedBook, stored: BookEntry): ScrapedBook {
     if (field === "isbn" || !exceedsBookFieldCap(book[field], max)) continue; // isbn: never scraped
     fitted[field] =
       field === "title"
-        ? fitSavedTitle(book, stored)
+        ? OVER_CAP_TITLE_PLACEHOLDER
         : storedText(stored[field]);
   }
   return fitted;
@@ -88,14 +82,16 @@ function withBlankedFields(book: ScrapedBook): ScrapedBook {
  * neither field takes part in matching. A book in `saved` is never left out
  * (a full PUT without it would record it as removed and lose its share flag):
  * an over-cap author or category takes the saved value instead. An over-cap
- * title is sent as saved when unchanged (`titleKey` equal; only a pre-cap
- * title can be, and the Worker admits it as stored), and otherwise replaced
- * by `OVER_CAP_TITLE_PLACEHOLDER`: a cut or the saved title could equal
- * another book's title and move its share flag; the placeholder never pairs.
+ * title, changed or not, is replaced by `OVER_CAP_TITLE_PLACEHOLDER`: a cut or
+ * the saved title could equal another book's title and move its share flag;
+ * the placeholder never pairs. A saved book NOT scraped this sync keeps its
+ * stored title, which may predate the caps and be over them; so a legacy entry
+ * with an over-cap title never resolves onto a real book, at sync or at load
+ * (`dropResolvedLegacyBooks` in `legacyBooks.ts`) — less sharing, never more.
  * Every other field still comes from the scrape; nothing is truncated.
- * A left-out book's title is still reported in `skippedTitles` for the
- * same-title steps: only a stored title saved before the caps existed can
- * equal it, so it is kept for that legacy data and changes nothing otherwise.
+ * A left-out book's title is reported in `skippedTitles` for the same-title
+ * steps: it keeps a saved book with that stored title from being pruned as
+ * removed, and keeps a same-title match ambiguous on that sync.
  * Order is preserved, neither input is mutated, and `scraped` itself is
  * returned (with an empty `skippedTitles`) when every book fits. Pure; the caller logs (`warnFieldCapFit`).
  */

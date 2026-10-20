@@ -9,6 +9,7 @@ import {
 import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
+import { BOOK_TITLE_MAX_LENGTH } from "moo-family-bookshelf-shared/api/bookFieldLimits";
 
 // Real Readmoo book ids are 15 digits; the legacy `.privacy` fallback path
 // uploaded 7–8 digit internal ids instead (#234).
@@ -461,6 +462,48 @@ describe("dropResolvedLegacyBooks — ambiguousTitles", () => {
 
     expect(dropResolvedLegacyBooks(books, undefined, new Set(["三體"]))).toBe(
       books,
+    );
+  });
+});
+
+// #326: a real twin's over-cap title is uploaded as a placeholder, so a lone real entry still
+// storing it may be a false twin; an over-cap legacy title never resolves.
+describe("dropResolvedLegacyBooks — over-cap legacy titles", () => {
+  const atCap = "書".repeat(BOOK_TITLE_MAX_LENGTH);
+  const overCap = "書".repeat(BOOK_TITLE_MAX_LENGTH + 1);
+  const legacyAndTwin = (legacyTitle: string, realTitle: string) => [
+    makeBook({ bookId: LEGACY_A, title: legacyTitle, isShared: BoolFlag.TRUE }),
+    makeBook({ bookId: REAL_A, title: realTitle, isShared: BoolFlag.FALSE }),
+  ];
+
+  it.each([
+    { name: "exactly at the cap", legacy: atCap, real: atCap },
+    {
+      name: "at the cap once surrounding whitespace is trimmed",
+      legacy: ` \t${atCap}\n`,
+      real: `${atCap} `,
+    },
+  ])(
+    "resolves a legacy entry whose title is $name onto its single real twin",
+    ({ legacy, real }) => {
+      const result = dropResolvedLegacyBooks(legacyAndTwin(legacy, real));
+
+      expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+        [REAL_A, BoolFlag.TRUE],
+      ]);
+    },
+  );
+
+  it("keeps a legacy entry whose title is one unit over the cap and leaves its real twin unshared", () => {
+    const books = legacyAndTwin(overCap, overCap);
+    const before = snapshot(books);
+
+    const result = dropResolvedLegacyBooks(books);
+
+    expect(result).toBe(books);
+    expect(result).toEqual(before);
+    expect(result.find((b) => b.bookId === REAL_A)?.isShared).toBe(
+      BoolFlag.FALSE,
     );
   });
 });
