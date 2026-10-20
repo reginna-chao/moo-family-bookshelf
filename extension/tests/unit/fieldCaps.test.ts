@@ -9,6 +9,8 @@ import {
   overCapBookField,
 } from "moo-family-bookshelf-shared/api/bookFieldLimits";
 import { fitScrapeToFieldCaps, warnFieldCapFit } from "@/sync/fieldCaps";
+import { dropResolvedLegacyBooks } from "@/sync/legacyBooks";
+import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 
@@ -29,6 +31,14 @@ import type { ScrapedBook } from "@/content/scraper";
  * - a saved book is never left out — a full PUT without it would record it as
  *   removed and lose its share flag — and each over-cap field takes the saved
  *   value instead, every other field still from the scrape;
+ * - a saved book whose scraped title changed to a left-out book's title is
+ *   sent with its stored title (counted once in `keptStoredCount`): otherwise
+ *   it would be the lone real twin a saved same-title legacy entry resolves
+ *   onto at Personal Shelf load, moving that entry's share flag onto it;
+ * - a saved book whose stored title IS a left-out book's title and whose
+ *   scraped title changed away from it keeps that stored title too: sent with
+ *   the new title, it would leave one other real twin on the server, which a
+ *   saved same-title legacy entry then resolves onto at Personal Shelf load;
  * - nothing is ever truncated: a cut title would break the same-title
  *   id-change matching that guards 新書預設開放, so a saved value that is
  *   itself over the cap is sent back as it is.
@@ -426,6 +436,167 @@ describe("fitScrapeToFieldCaps", () => {
     expect(savedBooks).toEqual(savedBefore);
     expect(fit.books).not.toBe(books);
     expect(fit.books[0]).not.toBe(books[0]);
+  });
+});
+
+// See the header → "a saved book whose scraped title changed to a left-out book's title".
+// The sync-level reload regression is in syncUpload.test.ts.
+describe("fitScrapeToFieldCaps — a saved book renamed to a left-out book's title", () => {
+  const SAME_TITLE = "同名書";
+  const STORED_TITLE = "原書名";
+  const storedA = () => saved(A, { title: STORED_TITLE });
+  const overCapNewB = () =>
+    scraped(B, { title: SAME_TITLE, author: longText(501) });
+
+  it.each([
+    { name: "the exact title", scrapedTitle: SAME_TITLE },
+    {
+      name: "the title with surrounding whitespace",
+      scrapedTitle: " 同名書\n",
+    },
+  ])(
+    "sends the stored title, every other field from the scrape, when renamed to $name",
+    ({ scrapedTitle }) => {
+      const renamedA = scraped(A, {
+        title: scrapedTitle,
+        author: "新作者",
+        coverUrl: "https://cdn.readmoo.com/cover/new.jpg",
+        category: "新分類",
+        isArchived: BoolFlag.TRUE,
+      });
+
+      const fit = fitScrapeToFieldCaps([renamedA, overCapNewB()], [storedA()]);
+
+      expect(fit.books).toEqual([
+        {
+          bookId: A,
+          title: STORED_TITLE,
+          author: "新作者",
+          coverUrl: "https://cdn.readmoo.com/cover/new.jpg",
+          readmooUrl: `https://readmoo.com/book/${A}`,
+          category: "新分類",
+          isArchived: BoolFlag.TRUE,
+        },
+      ]);
+      expect(fit.keptStoredCount).toBe(1);
+      expect(fit.skippedCount).toBe(1);
+      expect(fit.skippedTitles).toEqual(new Set([SAME_TITLE]));
+    },
+  );
+
+  it("counts a saved book once when it is also over a cap", () => {
+    const renamedA = scraped(A, { title: SAME_TITLE, author: longText(501) });
+
+    const fit = fitScrapeToFieldCaps([renamedA, overCapNewB()], [storedA()]);
+
+    expect(fit.books).toHaveLength(1);
+    expect(fit.books[0]).toMatchObject({
+      bookId: A,
+      title: STORED_TITLE,
+      author: "舊作者",
+    });
+    expect(fit.keptStoredCount).toBe(1);
+    expect(fit.skippedCount).toBe(1);
+  });
+
+  it("leaves the saved book's title alone when the stored title already is the left-out one", () => {
+    const renamedA = scraped(A, { title: SAME_TITLE });
+
+    const fit = fitScrapeToFieldCaps(
+      [renamedA, overCapNewB()],
+      [saved(A, { title: SAME_TITLE })],
+    );
+
+    expect(fit.books.map((b) => [b.bookId, b.title])).toEqual([
+      [A, SAME_TITLE],
+    ]);
+    expect(fit.keptStoredCount).toBe(0);
+    expect(fit.skippedCount).toBe(1);
+  });
+
+  it.each([
+    { name: "every book fits", others: [] as ScrapedBook[], savedOthers: [] },
+    {
+      name: "the only over-cap new book has another title",
+      others: [scraped(B, { title: "別的書", author: longText(501) })],
+      savedOthers: [],
+    },
+    {
+      name: "the over-cap same-title book is a saved one",
+      others: [scraped(C, { title: SAME_TITLE, author: longText(501) })],
+      savedOthers: [saved(C, { title: SAME_TITLE })],
+    },
+  ])(
+    "sends the scraped title of a renamed saved book when $name",
+    ({ others, savedOthers }) => {
+      const fit = fitScrapeToFieldCaps(
+        [scraped(A, { title: SAME_TITLE }), ...others],
+        [storedA(), ...savedOthers],
+      );
+
+      expect(fit.books.find((b) => b.bookId === A)?.title).toBe(SAME_TITLE);
+      expect(fit.skippedTitles.has(SAME_TITLE)).toBe(false);
+    },
+  );
+});
+
+// See the header → "scraped title changed away from it".
+describe("fitScrapeToFieldCaps — a saved book renamed away from a left-out book's title", () => {
+  const SAME_TITLE = "同名書";
+  const NEW_TITLE = "新書名";
+  const LEGACY_ID = "14563038";
+  const savedList = () => [
+    saved(LEGACY_ID, { title: SAME_TITLE, isShared: BoolFlag.TRUE }),
+    saved(A, { title: SAME_TITLE, isShared: BoolFlag.FALSE }),
+    saved(C, { title: SAME_TITLE, isShared: BoolFlag.FALSE }),
+  ];
+  const renamedA = () =>
+    scraped(A, { title: NEW_TITLE, author: "新作者", category: "新分類" });
+  const scrapedC = () => scraped(C, { title: SAME_TITLE });
+  const overCapNewB = () =>
+    scraped(B, { title: SAME_TITLE, author: longText(501) });
+
+  it("sends the stored title, every other field from the scrape, while a same-title new book is left out", () => {
+    const c = scrapedC();
+
+    const fit = fitScrapeToFieldCaps(
+      [renamedA(), c, overCapNewB()],
+      savedList(),
+    );
+
+    expect(fit.books).toEqual([{ ...renamedA(), title: SAME_TITLE }, c]);
+    expect(fit.books[1]).toBe(c);
+    expect(fit.keptStoredCount).toBe(1);
+    expect(fit.skippedCount).toBe(1);
+    expect(fit.skippedTitles).toEqual(new Set([SAME_TITLE]));
+  });
+
+  it("sends the scraped title when no same-title book is left out (contrast)", () => {
+    const fit = fitScrapeToFieldCaps([renamedA(), scrapedC()], savedList());
+
+    expect(fit.books.map((b) => [b.bookId, b.title])).toEqual([
+      [A, NEW_TITLE],
+      [C, SAME_TITLE],
+    ]);
+    expect(fit.keptStoredCount).toBe(0);
+  });
+
+  it("keeps the shared legacy entry unresolved at the Personal Shelf load", () => {
+    const books = savedList();
+    const fit = fitScrapeToFieldCaps(
+      [renamedA(), scrapedC(), overCapNewB()],
+      books,
+    );
+
+    const uploaded = mergeBooks(fit.books, books, undefined, fit.skippedTitles);
+    // The Personal Shelf load (usePersonalBooks.ts) never sees skippedTitles.
+    const reloaded = dropResolvedLegacyBooks(uploaded);
+
+    expect(reloaded.map((b) => [b.bookId, b.title, b.isShared])).toEqual([
+      [A, SAME_TITLE, BoolFlag.FALSE],
+      [C, SAME_TITLE, BoolFlag.FALSE],
+      [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+    ]);
   });
 });
 

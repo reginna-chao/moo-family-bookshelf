@@ -44,6 +44,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * one uploaded alone, the Personal Shelf load (`dropResolvedLegacyBooks` on the
  * saved list, which never sees the left-out title) would resolve a saved
  * legacy entry onto it and move its share flag to a book never chosen.
+ *
+ * A saved book renamed on Readmoo to a left-out book's title is uploaded with
+ * its STORED title for the same reason: sent with the new title, it would be
+ * the lone real twin of a shared same-title legacy entry on the server, and
+ * the next Personal Shelf load would show it shared (and PATCH it shared on
+ * the next Save). Its contrast — no left-out book, the rename uploads and the
+ * legacy share moves onto it — is the pre-existing #234 resolution.
+ *
+ * A saved book renamed on Readmoo AWAY from a left-out book's title keeps its
+ * stored title too: sent with the new title, it would leave a single other
+ * real twin of the shared legacy entry on the server, and the Personal Shelf
+ * load would resolve the legacy entry onto that twin and show it shared.
  */
 
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
@@ -1272,6 +1284,8 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
       const OVER_CAP_AUTHOR = "長".repeat(BOOK_AUTHOR_MAX_LENGTH + 1);
       const THIRD_ID = "210000000000004";
       const LEGACY_ID = "14563038";
+      const SAME_TITLE = "同名書";
+      const STORED_TITLE = "原書名";
 
       function overCapAuthor(bookId: string, title: string): ScrapedBook {
         return { ...scrapedBook(bookId, title), author: OVER_CAP_AUTHOR };
@@ -1458,6 +1472,88 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           expect(reloaded).toBe(body);
         },
       );
+
+      // See the header → "A saved book renamed on Readmoo to a left-out book's title".
+      it.each([
+        {
+          name: "uploads a saved book renamed to a left-out book's title with its stored title, so the reload promotes nothing",
+          withSkipped: true,
+          uploaded: [
+            [BOOK_A, STORED_TITLE, BoolFlag.FALSE],
+            [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+          ],
+          reloaded: [
+            [BOOK_A, STORED_TITLE, BoolFlag.FALSE],
+            [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+          ],
+          skipped: 1,
+        },
+        {
+          name: "without the left-out book the rename uploads and the legacy share moves onto it (contrast, pre-existing #234 behaviour)",
+          withSkipped: false,
+          uploaded: [[BOOK_A, SAME_TITLE, BoolFlag.TRUE]],
+          reloaded: [[BOOK_A, SAME_TITLE, BoolFlag.TRUE]],
+          skipped: 0,
+        },
+      ])("$name", async ({ withSkipped, uploaded, reloaded, skipped }) => {
+        mockScrape([
+          scrapedBook(BOOK_A, SAME_TITLE),
+          ...(withSkipped ? [overCapAuthor(BOOK_B, SAME_TITLE)] : []),
+        ]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(LEGACY_ID, BoolFlag.TRUE, SAME_TITLE),
+            savedBook(BOOK_A, BoolFlag.FALSE, STORED_TITLE),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts).toHaveLength(1);
+        const body = server.puts[0].body.books;
+        const rows = (books: BookEntry[]) =>
+          books.map((b) => [b.bookId, b.title, b.isShared]);
+        expect(rows(body)).toEqual(uploaded);
+        expect(body.map((b) => b.bookId)).not.toContain(BOOK_B);
+        expect(result.fieldCapSkippedCount).toBe(skipped);
+        // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+        expect(rows(dropResolvedLegacyBooks(body))).toEqual(reloaded);
+      });
+
+      // See the header → "renamed on Readmoo AWAY from a left-out book's title".
+      it("uploads a saved book renamed away from a left-out book's title with its stored title, so the reload promotes nothing", async () => {
+        mockScrape([
+          scrapedBook(BOOK_A, "新書名"),
+          scrapedBook(THIRD_ID, SAME_TITLE),
+          overCapAuthor(BOOK_B, SAME_TITLE),
+        ]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(LEGACY_ID, BoolFlag.TRUE, SAME_TITLE),
+            savedBook(BOOK_A, BoolFlag.FALSE, SAME_TITLE),
+            savedBook(THIRD_ID, BoolFlag.FALSE, SAME_TITLE),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts).toHaveLength(1);
+        const body = server.puts[0].body.books;
+        const rows = (books: BookEntry[]) =>
+          books.map((b) => [b.bookId, b.title, b.isShared]);
+        const expected = [
+          [BOOK_A, SAME_TITLE, BoolFlag.FALSE],
+          [THIRD_ID, SAME_TITLE, BoolFlag.FALSE],
+          [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+        ];
+        expect(rows(body)).toEqual(expected);
+        expect(body.map((b) => b.bookId)).not.toContain(BOOK_B);
+        expect(result.fieldCapSkippedCount).toBe(1);
+        // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+        expect(rows(dropResolvedLegacyBooks(body))).toEqual(expected);
+      });
     });
   });
 });

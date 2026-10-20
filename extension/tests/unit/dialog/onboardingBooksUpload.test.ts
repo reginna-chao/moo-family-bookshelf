@@ -333,6 +333,34 @@ describe("uploadOnboardingBooks", () => {
     );
   });
 
+  // A renamed saved book sent as the legacy entry's lone twin would take its share on the Personal Shelf load.
+  it("sends a saved book renamed to a left-out book's title with its stored title, keeping the shared legacy entry", async () => {
+    const legacy = { ...saved(LEGACY, BoolFlag.TRUE), title: "同名書" };
+    const storedA = { ...saved(A, BoolFlag.FALSE), title: "原書名" };
+    const { api, updatePersonalBooks } = client(
+      [record([storedA, legacy], L0)],
+      [{ data: { ok: true } }],
+    );
+    const renamedA = { ...scraped(A), title: "同名書", author: "新作者" };
+    const overCapB = {
+      ...scraped(B),
+      title: "同名書",
+      author: "長".repeat(501),
+    };
+
+    await expect(upload(api, [renamedA, overCapB])).resolves.toBeNull();
+
+    const books = updatePersonalBooks.mock.calls[0][1].books;
+    expect(
+      books.map((b: BookEntry) => [b.bookId, b.title, b.isShared]),
+    ).toEqual([
+      [A, "原書名", BoolFlag.FALSE],
+      [LEGACY, "同名書", BoolFlag.TRUE],
+    ]);
+    // The scraped author proves the scrape was merged, not just the saved entry echoed back.
+    expect(books[0].author).toBe("新作者");
+  });
+
   it("throws the circuit-breaker pause when the re-read no longer matches the scrape", async () => {
     const many = Array.from({ length: 60 }, (_, i) =>
       saved(`2100000${String(100 + i).padStart(8, "0")}`, BoolFlag.FALSE),

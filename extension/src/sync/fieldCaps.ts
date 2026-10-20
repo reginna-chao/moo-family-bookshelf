@@ -19,7 +19,8 @@ export interface FieldCapFit {
   /** Non-empty `titleKey`s of the over-cap left-out books: each still counts as present for same-title
    *  matching, so it keeps such matches ambiguous and the saved book it may replace unpruned. */
   skippedTitles: ReadonlySet<string>;
-  /** Saved books kept with their stored value in place of each over-cap scraped field. */
+  /** Saved books sent with a stored value: in place of each over-cap scraped field, or of a scraped
+   *  title that changed to or away from one in `skippedTitles`. Each book counts once. */
   keptStoredCount: number;
 }
 
@@ -41,34 +42,38 @@ function withStoredFields(book: ScrapedBook, stored: BookEntry): ScrapedBook {
   return fitted;
 }
 
-interface CapClassification {
-  /** Books that fit, saved books with their stored values in place, in scrape order. */
-  fitting: ScrapedBook[];
-  /** Books new to the server with an over-cap field. */
-  overCap: ScrapedBook[];
-  keptStoredCount: number;
+/** A saved book as sent: over-cap fields take the stored values; a scraped title changed to or away from
+ *  a held one (`skippedTitles`) takes the stored title. Returns `book` itself when nothing was replaced. */
+function fitSavedBook(
+  book: ScrapedBook,
+  stored: BookEntry,
+  skippedTitles: ReadonlySet<string>,
+): ScrapedBook {
+  const fitted =
+    overCapBookField(book) === null ? book : withStoredFields(book, stored);
+  const key = titleKey(fitted);
+  const storedKey = titleKey(stored);
+  if (
+    key === storedKey ||
+    (!skippedTitles.has(key) && !skippedTitles.has(storedKey))
+  ) {
+    return fitted;
+  }
+  return { ...fitted, title: storedText(stored.title) };
 }
 
-/** Split a scrape by the caps: over-cap new books out, over-cap saved books given their stored values. */
-function classifyByFieldCaps(
+/** Non-empty `titleKey`s of the books new to the server that have an over-cap field. */
+function overCapNewTitles(
   scraped: ScrapedBook[],
   savedById: ReadonlyMap<string, BookEntry>,
-): CapClassification {
-  const fitting: ScrapedBook[] = [];
-  const overCap: ScrapedBook[] = [];
-  let keptStoredCount = 0;
+): Set<string> {
+  const titles = new Set<string>();
   for (const book of scraped) {
-    const stored = savedById.get(book.bookId);
-    if (overCapBookField(book) === null) {
-      fitting.push(book);
-    } else if (stored) {
-      fitting.push(withStoredFields(book, stored));
-      keptStoredCount += 1;
-    } else {
-      overCap.push(book);
-    }
+    if (savedById.has(book.bookId) || overCapBookField(book) === null) continue;
+    const key = titleKey(book);
+    if (key !== "") titles.add(key);
   }
-  return { fitting, overCap, keptStoredCount };
+  return titles;
 }
 
 /**
@@ -80,7 +85,10 @@ function classifyByFieldCaps(
  * (`usePersonalBooks.ts`), moving its share flag to a book never chosen. A
  * book in `saved` is never left out (a full PUT without it would record it as
  * removed and lose its share flag); each over-cap field takes the saved value
- * instead, every other field still comes from the scrape. Nothing is ever
+ * instead, every other field still comes from the scrape. For the same reason
+ * as the held twins, a saved book whose scraped title changed to or away from
+ * a held one keeps its stored title, so no saved book gains or loses that
+ * title on the server while a same-title book is held. Nothing is ever
  * truncated. A left-out over-cap book's title is reported in `skippedTitles`
  * for the same-title steps (`mergeBooks`, `resolveForUpload`). Order is
  * preserved, neither input is mutated, and `scraped` itself is returned (with
@@ -100,19 +108,26 @@ export function fitScrapeToFieldCaps(
     };
   }
   const savedById = new Map(saved.map((entry) => [entry.bookId, entry]));
-  const { fitting, overCap, keptStoredCount } = classifyByFieldCaps(
-    scraped,
-    savedById,
-  );
-  const skippedTitles = new Set(
-    overCap.map(titleKey).filter((key) => key !== ""),
-  );
-  const books = fitting.filter(
-    (book) => savedById.has(book.bookId) || !skippedTitles.has(titleKey(book)),
-  );
+  const skippedTitles = overCapNewTitles(scraped, savedById);
+  const books: ScrapedBook[] = [];
+  let keptStoredCount = 0;
+  for (const book of scraped) {
+    const stored = savedById.get(book.bookId);
+    if (stored) {
+      const fitted = fitSavedBook(book, stored, skippedTitles);
+      if (fitted !== book) keptStoredCount += 1;
+      books.push(fitted);
+    } else if (
+      overCapBookField(book) === null &&
+      !skippedTitles.has(titleKey(book))
+    ) {
+      books.push(book);
+    }
+  }
+  // Saved books are never left out, so every missing book is a new one held back.
   return {
     books,
-    skippedCount: overCap.length + (fitting.length - books.length),
+    skippedCount: scraped.length - books.length,
     skippedTitles,
     keptStoredCount,
   };
