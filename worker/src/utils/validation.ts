@@ -3,6 +3,10 @@ import {
   isAllowedCoverUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
 import {
+  BOOK_AUTHOR_MAX_LENGTH,
+  BOOK_TITLE_MAX_LENGTH,
+} from "moo-family-bookshelf-shared/api/bookFieldLimits";
+import {
   BoolFlag,
   MAX_FAMILY_PREF_BOOK_ID_LENGTH,
   type VerifyMethod,
@@ -153,10 +157,16 @@ export function sanitizeExpectedLastUpdated(value: unknown): string | null {
  * They are abuse ceilings, not display bounds: the client sends values it
  * scraped from a Readmoo book page, and nothing in the UI truncates at these
  * numbers.
+ *
+ * Title and author are DEFINED as the `PUT /api/user/:id/books` caps on
+ * purpose (#331): both clients forward the family-bookshelf `title` / `author`
+ * verbatim, so a book the family bookshelf serves must never be one the borrow
+ * route rejects as too long — a narrower borrow cap made such books
+ * unborrowable.
  */
 export const BORROW_BOOK_ID_MAX_LENGTH = 200;
-export const BORROW_BOOK_TITLE_MAX_LENGTH = 200;
-export const BORROW_BOOK_AUTHOR_MAX_LENGTH = 100;
+export const BORROW_BOOK_TITLE_MAX_LENGTH = BOOK_TITLE_MAX_LENGTH;
+export const BORROW_BOOK_AUTHOR_MAX_LENGTH = BOOK_AUTHOR_MAX_LENGTH;
 /**
  * Applies to a NON-EMPTY `bookCoverUrl` only — `""` means "no cover" and stays
  * accepted. 2048 is the conventional practical URL ceiling, comfortably above

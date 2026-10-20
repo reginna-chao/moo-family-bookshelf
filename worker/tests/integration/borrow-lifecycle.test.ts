@@ -25,6 +25,14 @@ import { USER1, USER2 } from "../helpers/ids";
  * over-cap author to ""), and both clients forward it verbatim. `bookAuthor`
  * stays REQUIRED — absent / null is still MISSING_FIELDS — but "" is accepted
  * and must reach the list endpoint as "", never undefined / null.
+ *
+ * Long author (#331): the borrow author cap used to be 100 while PUT
+ * /api/user/:id/books accepts up to `BOOK_AUTHOR_MAX_LENGTH` (500), so a book
+ * with a 101–500 character author synced and showed on the family bookshelf,
+ * yet every borrow request for it got 400 INVALID_FIELDS. That case walks the
+ * client's real path: PUT the book, read it back from the bookshelf, and
+ * borrow with the served `title` / `author` / `coverUrl` verbatim. Its bookId
+ * is real-shaped (15 digits) because PUT /books drops new short ids.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -485,5 +493,85 @@ describe("Borrow Lifecycle Integration", () => {
       expect(listJson.data[0].requestId).toBe(requestId);
       expect(listJson.data[0].bookAuthor).toBe("");
     }
+  });
+
+  it("should borrow a family-bookshelf book whose author is longer than 100 characters", async () => {
+    // Over the old borrow cap (100), under the PUT books cap. See the header → "Long author".
+    const longAuthor = "a".repeat(101);
+    const bookId = "210439468000131";
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
+
+    const putRes = await request(
+      "PUT",
+      `/api/user/${USER1}/books`,
+      {
+        schemaVersion: 1,
+        userId: USER1,
+        displayName: "Alice",
+        books: [
+          {
+            bookId,
+            title: "Long Author Book",
+            author: longAuthor,
+            isbn: "",
+            coverUrl: "",
+            readmooUrl: "",
+            category: "",
+            isShared: 1,
+          },
+        ],
+      },
+      token1,
+    );
+    expect(putRes.status).toBe(200);
+
+    const shelfRes = await request(
+      "GET",
+      `/api/family/${familyId}/bookshelf`,
+      undefined,
+      token2,
+    );
+    expect(shelfRes.status).toBe(200);
+    const shelfJson = (await shelfRes.json()) as Json;
+    const owner = shelfJson.data.members.find((m: Json) => m.userId === USER1);
+    const book = owner.books.find((b: Json) => b.bookId === bookId);
+    expect(book.author).toBe(longAuthor);
+
+    const createRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      {
+        bookId: book.bookId,
+        bookTitle: book.title,
+        bookAuthor: book.author,
+        bookCoverUrl: book.coverUrl,
+        ownerId: USER1,
+      },
+      token2,
+    );
+    expect(createRes.status).toBe(201);
+    const createJson = (await createRes.json()) as Json;
+    expect(createJson.data.bookAuthor).toBe(longAuthor);
+
+    // The owner's list carries the full author too, so it was stored untruncated.
+    const listRes = await request(
+      "GET",
+      `/api/family/${familyId}/borrow`,
+      undefined,
+      token1,
+    );
+    expect(listRes.status).toBe(200);
+    const listJson = (await listRes.json()) as Json;
+    expect(listJson.data).toHaveLength(1);
+    expect(listJson.data[0].requestId).toBe(createJson.data.requestId);
+    expect(listJson.data[0].bookAuthor).toBe(longAuthor);
   });
 });

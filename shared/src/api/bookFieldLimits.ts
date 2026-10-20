@@ -1,8 +1,8 @@
 // Caps on each `PUT /api/user/:id/books` entry's text fields (`.length`, UTF-16 units): abuse ceilings, not
 // display bounds — one field must not carry megabytes every family member and public-shelf visitor downloads.
 export const BOOK_TITLE_MAX_LENGTH = 200;
-// Wider than the Worker's borrow author cap on purpose: a 101-500 char author still syncs (its borrow
-// request is refused as before), because locking a user out of sync is the worse failure.
+// The Worker's borrow route uses these same title / author caps (#331), so a book the family bookshelf
+// serves is never refused as too long when borrowed — except a pre-cap value grandfathered by PUT books (#326).
 export const BOOK_AUTHOR_MAX_LENGTH = 500;
 export const BOOK_CATEGORY_MAX_LENGTH = 100;
 /** The Extension never scrapes an ISBN; it only echoes the stored value (normally `""`). */

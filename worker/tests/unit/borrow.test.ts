@@ -13,6 +13,8 @@ import {
   BORROW_BOOK_TITLE_MAX_LENGTH,
   BORROW_BOOK_AUTHOR_MAX_LENGTH,
   BORROW_COVER_URL_MAX_LENGTH,
+  BOOK_TITLE_MAX_LENGTH,
+  BOOK_AUTHOR_MAX_LENGTH,
 } from "../../src/utils/validation";
 import { NOBODY, USER1, USER2, USER3 } from "../helpers/ids";
 import {
@@ -1113,6 +1115,27 @@ describe("POST /api/family/:id/borrow field length caps", () => {
     expect(perUserCharges(calls)).toHaveLength(0);
     expect(await perUserCounterKeys()).toHaveLength(0);
   });
+});
+
+describe("borrow title / author caps vs PUT books caps", () => {
+  // A borrow cap narrower than the PUT books cap makes family-bookshelf books unborrowable (#331).
+  it.each([
+    {
+      field: "bookTitle",
+      borrowMax: BORROW_BOOK_TITLE_MAX_LENGTH,
+      booksMax: BOOK_TITLE_MAX_LENGTH,
+    },
+    {
+      field: "bookAuthor",
+      borrowMax: BORROW_BOOK_AUTHOR_MAX_LENGTH,
+      booksMax: BOOK_AUTHOR_MAX_LENGTH,
+    },
+  ])(
+    "should cap $field at exactly the PUT books cap",
+    ({ borrowMax, booksMax }) => {
+      expect(borrowMax).toBe(booksMax);
+    },
+  );
 });
 
 // --- GET /api/family/:id/borrow — list borrow requests ---
