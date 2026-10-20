@@ -609,13 +609,6 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
     getPublicShelves(c.env.KV, userId),
   ]);
 
-  // Text-field caps need the stored record (unchanged stored values are grandfathered, #326);
-  // checked before the 409 so a bad body still answers 400 first.
-  const overLong = overLongBookFieldMessage(parsedBooks.books, existing?.books);
-  if (overLong !== null) {
-    return jsonError(c, 400, "INVALID_PAYLOAD", overLong);
-  }
-
   // Lost-update guard for read-merge-put clients (#249); narrows the window to
   // this handler's own read→put gap — see backend.md → API Design.
   if (
@@ -628,6 +621,13 @@ userRoutes.openapi(putUserBooksRoute, async (c) => {
       "BOOKS_CONFLICT",
       "Books record changed since it was read",
     );
+  }
+
+  // Text-field caps need the stored record (unchanged stored values are grandfathered, #326); run
+  // after the 409 so a stale read of a since-replaced over-cap value re-reads, not a misleading 400.
+  const overLong = overLongBookFieldMessage(parsedBooks.books, existing?.books);
+  if (overLong !== null) {
+    return jsonError(c, 400, "INVALID_PAYLOAD", overLong);
   }
 
   const publicShelves = resolvePublicShelves(publicShelvesPointer, existing);

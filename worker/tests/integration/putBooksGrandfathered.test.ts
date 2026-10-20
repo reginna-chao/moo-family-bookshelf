@@ -44,11 +44,14 @@ type Json = any;
  * title would break the Extension's same-title rename matching that guards
  * 新書預設開放.
  *
- * Precedence: the cap check now needs the stored record, so it runs after the
- * handler's KV reads, but still BEFORE the `expectedLastUpdated` 409 — a bad
- * body answers 400 even when its precondition is stale too. The positive
- * companion (grandfathered body + stale precondition ⇒ 409) proves the
- * precondition was live in that request.
+ * Precedence: the cap check needs the stored record, so it runs after the
+ * handler's KV reads, and AFTER the `expectedLastUpdated` 409 — a stale
+ * precondition answers 409 even when the body is also over the cap. Reason:
+ * a client that read a stored over-cap value while another device replaced it
+ * with a shorter one would otherwise get a misleading 400 instead of a
+ * re-read; the race case below pins exactly that. The companions
+ * (grandfathered body + stale ⇒ 409, + matching ⇒ 200) show the precondition
+ * alone decides the 409.
  *
  * Requests run with `DEV_MODE`, so the per-user rate-limit counter is skipped
  * and a rejected request performs no KV `put` at all (see `watchKvOps`). Reads
@@ -112,13 +115,16 @@ function putBooks(
 }
 
 /** Seed the stored `user:{id}` record; returns its raw stored string. */
-async function seedStoredRecord(books: BookEntry[]): Promise<string> {
+async function seedStoredRecord(
+  books: BookEntry[],
+  lastUpdated: string = STORED_LAST_UPDATED,
+): Promise<string> {
   const record: UserBooksRecord = {
     schemaVersion: 1,
     userId: USER1,
     displayName: "Test User",
     books,
-    lastUpdated: STORED_LAST_UPDATED,
+    lastUpdated,
   };
   await kv.put(kvKeys.user(USER1), JSON.stringify(record));
   return (await kv.get(kvKeys.user(USER1))) as string;
@@ -297,7 +303,7 @@ describe("PUT /api/user/:id/books — grandfathered over-cap values", () => {
 
 // See the header → "Precedence".
 describe("PUT /api/user/:id/books — cap check vs expectedLastUpdated", () => {
-  it("answers 400, not 409, for a new over-cap value sent with a stale expectedLastUpdated", async () => {
+  it("answers 409 before the cap check for a new over-cap value sent with a stale expectedLastUpdated", async () => {
     const previousRaw = await seedStoredRecord([book(BOOK_A)]);
     const ops = watchKvOps(kv);
 
@@ -306,7 +312,34 @@ describe("PUT /api/user/:id/books — cap check vs expectedLastUpdated", () => {
       { expectedLastUpdated: "1999-12-31T00:00:00.000Z" },
     );
 
-    await expectRejected(res, "title", BOOK_TITLE_MAX_LENGTH, previousRaw, ops);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as Json).error.code).toBe("BOOKS_CONFLICT");
+    expect(await kv.get(kvKeys.user(USER1))).toBe(previousRaw);
+    expect(ops.putKeys()).toEqual([]);
+  });
+
+  it("answers 409, not 400, when another device replaced the stored over-cap title the client read", async () => {
+    const readAt = "2020-01-01T00:00:00.000Z";
+    const replacedAt = "2020-02-01T00:00:00.000Z";
+    await seedStoredRecord([book(BOOK_A, { title: LEGACY_TITLE })], readAt);
+    // The other device's sync lands between this client's GET and its PUT.
+    const replacedRaw = await seedStoredRecord(
+      [book(BOOK_A, { title: "Short title" })],
+      replacedAt,
+    );
+    const ops = watchKvOps(kv);
+
+    const res = await putBooks([book(BOOK_A, { title: LEGACY_TITLE })], {
+      expectedLastUpdated: readAt,
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as Json).error.code).toBe("BOOKS_CONFLICT");
+    expect(ops.putKeys()).toEqual([]);
+    expect(await kv.get(kvKeys.user(USER1))).toBe(replacedRaw);
+    const stored = await storedRecord();
+    expect(stored?.books[0]?.title).toBe("Short title");
+    expect(stored?.lastUpdated).toBe(replacedAt);
   });
 
   it("answers 409 for a grandfathered body sent with a stale expectedLastUpdated", async () => {
