@@ -117,12 +117,12 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Raw parsed-JSON shape: `bookCoverUrl` is optional AND unconstrained, so it
-  // is typed `unknown` and narrowed by `normalizeBookCoverUrl` below.
+  // Raw parsed-JSON shape: `bookAuthor` / `bookCoverUrl` accept "" and are told apart from a
+  // wrong-type value by the guards below, so they are typed `unknown` here.
   let body: {
     bookId?: string;
     bookTitle?: string;
-    bookAuthor?: string;
+    bookAuthor?: unknown;
     bookCoverUrl?: unknown;
     ownerId?: string;
   } | null;
@@ -132,7 +132,15 @@ borrowRoutes.openapi(createBorrowRoute, async (c) => {
     return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
   }
 
-  if (!body?.bookId || !body.bookTitle || !body.bookAuthor || !body.ownerId) {
+  // `bookAuthor` must be present but may be "" (no author on Readmoo); a non-string falls to INVALID_FIELDS.
+  // Rationale: .claude/rules/backend.md → API Design (`bookAuthor` bullet).
+  if (
+    !body?.bookId ||
+    !body.bookTitle ||
+    body.bookAuthor === undefined ||
+    body.bookAuthor === null ||
+    !body.ownerId
+  ) {
     return jsonError(
       c,
       400,
