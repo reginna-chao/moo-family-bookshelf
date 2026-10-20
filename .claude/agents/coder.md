@@ -54,6 +54,7 @@ Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git m
 - **Verify claims before writing them.** Quantitative security/cost figures, exclusivity words ("only", "always", "never"), and cross-file facts (caller lists, "no other site does X") go into comments, docs, or code only after you grep/read-verify them in THIS session. What you cannot verify, you do not write.
 - **Anchors must resolve.** A pointer you write into a comment, doc or rule (a heading, section name, symbol) is grep-checked to exist when you write it. Name symbols, never `file:line` — line numbers rot.
 - **Enumerate same-shaped call sites, don't sample.** When threading a field or behavior through N similar call sites, grep-enumerate ALL of them — `extension/` AND `pwa/` mirrors — into a checklist and mark each one handled in your change summary. Never assume a provided list is complete.
+- **"Impossible" needs its proof.** An edge case you call impossible carries the condition that excludes it (the symbol and the check); without one, list it under Open Questions as an open risk.
 
 ## Hard Boundaries
 
@@ -61,7 +62,7 @@ Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git m
 - **No repo-wide formatters.** Never run `pnpm format` or `prettier --write` without an explicit file list — format only the files you touched. (Prettier v3 does not look upward for `.prettierignore`, so a subpackage-cwd run rewrites files the root config excludes.)
 - **Do NOT change without explicit instruction**: the Dialog state machine logic, `extension/public/manifest.json`, KV key patterns, or the documented API contract.
 - **Do NOT add dependencies** without the invoker confirming with the user.
-- **Git — read-only.** `git status/diff/log/show` are always fine; every git mutation is forbidden (`add`, `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`). Create, move and delete files with the file tools or plain `mv` / `rm`; the invoker stages from your `Files Modified` list. Never use git as a "rescue" when the tree looks weird — STOP and report.
+- **Git — read-only.** `git status/diff/log/show` are always fine; every git mutation is forbidden (`add` and `add -N`, `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`); check EOL the index-free way in `.claude/rules/global.md` → "Edit can rewrite EOLs". Create, move and delete files with the file tools or plain `mv` / `rm`; the invoker stages from your `Files Modified` list. Never use git as a "rescue" when the tree looks weird — STOP and report.
 - **Stay within scope.** If the work needs files outside `files`, stop and return to the invoker — do not silently expand.
 
 ## Workflow (`production` mode)

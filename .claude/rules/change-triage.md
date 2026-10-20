@@ -67,6 +67,8 @@ agent and the orchestrator lands as two duplicate issues.
 - `gh` in this repo runs under the personal account via `GH_CONFIG_DIR`, configured in
   `.claude/settings.local.json` (gitignored, per-developer). That `env` does not reach the Bash
   tool's shell: prefix each call with `GH_CONFIG_DIR=<value from settings.local.json>`, and send
-  `--json` output to a file, then Read it — plain-text output can come back empty. If `gh` is unavailable in a session **or
+  `--json` output to a file, then Read it — plain-text output can come back empty. Write the issue
+  (or PR) body to a scratchpad file and pass `--body-file`, never `--body`: the shell strips the
+  quotes in any code the body carries, and the file survives an interrupted session. If `gh` is unavailable in a session **or
   issue creation itself fails** (auth, network, rate limit), list the item in that run's final report
   instead — never drop it silently, and never fall back to a worktree or a task chip.
