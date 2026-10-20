@@ -11,13 +11,20 @@ import { USER1, USER2 } from "../helpers/ids";
  * on a Readmoo host on purpose: the create handler runs `isAllowedCoverUrl`
  * (shared/src/config/readmoo.ts) on every non-empty value and refuses anything
  * else with 400 INVALID_COVER_URL, which would never reach the lifecycle logic
- * these cases are about. The cover-less variant gets its own case at the end of
- * the lifecycle block; rejection cases live in `tests/unit/borrow.test.ts`.
+ * these cases are about. The cover-less and author-less variants get their own
+ * cases at the end of the lifecycle block; rejection cases live in
+ * `tests/unit/borrow.test.ts`.
  *
  * Cover-less book: the bookshelf aggregation sanitizes an off-whitelist cover
  * to "" and the clients forward that verbatim, so an empty `bookCoverUrl` is
  * exactly the payload a book with no renderable cover produces. It used to be
  * answered 400 MISSING_FIELDS, making such books permanently unborrowable.
+ *
+ * Author-less book (#330): the same bug on `bookAuthor`. The Extension scraper
+ * yields `author: ""` when Readmoo shows no author (and its sync blanks an
+ * over-cap author to ""), and both clients forward it verbatim. `bookAuthor`
+ * stays REQUIRED — absent / null is still MISSING_FIELDS — but "" is accepted
+ * and must reach the list endpoint as "", never undefined / null.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -432,5 +439,51 @@ describe("Borrow Lifecycle Integration", () => {
     const returnJson = (await returnRes.json()) as Json;
     expect(returnJson.data.status).toBe(BorrowStatus.RETURNED);
     expect(returnJson.data.bookCoverUrl).toBe("");
+  });
+
+  it("should create and list a borrow request for an author-less book, keeping bookAuthor empty", async () => {
+    // An empty author is what a book with no author on Readmoo sends; it used to be
+    // refused 400 MISSING_FIELDS. See the header → "Author-less book".
+    const { familyId, authToken: token1 } = await createFamilyAndGetToken(
+      USER1,
+      "Alice",
+    );
+    const { authToken: token2 } = await joinFamilyAndGetToken(
+      familyId,
+      USER2,
+      "Bob",
+    );
+
+    const createRes = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      {
+        bookId: "book-no-author",
+        bookTitle: "Author-less Book",
+        bookAuthor: "",
+        bookCoverUrl: "https://cdn.readmoo.com/cover/no-author.jpg",
+        ownerId: USER1,
+      },
+      token2,
+    );
+    expect(createRes.status).toBe(201);
+    const createJson = (await createRes.json()) as Json;
+    const requestId = createJson.data.requestId;
+    expect(createJson.data.bookAuthor).toBe("");
+
+    // Both parties see the request in their list with the empty author intact.
+    for (const token of [token2, token1]) {
+      const listRes = await request(
+        "GET",
+        `/api/family/${familyId}/borrow`,
+        undefined,
+        token,
+      );
+      expect(listRes.status).toBe(200);
+      const listJson = (await listRes.json()) as Json;
+      expect(listJson.data).toHaveLength(1);
+      expect(listJson.data[0].requestId).toBe(requestId);
+      expect(listJson.data[0].bookAuthor).toBe("");
+    }
   });
 });

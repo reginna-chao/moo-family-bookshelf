@@ -55,6 +55,17 @@ import {
  * message regains it too and the assertion fails — the cheapest tripwire
  * against the regression that made every cover-less book unborrowable.
  *
+ * Empty bookAuthor (#330): `bookAuthor` is REQUIRED but may be "". The
+ * Extension scraper yields `author: ""` when Readmoo shows no author, the
+ * Extension sync blanks an over-cap author to "", and both clients forward the
+ * value verbatim — so while the field sat in the falsy MISSING_FIELDS guard,
+ * every author-less book was permanently unborrowable (the cover-less bug
+ * again, on a different field). Only absent / null now mean "missing"; "" is
+ * accepted and stored verbatim as "". A PRESENT value of the wrong type is a
+ * format error, INVALID_FIELDS: `0` and `false` are the load-bearing rows,
+ * because they are falsy and so were answered MISSING_FIELDS before the fix —
+ * a table without them would still pass if the falsy guard came back.
+ *
  * POST /api/family/:id/borrow — bookCoverUrl is OPTIONAL: regression guard for
  * cover-less books. The family-bookshelf aggregation (src/routes/bookshelf.ts)
  * sanitizes every off-whitelist cover to "" and the clients forward that
@@ -354,6 +365,67 @@ describe("POST /api/family/:id/borrow", () => {
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("MISSING_FIELDS");
   });
+
+  it("should return 400 MISSING_FIELDS if bookAuthor is null", async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, bookAuthor: null },
+      token2,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("MISSING_FIELDS");
+  });
+
+  // Regression guard for #330: an author-less book sends "" and must stay borrowable.
+  // See the header → "Empty bookAuthor".
+  it('should create the borrow request and store bookAuthor "" verbatim when the author is empty', async () => {
+    const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+    const res = await request(
+      "POST",
+      `/api/family/${familyId}/borrow`,
+      { ...validBorrowBody, bookAuthor: "" },
+      token2,
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Json;
+    expect(json.data.bookAuthor).toBe("");
+
+    const stored = await readIndexEntry(familyId, json.data.requestId);
+    expect(stored).toBeDefined();
+    expect(stored?.bookAuthor).toBe("");
+  });
+
+  // A PRESENT non-string author is a format error; falsy `0` / `false` are load-bearing.
+  // See the header → "Empty bookAuthor".
+  it.each([
+    { label: "the number 0", author: 0 },
+    { label: "the boolean false", author: false },
+    { label: "a number", author: 123 },
+    { label: "an object", author: {} },
+    { label: "an array", author: ["Author"] },
+  ])(
+    "should reject a bookAuthor of $label with 400 INVALID_FIELDS",
+    async ({ author }) => {
+      const { familyId, token2 } = await createFamilyWithTwoMembers();
+
+      const res = await request(
+        "POST",
+        `/api/family/${familyId}/borrow`,
+        { ...validBorrowBody, bookAuthor: author },
+        token2,
+      );
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Json;
+      // Never MISSING_FIELDS: the value is present, only its type is wrong.
+      expect(json.error.code).toBe("INVALID_FIELDS");
+      expect(await kv.get(kvKeys.borrowsByFamily(familyId), "json")).toBeNull();
+    },
+  );
 
   // Pins the required-field list itself (a missing cover is accepted — "optional" block below).
   // See the header → "Required fields".
