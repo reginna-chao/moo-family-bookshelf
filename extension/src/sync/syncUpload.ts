@@ -56,8 +56,10 @@ export interface SyncUploadResult {
    *  were too many (`sync/autoShare.ts`). */
   autoSharedCount: number;
   autoShareHeldCount: number;
-  /** New books left out because a field is over the server's cap, plus their same-title new twins (`sync/fieldCaps.ts`). */
+  /** New books left out because the title is over the server's cap, and new books uploaded with an
+   *  over-cap author / category blanked (`sync/fieldCaps.ts`). */
   fieldCapSkippedCount: number;
+  fieldCapBlankedCount: number;
   /** The stored record's `lastUpdated` the landed PUT answered; undefined when the PUT response carries no usable `lastUpdated`. */
   lastUpdated?: string;
 }
@@ -132,6 +134,7 @@ function buildSyncUpload(
     autoSharedCount,
     autoShareHeldCount,
     fieldCapSkippedCount: fit.skippedCount,
+    fieldCapBlankedCount: fit.blankedCount,
   };
 }
 

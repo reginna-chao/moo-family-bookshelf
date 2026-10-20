@@ -4,6 +4,7 @@ import {
   PersonalShelfSyncNotices,
   autoShareHeldNotice,
   autoSharedBooksNotice,
+  blankedFieldsNotice,
   overLongBooksNotice,
   removedBooksNotice,
   renamedBooksNotice,
@@ -15,11 +16,13 @@ import type { SyncNoticeCounts } from "@/dialog/lastSync";
  * the notices about the last successful sync — books moved to a new Readmoo
  * id (#236), books removed because Readmoo no longer holds them (#241), and
  * the 新書預設開放 pair (#238): books auto-shared, and new books held back
- * because one sync brought in more than the cap. Last come new books left out
- * because a title, author or category is over the server's cap (#326). The
- * notice copy is pinned here at its production builder; the removed notice
- * has a with-shared and a without-shared variant, one a prefix of the other,
- * so both are asserted with exact equality.
+ * because one sync brought in more than the cap. Last come the two #326
+ * notices: new books left out because the title is over the server's cap,
+ * then new books uploaded with an over-cap author or category left blank —
+ * the two share wording, so each is asserted with exact equality and the
+ * other's absence. The notice copy is pinned here at its production builder;
+ * the removed notice has a with-shared and a without-shared variant, one a
+ * prefix of the other, so both are asserted with exact equality.
  */
 
 function counts(overrides: Partial<SyncNoticeCounts> = {}): SyncNoticeCounts {
@@ -30,6 +33,7 @@ function counts(overrides: Partial<SyncNoticeCounts> = {}): SyncNoticeCounts {
     autoSharedCount: 0,
     autoShareHeldCount: 0,
     fieldCapSkippedCount: 0,
+    fieldCapBlankedCount: 0,
     ...overrides,
   };
 }
@@ -81,7 +85,15 @@ describe("autoShareHeldNotice", () => {
 describe("overLongBooksNotice", () => {
   it("pins the user-visible copy", () => {
     expect(overLongBooksNotice(2)).toBe(
-      "有 2 本書這次沒有加進個人書櫃：書名、作者或分類太長，伺服器存不下，或是和這樣的書同名",
+      "有 2 本書的書名太長，伺服器存不下，沒有加進個人書櫃",
+    );
+  });
+});
+
+describe("blankedFieldsNotice", () => {
+  it("pins the user-visible copy", () => {
+    expect(blankedFieldsNotice(2)).toBe(
+      "有 2 本書的作者或分類太長，伺服器存不下，書還是加進了個人書櫃，只是不顯示太長的那一欄",
     );
   });
 });
@@ -220,11 +232,26 @@ describe("PersonalShelfSyncNotices", () => {
       />,
     );
     expect(screen.getByRole("status").textContent).toBe(
-      "有 3 本書這次沒有加進個人書櫃：書名、作者或分類太長，伺服器存不下，或是和這樣的書同名",
+      "有 3 本書的書名太長，伺服器存不下，沒有加進個人書櫃",
     );
+    expect(screen.queryByText(/作者或分類太長/)).not.toBeInTheDocument();
   });
 
-  it("shows no left-out notice when the count is 0", () => {
+  it("announces the blanked notice as a status with the production copy (#326)", () => {
+    render(
+      <PersonalShelfSyncNotices
+        progressMessage=""
+        syncError=""
+        counts={counts({ fieldCapBlankedCount: 5 })}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      "有 5 本書的作者或分類太長，伺服器存不下，書還是加進了個人書櫃，只是不顯示太長的那一欄",
+    );
+    expect(screen.queryByText(/書名太長/)).not.toBeInTheDocument();
+  });
+
+  it("shows neither #326 notice when both counts are 0", () => {
     render(
       <PersonalShelfSyncNotices
         progressMessage=""
@@ -248,6 +275,7 @@ describe("PersonalShelfSyncNotices", () => {
           autoSharedCount: 3,
           autoShareHeldCount: 120,
           fieldCapSkippedCount: 4,
+          fieldCapBlankedCount: 6,
         })}
       />,
     );
@@ -257,6 +285,7 @@ describe("PersonalShelfSyncNotices", () => {
       autoSharedBooksNotice(3),
       autoShareHeldNotice(120),
       overLongBooksNotice(4),
+      blankedFieldsNotice(6),
     ]);
   });
 

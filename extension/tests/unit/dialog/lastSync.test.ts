@@ -7,8 +7,9 @@ import { NO_SYNC, lastSyncOf, syncNoticeCountsOf } from "@/dialog/lastSync";
  * the notice counts the personal shelf reads from it — renamed books (#236)
  * books removed because Readmoo no longer holds them (#241), and books
  * auto-shared or held back by 新書預設開放 (#238), and new books left out
- * because a text field is over the server's cap (#326). Counts the sync result
- * leaves out default to a value that shows no notice.
+ * because the title is over the server's cap or uploaded with an over-cap
+ * author / category blank (#326). Counts the sync result leaves out default
+ * to a value that shows no notice.
  */
 
 const REMOVED_A = "210000000000051";
@@ -25,6 +26,7 @@ describe("NO_SYNC", () => {
       autoSharedCount: 0,
       autoShareHeldCount: 0,
       fieldCapSkippedCount: 0,
+      fieldCapBlankedCount: 0,
     });
   });
 });
@@ -40,17 +42,20 @@ describe("lastSyncOf", () => {
     expect(sync.autoSharedCount).toBe(0);
     expect(sync.autoShareHeldCount).toBe(0);
     expect(sync.fieldCapSkippedCount).toBe(0);
+    expect(sync.fieldCapBlankedCount).toBe(0);
     expect(sync.lastUpdated).toBeUndefined();
   });
 
-  it("carries the result's left-out count (#326)", () => {
+  it("carries the result's left-out and blanked counts (#326)", () => {
     const sync = lastSyncOf({
       success: true,
       books: [],
       fieldCapSkippedCount: 2,
+      fieldCapBlankedCount: 3,
     });
 
     expect(sync.fieldCapSkippedCount).toBe(2);
+    expect(sync.fieldCapBlankedCount).toBe(3);
   });
 
   it("carries the result's removed counts and stamp", () => {
@@ -138,6 +143,7 @@ describe("syncNoticeCountsOf", () => {
       autoSharedCount: 5,
       autoShareHeldCount: 0,
       fieldCapSkippedCount: 6,
+      fieldCapBlankedCount: 7,
       lastUpdated: "2026-10-01T00:00:00.000Z",
     });
 
@@ -148,6 +154,7 @@ describe("syncNoticeCountsOf", () => {
       autoSharedCount: 5,
       autoShareHeldCount: 0,
       fieldCapSkippedCount: 6,
+      fieldCapBlankedCount: 7,
     });
   });
 
@@ -159,6 +166,7 @@ describe("syncNoticeCountsOf", () => {
       autoSharedCount: 0,
       autoShareHeldCount: 0,
       fieldCapSkippedCount: 0,
+      fieldCapBlankedCount: 0,
     });
   });
 });

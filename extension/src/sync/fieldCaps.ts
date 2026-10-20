@@ -3,6 +3,7 @@
 
 import {
   BOOK_TEXT_FIELD_LIMITS,
+  BOOK_TITLE_MAX_LENGTH,
   exceedsBookFieldCap,
   overCapBookField,
 } from "moo-family-bookshelf-shared/api/bookFieldLimits";
@@ -13,14 +14,16 @@ import { titleKey } from "./legacyBooks";
 export interface FieldCapFit {
   /** The scrape to merge — the input array itself when every book fits. */
   books: ScrapedBook[];
-  /** Books new to the server left out this sync: those with a scraped field over its cap, plus
-   *  each new book held back for sharing a title with one of them. */
+  /** Books new to the server left out this sync: those whose scraped title is over its cap. */
   skippedCount: number;
-  /** Non-empty `titleKey`s of the over-cap left-out books: each still counts as present for same-title
-   *  matching, so it keeps such matches ambiguous and the saved book it may replace unpruned. */
+  /** Non-empty `titleKey`s of the left-out books: each still counts as present for same-title matching,
+   *  so it keeps such matches ambiguous and the saved book it may replace unpruned. */
   skippedTitles: ReadonlySet<string>;
-  /** Saved books sent with a stored value: in place of each over-cap scraped field, or of a scraped
-   *  title that changed to or away from one in `skippedTitles`. Each book counts once. */
+  /** Books new to the server uploaded with each over-cap author / category sent as `""`. Each book
+   *  counts once. */
+  blankedCount: number;
+  /** Saved books sent with an over-cap field fitted: a changed title cut to its cap, an unchanged one,
+   *  an author or a category replaced by the stored value. Each book counts once. */
   keptStoredCount: number;
 }
 
@@ -29,71 +32,72 @@ function storedText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** `book` with each over-cap scraped field replaced by the stored entry's value, sent as-is even when
- *  over the cap: the Worker admits an unchanged stored value for its bookId; a cut one breaks matching. */
-function withStoredFields(book: ScrapedBook, stored: BookEntry): ScrapedBook {
+/** An over-cap scraped title as sent: an unchanged pre-cap title goes back as stored (the Worker admits it);
+ *  a changed one is cut, as it equals no title stored since the caps and the stored one would join its group. */
+function fitSavedTitle(
+  book: ScrapedBook,
+  stored: BookEntry,
+  max: number,
+): string {
+  if (titleKey(book) === titleKey(stored)) return storedText(stored.title);
+  const cut = book.title.slice(0, max);
+  // Drop a high surrogate left at the cut, so an emoji there is never stored as half a character.
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/** A saved book as sent: an over-cap title per `fitSavedTitle`; an over-cap author / category takes the stored
+ *  value, sent as-is even when over the cap (the Worker admits it unchanged). Returns `book` when none is over. */
+function fitSavedBook(book: ScrapedBook, stored: BookEntry): ScrapedBook {
+  if (overCapBookField(book) === null) return book;
   const fitted = { ...book };
   for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
-    if (field === "isbn") continue; // never scraped
-    if (exceedsBookFieldCap(book[field], max)) {
-      fitted[field] = storedText(stored[field]);
-    }
+    if (field === "isbn" || !exceedsBookFieldCap(book[field], max)) continue; // isbn: never scraped
+    fitted[field] =
+      field === "title"
+        ? fitSavedTitle(book, stored, max)
+        : storedText(stored[field]);
   }
   return fitted;
 }
 
-/** A saved book as sent: over-cap fields take the stored values; a scraped title changed to or away from
- *  a held one (`skippedTitles`) takes the stored title. Returns `book` itself when nothing was replaced. */
-function fitSavedBook(
-  book: ScrapedBook,
-  stored: BookEntry,
-  skippedTitles: ReadonlySet<string>,
-): ScrapedBook {
-  const fitted =
-    overCapBookField(book) === null ? book : withStoredFields(book, stored);
-  const key = titleKey(fitted);
-  const storedKey = titleKey(stored);
-  if (
-    key === storedKey ||
-    (!skippedTitles.has(key) && !skippedTitles.has(storedKey))
-  ) {
-    return fitted;
+/** A new book whose title fits, with each over-cap author / category sent as `""`. Returns `book`
+ *  itself when no field is over its cap. */
+function withBlankedFields(book: ScrapedBook): ScrapedBook {
+  if (overCapBookField(book) === null) return book;
+  const fitted = { ...book };
+  for (const [field, max] of BOOK_TEXT_FIELD_LIMITS) {
+    if (field !== "author" && field !== "category") continue;
+    if (exceedsBookFieldCap(book[field], max)) fitted[field] = "";
   }
-  return { ...fitted, title: storedText(stored.title) };
-}
-
-/** Non-empty `titleKey`s of the books new to the server that have an over-cap field. */
-function overCapNewTitles(
-  scraped: ScrapedBook[],
-  savedById: ReadonlyMap<string, BookEntry>,
-): Set<string> {
-  const titles = new Set<string>();
-  for (const book of scraped) {
-    if (savedById.has(book.bookId) || overCapBookField(book) === null) continue;
-    const key = titleKey(book);
-    if (key !== "") titles.add(key);
-  }
-  return titles;
+  return fitted;
 }
 
 /**
  * Fit a scrape to the server's text-field caps (`BOOK_TEXT_FIELD_LIMITS`). A
- * book NOT in `saved` with an over-cap field is left out: it is new to the
- * server, so leaving it out records nothing as removed. Every other new book
- * with the same title waits with it, because a lone real twin on the server is
- * what a saved legacy entry resolves onto when the Personal Shelf loads
- * (`usePersonalBooks.ts`), moving its share flag to a book never chosen. A
- * book in `saved` is never left out (a full PUT without it would record it as
- * removed and lose its share flag); each over-cap field takes the saved value
- * instead, every other field still comes from the scrape. For the same reason
- * as the held twins, a saved book whose scraped title changed to or away from
- * a held one keeps its stored title, so no saved book gains or loses that
- * title on the server while a same-title book is held. Nothing is ever
- * truncated. A left-out over-cap book's title is reported in `skippedTitles`
- * for the same-title steps (`mergeBooks`, `resolveForUpload`). Order is
- * preserved, neither input is mutated, and `scraped` itself is returned (with
- * an empty `skippedTitles`) when every book fits. Pure; the caller logs
- * (`warnFieldCapFit`).
+ * book NOT in `saved` whose title is over `BOOK_TITLE_MAX_LENGTH` is left out:
+ * it is new to the server, so leaving it out records nothing as removed. Only
+ * the title decides this, because scraped titles are trimmed (`extractTitle`)
+ * and the Worker accepts no new over-cap title, so such a title equals no
+ * stored one and leaving the book out never changes how many real books carry
+ * any title the same-title steps (`mergeBooks`, `resolveForUpload`) can match.
+ * Any other new book is uploaded, each over-cap author or category sent as
+ * `""`: a book missing from the shelf is worse than a missing author, and
+ * neither field takes part in matching. A book in `saved` is never left out
+ * (a full PUT without it would record it as removed and lose its share flag):
+ * an over-cap author or category takes the saved value instead. An over-cap
+ * title is sent as saved when unchanged (`titleKey` equal; only a pre-cap
+ * title can be, and the Worker admits it as stored), and otherwise cut to
+ * `BOOK_TITLE_MAX_LENGTH` code units (one fewer when that would split a
+ * surrogate pair): it equals no title stored since the
+ * caps, so the cut breaks no such same-title match, while the saved title
+ * would join that title's group. Every other field still comes from the
+ * scrape; nothing but such a changed saved title is truncated.
+ * A left-out book's title is still reported in `skippedTitles` for the
+ * same-title steps: only a stored title saved before the caps existed can
+ * equal it, so it is kept for that legacy data and changes nothing otherwise.
+ * Order is preserved, neither input is mutated, and `scraped` itself is
+ * returned (with an empty `skippedTitles`) when every book fits. Pure; the caller logs (`warnFieldCapFit`).
  */
 export function fitScrapeToFieldCaps(
   scraped: ScrapedBook[],
@@ -104,40 +108,52 @@ export function fitScrapeToFieldCaps(
       books: scraped,
       skippedCount: 0,
       skippedTitles: new Set(),
+      blankedCount: 0,
       keptStoredCount: 0,
     };
   }
   const savedById = new Map(saved.map((entry) => [entry.bookId, entry]));
-  const skippedTitles = overCapNewTitles(scraped, savedById);
   const books: ScrapedBook[] = [];
+  const skippedTitles = new Set<string>();
+  let blankedCount = 0;
   let keptStoredCount = 0;
   for (const book of scraped) {
     const stored = savedById.get(book.bookId);
     if (stored) {
-      const fitted = fitSavedBook(book, stored, skippedTitles);
+      const fitted = fitSavedBook(book, stored);
       if (fitted !== book) keptStoredCount += 1;
       books.push(fitted);
-    } else if (
-      overCapBookField(book) === null &&
-      !skippedTitles.has(titleKey(book))
-    ) {
-      books.push(book);
+    } else if (exceedsBookFieldCap(book.title, BOOK_TITLE_MAX_LENGTH)) {
+      const key = titleKey(book);
+      if (key !== "") skippedTitles.add(key);
+    } else {
+      const fitted = withBlankedFields(book);
+      if (fitted !== book) blankedCount += 1;
+      books.push(fitted);
     }
   }
-  // Saved books are never left out, so every missing book is a new one held back.
+  // Only a new book with an over-cap title is left out, so every missing book is one of those.
   return {
     books,
     skippedCount: scraped.length - books.length,
     skippedTitles,
+    blankedCount,
     keptStoredCount,
   };
 }
 
-/** One counts-only warning (never a title or author) when `fit` left out or kept-stored any book. */
+/** One counts-only warning (never a title or author) when `fit` left out, blanked or kept-stored any book. */
 export function warnFieldCapFit(fit: FieldCapFit): void {
-  if (fit.skippedCount === 0 && fit.keptStoredCount === 0) return;
+  if (
+    fit.skippedCount === 0 &&
+    fit.blankedCount === 0 &&
+    fit.keptStoredCount === 0
+  ) {
+    return;
+  }
   console.warn("[moo] books over the server's text-field caps", {
     skippedCount: fit.skippedCount,
+    blankedCount: fit.blankedCount,
     keptStoredCount: fit.keptStoredCount,
   });
 }

@@ -30,32 +30,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * Text-field caps (#326, `sync/fieldCaps.ts`): the Worker refuses the whole
  * PUT when one entry's title, author or category is over its cap, so each
  * attempt fits the scrape against THAT attempt's read before the merge. A book
- * the read does not hold is left out and counted in `fieldCapSkippedCount`; a
- * book it holds is uploaded with the saved value in place of each over-cap
- * field, keeping its share flag. The count reported is the landed attempt's.
+ * the read does not hold is left out when its TITLE is over the cap (counted
+ * in `fieldCapSkippedCount`), and otherwise uploaded with each over-cap author
+ * or category sent as `""` (counted in `fieldCapBlankedCount`) — an ordinary
+ * new book in every other respect, auto-shared by 新書預設開放 like any other.
+ * A book the read holds is uploaded with the saved value in place of each
+ * over-cap author or category, and its changed over-cap title cut to the cap,
+ * keeping its share flag. The counts are the landed attempt's.
  *
- * A left-out book's title still counts: it may be the new id of a saved book
- * (an id change), or one more copy of a title. So a saved book carrying that
- * title is never pruned, a same-title rename is not paired (the old book is
- * kept and the new copy is not auto-shared), and a same-title legacy entry is
- * not resolved this sync. Each has a contrast case where the copy fits.
+ * Same-title books: a blanked book keeps its title, so it takes part in every
+ * same-title step (rename pairing, legacy resolution) exactly as if it fit.
+ * No new book is held back for sharing a title and no saved book's new title
+ * is reverted — an earlier rule did both, and each variant could leave a
+ * shared legacy entry with ONE real same-title twin on the server, which the
+ * Personal Shelf load (`dropResolvedLegacyBooks` on the saved list) resolved
+ * onto, moving its share flag to a book never chosen. The "same-title steps"
+ * group replays those cases and runs that load rule on the uploaded body.
  *
- * Every NEW book sharing the left-out book's title is held back with it: were
- * one uploaded alone, the Personal Shelf load (`dropResolvedLegacyBooks` on the
- * saved list, which never sees the left-out title) would resolve a saved
- * legacy entry onto it and move its share flag to a book never chosen.
- *
- * A saved book renamed on Readmoo to a left-out book's title is uploaded with
- * its STORED title for the same reason: sent with the new title, it would be
- * the lone real twin of a shared same-title legacy entry on the server, and
- * the next Personal Shelf load would show it shared (and PATCH it shared on
- * the next Save). Its contrast — no left-out book, the rename uploads and the
- * legacy share moves onto it — is the pre-existing #234 resolution.
- *
- * A saved book renamed on Readmoo AWAY from a left-out book's title keeps its
- * stored title too: sent with the new title, it would leave a single other
- * real twin of the shared legacy entry on the server, and the Personal Shelf
- * load would resolve the legacy entry onto that twin and show it shared.
+ * A left-out title still counts in the same-title steps (`skippedTitles`), but
+ * since the Worker accepts no new over-cap title, only a title stored before
+ * the caps existed can equal one: such a saved book is never pruned, and its
+ * same-title legacy entry is not resolved this sync.
  */
 
 // Only the DOM scraper is replaced; merge, breaker, id-change resolution and
@@ -1120,6 +1115,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
   // See the header → "Text-field caps".
   describe("books over the server's text-field caps (#326)", () => {
     const OVER_CAP_TITLE = "長".repeat(BOOK_TITLE_MAX_LENGTH + 1);
+    const OVER_CAP_AUTHOR = "長".repeat(BOOK_AUTHOR_MAX_LENGTH + 1);
     const SAVED_TITLE = "原本的書名";
     const CAP_WARNING = "[moo] books over the server's text-field caps";
 
@@ -1129,7 +1125,11 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         .mock.calls.filter((call) => call[0] === CAP_WARNING);
     }
 
-    it("leaves a new over-cap book out of the PUT and uploads the rest", async () => {
+    function overCapAuthor(bookId: string, title?: string): ScrapedBook {
+      return { ...scrapedBook(bookId, title), author: OVER_CAP_AUTHOR };
+    }
+
+    it("leaves a new book with an over-cap title out of the PUT and uploads the rest", async () => {
       mockScrape([
         scrapedBook(BOOK_A),
         scrapedBook(NEW_ID, OVER_CAP_TITLE),
@@ -1146,9 +1146,10 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         BOOK_B,
       ]);
       expect(result.fieldCapSkippedCount).toBe(1);
+      expect(result.fieldCapBlankedCount).toBe(0);
       expect(result.books.map((b) => b.bookId)).not.toContain(NEW_ID);
       expect(capWarnings()).toEqual([
-        [CAP_WARNING, { skippedCount: 1, keptStoredCount: 0 }],
+        [CAP_WARNING, { skippedCount: 1, blankedCount: 0, keptStoredCount: 0 }],
       ]);
       expect(wroteLastSyncAt()).toBe(true);
     });
@@ -1175,7 +1176,58 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
       expect(result.fieldCapSkippedCount).toBe(1);
     });
 
-    it("uploads a saved book with its saved title and share flag when the scraped title is over the cap", async () => {
+    it("uploads a new book with an over-cap author, its author blank, and counts it", async () => {
+      const blanked = { ...overCapAuthor(NEW_ID), category: "小說" };
+      mockScrape([scrapedBook(BOOK_A), blanked]);
+      const server = createFakeServer(storedRecord([savedBook(BOOK_A)]));
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      const body = server.puts[0].body.books;
+      expect(body.find((b) => b.bookId === NEW_ID)).toEqual({
+        bookId: NEW_ID,
+        title: blanked.title,
+        author: "",
+        isbn: "",
+        coverUrl: "",
+        readmooUrl: blanked.readmooUrl,
+        category: "小說",
+        isShared: BoolFlag.FALSE,
+        isArchived: BoolFlag.FALSE,
+      });
+      expect(JSON.stringify(server.puts[0].body)).not.toContain(
+        OVER_CAP_AUTHOR,
+      );
+      expect(result.fieldCapBlankedCount).toBe(1);
+      expect(result.fieldCapSkippedCount).toBe(0);
+      expect(result.books.map((b) => b.bookId)).toContain(NEW_ID);
+      expect(capWarnings()).toEqual([
+        [CAP_WARNING, { skippedCount: 0, blankedCount: 1, keptStoredCount: 0 }],
+      ]);
+    });
+
+    it("auto-shares a blanked new book with 新書預設開放 on, like any new book", async () => {
+      mockScrape([scrapedBook(BOOK_A), overCapAuthor(NEW_ID)]);
+      const server = createFakeServer({
+        ...storedRecord([savedBook(BOOK_A)]),
+        newBookDefaultShared: BoolFlag.TRUE,
+      });
+
+      const result = await runSync(server.client);
+
+      expect(result.success).toBe(true);
+      const body = server.puts[0].body.books;
+      expect(body.find((b) => b.bookId === NEW_ID)).toMatchObject({
+        author: "",
+        isShared: BoolFlag.TRUE,
+      });
+      expect(isSharedOf(body, BOOK_A)).toBe(BoolFlag.FALSE);
+      expect(result.autoSharedCount).toBe(1);
+      expect(result.fieldCapBlankedCount).toBe(1);
+    });
+
+    it("uploads a saved book with its share flag and its changed title cut to the cap when the scraped title is over it", async () => {
       mockScrape([
         { ...scrapedBook(BOOK_A, OVER_CAP_TITLE), author: "新作者" },
         scrapedBook(BOOK_B),
@@ -1194,18 +1246,19 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         (b) => b.bookId === BOOK_A,
       );
       expect(uploaded).toMatchObject({
-        title: SAVED_TITLE,
+        title: OVER_CAP_TITLE.slice(0, BOOK_TITLE_MAX_LENGTH),
         author: "新作者",
         isShared: BoolFlag.TRUE,
       });
       expect(result.fieldCapSkippedCount).toBe(0);
+      expect(result.fieldCapBlankedCount).toBe(0);
       expect(result.removedBookCount).toBe(0);
       expect(capWarnings()).toEqual([
-        [CAP_WARNING, { skippedCount: 0, keptStoredCount: 1 }],
+        [CAP_WARNING, { skippedCount: 0, blankedCount: 0, keptStoredCount: 1 }],
       ]);
     });
 
-    it("reports no left-out books and logs no cap warning when every book fits", async () => {
+    it("reports no left-out or blanked books and logs no cap warning when every book fits", async () => {
       mockScrape([scrapedBook(BOOK_A), scrapedBook(BOOK_B)]);
       const server = createFakeServer(storedRecord([savedBook(BOOK_A)]));
 
@@ -1213,6 +1266,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
       expect(result.success).toBe(true);
       expect(result.fieldCapSkippedCount).toBe(0);
+      expect(result.fieldCapBlankedCount).toBe(0);
       expect(capWarnings()).toEqual([]);
       // Positive companion: the upload did happen, so the absence is not vacuous.
       expect(server.puts).toHaveLength(1);
@@ -1228,7 +1282,10 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         ],
         firstPutIds: [BOOK_A],
         landedIds: [BOOK_A, NEW_ID],
-        landedNew: { title: SAVED_TITLE, isShared: BoolFlag.TRUE },
+        landedNew: {
+          title: OVER_CAP_TITLE.slice(0, BOOK_TITLE_MAX_LENGTH),
+          isShared: BoolFlag.TRUE,
+        },
         fieldCapSkippedCount: 0,
       },
       {
@@ -1279,22 +1336,45 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
       },
     );
 
-    // See the header → "A left-out book's title still counts".
-    describe("a left-out book's title in the same-title steps", () => {
-      const OVER_CAP_AUTHOR = "長".repeat(BOOK_AUTHOR_MAX_LENGTH + 1);
+    it("reports the blanked count of the landed attempt after a conflict", async () => {
+      mockScrape([scrapedBook(BOOK_A), overCapAuthor(NEW_ID)]);
+      const server = createFakeServer(storedRecord([savedBook(BOOK_A)]), {
+        // Another device uploaded NEW (with a short author) between this sync's read and its PUT.
+        beforePut: (index, state) => {
+          if (index !== 0) return;
+          state.stored = storedRecord(
+            [savedBook(BOOK_A), savedBook(NEW_ID)],
+            "race",
+          );
+        },
+      });
+
+      const result = await runSync(server.client, false);
+
+      expect(server.puts.map((p) => p.outcome)).toEqual(["conflict", "ok"]);
+      expect(
+        server.puts[0].body.books.find((b) => b.bookId === NEW_ID)?.author,
+      ).toBe("");
+      // The re-read holds NEW, so the landed attempt sends its stored author instead.
+      expect(
+        server.puts[1].body.books.find((b) => b.bookId === NEW_ID)?.author,
+      ).toBe("作者");
+      expect(result.fieldCapBlankedCount).toBe(0);
+    });
+
+    // See the header → "Same-title books".
+    describe("same-title steps", () => {
       const THIRD_ID = "210000000000004";
       const LEGACY_ID = "14563038";
       const SAME_TITLE = "同名書";
       const STORED_TITLE = "原書名";
-
-      function overCapAuthor(bookId: string, title: string): ScrapedBook {
-        return { ...scrapedBook(bookId, title), author: OVER_CAP_AUTHOR };
-      }
+      const rows = (books: BookEntry[]) =>
+        books.map((b) => [b.bookId, b.title, b.isShared]);
 
       it.each([BoolFlag.FALSE, BoolFlag.TRUE])(
-        "never prunes a saved book (isShared %s) whose new-id copy was left out",
+        "pairs a saved book (isShared %s) with its new-id copy whose author is blanked",
         async (isShared) => {
-          // OLD is gone from Readmoo's library; its same-title NEW copy is over the cap.
+          // OLD is gone from Readmoo's library; its same-title NEW copy has an over-cap author.
           mockScrape(
             [scrapedBook(KEPT_ID), overCapAuthor(NEW_ID, RENAMED_TITLE)],
             new Set([KEPT_ID, NEW_ID]),
@@ -1309,13 +1389,15 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           const result = await runSync(server.client);
 
           expect(result.success).toBe(true);
-          expect(result.fieldCapSkippedCount).toBe(1);
+          expect(result.renamedBooks).toEqual([
+            { oldId: OLD_ID, newId: NEW_ID },
+          ]);
           expect(result.removedBookCount).toBe(0);
-          expect(result.removedBooks).toEqual([]);
-          expect(result.renamedBooks).toEqual([]);
+          expect(result.fieldCapSkippedCount).toBe(0);
+          expect(result.fieldCapBlankedCount).toBe(1);
           const body = server.puts[0].body.books;
-          expect(body.map((b) => b.bookId)).toEqual([KEPT_ID, OLD_ID]);
-          expect(isSharedOf(body, OLD_ID)).toBe(isShared);
+          expect(body.map((b) => b.bookId)).toEqual([KEPT_ID, NEW_ID]);
+          expect(body[1]).toMatchObject({ author: "", isShared });
         },
       );
 
@@ -1344,13 +1426,13 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
       it.each([
         {
-          name: "a third, left-out copy holds back the same-title new copy too: no rename, old book kept",
+          name: "a third, blanked copy makes two same-title new books: no rename, old book kept",
           withThird: true,
           renamed: [],
-          ids: [KEPT_ID, BOOK_B, OLD_ID],
-          newShared: undefined,
+          ids: [KEPT_ID, NEW_ID, THIRD_ID, BOOK_B, OLD_ID],
+          newShared: BoolFlag.FALSE,
           oldShared: BoolFlag.TRUE,
-          skipped: 2,
+          blanked: 1,
         },
         {
           name: "without the third copy the rename pairs and carries the share (contrast)",
@@ -1359,11 +1441,11 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
           ids: [KEPT_ID, NEW_ID, BOOK_B],
           newShared: BoolFlag.TRUE,
           oldShared: undefined,
-          skipped: 0,
+          blanked: 0,
         },
       ])(
         "$name",
-        async ({ withThird, renamed, ids, newShared, oldShared, skipped }) => {
+        async ({ withThird, renamed, ids, newShared, oldShared, blanked }) => {
           mockScrape([
             scrapedBook(KEPT_ID),
             scrapedBook(NEW_ID, RENAMED_TITLE),
@@ -1382,11 +1464,19 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
           expect(result.success).toBe(true);
           expect(result.renamedBooks).toEqual(renamed);
-          expect(result.fieldCapSkippedCount).toBe(skipped);
+          expect(result.fieldCapSkippedCount).toBe(0);
+          expect(result.fieldCapBlankedCount).toBe(blanked);
           const body = server.puts[0].body.books;
           expect(body.map((b) => b.bookId)).toEqual(ids);
           expect(isSharedOf(body, NEW_ID)).toBe(newShared);
           expect(isSharedOf(body, OLD_ID)).toBe(oldShared);
+          if (withThird) {
+            // Titled like the saved OLD the scrape missed: an unpaired id change, never auto-shared.
+            expect(body.find((b) => b.bookId === THIRD_ID)).toMatchObject({
+              author: "",
+              isShared: BoolFlag.FALSE,
+            });
+          }
           // Positive companion: the genuinely new book IS auto-shared either way.
           expect(isSharedOf(body, BOOK_B)).toBe(BoolFlag.TRUE);
           expect(result.autoSharedCount).toBe(1);
@@ -1395,23 +1485,23 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
 
       it.each([
         {
-          name: "keeps a shared legacy entry unresolved while a same-title copy was left out",
-          withSkipped: true,
-          ids: [KEPT_ID, LEGACY_ID],
+          name: "keeps a shared legacy entry unresolved next to two real twins, one of them blanked",
+          withBlanked: true,
+          ids: [KEPT_ID, NEW_ID, LEGACY_ID],
           realShared: BoolFlag.FALSE,
           legacyShared: BoolFlag.TRUE,
         },
         {
-          name: "resolves the legacy entry onto its real twin without the left-out copy (contrast)",
-          withSkipped: false,
+          name: "resolves the legacy entry onto its lone real twin (contrast)",
+          withBlanked: false,
           ids: [KEPT_ID],
           realShared: BoolFlag.TRUE,
           legacyShared: undefined,
         },
-      ])("$name", async ({ withSkipped, ids, realShared, legacyShared }) => {
+      ])("$name", async ({ withBlanked, ids, realShared, legacyShared }) => {
         mockScrape([
           scrapedBook(KEPT_ID, RENAMED_TITLE),
-          ...(withSkipped ? [overCapAuthor(NEW_ID, RENAMED_TITLE)] : []),
+          ...(withBlanked ? [overCapAuthor(NEW_ID, RENAMED_TITLE)] : []),
         ]);
         const server = createFakeServer(
           storedRecord([
@@ -1426,79 +1516,68 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         const body = server.puts[0].body.books;
         expect(body.map((b) => b.bookId)).toEqual(ids);
         expect(isSharedOf(body, KEPT_ID)).toBe(realShared);
+        expect(isSharedOf(body, NEW_ID)).toBe(
+          withBlanked ? BoolFlag.FALSE : undefined,
+        );
         expect(isSharedOf(body, LEGACY_ID)).toBe(legacyShared);
+        // The Personal Shelf load (usePersonalBooks.ts) runs the same rule on the saved list.
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
       });
 
-      // See the header → "Every NEW book sharing the left-out book's title".
       it.each([
         {
-          name: "holds back a fitting new twin of a left-out book, so the saved legacy entry keeps its flag on reload",
-          withSkipped: true,
-          ids: [LEGACY_ID],
-          twinShared: undefined,
-          legacyShared: BoolFlag.TRUE,
-          skipped: 2,
-        },
-        {
-          name: "uploads the twin and resolves the legacy entry onto it without the left-out copy (contrast)",
-          withSkipped: false,
-          ids: [NEW_ID],
-          twinShared: BoolFlag.TRUE,
-          legacyShared: undefined,
-          skipped: 0,
-        },
-      ])(
-        "$name",
-        async ({ withSkipped, ids, twinShared, legacyShared, skipped }) => {
-          mockScrape([
-            scrapedBook(NEW_ID, RENAMED_TITLE),
-            ...(withSkipped ? [overCapAuthor(THIRD_ID, RENAMED_TITLE)] : []),
-          ]);
-          const server = createFakeServer(
-            storedRecord([savedBook(LEGACY_ID, BoolFlag.TRUE, RENAMED_TITLE)]),
-          );
-
-          const result = await runSync(server.client);
-
-          expect(result.success).toBe(true);
-          const body = server.puts[0].body.books;
-          expect(body.map((b) => b.bookId)).toEqual(ids);
-          expect(body.map((b) => b.bookId)).not.toContain(THIRD_ID);
-          expect(isSharedOf(body, NEW_ID)).toBe(twinShared);
-          expect(isSharedOf(body, LEGACY_ID)).toBe(legacyShared);
-          expect(result.fieldCapSkippedCount).toBe(skipped);
-          // The Personal Shelf load runs the same rule on the uploaded list.
-          const reloaded = dropResolvedLegacyBooks(body);
-          expect(reloaded).toBe(body);
-        },
-      );
-
-      // See the header → "A saved book renamed on Readmoo to a left-out book's title".
-      it.each([
-        {
-          name: "uploads a saved book renamed to a left-out book's title with its stored title, so the reload promotes nothing",
-          withSkipped: true,
+          name: "uploads both new twins of a shared legacy entry, one blanked, so it stays unresolved on reload",
+          withBlanked: true,
           uploaded: [
-            [BOOK_A, STORED_TITLE, BoolFlag.FALSE],
-            [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+            [NEW_ID, RENAMED_TITLE, BoolFlag.FALSE],
+            [THIRD_ID, RENAMED_TITLE, BoolFlag.FALSE],
+            [LEGACY_ID, RENAMED_TITLE, BoolFlag.TRUE],
           ],
-          reloaded: [
-            [BOOK_A, STORED_TITLE, BoolFlag.FALSE],
-            [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
-          ],
-          skipped: 1,
         },
         {
-          name: "without the left-out book the rename uploads and the legacy share moves onto it (contrast, pre-existing #234 behaviour)",
-          withSkipped: false,
-          uploaded: [[BOOK_A, SAME_TITLE, BoolFlag.TRUE]],
-          reloaded: [[BOOK_A, SAME_TITLE, BoolFlag.TRUE]],
-          skipped: 0,
+          name: "uploads a lone new twin and resolves the legacy entry onto it (contrast, pre-existing #234 behaviour)",
+          withBlanked: false,
+          uploaded: [[NEW_ID, RENAMED_TITLE, BoolFlag.TRUE]],
         },
-      ])("$name", async ({ withSkipped, uploaded, reloaded, skipped }) => {
+      ])("$name", async ({ withBlanked, uploaded }) => {
+        mockScrape([
+          scrapedBook(NEW_ID, RENAMED_TITLE),
+          ...(withBlanked ? [overCapAuthor(THIRD_ID, RENAMED_TITLE)] : []),
+        ]);
+        const server = createFakeServer(
+          storedRecord([savedBook(LEGACY_ID, BoolFlag.TRUE, RENAMED_TITLE)]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        const body = server.puts[0].body.books;
+        expect(rows(body)).toEqual(uploaded);
+        expect(result.fieldCapSkippedCount).toBe(0);
+        expect(result.fieldCapBlankedCount).toBe(withBlanked ? 1 : 0);
+        // The Personal Shelf load runs the same rule on the uploaded list.
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
+      });
+
+      it.each([
+        {
+          name: "uploads a saved book renamed to a blanked book's title with its new title, so the reload promotes nothing",
+          withBlanked: true,
+          uploaded: [
+            [BOOK_A, SAME_TITLE, BoolFlag.FALSE],
+            [BOOK_B, SAME_TITLE, BoolFlag.FALSE],
+            [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
+          ],
+        },
+        {
+          name: "without the blanked book the rename uploads and the legacy share moves onto it (contrast, pre-existing #234 behaviour)",
+          withBlanked: false,
+          uploaded: [[BOOK_A, SAME_TITLE, BoolFlag.TRUE]],
+        },
+      ])("$name", async ({ withBlanked, uploaded }) => {
         mockScrape([
           scrapedBook(BOOK_A, SAME_TITLE),
-          ...(withSkipped ? [overCapAuthor(BOOK_B, SAME_TITLE)] : []),
+          ...(withBlanked ? [overCapAuthor(BOOK_B, SAME_TITLE)] : []),
         ]);
         const server = createFakeServer(
           storedRecord([
@@ -1512,17 +1591,13 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         expect(result.success).toBe(true);
         expect(server.puts).toHaveLength(1);
         const body = server.puts[0].body.books;
-        const rows = (books: BookEntry[]) =>
-          books.map((b) => [b.bookId, b.title, b.isShared]);
         expect(rows(body)).toEqual(uploaded);
-        expect(body.map((b) => b.bookId)).not.toContain(BOOK_B);
-        expect(result.fieldCapSkippedCount).toBe(skipped);
+        expect(result.fieldCapBlankedCount).toBe(withBlanked ? 1 : 0);
         // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
-        expect(rows(dropResolvedLegacyBooks(body))).toEqual(reloaded);
+        expect(rows(dropResolvedLegacyBooks(body))).toEqual(uploaded);
       });
 
-      // See the header → "renamed on Readmoo AWAY from a left-out book's title".
-      it("uploads a saved book renamed away from a left-out book's title with its stored title, so the reload promotes nothing", async () => {
+      it("uploads a saved book renamed away from a blanked book's title with its new title, so the reload promotes nothing", async () => {
         mockScrape([
           scrapedBook(BOOK_A, "新書名"),
           scrapedBook(THIRD_ID, SAME_TITLE),
@@ -1541,18 +1616,112 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         expect(result.success).toBe(true);
         expect(server.puts).toHaveLength(1);
         const body = server.puts[0].body.books;
-        const rows = (books: BookEntry[]) =>
-          books.map((b) => [b.bookId, b.title, b.isShared]);
         const expected = [
-          [BOOK_A, SAME_TITLE, BoolFlag.FALSE],
+          [BOOK_A, "新書名", BoolFlag.FALSE],
           [THIRD_ID, SAME_TITLE, BoolFlag.FALSE],
+          [BOOK_B, SAME_TITLE, BoolFlag.FALSE],
           [LEGACY_ID, SAME_TITLE, BoolFlag.TRUE],
         ];
         expect(rows(body)).toEqual(expected);
-        expect(body.map((b) => b.bookId)).not.toContain(BOOK_B);
-        expect(result.fieldCapSkippedCount).toBe(1);
+        expect(result.fieldCapBlankedCount).toBe(1);
         // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
         expect(rows(dropResolvedLegacyBooks(body))).toEqual(expected);
+      });
+
+      it("uploads two saved books renamed apart and a blanked same-title new book, leaving the legacy entry alone", async () => {
+        mockScrape([
+          scrapedBook(BOOK_A, SAME_TITLE),
+          scrapedBook(THIRD_ID, "另一書名"),
+          overCapAuthor(BOOK_B, SAME_TITLE),
+        ]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(LEGACY_ID, BoolFlag.TRUE, STORED_TITLE),
+            savedBook(BOOK_A, BoolFlag.FALSE, STORED_TITLE),
+            savedBook(THIRD_ID, BoolFlag.FALSE, STORED_TITLE),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts).toHaveLength(1);
+        const body = server.puts[0].body.books;
+        expect(rows(body)).toEqual([
+          [BOOK_A, SAME_TITLE, BoolFlag.FALSE],
+          [THIRD_ID, "另一書名", BoolFlag.FALSE],
+          [BOOK_B, SAME_TITLE, BoolFlag.FALSE],
+          [LEGACY_ID, STORED_TITLE, BoolFlag.TRUE],
+        ]);
+        expect(body.find((b) => b.bookId === BOOK_B)?.author).toBe("");
+        expect(result.fieldCapBlankedCount).toBe(1);
+        // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
+      });
+
+      // See the header → "A left-out title still counts": a title stored before the caps existed.
+      it.each([BoolFlag.FALSE, BoolFlag.TRUE])(
+        "never prunes a saved book (isShared %s) with a pre-cap title whose new-id copy was left out",
+        async (isShared) => {
+          mockScrape(
+            [scrapedBook(KEPT_ID), scrapedBook(NEW_ID, OVER_CAP_TITLE)],
+            new Set([KEPT_ID, NEW_ID]),
+          );
+          const server = createFakeServer(
+            storedRecord([
+              savedBook(KEPT_ID),
+              savedBook(OLD_ID, isShared, OVER_CAP_TITLE),
+            ]),
+          );
+
+          const result = await runSync(server.client);
+
+          expect(result.success).toBe(true);
+          expect(result.fieldCapSkippedCount).toBe(1);
+          expect(result.removedBookCount).toBe(0);
+          expect(result.removedBooks).toEqual([]);
+          expect(result.renamedBooks).toEqual([]);
+          const body = server.puts[0].body.books;
+          expect(body.map((b) => b.bookId)).toEqual([KEPT_ID, OLD_ID]);
+          expect(isSharedOf(body, OLD_ID)).toBe(isShared);
+        },
+      );
+
+      it.each([
+        {
+          name: "keeps a shared pre-cap legacy entry unresolved while its same-title new copy was left out",
+          withSkipped: true,
+          ids: [KEPT_ID, LEGACY_ID],
+          realShared: BoolFlag.FALSE,
+          legacyShared: BoolFlag.TRUE,
+        },
+        {
+          name: "resolves the pre-cap legacy entry onto its real twin without the left-out copy (contrast)",
+          withSkipped: false,
+          ids: [KEPT_ID],
+          realShared: BoolFlag.TRUE,
+          legacyShared: undefined,
+        },
+      ])("$name", async ({ withSkipped, ids, realShared, legacyShared }) => {
+        mockScrape([
+          scrapedBook(KEPT_ID, OVER_CAP_TITLE),
+          ...(withSkipped ? [scrapedBook(NEW_ID, OVER_CAP_TITLE)] : []),
+        ]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(KEPT_ID, BoolFlag.FALSE, OVER_CAP_TITLE),
+            savedBook(LEGACY_ID, BoolFlag.TRUE, OVER_CAP_TITLE),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        const body = server.puts[0].body.books;
+        expect(body.map((b) => b.bookId)).toEqual(ids);
+        expect(isSharedOf(body, KEPT_ID)).toBe(realShared);
+        expect(isSharedOf(body, LEGACY_ID)).toBe(legacyShared);
+        expect(result.fieldCapSkippedCount).toBe(withSkipped ? 1 : 0);
       });
     });
   });
