@@ -4,10 +4,12 @@ import {
   dropResolvedLegacyBooks,
   isLegacyBookEntry,
   isRealBookId,
+  titleKey,
 } from "@/sync/legacyBooks";
 import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
+import { BOOK_TITLE_MAX_LENGTH } from "moo-family-bookshelf-shared/api/bookFieldLimits";
 
 // Real Readmoo book ids are 15 digits; the legacy `.privacy` fallback path
 // uploaded 7–8 digit internal ids instead (#234).
@@ -390,6 +392,147 @@ describe("mergeBooks — keepFlagsFor", () => {
   });
 
   it("promotes the real twin when keepFlagsFor is omitted (positive companion)", () => {
+    const result = mergeBooks(scraped, saved());
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_A, BoolFlag.TRUE],
+    ]);
+  });
+});
+
+describe("titleKey", () => {
+  it.each([
+    { name: "a plain title", title: "三體", key: "三體" },
+    { name: "surrounding whitespace", title: " \t三體\n", key: "三體" },
+    { name: "a whitespace-only title", title: "   ", key: "" },
+    { name: "a number", title: 42, key: "" },
+    { name: "null", title: null, key: "" },
+    { name: "undefined", title: undefined, key: "" },
+  ])("keys $name as $key", ({ title, key }) => {
+    expect(titleKey({ title: title as unknown as string })).toBe(key);
+  });
+});
+
+// #326: a title in `ambiguousTitles` belongs to a scraped book the field-cap fit
+// left out — one more real entry carrying it, so the legacy entry stays.
+describe("dropResolvedLegacyBooks — ambiguousTitles", () => {
+  const sharedLegacyAndUnsharedTwin = (): BookEntry[] => [
+    makeBook({ bookId: LEGACY_A, title: "三體", isShared: BoolFlag.TRUE }),
+    makeBook({ bookId: REAL_A, title: "三體", isShared: BoolFlag.FALSE }),
+  ];
+
+  it("keeps a legacy entry whose title is ambiguous and does not promote its real twin", () => {
+    const books = sharedLegacyAndUnsharedTwin();
+    const before = snapshot(books);
+
+    const result = dropResolvedLegacyBooks(books, undefined, new Set(["三體"]));
+
+    expect(result).toBe(books);
+    expect(result).toEqual(before);
+  });
+
+  it("drops and promotes when ambiguousTitles is omitted (positive companion)", () => {
+    const result = dropResolvedLegacyBooks(sharedLegacyAndUnsharedTwin());
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_A, BoolFlag.TRUE],
+    ]);
+  });
+
+  it("still resolves a legacy entry whose title is not in ambiguousTitles", () => {
+    const books = [
+      ...sharedLegacyAndUnsharedTwin(),
+      makeBook({ bookId: LEGACY_B, title: "別本書", isShared: BoolFlag.TRUE }),
+      makeBook({ bookId: REAL_B, title: "別本書" }),
+    ];
+
+    const result = dropResolvedLegacyBooks(books, undefined, new Set(["三體"]));
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [LEGACY_A, BoolFlag.TRUE],
+      [REAL_A, BoolFlag.FALSE],
+      [REAL_B, BoolFlag.TRUE],
+    ]);
+  });
+
+  it("keeps an ambiguous legacy entry even when no real entry carries the title", () => {
+    const books = [
+      makeBook({ bookId: LEGACY_A, title: "三體", isShared: BoolFlag.TRUE }),
+    ];
+
+    expect(dropResolvedLegacyBooks(books, undefined, new Set(["三體"]))).toBe(
+      books,
+    );
+  });
+});
+
+// #326: a real twin's over-cap title is uploaded as a placeholder, so a lone real entry still
+// storing it may be a false twin; an over-cap legacy title never resolves.
+describe("dropResolvedLegacyBooks — over-cap legacy titles", () => {
+  const atCap = "書".repeat(BOOK_TITLE_MAX_LENGTH);
+  const overCap = "書".repeat(BOOK_TITLE_MAX_LENGTH + 1);
+  const legacyAndTwin = (legacyTitle: string, realTitle: string) => [
+    makeBook({ bookId: LEGACY_A, title: legacyTitle, isShared: BoolFlag.TRUE }),
+    makeBook({ bookId: REAL_A, title: realTitle, isShared: BoolFlag.FALSE }),
+  ];
+
+  it.each([
+    { name: "exactly at the cap", legacy: atCap, real: atCap },
+    {
+      name: "at the cap once surrounding whitespace is trimmed",
+      legacy: ` \t${atCap}\n`,
+      real: `${atCap} `,
+    },
+  ])(
+    "resolves a legacy entry whose title is $name onto its single real twin",
+    ({ legacy, real }) => {
+      const result = dropResolvedLegacyBooks(legacyAndTwin(legacy, real));
+
+      expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+        [REAL_A, BoolFlag.TRUE],
+      ]);
+    },
+  );
+
+  it("keeps a legacy entry whose title is one unit over the cap and leaves its real twin unshared", () => {
+    const books = legacyAndTwin(overCap, overCap);
+    const before = snapshot(books);
+
+    const result = dropResolvedLegacyBooks(books);
+
+    expect(result).toBe(books);
+    expect(result).toEqual(before);
+    expect(result.find((b) => b.bookId === REAL_A)?.isShared).toBe(
+      BoolFlag.FALSE,
+    );
+  });
+});
+
+describe("mergeBooks — ambiguousTitles", () => {
+  const scraped: ScrapedBook[] = [
+    {
+      bookId: REAL_A,
+      title: "三體",
+      author: "作者",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+    },
+  ];
+  const saved = (): BookEntry[] => [
+    makeBook({ bookId: LEGACY_A, title: "三體", isShared: BoolFlag.TRUE }),
+  ];
+
+  it("forwards ambiguousTitles, keeping the legacy entry beside the scraped twin", () => {
+    const result = mergeBooks(scraped, saved(), undefined, new Set(["三體"]));
+
+    expect(result.map((b) => [b.bookId, b.isShared])).toEqual([
+      [REAL_A, BoolFlag.FALSE],
+      [LEGACY_A, BoolFlag.TRUE],
+    ]);
+  });
+
+  it("collapses the legacy entry into the scraped twin without it (positive companion)", () => {
     const result = mergeBooks(scraped, saved());
 
     expect(result.map((b) => [b.bookId, b.isShared])).toEqual([

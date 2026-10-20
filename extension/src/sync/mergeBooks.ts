@@ -9,7 +9,8 @@ import { dropResolvedLegacyBooks } from "./legacyBooks";
  * - Saved-only: keep as-is (user may be on a different page), EXCEPT
  *   legacy entries resolved to a real one, which are dropped by
  *   `dropResolvedLegacyBooks` (#234); ids in `keepFlagsFor` (the user's
- *   unsaved toggles) are never promoted by that step
+ *   unsaved toggles) are never promoted by that step, and a title in
+ *   `ambiguousTitles` (books the field-cap fit left out, #326) never resolves
  *
  * Pruning books removed from Readmoo is `pruneRemovedBooks` in
  * `pruneBooks.ts`, run by `resolveForUpload` — never here.
@@ -18,6 +19,7 @@ export function mergeBooks(
   scraped: ScrapedBook[],
   saved: BookEntry[],
   keepFlagsFor?: ReadonlySet<string>,
+  ambiguousTitles?: ReadonlySet<string>,
 ): BookEntry[] {
   const savedMap = new Map(saved.map((b) => [b.bookId, b]));
   const merged = new Map<string, BookEntry>();
@@ -43,5 +45,9 @@ export function mergeBooks(
     }
   }
 
-  return dropResolvedLegacyBooks(Array.from(merged.values()), keepFlagsFor);
+  return dropResolvedLegacyBooks(
+    Array.from(merged.values()),
+    keepFlagsFor,
+    ambiguousTitles,
+  );
 }

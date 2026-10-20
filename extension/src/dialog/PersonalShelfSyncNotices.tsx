@@ -22,12 +22,22 @@ export function autoShareHeldNotice(count: number): string {
   return `這次新增了 ${count} 本書，一次超過 ${AUTO_SHARE_MAX_NEW} 本不會自動開放，請自己選要開放哪些`;
 }
 
+/** Notice shown when a sync left out new books whose title is over the server's cap (#326, `sync/fieldCaps.ts`). */
+export function overLongBooksNotice(count: number): string {
+  return `有 ${count} 本書的書名太長，伺服器存不下，沒有加進個人書櫃`;
+}
+
+/** Notice shown when a sync uploaded new books with an over-cap author or category left blank (#326). */
+export function blankedFieldsNotice(count: number): string {
+  return `有 ${count} 本書的作者或分類太長，伺服器存不下，書還是加進了個人書櫃，只是不顯示太長的那一欄`;
+}
+
 export interface PersonalShelfSyncNoticesProps {
   /** Live scrape progress; empty when no scrape is running. */
   progressMessage: string;
   /** Sync error to show; empty when the last sync did not fail. */
   syncError: string;
-  /** Renamed / removed / auto-shared book counts of the last successful sync. */
+  /** Renamed / removed / auto-shared / left-out / blanked book counts of the last successful sync. */
   counts: SyncNoticeCounts;
 }
 
@@ -64,6 +74,16 @@ export function PersonalShelfSyncNotices({
       {counts.autoShareHeldCount > 0 && (
         <p role="status" className="moo-shelf__sync-notice">
           {autoShareHeldNotice(counts.autoShareHeldCount)}
+        </p>
+      )}
+      {counts.fieldCapSkippedCount > 0 && (
+        <p role="status" className="moo-shelf__sync-notice">
+          {overLongBooksNotice(counts.fieldCapSkippedCount)}
+        </p>
+      )}
+      {counts.fieldCapBlankedCount > 0 && (
+        <p role="status" className="moo-shelf__sync-notice">
+          {blankedFieldsNotice(counts.fieldCapBlankedCount)}
         </p>
       )}
     </>

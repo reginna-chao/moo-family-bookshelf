@@ -1,5 +1,9 @@
 import { BookEntry, BoolFlag } from "../api/client";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
+import {
+  BOOK_TITLE_MAX_LENGTH,
+  exceedsBookFieldCap,
+} from "moo-family-bookshelf-shared/api/bookFieldLimits";
 
 // The real-book-id rule lives in `shared/` so the scraper, this cleanup and the Worker's PUT books
 // boundary cannot drift; re-exported so existing `../sync/legacyBooks` importers keep working.
@@ -20,20 +24,30 @@ export function isLegacyBookEntry(entry: BookEntry): boolean {
 }
 
 /** The trimmed title same-title matching compares; "" for a missing or non-string title. */
-export function titleKey(entry: BookEntry): string {
+export function titleKey(entry: Pick<BookEntry, "title">): string {
   return typeof entry.title === "string" ? entry.title.trim() : "";
 }
 
-/** Title → the single real entry carrying it; a title shared by 2+ real entries maps to `null`
- *  (ambiguous), and empty titles are not indexed. */
-function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
+/** Title → the single real entry carrying it; a title shared by 2+ real entries, or in
+ *  `ambiguousTitles`, maps to `null` (ambiguous), and empty titles are not indexed. */
+function indexRealByTitle(
+  books: BookEntry[],
+  ambiguousTitles?: ReadonlySet<string>,
+): Map<string, BookEntry | null> {
   const index = new Map<string, BookEntry | null>();
+  for (const key of ambiguousTitles ?? []) index.set(key, null);
   for (const entry of books) {
     const key = titleKey(entry);
     if (key === "" || isLegacyBookEntry(entry)) continue;
     index.set(key, index.has(key) ? null : entry);
   }
   return index;
+}
+
+/** False for an over-cap title (#326): its scraped real twins are sent as `OVER_CAP_TITLE_PLACEHOLDER`,
+ *  so a lone real book still storing that title (not scraped this sync) would be a false twin. */
+function legacyTitleCanResolve(key: string): boolean {
+  return !exceedsBookFieldCap(key, BOOK_TITLE_MAX_LENGTH);
 }
 
 /**
@@ -50,18 +64,25 @@ function indexRealByTitle(books: BookEntry[]): Map<string, BookEntry | null> {
  * through this same rule. Pruning books removed from Readmoo (#241) is
  * `pruneRemovedBooks` in `pruneBooks.ts`, which never touches legacy ids.
  *
+ * A title in `ambiguousTitles` (a scraped book left out of `books`, #326)
+ * counts as one more real entry carrying it, so its legacy entry is kept.
+ * A legacy entry whose trimmed title is over `BOOK_TITLE_MAX_LENGTH` never
+ * resolves and is always kept (#326, see `legacyTitleCanResolve`).
+ *
  * Order is preserved, the input is not mutated, and the same array is
  * returned when nothing is removed.
  */
 export function dropResolvedLegacyBooks(
   books: BookEntry[],
   keepFlagsFor?: ReadonlySet<string>,
+  ambiguousTitles?: ReadonlySet<string>,
 ): BookEntry[] {
-  const realByTitle = indexRealByTitle(books);
-  const resolveTarget = (entry: BookEntry): BookEntry | null =>
-    isLegacyBookEntry(entry)
-      ? (realByTitle.get(titleKey(entry)) ?? null)
-      : null;
+  const realByTitle = indexRealByTitle(books, ambiguousTitles);
+  const resolveTarget = (entry: BookEntry): BookEntry | null => {
+    if (!isLegacyBookEntry(entry)) return null;
+    const key = titleKey(entry);
+    return legacyTitleCanResolve(key) ? (realByTitle.get(key) ?? null) : null;
+  };
 
   const promoted = new Set<BookEntry>();
   let removedAny = false;

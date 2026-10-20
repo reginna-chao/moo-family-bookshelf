@@ -512,6 +512,51 @@ describe("resolveForUpload", () => {
     expect(result.renamedBooks).toEqual([]);
     expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID, OLD_ID]);
   });
+
+  // #326: a title in `skippedTitles` is a scraped book the field-cap fit left out of `merged`.
+  describe("skippedTitles", () => {
+    const options = {
+      familyId: "fam-1",
+      userId: USER_ID,
+      preScrapeServerIds: SAVED_IDS,
+    };
+
+    it("does not pair a same-title rename while another scraped copy of the title was left out", () => {
+      const result = resolveForUpload(merged, scrapeOf(true), [saved], [], {
+        ...options,
+        skippedTitles: new Set([saved.title]),
+      });
+
+      expect(result.renamedBooks).toEqual([]);
+      expect(result.books.map((b) => b.bookId)).toEqual([NEW_ID, OLD_ID]);
+      expect(result.books[1].isShared).toBe(BoolFlag.TRUE);
+    });
+
+    it.each([
+      { name: "keeps", skippedTitles: new Set([saved.title]), kept: [OLD_ID] },
+      {
+        name: "prunes (positive companion)",
+        skippedTitles: undefined,
+        kept: [],
+      },
+    ])(
+      "$name a saved book whose left-out scraped twin Readmoo's library holds",
+      ({ skippedTitles, kept }) => {
+        // NEW (the twin, title T) is in the scrape and library ids but not in `merged`.
+        const result = resolveForUpload(
+          [saved],
+          scrapeOf(true, new Set([NEW_ID])),
+          [saved],
+          [],
+          { ...options, skippedTitles },
+        );
+
+        expect(result.books.map((b) => b.bookId)).toEqual(kept);
+        expect(result.removedCount).toBe(1 - kept.length);
+        expect(result.renamedBooks).toEqual([]);
+      },
+    );
+  });
 });
 
 // The onboarding sync (`dialog/onboardingBooksUpload.ts`) never judges renames and

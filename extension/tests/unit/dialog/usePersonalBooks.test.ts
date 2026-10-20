@@ -117,7 +117,10 @@ import { usePersonalBooks } from "@/dialog/usePersonalBooks";
 import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import { scrapeBooks } from "@/content/scraper";
 import { PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
-import { BOOKS_TOO_LARGE_MESSAGE } from "moo-family-bookshelf-shared/personal/saveErrors";
+import {
+  BOOKS_INVALID_PAYLOAD_MESSAGE,
+  BOOKS_TOO_LARGE_MESSAGE,
+} from "moo-family-bookshelf-shared/personal/saveErrors";
 import type { RenamedBook } from "@/sync/renamedBooks";
 
 /** Realistic 15-digit book ids — a short cache-only id is dropped on load.
@@ -1473,6 +1476,40 @@ describe("usePersonalBooks — oversized save (413 PAYLOAD_TOO_LARGE)", () => {
     expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
     expect(result.current.errorMessage).toBe(BOOKS_TOO_LARGE_MESSAGE);
     expect(result.current.status).toBe("error");
+  });
+});
+
+// #326: the Worker's English 400 for a malformed / over-cap body never reaches the shelf.
+describe("usePersonalBooks — save refused as invalid (400 INVALID_PAYLOAD)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupStorage();
+  });
+
+  it("shows the invalid-payload copy and keeps the toggle staged", async () => {
+    const client = clientWithServerBooks([makeBook(B1)], {
+      patchPersonalBooks: vi.fn().mockResolvedValue({
+        error: {
+          code: "INVALID_PAYLOAD",
+          message: "Each book's title must be at most 200 characters",
+        },
+      }),
+    });
+    const { result } = renderUsePersonalBooks(client);
+    await waitForReady(result);
+
+    act(() => {
+      result.current.handleToggle(B1);
+    });
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(client.patchPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(result.current.errorMessage).toBe(BOOKS_INVALID_PAYLOAD_MESSAGE);
+    expect(result.current.errorMessage).not.toContain("must be at most");
+    expect(result.current.status).toBe("error");
+    expect(result.current.dirtyBookIds.has(B1)).toBe(true);
   });
 });
 

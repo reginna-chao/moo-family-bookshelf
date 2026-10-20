@@ -172,6 +172,49 @@ describe("pruneRemovedBooks", () => {
     expect(result.removedCount).toBe(0);
   });
 
+  describe("protectedTitles (#326)", () => {
+    // D may be the scraped book the field-cap fit left out, under its old id.
+    const titled = (bookId: string, title: string): BookEntry => ({
+      ...book(bookId),
+      title,
+    });
+    const reads = { scrapedIds: new Set([A]), libraryIds: new Set([A]) };
+
+    it("keeps a candidate whose trimmed title is protected, removing the others", () => {
+      const books = [book(A), titled(C, "別本書"), titled(D, "  被略過的書 ")];
+
+      const result = pruneRemovedBooks(
+        books,
+        ctxFor(books, { ...reads, protectedTitles: new Set(["被略過的書"]) }),
+      );
+
+      expect(result.books.map((b) => b.bookId)).toEqual([A, D]);
+      expect(result.removedBooks).toEqual([
+        { bookId: C, isShared: BoolFlag.FALSE },
+      ]);
+    });
+
+    it("removes the same candidate when protectedTitles is omitted (positive companion)", () => {
+      const books = [book(A), titled(D, "被略過的書")];
+
+      const result = pruneRemovedBooks(books, ctxFor(books, reads));
+
+      expect(result.books.map((b) => b.bookId)).toEqual([A]);
+      expect(result.removedCount).toBe(1);
+    });
+
+    it("keeps nothing extra for an empty protected set", () => {
+      const books = [book(A), titled(D, "被略過的書")];
+
+      const result = pruneRemovedBooks(
+        books,
+        ctxFor(books, { ...reads, protectedTitles: new Set() }),
+      );
+
+      expect(result.removedBooks.map((b) => b.bookId)).toEqual([D]);
+    });
+  });
+
   it("keeps an entry the server does not hold", () => {
     const books = [book(A), book(D)];
 

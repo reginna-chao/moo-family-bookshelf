@@ -245,6 +245,17 @@ describe("resolveRenamedBooks", () => {
       books: () => [newEntry({ title: "別本書" }), oldEntry()],
       ctx: {},
     },
+    {
+      // #326: a third copy the field-cap fit left out of the list.
+      name: "a left-out scraped book carries the same title",
+      books: () => [newEntry(), oldEntry({ isShared: BoolFlag.TRUE })],
+      ctx: { ambiguousTitles: new Set([TITLE]) },
+    },
+    {
+      name: "a left-out scraped book carries the same title after trimming",
+      books: () => [newEntry({ title: ` ${TITLE}` }), oldEntry()],
+      ctx: { ambiguousTitles: new Set([TITLE]) },
+    },
   ];
 
   for (const { name, books, ctx } of keepCases) {
@@ -261,6 +272,18 @@ describe("resolveRenamedBooks", () => {
       expect(input).toEqual(before);
     });
   }
+
+  it("still pairs a title that ambiguousTitles does not hold (#326 positive companion)", () => {
+    const books = [newEntry(), oldEntry({ isShared: BoolFlag.TRUE })];
+
+    const result = resolveRenamedBooks(
+      books,
+      makeCtx({ ambiguousTitles: new Set(["別本書"]) }),
+    );
+
+    expect(result.renamedBooks).toEqual([{ oldId: OLD_ID, newId: NEW_ID }]);
+    expect(result.books[0].isShared).toBe(BoolFlag.TRUE);
+  });
 
   it("replaces an archived old entry when archive sync is on", () => {
     const books = [

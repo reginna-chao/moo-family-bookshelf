@@ -15,6 +15,7 @@ import {
   loadSavedBooksForSync,
   type LoadSavedResult,
 } from "../sync/savedBooks";
+import { fitScrapeToFieldCaps, warnFieldCapFit } from "../sync/fieldCaps";
 import { assertSyncNotPaused } from "../sync/syncBreaker";
 import { holdBackRenameCandidates } from "../sync/syncSteps";
 import { MAX_SYNC_UPLOAD_ATTEMPTS } from "../sync/syncUpload";
@@ -43,7 +44,16 @@ function buildOnboardingRecord(
   scrapedIds: ReadonlySet<string>,
   saved: LoadSavedResult,
 ): PersonalBooks & { expectedLastUpdated?: string } {
-  const merged = mergeBooks(p.scrapedBooks, saved.books);
+  // Fitted per read, like the sync (`sync/fieldCaps.ts`); `scrapedIds` stays the full scrape. Holding
+  // back needs no `skippedTitles`: it only drops brand-new entries, never a saved one.
+  const fit = fitScrapeToFieldCaps(p.scrapedBooks, saved.books);
+  warnFieldCapFit(fit);
+  const merged = mergeBooks(
+    fit.books,
+    saved.books,
+    undefined,
+    fit.skippedTitles,
+  );
   return {
     schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
     userId: p.userId,

@@ -16,6 +16,10 @@ export interface SyncNoticeCounts {
   autoSharedCount: number;
   /** New books 新書預設開放 left unshared because there were too many. */
   autoShareHeldCount: number;
+  /** New books left out of the sync because the title is over the server's cap (`sync/fieldCaps.ts`). */
+  fieldCapSkippedCount: number;
+  /** New books uploaded with an over-cap author or category left blank (`sync/fieldCaps.ts`). */
+  fieldCapBlankedCount: number;
 }
 
 /** The last SUCCESSFUL sync, held as one value so its parts never mismatch. */
@@ -34,6 +38,8 @@ export const NO_SYNC: LastSync = {
   removedSharedCount: 0,
   autoSharedCount: 0,
   autoShareHeldCount: 0,
+  fieldCapSkippedCount: 0,
+  fieldCapBlankedCount: 0,
 };
 
 export function lastSyncOf(result: SyncBooksResult): LastSync {
@@ -47,6 +53,8 @@ export function lastSyncOf(result: SyncBooksResult): LastSync {
     removedSharedCount: result.removedSharedCount ?? 0,
     autoSharedCount: result.autoSharedCount ?? 0,
     autoShareHeldCount: result.autoShareHeldCount ?? 0,
+    fieldCapSkippedCount: result.fieldCapSkippedCount ?? 0,
+    fieldCapBlankedCount: result.fieldCapBlankedCount ?? 0,
     lastUpdated: result.lastUpdated,
   };
 }
@@ -59,5 +67,7 @@ export function syncNoticeCountsOf(sync: LastSync): SyncNoticeCounts {
     removedSharedCount: sync.removedSharedCount,
     autoSharedCount: sync.autoSharedCount,
     autoShareHeldCount: sync.autoShareHeldCount,
+    fieldCapSkippedCount: sync.fieldCapSkippedCount,
+    fieldCapBlankedCount: sync.fieldCapBlankedCount,
   };
 }

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   BOOKS_CONFLICT_CODE,
   BOOKS_CONFLICT_MESSAGE,
+  BOOKS_INVALID_PAYLOAD_MESSAGE,
   BOOKS_SAVE_CONFLICT_MESSAGE,
   BOOKS_TOO_LARGE_MESSAGE,
   booksSaveErrorText,
@@ -15,8 +16,12 @@ import {
  * the code alone selects local 繁中 copy. A sync whose `expectedLastUpdated`
  * kept failing ends on `409 { code: "BOOKS_CONFLICT" }` (#249), which likewise
  * maps to local copy — the sync wording by default, the Save wording when the
- * caller passes `BOOKS_SAVE_CONFLICT_MESSAGE` (#259). Every other error keeps going through
- * `safeErrorText` exactly as the call sites did before (that helper's full
+ * caller passes `BOOKS_SAVE_CONFLICT_MESSAGE` (#259). A body the Worker refuses
+ * as malformed or over a cap — `400 { code: "INVALID_PAYLOAD", message: "Each
+ * book's author must be at most 500 characters" }` among others — gets local
+ * copy too (#326): that English message used to reach the shelf verbatim.
+ * Every other error keeps going through `safeErrorText` exactly as the call
+ * sites did before (that helper's full
  * value domain is pinned in tests/unit/safeErrorText.test.ts).
  *
  * The envelope is bare-cast from `response.json()`, so `code` and `message`
@@ -59,6 +64,51 @@ describe("booksSaveErrorText", () => {
       }
     },
   );
+
+  it("pins the production copy for an upload the server refuses as invalid (#326)", () => {
+    expect(BOOKS_INVALID_PAYLOAD_MESSAGE).toBe(
+      "書單裡有伺服器不接受的資料，這次沒有存進去。請把擴充功能或 PWA 更新到最新版再試一次。",
+    );
+  });
+
+  it("never shows the Worker's English field-cap message (#326)", () => {
+    // The Worker's 400 for an over-long field (worker/src/routes/user.ts).
+    const error = asError(
+      "INVALID_PAYLOAD",
+      "Each book's author must be at most 500 characters",
+    );
+    for (const fallback of [SAVE_FALLBACK, SYNC_FALLBACK]) {
+      const text = booksSaveErrorText(error, fallback);
+      expect(text).toBe(BOOKS_INVALID_PAYLOAD_MESSAGE);
+      expect(text).not.toContain("must be at most");
+    }
+  });
+
+  it.each([
+    { name: "a localized message", message: "資料格式錯誤" },
+    { name: "an object message", message: { zh: "壞掉了" } },
+    { name: "a missing message", message: undefined },
+    { name: "an empty message", message: "" },
+  ])(
+    "returns the invalid-payload copy for INVALID_PAYLOAD carrying $name, ignoring fallback and conflict copy",
+    ({ message }) => {
+      for (const fallback of [SAVE_FALLBACK, SYNC_FALLBACK]) {
+        expect(
+          booksSaveErrorText(
+            asError("INVALID_PAYLOAD", message),
+            fallback,
+            BOOKS_SAVE_CONFLICT_MESSAGE,
+          ),
+        ).toBe(BOOKS_INVALID_PAYLOAD_MESSAGE);
+      }
+    },
+  );
+
+  it("passes a near-miss lowercase invalid-payload code through as an ordinary error", () => {
+    expect(
+      booksSaveErrorText(asError("invalid_payload", "bad"), SAVE_FALLBACK),
+    ).toBe("bad");
+  });
 
   it("pins the production copy and wire code for a sync conflict", () => {
     expect(BOOKS_CONFLICT_MESSAGE).toBe(

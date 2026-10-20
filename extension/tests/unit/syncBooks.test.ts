@@ -235,6 +235,8 @@ describe("syncBooks — archive sync path", () => {
     expect(mergeBooks).toHaveBeenCalledWith(
       [...normalBooks, ...archivedBooks],
       expect.any(Array),
+      undefined,
+      new Set(),
     );
   });
 
@@ -633,6 +635,8 @@ describe("syncBooks — full flow", () => {
     expect(mergeBooks).toHaveBeenCalledWith(
       expect.any(Array),
       expect.arrayContaining([expect.objectContaining({ bookId: "plain-1" })]),
+      undefined,
+      new Set(),
     );
   });
 

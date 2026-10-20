@@ -4,6 +4,7 @@ import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 import { MAX_SYNC_UPLOAD_ATTEMPTS } from "@/sync/syncUpload";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
+import { OVER_CAP_TITLE_PLACEHOLDER } from "@/sync/fieldCaps";
 
 /**
  * `dialog/onboardingBooksUpload.ts` (#259) — onboarding's first sync is a
@@ -13,7 +14,15 @@ import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
  * the merge rebuilt from that read (a share another device changed is taken
  * from the server, never written back stale). At most
  * `MAX_SYNC_UPLOAD_ATTEMPTS` PUTs; the last error is returned for the caller's
- * error phase. A failed read throws.
+ * error phase. A failed read throws. Each read also fits the scrape to the
+ * server's text-field caps first (#326, `sync/fieldCaps.ts`): a new book with
+ * an over-cap title is left out, a new book with an over-cap author or
+ * category is uploaded with that field blank, and a saved one keeps its saved
+ * author / category, its changed over-cap title replaced by
+ * `OVER_CAP_TITLE_PLACEHOLDER`. A blanked book keeps its title, so the
+ * same-title steps treat it exactly like a book that fits — including
+ * onboarding's pre-existing hold-back of rename candidates
+ * (`holdBackRenameCandidates`, #234), which the caps do not change.
  *
  * The real merge runs here (`useAutoSetup.test.ts` stubs it). The hook-level
  * wiring — error phase, copy, `LAST_SYNC_AT_KEY` — is in `useAutoSetup.test.ts`.
@@ -22,6 +31,7 @@ import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
 const USER = "user-hash";
 const A = "210000000000001";
 const B = "210000000000002";
+const LEGACY = "14563038";
 const L0 = "2026-09-30T10:00:00.000Z";
 const L1 = "2026-09-30T10:00:05.000Z";
 const L2 = "2026-09-30T10:00:09.000Z";
@@ -206,6 +216,184 @@ describe("uploadOnboardingBooks", () => {
 
     await expect(upload(api)).rejects.toThrow("伺服器忙碌");
     expect(updatePersonalBooks).toHaveBeenCalledTimes(1);
+  });
+
+  // #326: the Worker refuses the whole PUT over one entry's field cap.
+  it("leaves a new book with an over-cap title out of the PUT, with one counts-only warning", async () => {
+    const overCap = { ...scraped(B), title: "長".repeat(201) };
+    const { api, updatePersonalBooks } = client(
+      [record([saved(A, BoolFlag.TRUE)], L0)],
+      [{ data: { ok: true } }],
+    );
+
+    await expect(upload(api, [scraped(A), overCap])).resolves.toBeNull();
+
+    const body = updatePersonalBooks.mock.calls[0][1];
+    expect(body.books.map((b: BookEntry) => [b.bookId, b.isShared])).toEqual([
+      [A, BoolFlag.TRUE],
+    ]);
+    const capWarnings = vi
+      .mocked(console.warn)
+      .mock.calls.filter(
+        ([text]) => text === "[moo] books over the server's text-field caps",
+      );
+    expect(capWarnings).toEqual([
+      [
+        "[moo] books over the server's text-field caps",
+        { skippedCount: 1, blankedCount: 0, keptStoredCount: 0 },
+      ],
+    ]);
+  });
+
+  it("uploads a new book with an over-cap author with that author blank, with one counts-only warning", async () => {
+    const overCap = { ...scraped(B), author: "長".repeat(501) };
+    const { api, updatePersonalBooks } = client(
+      [record([saved(A, BoolFlag.TRUE)], L0)],
+      [{ data: { ok: true } }],
+    );
+
+    await expect(upload(api, [scraped(A), overCap])).resolves.toBeNull();
+
+    const body = updatePersonalBooks.mock.calls[0][1];
+    expect(
+      body.books.map((b: BookEntry) => [b.bookId, b.author, b.isShared]),
+    ).toEqual([
+      [A, "", BoolFlag.TRUE],
+      [B, "", BoolFlag.FALSE],
+    ]);
+    expect(body.books[1].title).toBe(`書-${B}`);
+    expect(
+      vi
+        .mocked(console.warn)
+        .mock.calls.filter(
+          ([text]) => text === "[moo] books over the server's text-field caps",
+        ),
+    ).toEqual([
+      [
+        "[moo] books over the server's text-field caps",
+        { skippedCount: 0, blankedCount: 1, keptStoredCount: 0 },
+      ],
+    ]);
+  });
+
+  it("keeps a saved book whose scraped title is over the cap: placeholder title, saved share flag, scraped author", async () => {
+    const { api, updatePersonalBooks } = client(
+      [record([saved(A, BoolFlag.TRUE)], L0)],
+      [{ data: { ok: true } }],
+    );
+    const overCap = {
+      ...scraped(A),
+      title: "長".repeat(201),
+      author: "新作者",
+    };
+
+    await expect(upload(api, [overCap])).resolves.toBeNull();
+
+    const books = updatePersonalBooks.mock.calls[0][1].books;
+    expect(books).toHaveLength(1);
+    // The scraped author proves the scrape was merged, not just the saved entry echoed back.
+    expect(books[0]).toMatchObject({
+      bookId: A,
+      title: OVER_CAP_TITLE_PLACEHOLDER,
+      author: "新作者",
+      isShared: BoolFlag.TRUE,
+    });
+  });
+
+  // See the header → "A blanked book keeps its title": each table pins fitting ≡ blanked.
+  describe("a same-title new copy, fitting or blanked", () => {
+    const copyOf = (kind: "none" | "fits" | "blanked", title: string) => {
+      if (kind === "none") return [];
+      const copy = { ...scraped(B), title };
+      return [kind === "fits" ? copy : { ...copy, author: "長".repeat(501) }];
+    };
+    const bodyOf = (put: ReturnType<typeof vi.fn>) =>
+      put.mock.calls[0][1].books as BookEntry[];
+
+    it.each([
+      {
+        kind: "fits",
+        uploaded: [
+          [A, BoolFlag.FALSE],
+          [LEGACY, BoolFlag.TRUE],
+        ],
+      },
+      {
+        kind: "blanked",
+        uploaded: [
+          [A, BoolFlag.FALSE],
+          [LEGACY, BoolFlag.TRUE],
+        ],
+      },
+      // Without the copy the legacy entry resolves onto its lone real twin.
+      { kind: "none", uploaded: [[A, BoolFlag.TRUE]] },
+    ] as const)(
+      "holds back a copy that $kind next to a saved twin and a shared legacy entry (pre-existing #234 hold-back)",
+      async ({ kind, uploaded }) => {
+        const legacy = { ...saved(LEGACY, BoolFlag.TRUE), title: `書-${A}` };
+        const { api, updatePersonalBooks } = client(
+          [record([saved(A, BoolFlag.FALSE), legacy], L0)],
+          [{ data: { ok: true } }],
+        );
+
+        await expect(
+          upload(api, [scraped(A), ...copyOf(kind, `書-${A}`)]),
+        ).resolves.toBeNull();
+
+        expect(
+          bodyOf(updatePersonalBooks).map((b) => [b.bookId, b.isShared]),
+        ).toEqual(uploaded);
+      },
+    );
+
+    it.each([
+      { kind: "fits", uploaded: [[LEGACY, BoolFlag.TRUE]] },
+      { kind: "blanked", uploaded: [[LEGACY, BoolFlag.TRUE]] },
+      // Without the copy the lone new twin takes the legacy share.
+      { kind: "none", uploaded: [[A, BoolFlag.TRUE]] },
+    ] as const)(
+      "holds back both new twins of a shared legacy entry when the second $kind (pre-existing #234 hold-back)",
+      async ({ kind, uploaded }) => {
+        const legacy = { ...saved(LEGACY, BoolFlag.TRUE), title: `書-${A}` };
+        const { api, updatePersonalBooks } = client(
+          [record([legacy], L0)],
+          [{ data: { ok: true } }],
+        );
+
+        await expect(
+          upload(api, [scraped(A), ...copyOf(kind, `書-${A}`)]),
+        ).resolves.toBeNull();
+
+        expect(
+          bodyOf(updatePersonalBooks).map((b) => [b.bookId, b.isShared]),
+        ).toEqual(uploaded);
+      },
+    );
+
+    it.each(["fits", "blanked"] as const)(
+      "sends a saved book renamed to a legacy entry's title with its new title when the same-title copy %s (pre-existing #234 hold-back)",
+      async (kind) => {
+        const legacy = { ...saved(LEGACY, BoolFlag.TRUE), title: "同名書" };
+        const storedA = { ...saved(A, BoolFlag.FALSE), title: "原書名" };
+        const { api, updatePersonalBooks } = client(
+          [record([storedA, legacy], L0)],
+          [{ data: { ok: true } }],
+        );
+        const renamedA = { ...scraped(A), title: "同名書", author: "新作者" };
+
+        await expect(
+          upload(api, [renamedA, ...copyOf(kind, "同名書")]),
+        ).resolves.toBeNull();
+
+        const books = bodyOf(updatePersonalBooks);
+        expect(books.map((b) => [b.bookId, b.title, b.isShared])).toEqual([
+          [A, "同名書", BoolFlag.FALSE],
+          [LEGACY, "同名書", BoolFlag.TRUE],
+        ]);
+        // The scraped author proves the scrape was merged, not just the saved entry echoed back.
+        expect(books[0].author).toBe("新作者");
+      },
+    );
   });
 
   it("throws the circuit-breaker pause when the re-read no longer matches the scrape", async () => {

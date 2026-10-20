@@ -425,7 +425,12 @@ describe("useAutoSetup", () => {
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
 
-      expect(mergeBooks).toHaveBeenCalledWith(expect.any(Array), [savedBook]);
+      expect(mergeBooks).toHaveBeenCalledWith(
+        expect.any(Array),
+        [savedBook],
+        undefined,
+        new Set(),
+      );
     });
 
     it("passes empty savedBooks when apiResponse.data is null (first-ever sync)", async () => {
@@ -444,7 +449,12 @@ describe("useAutoSetup", () => {
       await vi.advanceTimersByTimeAsync(1500);
       await promise;
 
-      expect(mergeBooks).toHaveBeenCalledWith(expect.any(Array), []);
+      expect(mergeBooks).toHaveBeenCalledWith(
+        expect.any(Array),
+        [],
+        undefined,
+        new Set(),
+      );
     });
   });
 

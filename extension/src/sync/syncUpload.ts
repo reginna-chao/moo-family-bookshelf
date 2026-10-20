@@ -18,6 +18,7 @@ import {
   landedLastUpdatedOf,
 } from "moo-family-bookshelf-shared/personal/fullPutConflict";
 import { autoShareContextFor, autoShareNewBooks } from "./autoShare";
+import { fitScrapeToFieldCaps, warnFieldCapFit } from "./fieldCaps";
 import { mergeBooks } from "./mergeBooks";
 import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
@@ -55,6 +56,10 @@ export interface SyncUploadResult {
    *  were too many (`sync/autoShare.ts`). */
   autoSharedCount: number;
   autoShareHeldCount: number;
+  /** New books left out because the title is over the server's cap, and new books uploaded with an
+   *  over-cap author / category blanked (`sync/fieldCaps.ts`). */
+  fieldCapSkippedCount: number;
+  fieldCapBlankedCount: number;
   /** The stored record's `lastUpdated` the landed PUT answered; undefined when the PUT response carries no usable `lastUpdated`. */
   lastUpdated?: string;
 }
@@ -88,14 +93,16 @@ function buildSyncUpload(
   ctx: SyncUploadContext,
   saved: LoadSavedResult,
 ): SyncUpload {
-  const merged = mergeBooks(ctx.scrape.books, saved.books);
-  const plan = resolveForUpload(
-    merged,
-    ctx.scrape,
-    saved.books,
-    ctx.requests,
-    ctx,
-  );
+  // Fitted per read (a 409 re-read changes `saved`). A left-out book is absent from `merged` (never
+  // uploaded or auto-shared), but its title keeps same-title matches ambiguous and its old entry unpruned.
+  const fit = fitScrapeToFieldCaps(ctx.scrape.books, saved.books);
+  warnFieldCapFit(fit);
+  const { skippedTitles } = fit;
+  const merged = mergeBooks(fit.books, saved.books, undefined, skippedTitles);
+  const plan = resolveForUpload(merged, ctx.scrape, saved.books, ctx.requests, {
+    ...ctx,
+    skippedTitles,
+  });
   // Never earlier: id-change resolution only promotes TRUE, so a flag set before it would stick.
   const shareCtx = autoShareContextFor(
     saved,
@@ -126,6 +133,8 @@ function buildSyncUpload(
     removedSharedCount: plan.removedSharedCount,
     autoSharedCount,
     autoShareHeldCount,
+    fieldCapSkippedCount: fit.skippedCount,
+    fieldCapBlankedCount: fit.blankedCount,
   };
 }
 
