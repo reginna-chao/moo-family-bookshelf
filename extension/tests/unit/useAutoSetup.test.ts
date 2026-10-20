@@ -26,6 +26,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * make it a server id and the pair could never be resolved by a later sync).
  * The real merge runs there so the saved-only entry is actually in the merged
  * list.
+ *
+ * #328 kept cache retry: a personal-books cache that a failed create/join upload
+ * left behind is retried AFTER the post-scrape account re-check and BEFORE the
+ * onboarding upload, so its share flags become the first server record instead
+ * of an all-unshared one. These cases back chrome.storage.local.get / remove
+ * with a local store and the API with a stateful in-memory record, and run the
+ * real merge so the onboarding PUT is built on top of the migrated record.
  */
 
 // Mock scraper module before importing the hook
@@ -54,8 +61,14 @@ import { scrapeUserEmail } from "@/content/scraper";
 import { mergeBooks } from "@/dialog/mergeBooks";
 import { verifyAccountIdentity } from "@/dialog/accountIdentityCheck";
 import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "@/dialog/AccountCheckContext";
-import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
-import { LAST_SYNC_AT_KEY } from "@/constants";
+import {
+  BoolFlag,
+  type ApiClient,
+  type BookEntry,
+  type PersonalBooks,
+} from "@/api/client";
+import { LAST_SYNC_AT_KEY, PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
 import {
   BOOKS_CONFLICT_MESSAGE,
   BOOKS_SAVE_CONFLICT_MESSAGE,
@@ -679,5 +692,176 @@ describe("useAutoSetup", () => {
         expect(warnSpy).not.toHaveBeenCalled();
       });
     });
+  });
+
+  // See the header → "#328 kept cache retry".
+  describe("syncBooks — retry of a kept personal-books cache (#328)", () => {
+    const USER_ID = "user-hash";
+    const CACHED_BOOK: BookEntry = {
+      bookId: "210000000000001",
+      title: "設好分享的書",
+      author: "",
+      isbn: "",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+      isShared: BoolFlag.TRUE,
+    };
+    const ENCODED_CACHE = encodePersonalBooksCache(USER_ID, [CACHED_BOOK]);
+
+    let store: Record<string, unknown>;
+    let restoreRemove: () => void;
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(async () => {
+      store = { [PERSONAL_BOOKS_CACHE_KEY]: ENCODED_CACHE };
+      vi.mocked(chrome.storage.local.get).mockImplementation(((
+        keys: string | string[],
+      ) => {
+        const result: Record<string, unknown> = {};
+        for (const key of Array.isArray(keys) ? keys : [keys]) {
+          if (key in store) result[key] = store[key];
+        }
+        return Promise.resolve(result);
+      }) as unknown as typeof chrome.storage.local.get);
+
+      const remove = vi.mocked(chrome.storage.local.remove);
+      const originalRemove = remove.getMockImplementation();
+      remove.mockImplementation(((keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys])
+          delete store[key];
+        return Promise.resolve();
+      }) as unknown as typeof chrome.storage.local.remove);
+      restoreRemove = () => {
+        if (originalRemove) remove.mockImplementation(originalRemove);
+      };
+
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockResolvedValueOnce([
+        {
+          bookId: CACHED_BOOK.bookId,
+          title: CACHED_BOOK.title,
+          author: "",
+          coverUrl: "",
+          readmooUrl: "",
+          category: "",
+          isArchived: BoolFlag.FALSE,
+        },
+      ]);
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      restoreRemove();
+      warnSpy.mockRestore();
+    });
+
+    /** A server holding one personal-books record in memory, starting with none. */
+    function createServer(): ApiClient {
+      let record: PersonalBooks | null = null;
+      return {
+        getPersonalBooks: vi.fn(async () => ({ data: record })),
+        updatePersonalBooks: vi.fn(
+          async (_userId: string, body: PersonalBooks) => {
+            record = body;
+            return { data: { ok: true } };
+          },
+        ),
+      } as unknown as ApiClient;
+    }
+
+    async function withRealMerge(): Promise<void> {
+      const actual = await vi.importActual<
+        typeof import("@/dialog/mergeBooks")
+      >("@/dialog/mergeBooks");
+      vi.mocked(mergeBooks).mockImplementationOnce(actual.mergeBooks);
+    }
+
+    async function runSync(api: ApiClient) {
+      const { result } = renderHook(() => useAutoSetup());
+      let success = false;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: USER_ID,
+          apiClient: api,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+      return { success, result };
+    }
+
+    it("uploads the kept cache before the onboarding upload, keeping its share flags, then removes it", async () => {
+      await withRealMerge();
+      const api = createServer();
+
+      const { success } = await runSync(api);
+
+      expect(success).toBe(true);
+      expect(chrome.storage.local.get).toHaveBeenCalledWith(
+        expect.arrayContaining([PERSONAL_BOOKS_CACHE_KEY]),
+      );
+      const puts = vi
+        .mocked(api.updatePersonalBooks)
+        .mock.calls.map(([, body]) => body);
+      expect(puts).toHaveLength(2);
+      const [cachePut, onboardingPut] = puts;
+      expect(cachePut.books).toEqual([CACHED_BOOK]);
+      expect(cachePut.books[0].isShared).toBe(BoolFlag.TRUE);
+      // The onboarding PUT is built on the record the cache upload created.
+      expect(onboardingPut.expectedLastUpdated).toBe(cachePut.lastUpdated);
+      expect(onboardingPut.books).toEqual([
+        expect.objectContaining({
+          bookId: CACHED_BOOK.bookId,
+          isShared: BoolFlag.TRUE,
+        }),
+      ]);
+      expect(PERSONAL_BOOKS_CACHE_KEY in store).toBe(false);
+    });
+
+    it("retries the cache only after the post-scrape account re-check", async () => {
+      await withRealMerge();
+      const api = createServer();
+
+      await runSync(api);
+
+      const recheckOrder = vi.mocked(verifyAccountIdentity).mock
+        .invocationCallOrder[0];
+      const cacheReadOrder = vi.mocked(api.getPersonalBooks).mock
+        .invocationCallOrder[0];
+      expect(recheckOrder).toBeLessThan(cacheReadOrder);
+    });
+
+    it("still runs the onboarding upload when the cache retry fails again", async () => {
+      await withRealMerge();
+      const api = createServer();
+      vi.mocked(api.updatePersonalBooks).mockResolvedValueOnce({
+        error: { code: "INTERNAL_ERROR", message: "x" },
+      });
+
+      const { success } = await runSync(api);
+
+      expect(success).toBe(true);
+      expect(api.updatePersonalBooks).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["mismatch", "unknown"] as const)(
+      "does not touch the cache or the server when the post-scrape account re-check is %s",
+      async (identity) => {
+        vi.mocked(verifyAccountIdentity).mockResolvedValue(identity);
+        const api = createServer();
+
+        const { success } = await runSync(api);
+
+        expect(success).toBe(false);
+        expect(api.getPersonalBooks).not.toHaveBeenCalled();
+        expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+        expect(chrome.storage.local.get).not.toHaveBeenCalledWith(
+          expect.arrayContaining([PERSONAL_BOOKS_CACHE_KEY]),
+        );
+        expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+        expect(store[PERSONAL_BOOKS_CACHE_KEY]).toBe(ENCODED_CACHE);
+      },
+    );
   });
 });

@@ -1051,7 +1051,7 @@ describe("Onboarding", () => {
       ]);
     });
 
-    it("cleans up cache even when migration fails", async () => {
+    it("keeps the cache for a later retry when the migration upload fails (#328)", async () => {
       const mockApi = createMockApiClient({
         createFamily: vi.fn().mockResolvedValue({
           data: {
@@ -1087,8 +1087,9 @@ describe("Onboarding", () => {
         expect(screen.getByText("家庭公開書櫃已建立")).toBeInTheDocument();
       });
 
-      // Cache should still be cleaned up even on failure
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+      // The upload was attempted and failed, so the cache stays for the next sync to retry.
+      expect(mockApi.updatePersonalBooks).toHaveBeenCalled();
+      expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
         PERSONAL_BOOKS_CACHE_KEY,
       ]);
     });

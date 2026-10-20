@@ -5,6 +5,7 @@ import { navigateAndRun, readMePageProfile } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
 import { ApiClient } from "../api/client";
 import { uploadOnboardingBooks } from "./onboardingBooksUpload";
+import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 import { verifyAccountIdentity } from "./accountIdentityCheck";
 import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "./AccountCheckContext";
 import {
@@ -124,6 +125,10 @@ export function useAutoSetup(): UseAutoSetupReturn {
           restoreHash();
           return false;
         }
+
+        // Retry a cache kept by a failed create/join upload BEFORE the first upload
+        // creates an all-unshared record; with no cache this is one local read.
+        await migratePersonalBooksCache(userId, apiClient);
 
         const uploadError = await uploadOnboardingBooks({
           apiClient,
