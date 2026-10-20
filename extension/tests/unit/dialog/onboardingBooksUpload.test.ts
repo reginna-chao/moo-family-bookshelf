@@ -4,6 +4,7 @@ import { BoolFlag, type ApiClient, type BookEntry } from "@/api/client";
 import type { ScrapedBook } from "@/content/scraper";
 import { MAX_SYNC_UPLOAD_ATTEMPTS } from "@/sync/syncUpload";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
+import { OVER_CAP_TITLE_PLACEHOLDER } from "@/sync/fieldCaps";
 
 /**
  * `dialog/onboardingBooksUpload.ts` (#259) — onboarding's first sync is a
@@ -17,7 +18,8 @@ import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
  * server's text-field caps first (#326, `sync/fieldCaps.ts`): a new book with
  * an over-cap title is left out, a new book with an over-cap author or
  * category is uploaded with that field blank, and a saved one keeps its saved
- * author / category, its changed over-cap title cut to the cap. A blanked book keeps its title, so the
+ * author / category, its changed over-cap title replaced by
+ * `OVER_CAP_TITLE_PLACEHOLDER`. A blanked book keeps its title, so the
  * same-title steps treat it exactly like a book that fits — including
  * onboarding's pre-existing hold-back of rename candidates
  * (`holdBackRenameCandidates`, #234), which the caps do not change.
@@ -274,7 +276,7 @@ describe("uploadOnboardingBooks", () => {
     ]);
   });
 
-  it("keeps a saved book whose scraped title is over the cap: title cut to the cap, saved share flag, scraped author", async () => {
+  it("keeps a saved book whose scraped title is over the cap: placeholder title, saved share flag, scraped author", async () => {
     const { api, updatePersonalBooks } = client(
       [record([saved(A, BoolFlag.TRUE)], L0)],
       [{ data: { ok: true } }],
@@ -292,7 +294,7 @@ describe("uploadOnboardingBooks", () => {
     // The scraped author proves the scrape was merged, not just the saved entry echoed back.
     expect(books[0]).toMatchObject({
       bookId: A,
-      title: "長".repeat(200),
+      title: OVER_CAP_TITLE_PLACEHOLDER,
       author: "新作者",
       isShared: BoolFlag.TRUE,
     });

@@ -35,8 +35,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * or category sent as `""` (counted in `fieldCapBlankedCount`) — an ordinary
  * new book in every other respect, auto-shared by 新書預設開放 like any other.
  * A book the read holds is uploaded with the saved value in place of each
- * over-cap author or category, and its changed over-cap title cut to the cap,
- * keeping its share flag. The counts are the landed attempt's.
+ * over-cap author or category, and its changed over-cap title replaced by
+ * `OVER_CAP_TITLE_PLACEHOLDER` (never a cut, which could equal a legacy
+ * entry's 200-unit title and take its share flag), keeping its share flag.
+ * The counts are the landed attempt's.
  *
  * Same-title books: a blanked book keeps its title, so it takes part in every
  * same-title step (rename pairing, legacy resolution) exactly as if it fit.
@@ -62,6 +64,7 @@ vi.mock("@/content/scraper", () => ({
 
 import { syncBooks } from "@/sync/syncBooks";
 import { dropResolvedLegacyBooks } from "@/sync/legacyBooks";
+import { OVER_CAP_TITLE_PLACEHOLDER } from "@/sync/fieldCaps";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
 import {
   BOOKS_CONFLICT_MESSAGE,
@@ -1227,7 +1230,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
       expect(result.fieldCapBlankedCount).toBe(1);
     });
 
-    it("uploads a saved book with its share flag and its changed title cut to the cap when the scraped title is over it", async () => {
+    it("uploads a saved book with its share flag and the placeholder for its changed title when the scraped title is over the cap", async () => {
       mockScrape([
         { ...scrapedBook(BOOK_A, OVER_CAP_TITLE), author: "新作者" },
         scrapedBook(BOOK_B),
@@ -1246,7 +1249,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         (b) => b.bookId === BOOK_A,
       );
       expect(uploaded).toMatchObject({
-        title: OVER_CAP_TITLE.slice(0, BOOK_TITLE_MAX_LENGTH),
+        title: OVER_CAP_TITLE_PLACEHOLDER,
         author: "新作者",
         isShared: BoolFlag.TRUE,
       });
@@ -1283,7 +1286,7 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         firstPutIds: [BOOK_A],
         landedIds: [BOOK_A, NEW_ID],
         landedNew: {
-          title: OVER_CAP_TITLE.slice(0, BOOK_TITLE_MAX_LENGTH),
+          title: OVER_CAP_TITLE_PLACEHOLDER,
           isShared: BoolFlag.TRUE,
         },
         fieldCapSkippedCount: 0,
@@ -1655,6 +1658,31 @@ describe("uploadSyncBooksRereadingOnConflict (via syncBooks)", () => {
         ]);
         expect(body.find((b) => b.bookId === BOOK_B)?.author).toBe("");
         expect(result.fieldCapBlankedCount).toBe(1);
+        // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
+        expect(dropResolvedLegacyBooks(body)).toBe(body);
+      });
+
+      // Mutation: with a 200-unit cut BOOK_A was sent titled exactly T and took the legacy share flag.
+      it("uploads a saved book renamed to an over-cap title with the placeholder, never a cut equal to a legacy entry's 200-unit title", async () => {
+        const legacyTitle = "a".repeat(BOOK_TITLE_MAX_LENGTH);
+        mockScrape([scrapedBook(BOOK_A, `${legacyTitle}suffix`)]);
+        const server = createFakeServer(
+          storedRecord([
+            savedBook(LEGACY_ID, BoolFlag.TRUE, legacyTitle),
+            savedBook(BOOK_A, BoolFlag.FALSE, "Original"),
+          ]),
+        );
+
+        const result = await runSync(server.client);
+
+        expect(result.success).toBe(true);
+        expect(server.puts).toHaveLength(1);
+        const body = server.puts[0].body.books;
+        expect(rows(body)).toEqual([
+          [BOOK_A, OVER_CAP_TITLE_PLACEHOLDER, BoolFlag.FALSE],
+          [LEGACY_ID, legacyTitle, BoolFlag.TRUE],
+        ]);
+        expect(result.fieldCapSkippedCount).toBe(0);
         // The Personal Shelf load (usePersonalBooks.ts) runs this on the saved list.
         expect(dropResolvedLegacyBooks(body)).toBe(body);
       });

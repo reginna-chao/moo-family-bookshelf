@@ -8,7 +8,11 @@ import {
   exceedsBookFieldCap,
   overCapBookField,
 } from "moo-family-bookshelf-shared/api/bookFieldLimits";
-import { fitScrapeToFieldCaps, warnFieldCapFit } from "@/sync/fieldCaps";
+import {
+  OVER_CAP_TITLE_PLACEHOLDER,
+  fitScrapeToFieldCaps,
+  warnFieldCapFit,
+} from "@/sync/fieldCaps";
 import { dropResolvedLegacyBooks } from "@/sync/legacyBooks";
 import { mergeBooks } from "@/sync/mergeBooks";
 import { BoolFlag, type BookEntry } from "@/api/client";
@@ -36,10 +40,11 @@ import type { ScrapedBook } from "@/content/scraper";
  *   every other field still from the scrape (`keptStoredCount`);
  * - a saved book's over-cap title is sent as saved when unchanged (`titleKey`
  *   equal — only a pre-cap title can be, and the Worker admits it), and
- *   otherwise cut to 200 code units (199 when the cut would split an emoji).
- *   Only such a changed saved title is ever truncated: it equals no title
- *   stored since the caps, so the cut breaks no same-title match, while
- *   keeping the stored title would join that title's group.
+ *   otherwise replaced by `OVER_CAP_TITLE_PLACEHOLDER`. Nothing is truncated:
+ *   a 200-unit cut could equal a legacy entry's exact 200-unit title (and the
+ *   stored title could equal another book's), and same-title matching would
+ *   then move that entry's share flag onto the renamed book. Only saved books
+ *   carry the placeholder, so same-title matching never pairs on it.
  *
  * Same-title books: no new book is ever held back for sharing a title, and no
  * saved book's scraped title is ever reverted to its stored one. An earlier
@@ -376,10 +381,9 @@ describe("fitScrapeToFieldCaps", () => {
     });
   });
 
-  it("keeps a saved book, cutting only its changed over-cap title to the cap", () => {
-    const scrapedTitle = longText(201);
+  it("keeps a saved book, replacing only its changed over-cap title with the placeholder", () => {
     const book = scraped(A, {
-      title: scrapedTitle,
+      title: longText(201),
       author: "新作者",
       coverUrl: "https://cdn.readmoo.com/cover/new.jpg",
       category: "新分類",
@@ -391,7 +395,7 @@ describe("fitScrapeToFieldCaps", () => {
     expect(fit.books).toEqual([
       {
         bookId: A,
-        title: scrapedTitle.slice(0, BOOK_TITLE_MAX_LENGTH),
+        title: OVER_CAP_TITLE_PLACEHOLDER,
         author: "新作者",
         coverUrl: "https://cdn.readmoo.com/cover/new.jpg",
         readmooUrl: `https://readmoo.com/book/${A}`,
@@ -405,16 +409,15 @@ describe("fitScrapeToFieldCaps", () => {
   });
 
   it("fits every over-cap field of a saved book, and only those", () => {
-    const scrapedTitle = longText(201);
     const book = scraped(A, {
-      title: scrapedTitle,
+      title: longText(201),
       author: "新作者",
       category: longText(101),
     });
 
     const [fitted] = fitScrapeToFieldCaps([book], [saved(A)]).books;
 
-    expect(fitted.title).toBe(scrapedTitle.slice(0, BOOK_TITLE_MAX_LENGTH));
+    expect(fitted.title).toBe(OVER_CAP_TITLE_PLACEHOLDER);
     expect(fitted.category).toBe("舊分類");
     expect(fitted.author).toBe("新作者");
   });
@@ -458,24 +461,6 @@ describe("fitScrapeToFieldCaps", () => {
     expect(fit.keptStoredCount).toBe(1);
   });
 
-  it("cuts a changed saved title one unit short when the cap would split an emoji", () => {
-    // Index 199 is the emoji's high surrogate, so a 200-unit cut would end on it.
-    const scrapedTitle = `${"長".repeat(BOOK_TITLE_MAX_LENGTH - 1)}😀${longText(10)}`;
-    expect(scrapedTitle.charCodeAt(BOOK_TITLE_MAX_LENGTH - 1)).toBe(0xd83d);
-
-    const fit = fitScrapeToFieldCaps(
-      [scraped(A, { title: scrapedTitle })],
-      [saved(A)],
-    );
-
-    const sent = fit.books[0].title;
-    expect(sent).toBe("長".repeat(BOOK_TITLE_MAX_LENGTH - 1));
-    expect(sent).toHaveLength(BOOK_TITLE_MAX_LENGTH - 1);
-    const last = sent.charCodeAt(sent.length - 1);
-    expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
-    expect(fit.keptStoredCount).toBe(1);
-  });
-
   it.each([
     { name: "a number", value: 42 },
     { name: "null", value: null },
@@ -496,11 +481,10 @@ describe("fitScrapeToFieldCaps", () => {
 
   it("keeps the scrape order across left-out, blanked, kept-stored and fitting books", () => {
     const D = "210000000000104";
-    const cTitle = "丙".repeat(201);
     const books = [
       scraped(A, { title: longText(201) }),
       scraped(B, { author: longText(501) }),
-      scraped(C, { title: cTitle }),
+      scraped(C, { title: "丙".repeat(201) }),
       scraped(D),
     ];
 
@@ -508,7 +492,7 @@ describe("fitScrapeToFieldCaps", () => {
 
     expect(fit.books.map((b) => b.bookId)).toEqual([B, C, D]);
     expect(fit.books[0]).toEqual({ ...books[1], author: "" });
-    expect(fit.books[1].title).toBe(cTitle.slice(0, BOOK_TITLE_MAX_LENGTH));
+    expect(fit.books[1].title).toBe(OVER_CAP_TITLE_PLACEHOLDER);
     expect(fit.books[2]).toBe(books[3]);
     expect(fit).toMatchObject({
       skippedCount: 1,
@@ -635,9 +619,9 @@ describe("fitScrapeToFieldCaps — same-title books", () => {
 
   it.each([
     {
-      name: "an over-cap title, sent cut to the cap",
+      name: "an over-cap title, sent as the placeholder",
       newTitle: longText(BOOK_TITLE_MAX_LENGTH + 1),
-      sentTitle: longText(BOOK_TITLE_MAX_LENGTH),
+      sentTitle: OVER_CAP_TITLE_PLACEHOLDER,
       keptStoredCount: 1,
     },
     {
@@ -673,6 +657,35 @@ describe("fitScrapeToFieldCaps — same-title books", () => {
       ]);
     },
   );
+
+  // Mutation: with a 200-unit cut A was sent titled exactly T, and the legacy entry resolved onto A.
+  it("never sends a renamed saved book with a cut equal to a legacy entry's 200-unit title", () => {
+    const legacyTitle = "a".repeat(BOOK_TITLE_MAX_LENGTH);
+    const savedBooks = [
+      saved(LEGACY_ID, { title: legacyTitle, isShared: BoolFlag.TRUE }),
+      saved(A, { title: "Original", isShared: BoolFlag.FALSE }),
+    ];
+
+    const fit = fitScrapeToFieldCaps(
+      [scraped(A, { title: `${legacyTitle}suffix` })],
+      savedBooks,
+    );
+
+    expect(fit.books.map((b) => [b.bookId, b.title])).toEqual([
+      [A, OVER_CAP_TITLE_PLACEHOLDER],
+    ]);
+    expect(fit.books[0].title).not.toBe(legacyTitle);
+    const { reloaded } = uploadedThenReloaded(fit, savedBooks);
+    expect(rows(reloaded)).toEqual([
+      [A, OVER_CAP_TITLE_PLACEHOLDER, BoolFlag.FALSE],
+      [LEGACY_ID, legacyTitle, BoolFlag.TRUE],
+    ]);
+    // Positive companion: A sent titled T instead takes the legacy entry's share flag.
+    const cut = [{ ...fit.books[0], title: legacyTitle }];
+    expect(
+      rows(uploadedThenReloaded({ ...fit, books: cut }, savedBooks).reloaded),
+    ).toEqual([[A, legacyTitle, BoolFlag.TRUE]]);
+  });
 
   // See the header → "the "pre-cap" case": a title stored before the caps existed.
   it("lists a left-out title a pre-cap saved book still carries, keeping its legacy entry unresolved", () => {
