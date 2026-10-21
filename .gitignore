@@ -53,6 +53,7 @@ test-results/
 # Claude
 .claude/settings.json
 .claude/settings.local.json
+.claude/worktrees/
 
 # Skill archive
 .skill-archive/

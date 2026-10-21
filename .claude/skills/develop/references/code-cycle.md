@@ -89,7 +89,7 @@ The free-text answer AskUserQuestion always offers covers a name the user prefer
 
 ### 0b — Carry out the answer (after the answer, before the first dispatch)
 
-1. **Execute the chosen option:** `git branch -m <type>/<slug>` (rename in place), `git checkout -b <type>/<slug> origin/main`, or `git worktree add .claude/worktrees/<slug> -b <type>/<slug> origin/main`. Waiting means the run stops here with a Stop Block.
+1. **Execute the chosen option:** `git branch -m <type>/<slug>` (rename in place), `git checkout -b <type>/<slug> origin/main`, or `git worktree add .claude/worktrees/<slug> -b <type>/<slug> origin/main` (`.claude/worktrees/` is gitignored, so the new folder never shows as a stray entry). Continuing an existing branch needs no command. Waiting means the run stops here with a Stop Block.
 2. Re-confirm `git log --oneline origin/main..HEAD` is empty (or holds only the continued branch's own commits). See `.claude/rules/global.md` → "Branch & Worktree Hygiene".
 3. **Record the starting point:** `git branch --show-current` and `git rev-parse HEAD`. The branch is re-checked after every coder return and before the commit (another session can take over a shared checkout); the HEAD is condition 3's base when the run continues an existing branch.
 4. **Worktree tasks:** when the task runs in a dedicated worktree, start EVERY agent prompt by restating the worktree's absolute path, forbidding any write to the main checkout, and requiring the agent to confirm the path prefix before every Read/Edit/Write — stating the boundary alone has proven insufficient.
