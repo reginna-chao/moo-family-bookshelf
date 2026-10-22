@@ -6,6 +6,7 @@ import {
   namespacedKey,
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
+  USER_ID_KEY,
 } from "@/hooks/useAuth";
 import {
   REAUTH_PENDING_KEY,
@@ -47,6 +48,14 @@ import {
  * logout that follows it (App writes it right after `logout()`, and the landing
  * re-login reads it), but a full wipe — `forceLogout` / `forceClearStorage` —
  * drops it.
+ *
+ * Invite links (#360): only a DECODABLE `#invite=` code ends the current
+ * session, and it ends it narrowly — the user's keys and a pending remembered
+ * logout go, while the rememberSyncCode preference and the #266 re-auth marker
+ * stay (docs/architecture.md → 家庭解綁流程). An undecodable code, or an
+ * `invite` key in the QUERY string, is ignored: a malformed link must not sign
+ * the user out. A QR fragment (`#code=…&uid=…`) wins over an invite in the same
+ * fragment and keeps its full wipe (`forceClearStorage`).
  */
 
 // Mock syncCode module
@@ -518,6 +527,132 @@ describe("useAuth", () => {
       // Invalid sync code should be ignored
       expect(result.current.initialSyncCode).toBe("");
       expect(result.current.auth).toBeNull();
+    });
+
+    // #360: only a decodable #invite= ends a session, and narrowly.
+    // See the header → "Invite links".
+    describe("with an existing session (#360)", () => {
+      const REAUTH_MARKER = "abcd";
+      const REMEMBERED_CODE = "moo-fam-old-key";
+      const SESSION = {
+        userId: "user-1",
+        familyId: "fam-1",
+        apiHost: CUSTOM_HOST,
+        authToken: "tok-1",
+      };
+      const USER_SUFFIXES = [
+        "familyId",
+        "apiHost",
+        "authToken",
+        "familyShelfSort",
+      ];
+
+      /** A logged-in user who turned rememberSyncCode off, with a #266 marker pending. */
+      function seedSessionAndDeviceKeys(): void {
+        seedStorage(SESSION);
+        localStorage.setItem(namespacedKey("user-1", "authToken"), "tok-1");
+        localStorage.setItem(
+          namespacedKey("user-1", "familyShelfSort"),
+          "title",
+        );
+        localStorage.setItem(REMEMBER_SYNC_CODE_KEY, "0");
+        localStorage.setItem(REMEMBERED_LOGOUT_KEY, REMEMBERED_CODE);
+        localStorage.setItem(REAUTH_PENDING_KEY, REAUTH_MARKER);
+      }
+
+      function stubUrl(hash: string, search = ""): void {
+        vi.stubGlobal("location", {
+          search,
+          hash,
+          pathname: "/",
+          href: `http://localhost/${search}${hash}`,
+        });
+      }
+
+      function expectSessionUntouched(auth: unknown): void {
+        expect(auth).toEqual(SESSION);
+        expect(localStorage.getItem(USER_ID_KEY)).toBe("user-1");
+        expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBe("0");
+        expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBe(
+          REMEMBERED_CODE,
+        );
+        expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBe(REAUTH_MARKER);
+      }
+
+      it("keeps the session and device keys when the #invite= code is undecodable", () => {
+        seedSessionAndDeviceKeys();
+        stubUrl("#invite=bad-code");
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        mockDecodeSyncCode.mockImplementation(() => {
+          throw new SyncCodeError("Invalid sync code format");
+        });
+
+        const { result } = renderHook(() => useAuth());
+
+        expect(mockDecodeSyncCode).toHaveBeenCalledWith("bad-code");
+        expectSessionUntouched(result.current.auth);
+        expect(result.current.initialSyncCode).toBe("");
+        expect(result.current.isLoading).toBe(false);
+        // The address bar is still scrubbed.
+        expect(replaceStateSpy).toHaveBeenCalledWith({}, "", "/");
+      });
+
+      it("ignores an invite key in the query string, even a decodable one", () => {
+        seedSessionAndDeviceKeys();
+        stubUrl("", "?invite=moo-new-family-newkey");
+        mockDecodeSyncCode.mockReturnValue({ familyId: "new-family" });
+
+        const { result } = renderHook(() => useAuth());
+
+        expectSessionUntouched(result.current.auth);
+        expect(result.current.initialSyncCode).toBe("");
+        expect(mockDecodeSyncCode).not.toHaveBeenCalled();
+      });
+
+      it("ends the session for a valid #invite= but keeps rememberSyncCode and the re-auth marker", () => {
+        seedSessionAndDeviceKeys();
+        // Positive companion: the user keys really are there before the render.
+        for (const suffix of USER_SUFFIXES) {
+          expect(
+            localStorage.getItem(namespacedKey("user-1", suffix)),
+          ).not.toBeNull();
+        }
+        stubUrl("#invite=moo-new-family-newkey");
+        mockDecodeSyncCode.mockReturnValue({ familyId: "new-family" });
+
+        const { result } = renderHook(() => useAuth());
+
+        expect(result.current.auth).toBeNull();
+        expect(result.current.initialSyncCode).toBe("moo-new-family-newkey");
+        expect(result.current.qrUserId).toBe("");
+        expect(localStorage.getItem(USER_ID_KEY)).toBeNull();
+        for (const suffix of USER_SUFFIXES) {
+          expect(
+            localStorage.getItem(namespacedKey("user-1", suffix)),
+          ).toBeNull();
+        }
+        expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+        expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBe("0");
+        expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBe(REAUTH_MARKER);
+      });
+
+      it("lets a QR fragment win over an invite in the same fragment, with the full wipe", () => {
+        seedSessionAndDeviceKeys();
+        stubUrl(
+          "#code=moo-qr-fam-qrkey&uid=user-qr&invite=moo-new-family-newkey",
+        );
+        mockDecodeSyncCode.mockReturnValue({ familyId: "qr-fam" });
+
+        const { result } = renderHook(() => useAuth());
+
+        expect(result.current.auth).toBeNull();
+        expect(result.current.initialSyncCode).toBe("moo-qr-fam-qrkey");
+        expect(result.current.qrUserId).toBe("user-qr");
+        expect(localStorage.getItem(USER_ID_KEY)).toBeNull();
+        expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+        expect(localStorage.getItem(REMEMBER_SYNC_CODE_KEY)).toBeNull();
+        expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+      });
     });
   });
 
