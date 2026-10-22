@@ -254,7 +254,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key get "verify:<上一步的 userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`：
+3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡：
 
    ```bash
    node -e "const c=require('crypto');const pin=process.argv[1];const salt=c.randomBytes(16).toString('hex');const hash=c.createHash('sha256').update(salt+pin).digest('hex');require('fs').writeFileSync('temp-verify.json',JSON.stringify({method:'pin',hash,salt,prompted:0,secretUpdatedAt:Date.now()}))" "246813"
@@ -264,6 +264,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
    ```bash
    pnpm exec wrangler kv key put "verify:<上一步的 userId>" --path temp-verify.json --namespace-id <正式 namespace ID> --remote
+   rm temp-verify.json
    ```
 
 5. 用家人看不到的管道把臨時 PIN 告訴他。請他用同步碼加臨時 PIN 重新登入，登入後立刻改成自己的 PIN 或圖形：電腦上在擴充功能設定裡改；只有手機的話，PWA 登入後會自動跳出設定登入驗證的畫面。他的個人書櫃與分享設定都還在，不受影響。
