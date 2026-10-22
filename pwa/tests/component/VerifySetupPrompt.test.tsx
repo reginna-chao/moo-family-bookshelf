@@ -74,6 +74,23 @@ describe("VerifySetupPrompt", () => {
     expect(screen.getByText("不設定驗證")).toBeInTheDocument();
   });
 
+  // #342: the hint used to claim the verification is phone-only, but an Extension re-login needs it too.
+  it("should tell the user the verification also guards Extension re-login and where to reset it", async () => {
+    const client = createMockClient();
+
+    render(
+      <VerifySetupPrompt
+        userId={USER_ID}
+        apiClient={client}
+        onComplete={mockOnComplete}
+      />,
+    );
+
+    const tip = await screen.findByText(/擴充功能需要重新登入時/);
+    expect(tip).toHaveTextContent("從擴充功能的「設定」改成新的");
+    expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
+  });
+
   it("should not render when already prompted", async () => {
     const client = createMockClient({
       getVerifyMethod: vi

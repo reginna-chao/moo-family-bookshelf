@@ -148,7 +148,7 @@ export function FamilySettings({
         <FamilySettingsSectionHeader
           open={mobileOpen}
           onToggle={() => setMobileOpen(!mobileOpen)}
-          label="手機版登入"
+          label="手機登入與驗證"
         />
         {mobileOpen && (
           <>

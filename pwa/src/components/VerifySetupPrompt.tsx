@@ -180,7 +180,7 @@ function ChooseMethodView({
         保護你的帳號，防止他人在手機版未經授權登入。
       </p>
       <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-5 leading-relaxed">
-        提示：此驗證僅用於手機版登入時保護你的書櫃資料。
+        提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。忘記的話，可以在還保持登入的電腦上，從擴充功能的「設定」改成新的。
       </p>
       <div className="space-y-3">
         <button
