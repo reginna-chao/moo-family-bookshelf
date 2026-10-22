@@ -589,7 +589,8 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   try {
     await settleDepartingBorrower(c.env.KV, familyId, targetUserId);
   } catch (err) {
-    console.error("BORROW_CLEANUP_FAILED", { familyId, targetUserId, err });
+    // No ids in logs: familyId is the sync code, a userId resolves to it (.claude/rules/backend.md → API Design).
+    console.error("BORROW_CLEANUP_FAILED", { err });
     return jsonError(
       c,
       500,
@@ -1153,11 +1154,7 @@ async function writeKickedTombstone(
     };
     await putKickedTombstone(kv, familyId, targetUserId, kickedRecord);
   } catch (err) {
-    console.error("KICK_TOMBSTONE_WRITE_FAILED", {
-      familyId,
-      targetUserId,
-      err,
-    });
+    console.error("KICK_TOMBSTONE_WRITE_FAILED", { err });
   }
 }
 

@@ -1013,7 +1013,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
           try {
             await settleDepartingBorrower(c.env.KV, familyId, userId);
           } catch (err) {
-            console.error("BORROW_CLEANUP_FAILED", { familyId, userId, err });
+            console.error("BORROW_CLEANUP_FAILED", { err });
           }
 
           // Write the list back only when the caller was listed: an unchanged put is pointless and can

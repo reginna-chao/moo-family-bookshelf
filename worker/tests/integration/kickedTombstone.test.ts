@@ -81,8 +81,25 @@
  * no tombstone the removed client can rejoin again — is pinned so the
  * trade-off stays visible rather than being mistaken for enforcement that
  * silently never ran.
+ *
+ * No ids in error logs (#357): the familyId IS the sync code, and a userId
+ * resolves to one through `POST /api/auth/lookup`, so the failure log carries
+ * `{ err }` only. `expectIdFreeErrorLog` pins that two ways — no `familyId` /
+ * `targetUserId` / `userId` KEY, and none of the case's id VALUES anywhere in
+ * the logged arguments (the `err` message included), which also catches the id
+ * coming back under another key name. That value check is why `failPutFor`'s
+ * simulated error names no key: a message echoing `kicked:{familyId}:{userId}`
+ * would put ids in the log that production never wrote.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  type MockInstance,
+} from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
@@ -188,7 +205,8 @@ function failPutFor(failingKey: string): () => void {
     ...base,
     put: async (key: string, value: string, opts?: unknown): Promise<void> => {
       if (key === failingKey) {
-        throw new Error(`simulated KV put failure for "${key}"`);
+        // No key in the message. See the header → "No ids in error logs".
+        throw new Error("simulated KV put failure");
       }
       return put(key, value, opts);
     },
@@ -196,6 +214,27 @@ function failPutFor(failingKey: string): () => void {
   return () => {
     kv = base;
   };
+}
+
+/** The `tag` log carries `err` and no id, by key or by value.
+ *  See the header → "No ids in error logs". */
+function expectIdFreeErrorLog(
+  errors: MockInstance<typeof console.error>,
+  tag: string,
+  ids: string[],
+): void {
+  const calls = errors.mock.calls.filter(([logged]) => logged === tag);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const [, payload, ...rest] of calls) {
+    expect(payload).toHaveProperty("err");
+    for (const key of ["familyId", "targetUserId", "userId"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+    const logged = JSON.stringify([payload, ...rest], (_key, value: unknown) =>
+      value instanceof Error ? `${value.name}: ${value.message}` : value,
+    );
+    for (const id of ids) expect(logged).not.toContain(id);
+  }
 }
 
 async function memberIds(familyId: string, authToken: string) {
@@ -502,10 +541,11 @@ describe("Tombstone write failure", () => {
     expect(await memberIds(familyId, ownerToken)).toEqual([USER1]);
     // ...only the tombstone is missing, and the failure is observable in logs.
     expect(await readTombstone(familyId, USER2)).toBeNull();
-    expect(errors).toHaveBeenCalledWith(
-      "KICK_TOMBSTONE_WRITE_FAILED",
-      expect.objectContaining({ familyId, targetUserId: USER2 }),
-    );
+    expectIdFreeErrorLog(errors, "KICK_TOMBSTONE_WRITE_FAILED", [
+      familyId,
+      USER1,
+      USER2,
+    ]);
   });
 
   it("should degrade to the pre-tombstone behaviour when the write failed", async () => {
@@ -537,10 +577,11 @@ describe("Tombstone write failure", () => {
     expect(json.error.message).toBe(MEMBER_NOT_FOUND_MESSAGE);
 
     expect(await readTombstone(familyId, USER3)).toBeNull();
-    expect(errors).toHaveBeenCalledWith(
-      "KICK_TOMBSTONE_WRITE_FAILED",
-      expect.objectContaining({ familyId, targetUserId: USER3 }),
-    );
+    expectIdFreeErrorLog(errors, "KICK_TOMBSTONE_WRITE_FAILED", [
+      familyId,
+      USER1,
+      USER3,
+    ]);
   });
 
   it("should let the owner's retry re-apply a ban whose tombstone was lost", async () => {

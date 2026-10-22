@@ -55,7 +55,7 @@ export function createCountingKv(
  * ONE structured log line per /api/* request carrying its KV operation count —
  * the #160 read amplification was only spotted by chance on the dashboard,
  * months late. `[observability]` is already on at `head_sampling_rate = 1`
- * (wrangler.toml:5-8, :70-72), so this ships as telemetry with nothing else to
+ * (wrangler.toml:5-8, :72-74), so this ships as telemetry with nothing else to
  * configure, and the single object argument keeps its keys queryable as fields
  * in Workers Logs. Cost per request: one Proxy, one console.log, no KV
  * operation and no I/O — far below the free-tier allowance in wrangler.toml:5.
