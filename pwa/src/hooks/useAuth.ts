@@ -146,6 +146,13 @@ export function forceClearStorage(): void {
   clearReauthPending();
 }
 
+/** Ends the current session for a valid invite link. Narrower than forceClearStorage: keeps the
+ *  rememberSyncCode preference and the #266 marker (docs/architecture.md → 家庭解綁流程). */
+function clearSessionForInvite(): void {
+  removeUserKeys();
+  localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
+}
+
 function clearUrlParams(): void {
   // Preserve page routing hashes (#family-shelf, #personal-shelf, #settings);
   // only clear auth-related hashes (#code=…&uid=…, #invite=…) and query params.
@@ -211,18 +218,6 @@ export function useAuth(): UseAuthReturn {
   const [qrToken, setQrToken] = useState("");
 
   useEffect(() => {
-    // 0. If URL contains "invite=" param key, clear auth state to start fresh for invite.
-    const preCheckHashParams = new URLSearchParams(
-      window.location.hash.slice(1),
-    );
-    const preCheckSearchParams = new URLSearchParams(window.location.search);
-    if (
-      preCheckHashParams.has("invite") ||
-      preCheckSearchParams.has("invite")
-    ) {
-      forceClearStorage();
-    }
-
     // 1. Parse QR params BEFORE clearUrlParams removes the hash. A QR's pre-hashed userId goes
     //    through LandingPage's verification flow instead of auto-logging in.
     const qrParams = tryParseQrParams();
@@ -245,8 +240,9 @@ export function useAuth(): UseAuthReturn {
       return;
     }
 
-    // Pre-fill sync code from invite link (don't auto-submit)
+    // Only a decodable invite ends the current session (before step 3), then pre-fills (no auto-submit)
     if (inviteSyncCode) {
+      clearSessionForInvite();
       setInitialSyncCode(inviteSyncCode);
     }
 
