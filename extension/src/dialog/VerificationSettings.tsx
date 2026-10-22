@@ -183,13 +183,13 @@ export function VerificationSettings({
 
   return (
     <div className="moo-verify">
-      <div className="moo-verify__title">手機版登入驗證</div>
+      <div className="moo-verify__title">登入驗證</div>
       <div className="moo-verify__current">
         目前方式：
         {METHOD_LABELS.get(currentMethod ?? "none") ?? UNKNOWN_METHOD_LABEL}
       </div>
       <div className="moo-verify__tip">
-        提示：此驗證僅用於手機版登入時保護你的書櫃資料。
+        提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。忘記的話，可以在還保持登入的電腦上，從擴充功能的「設定」改成新的。
       </div>
 
       {/* Method selection buttons */}

@@ -234,6 +234,42 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 - `console.*` 的 log（`kv_ops`、錯誤事件）仍會保存，`enabled = true` 與 `head_sampling_rate = 1` 維持不變。`wrangler tail` 走的是即時串流，不經 Workers Logs 保存，依 Cloudflare 文件判斷不受這個設定影響（未實測）。
 - 這個設定只管 Workers Logs。部署前已寫入的 log 會留到保存期滿才消失（免費方案 3 天、付費方案 7 天）；若另外設定了 Logpush，或 Worker 綁了自訂網域（流量分析、WAF 事件也會記下請求路徑），請自行確認那些地方不保存完整網址。
 
+## 使用者忘記登入驗證時
+
+家人忘了自己設的 PIN 或圖形時，先問他手邊還有沒有一台電腦的擴充功能仍在登入狀態：有的話，請他在擴充功能設定裡重新設定驗證方式就好，不需要管理者介入。
+
+只有在沒有任何裝置登入（自己離開家庭、被移出，或很久沒用）時，才需要管理者介入：把他的驗證設定改寫成一組臨時 PIN，再把臨時 PIN 告訴他。伺服器無法替你確認對方是不是本人，這一步完全依賴你自己的判斷，確認是本人之後再做。原因與目前的政策見 `docs/architecture.md` → PWA 登入驗證機制 → 忘記驗證方式時。
+
+不要直接刪除他的驗證設定。刪除會留下一段沒有驗證的空窗，知道他 Email 和同步碼的家人可以在這段時間搶先登入；搶到的登入在他之後重設 PIN 時不會失效。改寫成臨時 PIN 就沒有空窗。臨時 PIN 你自己也知道，在他改掉之前你等於能登入他的帳號，所以請他登入後立刻改掉。
+
+1. 算出他的 userId（`sha256("moo:" + Email 轉小寫並去掉前後空白)`，與擴充功能、PWA 用的 `deriveUserId` 相同）。這行指令會把 Email 留在終端機的歷史紀錄裡，做完可自行清除：
+
+   ```bash
+   node -e "const e=process.argv[1].toLowerCase().trim();console.log(require('crypto').createHash('sha256').update('moo:'+e).digest('hex'))" "family-member@example.com"
+   ```
+
+2. 在 `worker/` 目錄先確認這個 userId 真的有驗證設定（`<正式 namespace ID>` 可用 `pnpm exec wrangler kv namespace list` 查詢）。印出的 `method` 應該是 `pin` 或 `pattern`；回「not found」代表 Email 打錯，或這個帳號本來就沒設驗證：
+
+   ```bash
+   pnpm exec wrangler kv key get "verify:<上一步的 userId>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`：
+
+   ```bash
+   node -e "const c=require('crypto');const pin=process.argv[1];const salt=c.randomBytes(16).toString('hex');const hash=c.createHash('sha256').update(salt+pin).digest('hex');require('fs').writeFileSync('temp-verify.json',JSON.stringify({method:'pin',hash,salt,prompted:0,secretUpdatedAt:Date.now()}))" "246813"
+   ```
+
+4. 把這筆紀錄寫進他的驗證設定，然後刪掉檔案：
+
+   ```bash
+   pnpm exec wrangler kv key put "verify:<上一步的 userId>" --path temp-verify.json --namespace-id <正式 namespace ID> --remote
+   ```
+
+5. 用家人看不到的管道把臨時 PIN 告訴他。請他用同步碼加臨時 PIN 重新登入，登入後立刻改成自己的 PIN 或圖形：電腦上在擴充功能設定裡改；只有手機的話，PWA 登入後會自動跳出設定登入驗證的畫面。他的個人書櫃與分享設定都還在，不受影響。
+
+寫入時的 `secretUpdatedAt` 會讓舊 PIN 累積的鎖定紀錄（`verifyfail:`）立刻失效，不必另外清除，也不用等 15 分鐘。如果之後從備份還原 KV，備份裡舊的驗證設定會跟著回來（見「KV 每日備份與還原演練」→ 還原）。
+
 ## 更新
 
 ```bash
