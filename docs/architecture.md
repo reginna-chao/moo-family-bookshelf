@@ -1139,7 +1139,7 @@ interface PublicShelfSnapshot {
 - **manifest 轉換**（`toFirefoxManifest`，兩種目標都套用）：
   - `version`：從 `extension/package.json` 重新讀取（與 Chrome 的 `sync-version.ts` 同一個來源），Firefox 版不會跟著分歧。
   - `browser_specific_settings.gecko`：該目標的 id、`strict_min_version`、`data_collection_permissions`（只有 `direct` 再加上 `update_url`）；另加 `gecko_android.strict_min_version`，給 Firefox for Android 用。
-  - `background`：Firefox for Android（Fenix）無法可靠支援 MV3 的 background `service_worker`，event page（`background.scripts`）在桌面與 Android 都能用，所以整個 `background` 換成 `scripts: [<原本的 service_worker 檔名，缺省為 background.js>]`，`service_worker` 與 `type: module` 都不保留。
+  - `background`：Firefox for Android（Fenix）無法可靠支援 MV3 的 background `service_worker`，event page（`background.scripts`）在桌面與 Android 都能用，所以整個 `background` 換成 `scripts: [<原本的 service_worker 檔名，缺省為 background.js>]` 加上 `type: "module"`。`service_worker` 不保留，但 `type: "module"` 必須保留：`background.js` 是帶頂層 `import` 的 ES module，少了它 Firefox 會當成傳統 script 載入，遇到語法錯誤，背景從未執行（#345）。
   - 其他欄位（permissions、content_scripts、host_permissions、web_accessible_resources、action、icons）與 Chrome 版完全相同。
   - 最低版本與資料同意宣告的理由寫在 `build-firefox-manifest.ts` 匯出常數 `STRICT_MIN_VERSION`、`DATA_COLLECTION_PERMISSIONS` 的 JSDoc。
 
@@ -1151,7 +1151,7 @@ interface PublicShelfSnapshot {
 - `browser_specific_settings.gecko.id` 存在，而且符合目標（`amo` → `GECKO_ID_AMO`，`direct` → `GECKO_ID_DIRECT`）。
 - `gecko.strict_min_version` 與 `gecko_android.strict_min_version` 都存在。
 - `gecko.data_collection_permissions.required` 包含 `"websiteContent"`。
-- 使用 event page：有非空的 `background.scripts`，而且沒有 `background.service_worker`（Firefox for Android 無法可靠支援）。
+- 使用 event page：有非空的 `background.scripts`，而且沒有 `background.service_worker`（Firefox for Android 無法可靠支援）；`background.type` 必須是 `"module"`。
 - `update_url` 依目標而定：`amo` 的 gecko **不能**有 `update_url`；`direct` 的 `gecko.update_url` 必須等於 `UPDATE_URL`。
 
 ### 自行散布版的更新檔（build-updates-json.ts）
