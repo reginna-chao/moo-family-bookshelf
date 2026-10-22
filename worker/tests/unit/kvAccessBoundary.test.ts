@@ -319,7 +319,9 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
     [
       "getVerifyRecord",
       "putVerifyRecord",
+      "deleteVerifyRecord",
       "putOtpRecord",
+      "deleteOtpRecord",
       "getQrTokenRecord",
       "putQrTokenRecord",
       "deleteQrToken",

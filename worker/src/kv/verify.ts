@@ -29,6 +29,14 @@ export async function putVerifyRecord(
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
 }
 
+/** Delete `verify:{userId}` — the account-deletion teardown of the verification settings. */
+export async function deleteVerifyRecord(
+  kv: KVNamespace,
+  userId: string,
+): Promise<void> {
+  await kv.delete(kvKeys.verify(userId));
+}
+
 /**
  * Write the one-time code `otp:{userId}` with TTL `OTP_TTL_SECONDS` (300s).
  * The TTL is the only expiry — nothing sweeps these keys.
@@ -41,6 +49,14 @@ export async function putOtpRecord(
   await kv.put(kvKeys.otp(userId), JSON.stringify(record), {
     expirationTtl: OTP_TTL_SECONDS,
   });
+}
+
+/** Delete `otp:{userId}` — the account-deletion teardown of a still-pending one-time code. */
+export async function deleteOtpRecord(
+  kv: KVNamespace,
+  userId: string,
+): Promise<void> {
+  await kv.delete(kvKeys.otp(userId));
 }
 
 /**

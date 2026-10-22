@@ -83,7 +83,9 @@ import {
 import {
   getVerifyRecord,
   putVerifyRecord,
+  deleteVerifyRecord,
   putOtpRecord,
+  deleteOtpRecord,
   getQrTokenRecord,
   putQrTokenRecord,
   deleteQrToken,
@@ -476,6 +478,16 @@ const DELETE_CASES: DeleteCase[] = [
     label: "deleteQrToken",
     key: kvKeys.qrToken(QR_TOKEN),
     remove: (kv) => deleteQrToken(kv, QR_TOKEN),
+  },
+  {
+    label: "deleteVerifyRecord",
+    key: kvKeys.verify(USER1),
+    remove: (kv) => deleteVerifyRecord(kv, USER1),
+  },
+  {
+    label: "deleteOtpRecord",
+    key: kvKeys.otp(USER1),
+    remove: (kv) => deleteOtpRecord(kv, USER1),
   },
 ];
 
