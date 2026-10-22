@@ -16,6 +16,7 @@ import {
 } from "../constants";
 import { BorrowStatus } from "../api/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
+import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { cookieConfirmsAccount } from "./pageAccountCookie";
 
 // Bumped by every fetch and every offline recheck; an in-flight fetch whose
@@ -58,7 +59,8 @@ export async function updatePendingBorrowBadge(
       return;
     }
 
-    const url = `${apiEndpoint.replace(/\/+$/, "")}/api/family/${encodeURIComponent(familyId)}/borrow`;
+    // Same shared validator as the Dialog: an endpoint it refuses throws here, so the token is never sent.
+    const url = `${validateEndpointUrl(apiEndpoint)}/api/family/${encodeURIComponent(familyId)}/borrow`;
     // Bare fetch on purpose (this light IIFE must not pull in ApiClient); trust goes through the same
     // `sanitizeBorrowRequests` boundary. See docs/architecture.md → 浮動按鈕與 Dialog 外殼.
     const res = await fetch(url, {

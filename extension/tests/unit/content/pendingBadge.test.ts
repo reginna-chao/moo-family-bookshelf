@@ -430,6 +430,17 @@ describe("updatePendingBorrowBadge", () => {
         `${ENDPOINT}/api/family/fam%2F..%2Fevil/borrow`,
       );
     });
+
+    it("never sends the token to a plain-HTTP public endpoint (issue #358)", async () => {
+      await seedStorage({
+        ...storageWithout(),
+        [API_ENDPOINT_KEY]: "http://public.example",
+      });
+
+      await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe("early return before any request", () => {
