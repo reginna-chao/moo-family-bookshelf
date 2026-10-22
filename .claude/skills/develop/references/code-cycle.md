@@ -87,6 +87,8 @@ Always the LAST item of 「需要你決定的事」 at the decision gate (`SKILL
 
 **Naming:** the branch is `<type>/<slug>` — conventional type (`feat`/`fix`/`refactor`/`docs`/`test`/`chore`) + a concise English task slug (e.g. `fix/save-before-sync`). A new worktree folder is `.claude/worktrees/<slug>` with the same slug. The slug is lowercase English letters, digits and `-` only, and so is the name of a new document under `docs/` (`docs/kv-backup-plan.md`); source files keep their package's convention (PascalCase components, camelCase modules). Never keep an opaque auto-generated name (`claude/angry-moore-3651ca`) as the PR branch. An app-made worktree's folder name is the app's and cannot be renamed from inside the session — only its branch is.
 
+**Every option names the place it means.** "This worktree" or "here" tells the user nothing — the session list shows several. The option label carries the folder in parentheses, 「留在此 worktree（resolve-issue-360-36885f），改分支名」 / 「在主 checkout（moo-family-bookshelf）開分支」 / 「另開 worktree（pwa-invite-validate-before-clear）」, and the option description carries the absolute path, the current branch and its state from 0a (clean / N commits ahead); the proposed new branch name goes in the label too.
+
 The free-text answer AskUserQuestion always offers covers a name the user prefers.
 
 ### 0b — Carry out the answer (after the decision gate, before the execution plan)
