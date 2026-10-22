@@ -1282,7 +1282,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **桌面與手機版面**（`mobileLayout.ts`）：content script 不在 React 裡，所以以 `window.matchMedia(MOBILE_MEDIA_QUERY)`（767px，`extension/src/hooks/breakpoints.ts`）而不是 `useMediaQuery` 驅動；這裡註冊的每個 listener 都有記錄，Dialog 關閉、按鈕移除或 context 失效時都能拆掉（`stopAllMobileWatchers`）。桌面維持原本的置中卡片，只有主畫面固定 `height: 80vh`（等於卡片的 max-height 上限，切換分頁時高度不跳動），引導／載入畫面依內容決定高度（上限 max-height、下限容器的 min-height），短內容下方不會留一大片空白。手機版 Dialog 全螢幕，backdrop 隱藏（它只會被不透明的 Dialog 蓋住）。
 - **浮動按鈕的位置**：桌面在 viewport 右下角；手機版同樣在右下，但抬高到讀墨底部分頁列之上、間隔 12px。底部列的高度在執行時量測：先試讀墨真正的 `.main-menu`，再試同一個元素上的 `.nav.nav-justified`，最後是幾個通用的猜測，每個候選都必須寬度至少占 viewport 的 60%、底邊距 viewport 底部不超過 4px，才當成底部列；都不符合時改用依寬度決定的固定高度（寬度 ≤ 370px 的雙行列 76px，否則單行列 55px）。
 - **按鈕樣式**：hover 樣式在所有環境都注入，包在 `@media (hover: hover)` 裡，觸控裝置點一下後 hover 樣式才不會卡住；`cleanupMooFamilyUI` 只移除按鈕、不移除這個 `<style>`，所以靠模組層級的旗標避免重複注入。開發環境另有環境標示樣式（`injectEnvStyle`）。浮動圖示大小的設定改變時直接更新現有按鈕，不重新注入，以免失去數字標記的狀態。
-- **待處理借閱數字的請求**（`pendingBorrowBadge.ts`；何時查詢見〈讀墨帳號確認（已加入家庭時）〉）：刻意用裸的 `fetch`，因為 content script 是輕量的 IIFE bundle，不能把 `ApiClient`（認證更新、端點驗證、去重）拉進來——它在 code-split 的 Dialog 模組裡。回應的信任因此交給 `sanitizeBorrowRequests`，與 `ApiClient.listBorrowRequests` 同一道邊界，這個端點的兩個用戶端對不可信（BYO）後端回應的處理不會分歧。信封本身也不可信：只從真正的物件上讀 `.data`，陣列與元素的驗證交給 sanitizer；任何不可用的內容都降為空清單（不顯示數字），不拋錯。
+- **待處理借閱數字的請求**（`pendingBorrowBadge.ts`；何時查詢見〈讀墨帳號確認（已加入家庭時）〉）：刻意用裸的 `fetch`，因為 content script 是輕量的 IIFE bundle，不能把 `ApiClient`（認證更新、端點驗證、去重）拉進來——它在 code-split 的 Dialog 模組裡。不過儲存的伺服器位址仍會先經過與 `ApiClient` 相同的 `validateEndpointUrl`（它放在 `shared/`，不屬於 `ApiClient`）；被它拒絕的位址就不送出請求，權杖因此不會送到 Dialog 也會拒絕的位址。回應的信任因此交給 `sanitizeBorrowRequests`，與 `ApiClient.listBorrowRequests` 同一道邊界，這個端點的兩個用戶端對不可信（BYO）後端回應的處理不會分歧。信封本身也不可信：只從真正的物件上讀 `.data`，陣列與元素的驗證交給 sanitizer；任何不可用的內容都降為空清單（不顯示數字），不拋錯。
 
 #### 讀墨借出自動化
 
