@@ -10,7 +10,6 @@ import {
   sanitizeFamilyGroupText,
   sanitizeMemberText,
   sanitizePersonalBooksText,
-  sanitizePublicShelfDataText,
   sanitizePublicShelfListText,
   sanitizePublicShelfResultText,
   sanitizeVersionInfoText,
@@ -39,10 +38,14 @@ import type {
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
-import { sanitizeFamilyMembersResponse } from "moo-family-bookshelf-shared/api/memberValidation";
+import {
+  sanitizeFamilyMember,
+  sanitizeFamilyMembersResponse,
+} from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { readEnvelope } from "./envelope";
+import { fetchPublicShelf } from "./publicShelfFetch";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -401,16 +404,27 @@ export class ApiClient {
     return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /** Read as `unknown` until `sanitizeFamilyMember` checks it (`unwrap` first); an unusable payload
+   *  throws, which every caller catches. See docs/architecture.md → API client 的回應處理. */
   async updateMemberSettings(
     familyId: string,
     uid: string,
     settings: MemberSettingsPayload,
   ): Promise<FamilyMember> {
-    const res = await this.patch<FamilyMember>(
+    const res = await this.patch<unknown>(
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizeMemberText);
+    const member = sanitizeFamilyMember(this.unwrap(res));
+    if (member === null) {
+      throw new ApiError(
+        "INVALID_RESPONSE",
+        "response is not a valid family member",
+      );
+    }
+    // Same two layers, same order as `getFamilyMembers`: the structural rebuild above, then the text
+    // layer on the surviving record's declared-string fields.
+    return sanitizeRecord(member, sanitizeMemberText);
   }
 
   // --- Verification ---
@@ -500,27 +514,9 @@ export class ApiClient {
     this.unwrapVoid(res);
   }
 
-  async getPublicShelf(shareToken: string): Promise<PublicShelfData> {
-    const url = `${this.baseUrl}/api/public/${shareToken}`;
-    const response = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-    });
-    const json = (await response.json()) as ApiResponse<PublicShelfData>;
-    if (json.error) {
-      // Sanitize before interpolation, or a hostile field throws before `status` is attached and a
-      // 404 loses its own screen (docs/architecture.md → API client 的回應處理).
-      const code = safeErrorText(json.error.code, "UNKNOWN_ERROR");
-      const message = safeErrorText(json.error.message, "請稍後再試");
-      const err = new Error(`${code}: ${message}`);
-      (err as Error & { status: number }).status = response.status;
-      throw err;
-    }
-    if (!json.data) {
-      throw new Error("EMPTY_RESPONSE: response body missing data");
-    }
-    // Own bare cast above, so this sanitizer is the ONLY guard before `PublicShelfPage` renders and
-    // `.toLowerCase()`s these fields (docs/architecture.md → API client 的回應處理).
-    return sanitizeRecord(json.data, sanitizePublicShelfDataText);
+  /** Bypasses `request()` (no auth, no dedup): the whole read lives in `fetchPublicShelf`. */
+  getPublicShelf(shareToken: string): Promise<PublicShelfData> {
+    return fetchPublicShelf(this.baseUrl, shareToken);
   }
 
   // --- Internal ---

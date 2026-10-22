@@ -38,10 +38,9 @@ function toBoolFlagField(value: unknown): BoolFlag | undefined {
  * already has the `|| userId.slice(0, 8)` fallback a normalized `displayName`
  * relies on. A `null` verdict is handled differently per caller though — one
  * element of a list is dropped silently, a whole PATCH response becomes an
- * `ApiError` the UI can retry. The PWA has no such consumer yet
- * (`pwa/src/components/MemberList.tsx` discards that response and refetches the
- * list), so the export also means a future PWA consumer finds the guard already
- * here.
+ * `ApiError` the UI can retry. The PWA's `updateMemberSettings` runs the same
+ * check, though its caller (`pwa/src/components/MemberList.tsx`) still discards
+ * the result and refetches the list.
  */
 export function sanitizeFamilyMember(element: unknown): FamilyMember | null {
   if (!isRecord(element)) return null;

@@ -828,13 +828,13 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 - **沒有 body 的成功**：`DELETE /api/user/:id/public-shelf/:shelfId` 是這個 API 唯一不帶 body 的回應（204，RFC 9110 §15.3.5）。`response.json()` 遇到空 body 會拋 SyntaxError，呼叫端分不出它和真正的網路失敗——被拒的撤銷曾經因此被讀成「已刪除」。所以 `readEnvelope` 把 204 解析成空信封，其他回應照舊解析（格式錯誤的仍會拋錯）。只放行這一個狀態碼：API 從不回 205，放寬只會讓惡意後端可以把空 body 讀成確認成功；304 屬於 `!response.ok`，本來就走錯誤路徑。`unwrapVoid` 不要求 `data`，否則每個成功的 204 都會變成假的 `EMPTY_RESPONSE`。
 - **`throwOnError` 是所有 `ApiError` 的唯一出口**，錯誤文字在這裡統一處理，而不是在每個呼叫處各做一次。`code`／`message` 宣告為 `string`，實際上來自 `response.json()` 的直接轉型，後端又可以自架。`JSON.parse` 真的能產生 `{"toString":null,"valueOf":null}` 這種值，它會讓建構子的 ``super(`${code}: ${message}`)`` 拋出 TypeError，`ApiError` 根本建不起來：`err instanceof ApiError` 變成 false，需要 `code` 與 `retryAfter` 的在地化 429 退避分支被跳過，畫面改顯示英文的 TypeError。處理這兩個會被插入字串的欄位，保住的是錯誤的身分，而不只是措辭。`retryAfter` 原樣傳入，建構子自己會檢查。
-- **`getPublicShelf`** 不經 `readEnvelope`，自己直接轉型回應：
+- **`getPublicShelf`**（實作在 `pwa/src/api/publicShelfFetch.ts` 的 `fetchPublicShelf`）不經 `readEnvelope`，自己直接轉型回應：
   - 錯誤欄位同樣先處理再插入字串，否則惡意的 `{"toString":null}` 會讓 `new Error(...)` 在掛上 `status` 之前就拋錯；`PublicShelfPage` 依 `status` 分流，404 就會失去「此公開書櫃不存在或已過期」畫面，落到一般的載入錯誤。
   - 成功的 `data` 只靠文字層這一道防護：`PublicShelfPage` 把 `title`／`book.title`／`book.author` 直接放進 JSX，搜尋時還會對它們呼叫 `.toLowerCase()`。
 - **成員清單、家庭書櫃、借閱清單先以 `unknown` 讀入**：結構檢查之前，線上的形狀只是後端的聲稱。成員清單與家庭書櫃整個信封一起檢查（呼叫端自己讀 `{ data, error }`，`error` 信封必須原樣送到），兩層的順序與理由見〈伺服器回傳資料的檢查〉。借閱清單先跑 `unwrap`——它負責信封契約（`error` 拋 `ApiError`、缺 `data` 拋 `EMPTY_RESPONSE`）——再交給 `sanitizeBorrowRequests`。
 - **`lookupUser`**：PWA 目前沒有使用（登入走同步碼），保留是為了與 Extension client 的契約一致，兩者才不會分歧。帶不帶 `verifySecret` 的回應差異見〈PWA 登入驗證機制〉。
 - **Extension 的 `extension/src/api/client.ts`**：`readEnvelope`（只放行 204）、`unwrapVoid`、`throwOnError` 與上面的規則相同。差別在 `throwOnError` 另外把 `isClientSynthesized` 套在**原始**的錯誤物件上，而不是處理過的文字：symbol 標記本身就是來源證明，不能從處理過的文字推斷（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
-- **`updateMemberSettings`**（Extension）：回應先以 `unknown` 讀入，`unwrap` 先跑（負責信封契約），再交給 `sanitizeFamilyMember` 做結構檢查，最後是文字層（與 `getFamilyMembers` 同順序）。結構檢查不過時拋出 `INVALID_RESPONSE`，這對每個呼叫端都安全：三個呼叫處（`extension/src/dialog/BorrowTab.tsx` 的借出對象寫回、`extension/src/dialog/MemberList.tsx` 的 canLend 開關與刪除 readmooName）都會接住，交給 `memberSettingsErrorMessage`，格式錯誤的回應因此顯示成可重試的錯誤，而不會汙染 `members` 狀態。
+- **`updateMemberSettings`**（Extension 與 PWA 相同）：回應先以 `unknown` 讀入，`unwrap` 先跑（負責信封契約），再交給 `sanitizeFamilyMember` 做結構檢查，最後是文字層（與 `getFamilyMembers` 同順序）。結構檢查不過時拋出 `INVALID_RESPONSE`，這對每個呼叫端都安全：Extension 的三個呼叫處（`extension/src/dialog/BorrowTab.tsx` 的借出對象寫回、`extension/src/dialog/MemberList.tsx` 的 canLend 開關與刪除 readmooName）都會接住，交給 `memberSettingsErrorMessage`，格式錯誤的回應因此顯示成可重試的錯誤，而不會汙染 `members` 狀態。PWA 唯一的呼叫處（`pwa/src/components/MemberList.tsx` 的 canLend 開關）同樣接住並交給 `memberSettingsErrorMessage`；它不使用回傳的成員，成功後重新讀取成員清單。
 
 #### 公開書櫃設定的寫入
 
@@ -1077,7 +1077,7 @@ interface PublicShelfSnapshot {
     - `safeCoverUrl`／`safeBookUrl` 只有一份，位於 `shared/src/safeUrl/`，Extension 與 PWA 都直接 import；兩者回傳 `String(url)` 而不是 `url`，這不是多餘的：白名單判斷的是 `new URL` 轉成字串**之後**的值，所以 `["https://cdn.readmoo.com/x.jpg"]` 這種陣列會被接受；若原樣回傳 `url`，等於把陣列掛著 `string` 型別交出去，第一個對它呼叫字串方法的消費端就會在 render 中拋出 `TypeError`（`useSearch` 正是這樣對待 `title`）。`coverUrl` 沒經過文字層，執行時其實是 `unknown`；`readmooUrl` 目前有經過文字層轉型，但那是另一個模組的決定，改了也不會有人回頭檢查這一行。目前的消費端只把它放進 `src`／`href` 屬性，或拿來判斷是否為空，所以這是地雷而不是現行的 bug；對真正的字串 `String()` 是恆等函式，判定與回傳值都不變。
   - 數字、`BoolFlag` 與字串字面值聯集（`status`、`selectionMode`、`method`）：轉成 `string` 會破壞型別，它們的渲染處以 `ReadonlyMap` 查表防護。
 
-**結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：
+**結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`，以及兩端 `updateMemberSettings` 收到的 `PATCH /api/family/:id/member/:uid` 回應；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：
 
 - **無法定位就丟棄**：元素不是 plain object，或身分欄位（成員 `userId`、書 `bookId`、借閱 `requestId`）不是非空字串，就整筆丟棄——它當不了 React key、名稱查表的鍵或家庭書櫃偏好 ref 的擁有者那一半，也當不了 `updateMemberSettings`／`removeMember` 的 `:uid` 或 `PATCH /api/borrow/:id` 的目標。
 - **其餘欄位正規化**：非字串降為 `""`（消費端都有 `||` 備援，`""` 對 `localeCompare` 與 `.slice` 都安全）。成員的兩個選填欄位不符宣告型別時直接省略：`canLend` 只接受 `BoolFlag` 的兩個值（`true`、`2`、`"1"` 都當作缺少），缺少照舊讀成 TRUE（兩端 `MemberList.tsx` 的 `canLend !== BoolFlag.FALSE`，相容還沒有這個欄位的舊版 Worker）；`readmooName` 缺少時，「尚未記錄」提示照舊顯示。
