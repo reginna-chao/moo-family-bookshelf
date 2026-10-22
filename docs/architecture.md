@@ -1402,6 +1402,7 @@ Client                          Worker
 - `API_VERSION`（整數）定義於 `worker/src/index.ts`，僅在**破壞性變更**時遞增
 - `SERVER_VERSION`（語意版本）用於追蹤部署版本
 - `/api/version` 端點回傳兩者，供客戶端查詢
+- `GET /api/version` 不需要 auth token（列在 `worker/src/utils/routes.ts` 的 `isPublicRoute`），客戶端未登入也能呼叫；它走公開路由的頻率限制（每個 IP 每分鐘 10 次）
 
 **客戶端**：
 
