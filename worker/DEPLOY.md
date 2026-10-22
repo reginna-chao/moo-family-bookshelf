@@ -226,6 +226,14 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致——真正需要硬上限時仍得評估 Durable Objects。
 
+## 不記錄請求網址（invocation log）
+
+`wrangler.toml` 在頂層的 `[observability.logs]` 與 `[env.production.observability.logs]` 都設了 `invocation_logs = false`。invocation log 會記下每個請求的完整網址，而網址裡有同步碼（familyId）、userId 與公開書櫃的 share token，開著就會讓這些值留在 Workers Logs 裡保存 3 天。
+
+- 自架者若維護自己的 wrangler 設定，請保留這兩段，並重新部署（`pnpm deploy`）。兩段都要有：production 的 `[env.production.observability]` 區塊會整段覆蓋頂層的 `[observability]`，只寫在頂層的設定對 production 不會生效。
+- `console.*` 的 log（`kv_ops`、錯誤事件）仍會保存，`enabled = true` 與 `head_sampling_rate = 1` 維持不變。`wrangler tail` 走的是即時串流，不經 Workers Logs 保存，依 Cloudflare 文件判斷不受這個設定影響（未實測）。
+- 這個設定只管 Workers Logs。部署前已寫入的 log 會留到保存期滿才消失（免費方案 3 天、付費方案 7 天）；若另外設定了 Logpush，或 Worker 綁了自訂網域（流量分析、WAF 事件也會記下請求路徑），請自行確認那些地方不保存完整網址。
+
 ## 更新
 
 ```bash

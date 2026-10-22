@@ -7,6 +7,10 @@ compatibility_date = "2024-12-30"
 enabled = true
 head_sampling_rate = 1
 
+[observability.logs]
+# Invocation logs record every request URL, and /api paths carry the sync code, userIds and share tokens.
+invocation_logs = false
+
 # Dev environment KV (default for wrangler dev / wrangler deploy)
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[kv_namespaces]]
@@ -68,6 +72,10 @@ name = "moo-family-bookshelf"
 [env.production.observability]
 enabled = true
 head_sampling_rate = 1
+
+# This block replaces the top-level [observability], so invocation logs are disabled here too.
+[env.production.observability.logs]
+invocation_logs = false
 
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[env.production.kv_namespaces]]

@@ -34,7 +34,7 @@ export async function dissolveFamily(
   try {
     await deleteBorrowIndex(kv, familyId);
   } catch (err) {
-    console.error("BORROW_INDEX_DELETE_FAILED", { familyId, err });
+    console.error("BORROW_INDEX_DELETE_FAILED", { err });
   }
   await deleteFamilyRecord(kv, familyId);
 }

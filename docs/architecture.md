@@ -493,17 +493,19 @@ moo-{family_id_short}@{api_host_encoded}
 
 `route` 取 `routePath(c, -1)`，也就是實際命中的**路由樣式**（未命中時為 `/api/*`），永遠不是 `c.req.path`：原始路徑帶著機密與可連結的識別碼（`:shareToken` 即公開書櫃的密鑰本身，`:id` 是 email 推導的 userId），寫進 log 等於把它們留在可長期查詢的欄位裡。
 
+同樣的理由，`wrangler.toml` 關閉了 Cloudflare 的 invocation log（`[observability.logs] invocation_logs = false`，頂層與 `[env.production.observability.logs]` 各一份——production 的 observability 區塊會整段覆蓋頂層設定），因為它會記下每個請求的完整網址；錯誤 log（`BORROW_CLEANUP_FAILED` 等）也只記事件名稱與錯誤，不記 familyId 或 userId（userId 可經 `POST /api/auth/lookup` 換回 familyId；familyId 約 41 bit，未加密鑰的雜湊可被暴力還原）。`wrangler tail` 即時檢視不受影響。
+
 #### 為何 Cloudflare 內建遙測無法取代
 
 - **KV analytics**：維度只有 namespace × actionType × 日期，沒有路由，也看不出單次請求的操作數。
 - **Workers Metrics**：整個 Worker 的彙總數字，同樣分辨不出是哪條路由造成的。
-- **Invocation log**：有請求本身的資訊，但完全不含 KV 操作數。
+- **Invocation log**：有請求本身的資訊，但完全不含 KV 操作數；本專案也已將它關閉（見上文）。
 
 Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示，因此這份資料的消費方式是**主動查詢**（拉），而非被動告警（推）。
 
 #### 已接受的殘餘風險：log 量與請求量 1:1
 
-`[observability]` 的 `head_sampling_rate = 1`（`wrangler.toml:5-8`、`:70-72`），加上中介層排在限流之前，被 429 擋下的請求同樣會輸出一行——per-IP 上限節流的是回應，不是 log 事件。免費方案下，Worker 自身的請求上限（約 100k 次/日）會比 log 額度（200k events/日，見 `wrangler.toml:5` 註解）先觸頂，因此代價是「一天的額度有一半被雜訊吃掉，真正重要的 `console.error`（例如 kicked 墓碑寫入失敗的 `KICK_TOMBSTONE_WRITE_FAILED`）被埋在其中」；付費方案下則是一筆 log 帳單。影響僅止於偵測能力下降，不涉及資料揭露、權限繞過，也不改變使用者可感知的可用性。不緩解的理由：調低取樣率會稀釋每一條路由的樣本，而略過 429 只約束得了單一 IP。
+`[observability]` 的 `head_sampling_rate = 1`（`wrangler.toml:5-8`、`:72-74`），加上中介層排在限流之前，被 429 擋下的請求同樣會輸出一行——per-IP 上限節流的是回應，不是 log 事件。免費方案下，Worker 自身的請求上限（約 100k 次/日）會比 log 額度（200k events/日，見 `wrangler.toml:5` 註解）先觸頂，因此代價是「一天的額度有一半被雜訊吃掉，真正重要的 `console.error`（例如 kicked 墓碑寫入失敗的 `KICK_TOMBSTONE_WRITE_FAILED`）被埋在其中」；付費方案下則是一筆 log 帳單。影響僅止於偵測能力下降，不涉及資料揭露、權限繞過，也不改變使用者可感知的可用性。不緩解的理由：調低取樣率會稀釋每一條路由的樣本，而略過 429 只約束得了單一 IP。
 
 #### 生產環境基準（2026-09-23，v1.7.1，#178）
 

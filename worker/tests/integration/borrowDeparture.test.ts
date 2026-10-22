@@ -35,6 +35,18 @@
  * for keys matching `predicate` and behave normally otherwise. The selectivity
  * is the point: the removal handler's OWN deletes (member key, auth token) must
  * still land, or the 200 under test would be proving something else.
+ * `failPutsMatching` is its `put` twin, used to make the settlement itself
+ * throw (its index put is the first write it makes).
+ *
+ * No ids in error logs (#357): the familyId IS the sync code, and a userId
+ * resolves to one through `POST /api/auth/lookup`, so `BORROW_CLEANUP_FAILED`
+ * and `BORROW_INDEX_DELETE_FAILED` log `{ err }` only. `expectIdFreeErrorLog`
+ * pins that two ways — no `familyId` / `targetUserId` / `userId` KEY, and none
+ * of the case's id VALUES anywhere in the logged arguments (the `err` message
+ * included), which also catches an id coming back under another key name. That
+ * value check is why both failure helpers throw a message naming no key: the
+ * index key embeds the familyId, and echoing it would put an id in the log
+ * that production never wrote.
  *
  * Both removal callers: the owner kicking a member and that member walking out
  * on their own reach the SAME settlement. Running the identical fixture
@@ -46,7 +58,15 @@
  * entry is ever left without its pointer. The settlement runs before the
  * family record is touched, so it owns the head of the trail.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  type MockInstance,
+} from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
@@ -177,9 +197,40 @@ async function livePointerKeys(): Promise<string[]> {
 function failDeletesMatching(predicate: (key: string) => boolean): void {
   const realDelete = kv.delete.bind(kv);
   vi.spyOn(kv, "delete").mockImplementation(async (key: string) => {
-    if (predicate(key)) throw new Error(`KV delete rejected: ${key}`);
+    if (predicate(key)) throw new Error("KV delete rejected");
     await realDelete(key);
   });
+}
+
+/** KV `put` rejects only for keys matching `predicate`.
+ *  See the header → "Selective delete failure". */
+function failPutsMatching(predicate: (key: string) => boolean): void {
+  const realPut = kv.put.bind(kv);
+  vi.spyOn(kv, "put").mockImplementation(async (key, value, options) => {
+    if (predicate(key)) throw new Error("KV put rejected");
+    await realPut(key, value, options);
+  });
+}
+
+/** The `tag` log carries `err` and no id, by key or by value.
+ *  See the header → "No ids in error logs". */
+function expectIdFreeErrorLog(
+  errors: MockInstance<typeof console.error>,
+  tag: string,
+  ids: string[],
+): void {
+  const calls = errors.mock.calls.filter(([logged]) => logged === tag);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const [, payload, ...rest] of calls) {
+    expect(payload).toHaveProperty("err");
+    for (const key of ["familyId", "targetUserId", "userId"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+    const logged = JSON.stringify([payload, ...rest], (_key, value: unknown) =>
+      value instanceof Error ? `${value.name}: ${value.message}` : value,
+    );
+    for (const id of ids) expect(logged).not.toContain(id);
+  }
 }
 
 beforeEach(() => {
@@ -479,9 +530,63 @@ describe("Departure cleanup when KV deletes reject", () => {
     expect(await livePointerKeys()).toEqual([]);
     expect(await kv.get(kvKeys.borrowsByFamily(FAMILY_ID))).not.toBeNull();
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      "BORROW_INDEX_DELETE_FAILED",
-      expect.objectContaining({ familyId: FAMILY_ID }),
+    expectIdFreeErrorLog(errorSpy, "BORROW_INDEX_DELETE_FAILED", [
+      FAMILY_ID,
+      ALICE,
+    ]);
+  });
+});
+
+// ===== The settlement itself throws: the two callers answer differently =====
+
+describe("Departure settlement when the index put rejects", () => {
+  it("refuses the removal with 500 BORROW_CLEANUP_FAILED and logs no id", async () => {
+    await seedFamily([member(BOB, "Bob")]);
+    await seedIndex([makeRecord(0)]);
+    const aliceToken = await seedAuthToken(kv, ALICE);
+    await seedAuthToken(kv, BOB);
+
+    failPutsMatching((key) => key === kvKeys.borrowsByFamily(FAMILY_ID));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await request(
+      "DELETE",
+      `/api/family/${FAMILY_ID}/member/${BOB}`,
+      undefined,
+      aliceToken,
     );
+
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as Json).error.code).toBe(
+      "BORROW_CLEANUP_FAILED",
+    );
+    expectIdFreeErrorLog(errorSpy, "BORROW_CLEANUP_FAILED", [
+      FAMILY_ID,
+      ALICE,
+      BOB,
+    ]);
+  });
+
+  it("still deletes the account (fail-open) and logs no id", async () => {
+    await seedFamily([member(BOB, "Bob")]);
+    await seedIndex([makeRecord(0)]);
+    const bobToken = await seedAuthToken(kv, BOB);
+
+    failPutsMatching((key) => key === kvKeys.borrowsByFamily(FAMILY_ID));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await request(
+      "DELETE",
+      `/api/user/${BOB}`,
+      undefined,
+      bobToken,
+    );
+
+    expect(res.status).toBe(200);
+    expectIdFreeErrorLog(errorSpy, "BORROW_CLEANUP_FAILED", [
+      FAMILY_ID,
+      ALICE,
+      BOB,
+    ]);
   });
 });
