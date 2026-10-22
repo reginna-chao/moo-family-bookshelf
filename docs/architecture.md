@@ -493,7 +493,7 @@ moo-{family_id_short}@{api_host_encoded}
 
 `route` 取 `routePath(c, -1)`，也就是實際命中的**路由樣式**（未命中時為 `/api/*`），永遠不是 `c.req.path`：原始路徑帶著機密與可連結的識別碼（`:shareToken` 即公開書櫃的密鑰本身，`:id` 是 email 推導的 userId），寫進 log 等於把它們留在可長期查詢的欄位裡。
 
-同樣的理由，`wrangler.toml` 關閉了 Cloudflare 的 invocation log（`[observability.logs] invocation_logs = false`，頂層與 `[env.production.observability.logs]` 各一份——production 的 observability 區塊會整段覆蓋頂層設定），因為它會記下每個請求的完整網址；錯誤 log（`BORROW_CLEANUP_FAILED` 等）也只記事件名稱與錯誤，不記 familyId 或 userId（userId 可經 `POST /api/auth/lookup` 換回 familyId；familyId 約 41 bit，未加密鑰的雜湊可被暴力還原）。`wrangler tail` 即時檢視不受影響。
+同樣的理由，`wrangler.toml` 關閉了 Cloudflare 的 invocation log（`[observability.logs] invocation_logs = false`，頂層與 `[env.production.observability.logs]` 各一份——production 的 observability 區塊會整段覆蓋頂層設定），因為它會記下每個請求的完整網址；錯誤 log（`BORROW_CLEANUP_FAILED` 等）也只記事件名稱與錯誤，不記 familyId 或 userId（userId 可經 `POST /api/auth/lookup` 換回 familyId；familyId 約 41 bit，未加密鑰的雜湊可被暴力還原）。`wrangler tail` 走的是即時串流，不經 Workers Logs 保存，依 Cloudflare 文件判斷不受這個設定影響（未實測）。
 
 #### 為何 Cloudflare 內建遙測無法取代
 
