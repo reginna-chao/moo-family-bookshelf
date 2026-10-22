@@ -14,7 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
 interface FirefoxManifest {
-  background?: { scripts?: string[]; service_worker?: string };
+  background?: { scripts?: string[]; service_worker?: string; type?: string };
   browser_specific_settings?: {
     gecko?: {
       id?: string;
@@ -142,6 +142,15 @@ function verifyTarget(target: FirefoxTarget): boolean {
     console.log(
       `OK: background.scripts present (${manifest.background.scripts.join(", ")}), no service_worker`,
     );
+  }
+
+  if (manifest.background?.type !== "module") {
+    console.error(
+      'FAIL: Firefox manifest background.type must be "module" (background.js is an ES module with top-level imports)',
+    );
+    failed = true;
+  } else {
+    console.log('OK: background.type is "module"');
   }
 
   // Per-target update_url policy.

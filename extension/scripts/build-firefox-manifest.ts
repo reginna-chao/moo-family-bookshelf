@@ -94,9 +94,11 @@ export function toFirefoxManifest(
         strict_min_version: STRICT_MIN_VERSION,
       },
     },
-    // Event page instead of service worker (Firefox for Android compatibility).
+    // Event page replaces the service worker (Firefox for Android). type "module" MUST stay:
+    // background.js is an ES module with top-level imports. See docs/architecture.md → Firefox 建置.
     background: {
       scripts: [swFile],
+      type: "module",
     },
   };
 }
@@ -133,7 +135,7 @@ export function buildFirefoxManifest(
   );
   console.log(`  update_url=${gecko?.update_url ?? "(none)"}`);
   console.log(
-    `  background.scripts=["${firefoxManifest.background?.scripts?.[0]}"] (event page)`,
+    `  background.scripts=["${firefoxManifest.background?.scripts?.[0]}"] type=${firefoxManifest.background?.type} (event page)`,
   );
 }
 

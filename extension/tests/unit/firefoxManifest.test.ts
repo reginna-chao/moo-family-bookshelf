@@ -90,11 +90,12 @@ describe("toFirefoxManifest", () => {
         "data_collection_permissions",
       );
 
-      // Event page replaces the MV3 service worker for Firefox/Android.
+      // Event page replaces the MV3 service worker for Firefox/Android; type "module"
+      // stays because background.js is an ES module with top-level imports.
       const background = result.background as BackgroundShape;
       expect(background.scripts).toEqual(["background.js"]);
       expect(background).not.toHaveProperty("service_worker");
-      expect(background).not.toHaveProperty("type");
+      expect(background.type).toBe("module");
 
       // version is the caller-supplied value.
       expect(result.version).toBe("1.5.0");
