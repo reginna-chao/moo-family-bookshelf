@@ -30,11 +30,6 @@ import {
  * promise-native polyfill types line up with production. Storage writes take a
  * single argument (no trailing callback).
  *
- * Migration stub: the background module runs migrateStorageKeys() at import time
- * (and in onInstalled/onStartup). These handler tests are not about migration —
- * it has its own suite in tests/unit/storage/migrate.test.ts — so it is stubbed
- * out to keep its storage side effects from polluting the storage spy assertions.
- *
  * Note: message payloads (e.g. { type: "SET_FAMILY_ID", familyId }) and handler
  * response shapes (e.g. { familyId: value }) use their own field names and are
  * unrelated to storage keys. Only storage reads/writes use the `moo:`-prefixed
@@ -51,12 +46,6 @@ import {
  * which would make a "refuses …" case silently vacuous), so the handler and the
  * shared rules cannot drift apart while staying green.
  */
-
-// Not under test here (own suite in storage/migrate.test.ts); stubbed so its
-// storage writes stay out of the spy assertions. See the file header.
-vi.mock("@/storage/migrate", () => ({
-  migrateStorageKeys: vi.fn().mockResolvedValue(undefined),
-}));
 
 type MessageListener = (
   message: Record<string, unknown>,

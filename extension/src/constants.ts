@@ -25,8 +25,7 @@ export const DEFAULT_PWA_URL: string =
 
 export const PERSONAL_BOOKS_CACHE_KEY = "moo:personalBooksCache";
 
-// --- Storage Keys --- all `moo:`-prefixed (consistent with the PWA); legacy unprefixed keys are
-// migrated on extension update — see storage/migrate.ts.
+// --- Storage Keys --- all `moo:`-prefixed (consistent with the PWA).
 
 // Auth
 export const USER_ID_KEY = "moo:userId";
@@ -75,9 +74,6 @@ export const PERSONAL_SHELF_SORT_KEY = "moo:personalShelfSort";
 // One-time flags
 export const MANUAL_LEND_NOTICE_DISMISSED_KEY = "moo:manualLendNoticeDismissed";
 export const PERSONAL_SHELF_SAVED_AT_KEY = "moo:personalShelfSavedAt";
-
-// Storage migration flag
-export const STORAGE_MIGRATED_KEY = "moo:storageMigrated";
 
 // Dynamic key builders for update tracking
 export function seenKey(userId: string): string {

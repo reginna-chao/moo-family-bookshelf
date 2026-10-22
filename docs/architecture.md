@@ -1232,7 +1232,6 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **`SET_API_ENDPOINT`** 使用與 `ApiClient`、Dialog 相同的 `validateEndpointUrl`（`shared/src/api/endpointUrl.ts`），整個擴充功能只有這一套規則，背景不得另留一份：先前背景裡的本機版本是更嚴格的「第三種意見」，擋掉了其餘用戶端都接受的私有網段／區網位址，自架者的背景副本因此沒有任何提示就與正式的 storage 寫入分歧。存的是正規化後的值，這條路徑與 Dialog 的直接寫入才不會留下同一個端點的兩種寫法。
 - **工具列圖示的同步錯誤標記**（`badge.ts`）：manifest 沒宣告 `"action"` 時 `chrome.action` 是 undefined，標記函式會直接略過，呼叫端不會讓 service worker 當掉。
 - **沒有背景排程同步**：以 `chrome.alarms` 排程的背景同步已移除，`alarms` 權限也拿掉了；升級上來的裝置若殘留排程，沒有任何 listener 會處理，等於無效。書單同步只在 Dialog 裡進行：開啟個人書櫃時的自動同步（依 `autoSyncInterval` 節流）與手動同步按鈕（`extension/src/sync/syncBooks.ts`），以及引導畫面建立／加入家庭時（`extension/src/dialog/useAutoSetup.ts`）。
-- **storage key 遷移**（`extension/src/storage/migrate.ts`）在每次 service worker 啟動時嘗試一次（`STORAGE_MIGRATED_KEY` 旗標設好後就是不花成本的 no-op）；`onInstalled` 會 `await` 它，讓 service worker 撐到遷移完成；`onStartup` 再試一次，以防先前 `onInstalled` 的遷移失敗。
 
 #### 本機儲存與同步
 
@@ -1243,11 +1242,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **寫入與清除都是本機優先**（背景的 `SET_FAMILY_ID`／`CLEAR_FAMILY_ID`）：先寫或先清 `storage.local`，持久化就不依賴 `storage.sync`——它在 Firefox 可能 reject（沒登入帳號、Android 的限制、或偏好設定關閉）。sync 的寫入／移除是盡力而為，而且獨立包起來，失敗也擋不住本機那一步；所以解除綁定一定會清掉本機的 familyId 與認證資訊（auth token 與到期時間）。
 - **只存本機的偏好**：家庭書櫃的檢視模式只是本機的介面偏好，不該跟著使用者換裝置，所以不鏡像到 `storage.sync`。只有剛好存成 `"row"` 才讀成 `"row"`，其他值（包括沒設定、舊資料）一律讀成 `"grid"`。自動同步頻率也一樣只存 `storage.local`：每台裝置自己決定多久爬一次書櫃，Chrome 上設的值不會出現在 Firefox 或手機上；沒設定或值不認得時讀成「每天」。同步封存書籍、家庭書櫃按鈕大小和兩個書櫃的排序也只存 `storage.local`，讀到不認得的值時各自回到預設（關閉、中、預設排序；排序的舊值 `title`／`author` 會讀成 `-asc` 形式）。按鈕大小的型別與判斷只在 `floatingIconSize.ts` 定義一次，content script 的浮動按鈕也從那裡 import。這些偏好寫入失敗時畫面都不退回舊值：Dialog 直接寫 `storage.local` 幾乎不會失敗（只有擴充功能的 context 失效時才會，那時整個 Dialog 已經不能用了），真的失敗也只是這次的選擇沒存下來，比畫面在使用者眼前跳回舊值好。
 - **`safeStorageGet`**（`safeStorage.ts`）：擴充功能重新載入／更新／停用後，留在頁面上的 content script 變成孤兒，`browser.storage.local` 的參照斷掉，任何 `.get(...)` 都會拋出 `Extension context invalidated`，沒被接住的 `await` 就變成 uncaught promise rejection。`safeStorageGet` 先檢查 context，再吞掉任何讀取錯誤，回傳空物件，呼叫端就落回各自的預設值。刻意吞掉錯誤，所以它只用於盡力而為的**讀取**：讀取失敗必須讓使用者知道的地方不要用它，而且呼叫端拿到 `{}` 時必須仍然正確。
-- **storage key 遷移**（`migrate.ts`）：擴充功能的 storage key 以前沒有前綴（例如 `userId`、`familyId`），現在與 PWA 一致加上 `moo:` 前綴。遷移把舊 key 改名成 `moo:` 版本，`storage.local` 與 `storage.sync` 都做，既有使用者更新後仍保有 auth token、家庭綁定與偏好設定。
-  - 可重複執行：已經以 `moo:` 開頭的 key 會跳過。
-  - 中斷安全：先寫新 key 再刪舊 key，中斷時資料留在舊 key 上（無害），不會遺失；`moo:` key 已經有值時（前一次只完成一半，之後 App 又寫了新資料）絕不用舊值覆蓋，只刪掉舊 key。
-  - 盡力而為：任何失敗都吞掉，背景程式不會當掉；旗標沒設上，下次啟動會再試。
-  - **待清理**：v1.3.0 為了這次一次性改名加入，等幾乎所有安裝都更新到 v1.3.0 之後就可以移除（目標約 v1.6.0，即 3 個發布週期）。遷移在自動更新觸發的 `onInstalled` 裡執行，不是等使用者再次造訪，所以長尾是幾天到幾週而不是幾個月。移除時一併拿掉 `STORAGE_MIGRATED_KEY` 的寫入；殘留的舊 key 是無害的孤兒，不值得再寫一次遷移去清。
+- **storage key 前綴**：擴充功能的 storage key 一律以 `moo:` 開頭，與 PWA 一致。v1.4.0 起曾有一次性遷移把舊的無前綴 key（例如 `userId`、`familyId`）改名，已在 #346 移除；殘留的舊 key 與 `moo:storageMigrated` 旗標是無害的孤兒，不另外清除（舊的無前綴 `userEmail` 要不要一併清掉，交給 #359 決定）。已接受的殘餘風險：2026 年 6 月前就沒再開過的 Chrome 安裝更新後讀不到舊 key，會回到引導畫面，資料都在伺服器上，按「開始使用」就重新連回原家庭（舊的自訂 API 端點也讀不到，自架家庭要先重新設定端點）；Firefox 版一開始就用 `moo:` key，不受影響。
 
 #### 書單同步
 
