@@ -27,6 +27,7 @@ import {
   deletePublicSnapshot,
 } from "../kv/publicShelves";
 import { readNewBookDefault, deleteNewBookDefault } from "../kv/newBookDefault";
+import { deleteVerifyRecord, deleteOtpRecord } from "../kv/verify";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
@@ -1043,6 +1044,8 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     deleteUserBooksRecord(c.env.KV, userId),
     deletePublicShelves(c.env.KV, userId),
     deleteNewBookDefault(c.env.KV, userId),
+    deleteVerifyRecord(c.env.KV, userId),
+    deleteOtpRecord(c.env.KV, userId),
     deleteMemberFamilyId(c.env.KV, userId),
     deleteAuthToken(c.env.KV, userId),
     ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),

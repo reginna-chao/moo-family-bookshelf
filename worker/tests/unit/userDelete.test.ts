@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { kvKeys } from "../../src/kv/schema";
+import {
+  kvKeys,
+  BoolFlag,
+  OTP_TTL_SECONDS,
+  type VerifyRecord,
+  type OtpRecord,
+} from "../../src/kv/schema";
 import { OWNER1, USER1, USER2, NOBODY } from "../helpers/ids";
 import { seedAuthToken } from "../helpers/auth";
 
@@ -265,10 +271,28 @@ describe("DELETE /api/user/:id", () => {
       user2Token,
     );
 
+    // Seed verification settings and a still-pending one-time code (#341).
+    const verifyRecord: VerifyRecord = {
+      method: "pin",
+      hash: "a".repeat(64),
+      salt: "b".repeat(32),
+      prompted: BoolFlag.TRUE,
+    };
+    const otpRecord: OtpRecord = {
+      code: "123456",
+      createdAt: new Date().toISOString(),
+    };
+    await kv.put(kvKeys.verify(USER2), JSON.stringify(verifyRecord));
+    await kv.put(kvKeys.otp(USER2), JSON.stringify(otpRecord), {
+      expirationTtl: OTP_TTL_SECONDS,
+    });
+
     // Verify keys exist before deletion
     expect(await kv.get(kvKeys.user(USER2))).not.toBeNull();
     expect(await kv.get(kvKeys.member(USER2))).not.toBeNull();
     expect(await kv.get(kvKeys.auth(USER2))).not.toBeNull();
+    expect(await kv.get(kvKeys.verify(USER2))).not.toBeNull();
+    expect(await kv.get(kvKeys.otp(USER2))).not.toBeNull();
 
     // Delete
     const res = await request(
@@ -283,6 +307,8 @@ describe("DELETE /api/user/:id", () => {
     expect(await kv.get(kvKeys.user(USER2))).toBeNull();
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.verify(USER2))).toBeNull();
+    expect(await kv.get(kvKeys.otp(USER2))).toBeNull();
 
     // Verify the auth token reverse-lookup is also deleted
     // (We can't easily check without knowing the token, but deleteAuthToken handles it)
