@@ -356,6 +356,7 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
 │   └── references/designer/{pencil-mockup,logo,icon,banner}.md
 ├── reports/        # retro reports — written by /develop's retro (offered once per run, at the commit gate), consumed & cleared by /distill
+├── runs/           # one <slug>/PLAN.md per in-flight /develop run (決定 / 計畫 / Fix Cycle Log) — written at GO so a later session can resume, deleted or kept at the commit gate
 └── skills/         # slash-menu entries
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them

@@ -32,6 +32,8 @@ translate these — translating them silently breaks the thing they configure:
   `.claude/skills/speak-human-tw/` (third-party, keep byte-identical to upstream).
 - `.claude/reports/` — retro reports are 繁體中文 by `develop/references/retro.md`; they are a record
   for humans, and are consumed and deleted by `/distill`.
+- `.claude/runs/<slug>/PLAN.md` — the run file is 繁體中文 by `develop/SKILL.md` §2: it quotes the
+  user's decisions and the plan they read, and a resuming session reads it back to them.
 
 When it is genuinely unclear which side a passage falls on, leave it and raise it — a wrong
 translation of a matched string fails silently, at the next run, far from the edit.
