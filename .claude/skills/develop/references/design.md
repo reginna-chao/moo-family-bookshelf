@@ -4,7 +4,7 @@ For DESIGN-intent requests (brand assets, add-icon, or visual-style exploration)
 
 ## Working directory (every mode that writes tracked files)
 
-Modes 1 and 2 end in committed assets, so they follow `references/code-cycle.md` → Phase 0: run 0a before the brief, close the brief with 「需要你決定的事」 whose last item is 「工作目錄」, and run 0b after the answer, before the first `designer` dispatch. The Add-icon exemption (Mode 2 step 3) skips the GO gate, never this question: a straightforward icon still asks 「工作目錄」 alone first. Mode 3 writes nothing tracked — its saved direction lives in the gitignored `.skill-archive/` — so it asks this only once it switches to Mode 1.
+Modes 1 and 2 end in committed assets, so they follow `references/code-cycle.md` → Phase 0 and the two stops of `SKILL.md` §2: run 0a before the brief; close the brief's analysis with 「需要你決定的事」 whose last item is 「工作目錄」 and ask it alone (the decision gate); run 0b; then present the brief as the plan and hold the GO gate, before the first `designer` dispatch. The design route keeps no `PLAN.md`. The Add-icon exemption (Mode 2 step 3) skips the GO gate, never this question: a straightforward icon still asks 「工作目錄」 alone first. Mode 3 writes nothing tracked — its saved direction lives in the gitignored `.skill-archive/` — so it asks this only once it switches to Mode 1.
 
 ## Mode triage
 
@@ -24,7 +24,7 @@ Modes 1 and 2 end in committed assets, so they follow `references/code-cycle.md`
 1. **Confirm the asset list** — only what the user asked for. Map each to how the `designer` agent will make it (favicon/logo/app icon = SVG via logo ref; UI icon set = SVG via icon ref; README banner / OG / social = SVG via banner ref).
 2. **Check existing brand** — `ls assets/ public/ extension/public/ site/ 2>/dev/null`; extract any existing logo, brand colors (CSS/Tailwind), icon style. Reuse — don't recreate what exists.
 3. **Compile a focused brief**: existing brand (logo path / colors / style), assets to create, platform constraints.
-4. **Present the brief as the plan, then hold the GO gate** (`SKILL.md` §2): the brief closes with 「需要你決定的事」, 「工作目錄」 last; one AskUserQuestion batch carries those items, then 「GO，開始執行」 / 「修改計畫」 — or a typed `GO`. Iterate on the brief until GO; no `designer` is dispatched before it.
+4. **Decision gate, then the brief as the plan, then the GO gate** (`SKILL.md` §2): first ask 「需要你決定的事」, 「工作目錄」 last, in its own AskUserQuestion batch with no GO in it; run 0b; then present the brief with those answers restated and ONE AskUserQuestion with 「GO，開始執行」 / 「修改計畫」 — or a typed `GO`. Iterate on the brief until GO; no `designer` is dispatched before it.
 
 ### Phase 2 — Delegate to `designer`
 
