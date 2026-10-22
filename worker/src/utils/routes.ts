@@ -14,6 +14,8 @@ export function isPublicRoute(method: string, path: string): boolean {
     return true;
   // GET /api/public/:shareToken — public bookshelf query
   if (method === "GET" && /^\/api\/public\/[^/]+\/?$/.test(path)) return true;
+  // GET /api/version — server version probe (clients call it without a token)
+  if (method === "GET" && /^\/api\/version\/?$/.test(path)) return true;
   // GET /api/_openapi.json + /api/_docs — dev-only API docs (handler gates with isDevMode)
   if (method === "GET" && /^\/api\/_openapi\.json\/?$/.test(path)) return true;
   if (method === "GET" && /^\/api\/_docs\/?$/.test(path)) return true;

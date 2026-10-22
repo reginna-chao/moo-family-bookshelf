@@ -298,6 +298,15 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("POST", "/api/user/abc123/verify/otp")).toBe(false);
   });
 
+  it("should match GET /api/version (token-less server probe)", () => {
+    expect(isPublicRoute("GET", "/api/version")).toBe(true);
+    expect(isPublicRoute("GET", "/api/version/")).toBe(true);
+  });
+
+  it("should NOT match POST /api/version (only GET is public)", () => {
+    expect(isPublicRoute("POST", "/api/version")).toBe(false);
+  });
+
   it("should not match other methods or paths", () => {
     expect(isPublicRoute("GET", "/api/family")).toBe(false);
     expect(isPublicRoute("DELETE", "/api/family/abcd-1234/member/user1")).toBe(
@@ -474,6 +483,13 @@ describe("rateLimitBucketFor", () => {
 
     expect(sensitive).toBeLessThan(publicTier);
     expect(publicTier).toBeLessThan(standard);
+  });
+
+  it("should charge GET /api/version to the public tier", () => {
+    expect(rateLimitBucketFor("GET", "/api/version")).toEqual({
+      prefix: "ratelimit:pub",
+      limit: 10,
+    });
   });
 
   it("should not let a crafted caller key alias the lookup counter", () => {
