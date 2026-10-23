@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { ApiClient } from "@/api/client";
-import type { VerifyMethod, VerifyInfo } from "@/api/client";
+import type { VerifyMethod } from "@/api/client";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 
@@ -30,15 +31,10 @@ export function VerifySetupPrompt({
 
   useEffect(() => {
     void apiClient
-      .getVerifyMethod(userId)
+      .getVerifyPrompted(userId)
       .then((res) => {
-        const info: VerifyInfo | undefined = res.data;
-        // Only show prompt if not yet prompted
-        if (info && info.prompted === 0) {
-          setStep("choose");
-        } else {
-          setStep("done");
-        }
+        // Show only on an explicit "not yet prompted"; an error envelope (e.g. an old server's 404) skips it
+        setStep(res.data?.prompted === BoolFlag.FALSE ? "choose" : "done");
       })
       .catch(() => {
         // On error, skip prompt to avoid blocking the user

@@ -72,7 +72,7 @@ const getVerifyRoute = createRoute({
     params: UserIdParam,
   },
   responses: {
-    200: jsonRes("Verification method and prompted status"),
+    200: jsonRes("Verification method only (no hash, no prompted status)"),
     400: jsonRes("Invalid user ID"),
   },
 });
@@ -83,9 +83,9 @@ verifyRoutes.openapi(getVerifyRoute, async (c) => {
 
   const record = await getVerifyRecord(c.env.KV, userId);
   const method = record?.method ?? "none";
-  const prompted = record?.prompted ?? 0;
 
-  return c.json({ data: { method, prompted } });
+  // `prompted` is owner-only (#343): it would reveal who has used the PWA.
+  return c.json({ data: { method } });
 });
 
 // PUT /:id/verify — set or change verification method (protected)
@@ -245,6 +245,37 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   const expiresAt = Date.now() + OTP_TTL_SECONDS * 1000;
 
   return c.json({ data: { code, expiresAt } });
+});
+
+// GET /:id/verify/prompted — read prompted status (protected, owner only; #343)
+const getVerifyPromptedRoute = createRoute({
+  method: "get",
+  path: "/{id}/verify/prompted",
+  tags: ["Verify"],
+  summary: "Get whether the user was prompted to set up verification",
+  request: {
+    params: UserIdParam,
+  },
+  responses: {
+    200: jsonRes("Prompted status"),
+    400: jsonRes("Invalid user ID"),
+    401: jsonRes("Unauthorized"),
+  },
+});
+
+verifyRoutes.openapi(getVerifyPromptedRoute, async (c) => {
+  // Format already enforced by UserIdParam (400 INVALID_USER_ID).
+  const { id: userId } = c.req.valid("param");
+
+  const callerId = getAuthenticatedUserId(c);
+  if (!callerId || callerId !== userId) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+
+  // A read: no VERIFY_WRITE_LIMIT; the per-IP authenticated tier still applies.
+  const record = await getVerifyRecord(c.env.KV, userId);
+
+  return c.json({ data: { prompted: record?.prompted ?? 0 } });
 });
 
 // POST /:id/verify/prompted — mark user as prompted (protected, prevents abuse)

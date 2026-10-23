@@ -30,6 +30,7 @@ import type {
   SetVerifyBody,
   UnkickResult,
   VerifyInfo,
+  VerifyPromptedInfo,
   VersionInfo,
 } from "moo-family-bookshelf-shared/api/types";
 import { BorrowStatus } from "moo-family-bookshelf-shared/borrow/types";
@@ -41,6 +42,7 @@ import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/valid
 import { sanitizeFamilyMembersResponse } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 import { DEFAULT_API_ENDPOINT } from "../constants";
+import { readEnvelope } from "./envelope";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -90,17 +92,6 @@ export type {
   BorrowRequest,
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
-
-/** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
- *  to exactly this one (docs/architecture.md → API client 的回應處理). */
-const NO_CONTENT_STATUS = 204;
-
-/** Read the `{ data, error }` envelope; a 204 is an empty envelope (`response.json()` would throw
- *  on it), every other response still parses — or throws — as JSON. */
-async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
-  if (response.status === NO_CONTENT_STATUS) return {};
-  return (await response.json()) as ApiResponse<T>;
-}
 
 export class ApiClient {
   private baseUrl: string;
@@ -428,6 +419,14 @@ export class ApiClient {
   async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
     this.validateHexId(userId, "userId");
     return this.get(`/api/user/${userId}/verify`);
+  }
+
+  /** Get whether the setup prompt was already shown (requires auth token). */
+  async getVerifyPrompted(
+    userId: string,
+  ): Promise<ApiResponse<VerifyPromptedInfo>> {
+    this.validateHexId(userId, "userId");
+    return this.get(`/api/user/${userId}/verify/prompted`);
   }
 
   /** Set verification method for a user. */

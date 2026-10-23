@@ -579,6 +579,7 @@ Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示�
   - **per-userId 速率限制以受害者的 userId 為 key**：加入家庭端點過去另設一個 `join` scope 的 per-userId 計數器，對**每一次**加入請求計數（不論呼叫方是否證明擁有該帳號），第三方只要知道受害者的 userId 就能打滿，讓受害者本人在該小時內重連時直接收到 `429 RATE_LIMITED`——由於加入是既有成員唯一的發 token 重連路徑，這等同把本人鎖在門外，違反 Auth Token 不變式。此「對每次請求計數」的計數器已**移除**。加入端點現在唯一的 per-userId 煞車是 `verify` 嘗試上限，它是「猜錯才計數」：在密鑰比對之後才查看，正確密鑰一律放行（帳號本人永遠通過，即使額度已被攻擊者打滿），被打滿只會擋住後續的錯誤**猜測**，因此不再是傷及帳號本人的可用性槓桿
   - **合法使用者的額度消耗：零**。一次完整登入流程（先 `/api/auth/lookup` 帶密鑰，再 create／join 帶同一組密鑰）雖然會通過閘門兩次，但兩次都比對成功，因此不消耗任何額度；就算此時該帳號的 `verify` 額度已被攻擊者打滿，本人依然通過。每小時 10 次的額度只會被「猜錯」吃掉
   - **沒有任何一道限制是硬上限**：每分鐘的限制（per-IP 三層，以及 per-userId 的 `bookshelf`／`borrow-*`）已改用 Cloudflare 原生 Rate Limiting binding，它在單一 Cloudflare 節點內計算、eventually consistent，官方明示 permissive by design。每小時的 per-userId 計數器與驗證嘗試上限則仍是 KV get-then-put、沒有序列化：同時併發送出的請求會讀到同一個計數值而全部放行，超額幅度取決於**攻擊者自己的併發數**，不是固定的 ~2 倍。兩條路徑都只對循序流量成立。要有硬上限必須改用 Durable Objects，屬另案決策，目前不在 backlog 內（`docs/project-plan.md` BE-4 只涵蓋「改用原生 binding」，已完成）；邊緣層則可用上方「運維層的補強」所述的 WAF Rate Limiting 規則
+  - **公開的驗證方式查詢仍透露 `method`**：`GET /api/user/:id/verify` 不需登入，因為 PWA 登入頁／QR Code 加入與擴充功能的初次設定、重新驗證，都要先知道該不該向使用者要密鑰，才能呼叫閘門。手上有 Email 清單的第三方因此能算出 userId，查出某個帳號有沒有設定驗證、設的是哪一種（`method` 不是 `none`），速度只受公開端點的 per-IP 限制約束（每分鐘 10 次，`worker/src/middleware/rateLimit.ts` 的 `RATE_LIMIT_PUBLIC`）。帳號是否用過 PWA（`prompted`）則不再公開，改由只有本人能讀的 `GET /api/user/:id/verify/prompted` 回傳（#343）
 - OTP 使用後立即刪除（一次性）。唯一例外是 `POST /api/auth/lookup`：該端點以 `consumeOtp: false` 呼叫閘門，比對成功也不刪除 OTP。因為用戶端的流程是「先 lookup 帶密鑰確認歸屬，再 create／join 帶**同一組**密鑰」，若在 lookup 就把一次性 OTP 用掉，第二個請求必然失敗且被計為一次驗證失敗，5 次就把使用者自己鎖住 15 分鐘。不刪除也不會放寬安全性：OTP 仍受自身 300 秒 TTL 約束，且呼叫方本來就已經持有它
 - Token refresh 改為 protected route（需有效 Bearer token），防止 userId + familyId 直接取得新 token
 - 預設不設定；首次 PWA 登入後提醒一次，之後不再提醒
@@ -600,9 +601,10 @@ Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示�
 
 | Method | Path                            | 說明                                                              | 權限 |
 | ------ | ------------------------------- | ----------------------------------------------------------------- | ---- |
-| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（不回傳 hash）                                       | 公開 |
+| `GET`  | `/api/user/:id/verify`          | 查詢驗證方式（只回 `method`，不回 hash 與 `prompted`）            | 公開 |
 | `PUT`  | `/api/user/:id/verify`          | 設定/變更驗證方式                                                 | 本人 |
 | `POST` | `/api/user/:id/verify/otp`      | 產生一次性驗證碼                                                  | 本人 |
+| `GET`  | `/api/user/:id/verify/prompted` | 查詢是否已提醒過設定驗證                                          | 本人 |
 | `POST` | `/api/user/:id/verify/prompted` | 標記已提醒                                                        | 本人 |
 | `POST` | `/api/user/:id/qr-token`        | 產生一次性 QR Token（PWA 掃碼加入家庭時可略過驗證，300 秒後失效） | 本人 |
 
@@ -610,7 +612,7 @@ Workers Logs 在本專案採用的方案上也無法對自訂欄位設定警示�
 
 驗證閘門不只擋手機：擴充功能初次設定與重新驗證（`extension/src/dialog/Onboarding.tsx`、`extension/src/dialog/ReauthModal.tsx`）走的是同一組建立／加入／查詢端點，同樣要求這組密鑰。忘記之後能不能自己解決，取決於還有沒有一台裝置握有有效的 auth token：
 
-- **還有登入中的電腦**：在擴充功能設定（`VerificationSettings`）重新設定驗證方式；`PUT /api/user/:id/verify` 會寫入新的 `secretUpdatedAt`，舊密鑰累積的鎖定隨之作廢。也可以產生 QR Code，讓手機略過驗證加入。PWA 只在帳號還沒被提示過（`GET /api/user/:id/verify` 回 `prompted: 0`）時顯示設定畫面，之後沒有修改驗證的入口，所以兩端的設定提示都指向擴充功能。
+- **還有登入中的電腦**：在擴充功能設定（`VerificationSettings`）重新設定驗證方式；`PUT /api/user/:id/verify` 會寫入新的 `secretUpdatedAt`，舊密鑰累積的鎖定隨之作廢。也可以產生 QR Code，讓手機略過驗證加入。PWA 只在帳號還沒被提示過（`GET /api/user/:id/verify/prompted` 回 `prompted: 0`）時顯示設定畫面，之後沒有修改驗證的入口，所以兩端的設定提示都指向擴充功能。
 - **沒有任何裝置握有 token**（自己離開家庭、被移出都會刪掉 token；同一帳號的所有裝置共用一把 token，90 天沒有續期也會到期）：目前沒有自助救援路徑。閘門要密鑰、改密鑰要 token、發 token 要過閘門，`DELETE /api/user/:id` 也要 token。刪除帳號不會造成這個狀態：它連驗證設定一起刪（#341），之後同一個 Email 重新開始時不需要密鑰。
 
 **目前的政策（#342）**：沒有 token 時，Worker 無從分辨申請人是不是本人（見「威脅模型與已接受的風險姿態」→ 前提一），不另外證明身分的自助重設等於「知道 Email 就能拿掉驗證」，因此不提供。唯一的出口是 KV 管理者把 `verify:{userId}` 改寫成一組臨時 PIN（直接刪除會留下沒有驗證的空窗，空窗期搶到的 token 在本人重設後仍有效，因為 `PUT /api/user/:id/verify` 不撤銷 token）：自架伺服器由管理者自行判斷，步驟見 `worker/DEPLOY.md` → 使用者忘記登入驗證時；官方伺服器在救援功能上線前沒有正式的申請窗口，維護者同樣無法確認申請人是本人。決定採用的方向是 Email 驗證救援（收得到讀墨註冊信箱的信，就是家人冒充不了的證明），它需要伺服器第一次接觸明文 Email 並接上寄信服務，設計見 `docs/verify-email-recovery-plan.md`，尚未實作。
@@ -822,7 +824,7 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 #### API client 的回應處理
 
-`pwa/src/api/client.ts`：
+`pwa/src/api/client.ts`（`readEnvelope` 自 #343 起在 `pwa/src/api/envelope.ts`）：
 
 - **沒有 body 的成功**：`DELETE /api/user/:id/public-shelf/:shelfId` 是這個 API 唯一不帶 body 的回應（204，RFC 9110 §15.3.5）。`response.json()` 遇到空 body 會拋 SyntaxError，呼叫端分不出它和真正的網路失敗——被拒的撤銷曾經因此被讀成「已刪除」。所以 `readEnvelope` 把 204 解析成空信封，其他回應照舊解析（格式錯誤的仍會拋錯）。只放行這一個狀態碼：API 從不回 205，放寬只會讓惡意後端可以把空 body 讀成確認成功；304 屬於 `!response.ok`，本來就走錯誤路徑。`unwrapVoid` 不要求 `data`，否則每個成功的 204 都會變成假的 `EMPTY_RESPONSE`。
 - **`throwOnError` 是所有 `ApiError` 的唯一出口**，錯誤文字在這裡統一處理，而不是在每個呼叫處各做一次。`code`／`message` 宣告為 `string`，實際上來自 `response.json()` 的直接轉型，後端又可以自架。`JSON.parse` 真的能產生 `{"toString":null,"valueOf":null}` 這種值，它會讓建構子的 ``super(`${code}: ${message}`)`` 拋出 TypeError，`ApiError` 根本建不起來：`err instanceof ApiError` 變成 false，需要 `code` 與 `retryAfter` 的在地化 429 退避分支被跳過，畫面改顯示英文的 TypeError。處理這兩個會被插入字串的欄位，保住的是錯誤的身分，而不只是措辭。`retryAfter` 原樣傳入，建構子自己會檢查。

@@ -71,7 +71,9 @@ import {
  * Public read: GET /api/user/:id/verify is what the PWA calls BEFORE login to
  * learn which verification method to prompt for. Limiting it on the owner's
  * write budget would let a spent window (or a third party who somehow spent
- * it) hide the login prompt.
+ * it) hide the login prompt. Since #343 it carries `method` only; the owner's
+ * `prompted` flag moved to the authenticated GET /api/user/:id/verify/prompted,
+ * which is a read too and stays off the write ceiling for the same reason.
  *
  * Cross-scope isolation — the core invariant of this change: the write
  * ceiling's scope is deliberately DISTINCT from the verification gate's
@@ -599,9 +601,34 @@ describe("Verify-domain write ceiling — public read", () => {
     const afterSpend = await prodRequest("GET", `/api/user/${USER_ID}/verify`);
     expect(afterSpend.status).toBe(200);
     const json = (await afterSpend.json()) as Json;
-    expect(json.data.method).toBe("pin");
-    expect(json.data.prompted).toBe(1);
+    expect(json.data).toEqual({ method: "pin" });
     // Reading charged nothing to the spent window either.
+    expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
+  });
+
+  it("serves the owner's GET verify/prompted without charging the write window, even once it is spent", async () => {
+    await seedAuthToken(USER_ID);
+    await seedVerifyMethod(USER_ID, "pin");
+
+    const beforeSpend = await prodRequest(
+      "GET",
+      `/api/user/${USER_ID}/verify/prompted`,
+      { token: AUTH_TOKEN },
+    );
+    expect(beforeSpend.status).toBe(200);
+    // An owner read must not create a write counter at all.
+    expect(await writesCharged(USER_ID)).toBeNull();
+    expect(await writeCounterKeys()).toHaveLength(0);
+
+    await spendWriteBudget(USER_ID, WRITE_MAX);
+
+    const afterSpend = await prodRequest(
+      "GET",
+      `/api/user/${USER_ID}/verify/prompted`,
+      { token: AUTH_TOKEN },
+    );
+    expect(afterSpend.status).toBe(200);
+    expect(await afterSpend.json()).toEqual({ data: { prompted: 1 } });
     expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
   });
 });

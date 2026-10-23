@@ -180,7 +180,7 @@ describe("LandingPage", () => {
     mockGetVerifyMethod.mockReset();
     // Default: no verification, joinFamily succeeds with token
     mockGetVerifyMethod.mockResolvedValue({
-      data: { method: "none", prompted: 0 },
+      data: { method: "none" },
     });
     mockJoinFamily.mockResolvedValue({
       data: { ok: true, authToken: "tok-123" } as unknown as { ok: boolean },
@@ -704,7 +704,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pin", prompted: 1 },
+        data: { method: "pin" },
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -726,7 +726,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pattern", prompted: 1 },
+        data: { method: "pattern" },
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -747,7 +747,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -771,7 +771,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pin", prompted: 1 },
+        data: { method: "pin" },
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -796,7 +796,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "VERIFICATION_FAILED", message: "Wrong code" },
@@ -829,7 +829,7 @@ describe("LandingPage", () => {
         familyId: "fam-1",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "none", prompted: 1 },
+        data: { method: "none" },
       });
 
       render(<LandingPage onAuth={mockOnAuth} />);
@@ -853,7 +853,7 @@ describe("LandingPage", () => {
         familyId: "fam-qr",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "none", prompted: 1 },
+        data: { method: "none" },
       });
 
       render(
@@ -890,7 +890,7 @@ describe("LandingPage", () => {
         apiHost: QR_ENDPOINT,
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "none", prompted: 1 },
+        data: { method: "none" },
       });
 
       render(
@@ -925,7 +925,7 @@ describe("LandingPage", () => {
         familyId: "fam-qr",
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pin", prompted: 1 },
+        data: { method: "pin" },
       });
 
       render(
@@ -1389,7 +1389,7 @@ describe("LandingPage", () => {
       async function renderQrArrival(apiHost?: string) {
         mockDecodeSyncCode.mockReturnValue({ familyId: "fam-qr", apiHost });
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "pin", prompted: 1 },
+          data: { method: "pin" },
         });
 
         render(
@@ -1488,7 +1488,7 @@ describe("LandingPage", () => {
         "asks first when %s",
         async (_label, qrToken) => {
           mockGetVerifyMethod.mockResolvedValue({
-            data: { method: "none", prompted: 1 },
+            data: { method: "none" },
           });
 
           renderQrArrival(QR_ENDPOINT, qrToken);
@@ -1520,7 +1520,7 @@ describe("LandingPage", () => {
 
       it("never appears for the official default endpoint", async () => {
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "none", prompted: 1 },
+          data: { method: "none" },
         });
 
         renderQrArrival(undefined, QR_TOKEN);
@@ -1577,7 +1577,7 @@ describe("LandingPage", () => {
 
       it("probes for a verification method and joins when none is configured", async () => {
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "none", prompted: 1 },
+          data: { method: "none" },
         });
 
         renderQrArrival(QR_ENDPOINT);
@@ -1605,7 +1605,7 @@ describe("LandingPage", () => {
 
       it("opens the challenge instead of joining when verification is configured", async () => {
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "pin", prompted: 1 },
+          data: { method: "pin" },
         });
 
         renderQrArrival(QR_ENDPOINT);
@@ -1774,7 +1774,7 @@ describe("LandingPage", () => {
         },
       });
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pin", prompted: 1 },
+        data: { method: "pin" },
       });
 
       renderQrArrival(QR_ENDPOINT, QR_TOKEN);
@@ -1834,7 +1834,7 @@ describe("LandingPage", () => {
         const { pending, finish } = deferredJoin();
         mockJoinFamily.mockReturnValue(pending);
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "none", prompted: 1 },
+          data: { method: "none" },
         });
 
         renderQrArrival(undefined, qrToken);

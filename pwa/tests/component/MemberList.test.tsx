@@ -28,7 +28,7 @@ import {
  * / `transferOwnership` RESOLVE an envelope the component reads `res.error` off.
  *
  * Hostile error envelopes: `removeMember` / `transferOwnership` resolve the `{ data, error }`
- * envelope through `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts), and
+ * envelope through `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/envelope.ts), and
  * the endpoint is user-configurable (BYO backend), so `error.message` is `unknown` at runtime. A
  * non-string used to land in `error` state and render as a JSX child: React 19 throws on an
  * object/array, and nothing above this list is an ErrorBoundary, so a refused removal blanked the

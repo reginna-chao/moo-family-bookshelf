@@ -92,7 +92,7 @@ describe("LandingPage re-login after a forced re-verification", () => {
     mockJoinFamily.mockReset();
     mockGetVerifyMethod.mockReset();
     mockGetVerifyMethod.mockResolvedValue({
-      data: { method: "none", prompted: 1 },
+      data: { method: "none" },
     });
     mockJoinFamily.mockResolvedValue({ data: { ok: true, authToken: "tok" } });
   });
@@ -146,7 +146,7 @@ describe("LandingPage re-login after a forced re-verification", () => {
     it("keeps the marker after a wrong secret, so the retry is still a recovery join", async () => {
       await markReauthPending(MARKED);
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
       mockJoinFamily
         .mockResolvedValueOnce({
