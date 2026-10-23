@@ -43,6 +43,8 @@ import {
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
 import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
@@ -179,7 +181,7 @@ export class ApiClient {
     userId: string,
     opts?: { verifySecret?: string },
   ): Promise<ApiResponse<LookupResult>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
@@ -192,7 +194,7 @@ export class ApiClient {
   /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
    *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.get<unknown>(`/api/user/${userId}/books`);
     return sanitizeEnvelope(
       sanitizePersonalBooksResponse<PersonalBooks>(res),
@@ -204,7 +206,7 @@ export class ApiClient {
     userId: string,
     data: PersonalBooks & { expectedLastUpdated?: string },
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/books`, data);
   }
 
@@ -214,7 +216,7 @@ export class ApiClient {
     userId: string,
     changes: Array<{ bookId: BookEntry["bookId"]; isShared: BoolFlag }>,
   ): Promise<ApiResponse<{ ok: boolean; applied: number }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.patch(`/api/user/${userId}/books`, { changes });
   }
 
@@ -226,7 +228,7 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
 
@@ -238,7 +240,7 @@ export class ApiClient {
     userId: string,
     displayName?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = {
       userId,
       displayName: displayName ?? "",
@@ -255,7 +257,7 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string | BoolFlag> = { userId };
     if (opts?.verifySecret !== undefined) body.verifySecret = opts.verifySecret;
     if (opts?.qrToken !== undefined) body.qrToken = opts.qrToken;
@@ -267,7 +269,7 @@ export class ApiClient {
     familyId: string,
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.del(`/api/family/${familyId}/member/${userId}`);
   }
 
@@ -275,7 +277,7 @@ export class ApiClient {
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(targetUserId, "targetUserId");
+    assertHexId(targetUserId, "targetUserId");
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
@@ -285,7 +287,7 @@ export class ApiClient {
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<UnkickResult>> {
-    this.validateHexId(targetUserId, "targetUserId");
+    assertHexId(targetUserId, "targetUserId");
     return this.del(`/api/family/${familyId}/kicked/${targetUserId}`);
   }
 
@@ -294,8 +296,8 @@ export class ApiClient {
     userId: string,
     newOwnerId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
-    this.validateHexId(newOwnerId, "newOwnerId");
+    assertHexId(userId, "userId");
+    assertHexId(newOwnerId, "newOwnerId");
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
@@ -316,7 +318,7 @@ export class ApiClient {
     userId: string,
     displayName: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/family/${familyId}/member/${userId}/displayName`, {
       displayName,
     });
@@ -325,7 +327,7 @@ export class ApiClient {
   // --- Account ---
 
   async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.del(`/api/user/${userId}`);
   }
 
@@ -398,17 +400,19 @@ export class ApiClient {
 
   // --- Verification ---
 
-  /** Get verification method for a user (no auth needed). */
+  /** No auth needed. Read as `unknown`; an unknown `method` becomes an `INVALID_RESPONSE` error
+   *  envelope, not a throw. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
-    this.validateHexId(userId, "userId");
-    return this.get(`/api/user/${userId}/verify`);
+    assertHexId(userId, "userId");
+    const res = await this.get<unknown>(`/api/user/${userId}/verify`);
+    return sanitizeVerifyInfoResponse<VerifyInfo>(res);
   }
 
   /** Get whether the setup prompt was already shown (requires auth token). */
   async getVerifyPrompted(
     userId: string,
   ): Promise<ApiResponse<VerifyPromptedInfo>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.get(`/api/user/${userId}/verify/prompted`);
   }
 
@@ -417,7 +421,7 @@ export class ApiClient {
     userId: string,
     body: SetVerifyBody,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/verify`, body);
   }
 
@@ -425,14 +429,14 @@ export class ApiClient {
   async markVerifyPrompted(
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.post(`/api/user/${userId}/verify/prompted`);
   }
 
   // --- Public Shelf (v1.2.0) ---
 
   async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
@@ -443,7 +447,7 @@ export class ApiClient {
     userId: string,
     body: { title: string; expiresDays: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf`,
       body,
@@ -456,7 +460,7 @@ export class ApiClient {
     shelfId: string,
     body: { title?: string; expiresDays?: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.put<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
@@ -468,7 +472,7 @@ export class ApiClient {
     userId: string,
     shelfId: string,
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
@@ -478,7 +482,7 @@ export class ApiClient {
   /** Revoke a public shelf; throws `ApiError` on refusal, and the caller MUST NOT then report the link
    *  closed (the snapshot stays readable until this succeeds). */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
     unwrapVoid(res);
   }
@@ -489,12 +493,6 @@ export class ApiClient {
   }
 
   // --- Internal ---
-
-  private validateHexId(id: string, label: string): void {
-    if (!/^[a-f0-9]{64}$/.test(id)) {
-      throw new Error(`Invalid ${label}: expected 64-char hex string`);
-    }
-  }
 
   private async request<T>(
     path: string,

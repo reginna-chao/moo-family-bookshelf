@@ -35,7 +35,7 @@ import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/p
  * no-op on them and any change came from layer 1. The same case tables live in
  * `extension/tests/unit/api/personal-books-client.test.ts`; layer 1 is the shared
  * implementation, so the mirrored tables prove each app's own composition. The
- * PWA client rejects a userId that is not 64 hex characters (`validateHexId`), so
+ * PWA client rejects a userId that is not 64 hex characters (`assertHexId`), so
  * every case uses one.
  *
  * Warnings: at most ONE aggregate `[personalBooksValidation]` line per response,

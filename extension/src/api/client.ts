@@ -62,6 +62,8 @@ import {
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
 import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { isClientSynthesized, synthesizeError } from "./synthesizedError";
 
@@ -266,7 +268,7 @@ export class ApiClient {
     userId: string,
     opts?: { verifySecret?: string },
   ): Promise<ApiResponse<LookupResult>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
@@ -307,7 +309,7 @@ export class ApiClient {
     userId: string,
     flag: BoolFlag,
   ): Promise<ApiResponse<{ ok: boolean; newBookDefaultShared: BoolFlag }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/new-book-default`, {
       newBookDefaultShared: flag,
     });
@@ -321,7 +323,7 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
 
@@ -509,8 +511,11 @@ export class ApiClient {
 
   // --- Verification ---
 
+  /** Read as `unknown`; an unknown `method` becomes an `INVALID_RESPONSE` error envelope, not a throw.
+   *  See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
-    return this.get(`/api/user/${userId}/verify`);
+    const res = await this.get<unknown>(`/api/user/${userId}/verify`);
+    return sanitizeVerifyInfoResponse<VerifyInfo>(res);
   }
 
   async setVerifyMethod(
@@ -718,11 +723,5 @@ export class ApiClient {
       },
       isReauthPending: () => this.reauthPending,
     });
-  }
-
-  private validateHexId(id: string, label: string): void {
-    if (!/^[a-f0-9]{64}$/.test(id)) {
-      throw new Error(`Invalid ${label}: expected 64-char hex string`);
-    }
   }
 }

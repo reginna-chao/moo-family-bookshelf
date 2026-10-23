@@ -842,6 +842,34 @@ describe("LandingPage", () => {
         expect(mockOnAuth).toHaveBeenCalled();
       });
     });
+
+    it("should join directly instead of getting stuck when the verify method is invalid", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+      });
+      // What the real client returns for an unknown method; the mapping itself is pinned by
+      // pwa/tests/unit/api/verifyApi.test.ts → "getVerifyMethod response validation".
+      mockGetVerifyMethod.mockResolvedValue({
+        error: {
+          code: "INVALID_RESPONSE",
+          message: "response is not a valid verify method",
+        },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "user@example.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalled();
+      });
+      expect(mockJoinFamily).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("請輸入 PIN 碼")).not.toBeInTheDocument();
+      expect(screen.queryByText("請繪製圖形驗證")).not.toBeInTheDocument();
+      expect(screen.queryByText("輸入驗證碼")).not.toBeInTheDocument();
+    });
   });
 
   describe("QR code auto-login flow", () => {
