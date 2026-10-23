@@ -18,7 +18,7 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  *
  * getPublicShelf (readEnvelope bypass) — the highest-stakes case in this file:
  * it bypasses `readEnvelope` with its OWN `fetch` + bare cast
- * (`pwa/src/api/client.ts`), and its consumer (`PublicShelfPage`) is reachable
+ * (`pwa/src/api/publicShelfFetch.ts`), and its consumer (`PublicShelfPage`) is reachable
  * by anyone holding a share link — including a visitor who never configured the
  * endpoint and cannot diagnose a blank page. The sanitizer applied to its return
  * value is the SOLE guard between a hostile public snapshot and
@@ -30,12 +30,12 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  * Every hostile fixture below is a value `JSON.parse` can actually produce.
  *
  * Fixture shapes (deliberate differences from the plain hostile fixtures):
- *  - `HOSTILE_MEMBER_WITH_ID` is the member-list element as `getFamilyMembers`
- *    sees it — that method answers to a COMPOSED contract (structural rebuild
- *    first, text layer second), not to the text layer alone. Versus
- *    `HOSTILE_MEMBER`: a usable `userId`, because `sanitizeFamilyMembersResponse`
- *    (`shared/src/api/memberValidation.ts`) DROPS an element without one instead
- *    of degrading it to `""`; it keeps the non-string `readmooName`, which the
+ *  - `HOSTILE_MEMBER_WITH_ID` is the member as BOTH composed call sites see it —
+ *    `getFamilyMembers` reads it as a list element, `updateMemberSettings` as the
+ *    whole PATCH response — where "composed" means a structural rebuild FIRST
+ *    and the text layer second. Versus `HOSTILE_MEMBER`: a usable `userId`,
+ *    because `sanitizeFamilyMember` (`shared/src/api/memberValidation.ts`) DROPS
+ *    a member without one instead of degrading it to `""`; it keeps the non-string `readmooName`, which the
  *    rebuild OMITS rather than degrades — the exact divergence the wiring rows
  *    have to make visible; and two extra properties, which the 4-field rebuild
  *    must strip.
@@ -54,6 +54,10 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  *    it to `""`; a NON-string `bookCoverUrl`, because the list path normalizes
  *    that field too (the single-object path leaves it alone); and two extra
  *    properties, which the 12-field rebuild must strip.
+ *  - `ISSUED_TOKEN` (the group fixtures' `authToken`) is a valid 64-char
+ *    lowercase hex string, because the issued-credential layer
+ *    (`shared/src/api/issuedCredentials.ts`) drops any other shape on
+ *    `createFamily` / `joinFamily`; its own cases live in `issuedCredentials.test.ts`.
  *
  * Expectation tables:
  *  - `GROUP_EXPECTATIONS` covers the group methods governed by the shared text
@@ -93,6 +97,15 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  *    tri-state `lastUpdated`: `null` means "never synced", so a hostile value
  *    degrades to null rather than to `""`; layer 1 keeps the survivor by SPREAD,
  *    which is what leaves this key for layer 2 to find.
+ *  - `updateMemberSettings` is composed the same way, so its fixture has to be
+ *    ADDRESSABLE: an unusable payload no longer degrades in place, it rejects
+ *    with `INVALID_RESPONSE`. That reject path is pinned in
+ *    `pwa/tests/unit/api/member-client.test.ts` and deliberately NOT
+ *    duplicated here, so the blanket "resolves instead of throwing" row keeps
+ *    holding for every entry in the table. Its rows are
+ *    `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped (the method resolves
+ *    with the member itself); `userId` reads back as the PAYLOAD's id, not the
+ *    `:uid` argument — the rebuild copies it verbatim and never echoes the request.
  *
  * Valid payloads must survive the boundary byte-identical. If this drifts, the
  * layer has stopped coercing types and started rewriting content — which would
@@ -146,7 +159,9 @@ import { ApiClient, BoolFlag, BorrowStatus } from "@/api/client";
  * `userId` is exactly as unaddressable as a borrow request with no `requestId`
  * (`null` cannot carry fields at all; `HOSTILE_MEMBER`'s `userId` is an ARRAY —
  * unusable as a React key, as either name-lookup key, or as the `:uid` of
- * `updateMemberSettings` / `removeMember`). Every other group method still
+ * `updateMemberSettings` / `removeMember`). `updateMemberSettings` meets the same
+ * strictness on its single PATCH member (an unaddressable one rejects with
+ * `INVALID_RESPONSE`, see "Expectation tables"); every other group method still
  * answers to the text layer alone, where a hostile member is degraded in place.
  */
 
@@ -154,6 +169,8 @@ const ENDPOINT = "https://api.example.com";
 const FAMILY_ID = "fam-abc123";
 const USER_ID = "a".repeat(64);
 const OTHER_USER_ID = "b".repeat(64);
+/** A token the issued-credential layer keeps. See the header → "Fixture shapes". */
+const ISSUED_TOKEN = "c".repeat(64);
 const SHELF_ID = "shelf-1";
 const REQUEST_ID = "req-123";
 const LIST_REQUEST_ID = "req-hostile-1";
@@ -215,7 +232,7 @@ const HOSTILE_GROUP = {
   maxMembers: 6,
   createdAt: { seconds: 1_700_000_000 },
   apiEndpoint: { host: "evil.example.com" },
-  authToken: "tok-secret-value",
+  authToken: ISSUED_TOKEN,
   expiresAt: 1_700_000_000_000,
 };
 
@@ -341,7 +358,7 @@ const GROUP_EXPECTATIONS: Expectation[] = [
   // Tri-state: a non-string endpoint degrades to null, never to "".
   { path: "data.apiEndpoint", value: null },
   // Deliberate exclusions — a credential, a flag and a number.
-  { path: "data.authToken", value: "tok-secret-value" },
+  { path: "data.authToken", value: ISSUED_TOKEN },
   { path: "data.members.0.canLend", value: BoolFlag.FALSE },
   { path: "data.maxMembers", value: 6 },
 ];
@@ -366,7 +383,7 @@ const MEMBERS_GROUP_EXPECTATIONS: Expectation[] = [
   // Tri-state: a non-string endpoint degrades to null, never to "".
   { path: "data.apiEndpoint", value: null },
   // Deliberate exclusions — a credential, a flag and a number.
-  { path: "data.authToken", value: "tok-secret-value" },
+  { path: "data.authToken", value: ISSUED_TOKEN },
   { path: "data.members.0.canLend", value: BoolFlag.FALSE },
   { path: "data.maxMembers", value: 6 },
 ];
@@ -507,17 +524,25 @@ const WIRING_CASES: WiringCase[] = [
       client.updateBorrowStatus(REQUEST_ID, BorrowStatus.LENT),
     expected: BORROW_EXPECTATIONS,
   },
+  // Composed like `getFamilyMembers`, so the fixture must be ADDRESSABLE (the
+  // `INVALID_RESPONSE` reject lives elsewhere). See the header → "Expectation tables".
   {
     name: "updateMemberSettings",
-    data: HOSTILE_MEMBER,
+    data: HOSTILE_MEMBER_WITH_ID,
     invoke: (client) =>
       client.updateMemberSettings(FAMILY_ID, USER_ID, {
         canLend: BoolFlag.FALSE,
       }),
+    // `MEMBERS_GROUP_EXPECTATIONS`' member rows, unwrapped; `userId` is the
+    // PAYLOAD's id, never the echoed `:uid` argument.
     expected: [
-      { path: "userId", value: "" },
+      { path: "userId", value: OTHER_USER_ID },
       { path: "displayName", value: "" },
-      { path: "readmooName", value: "" },
+      // Omitted by the rebuild, NOT degraded to "".
+      { path: "readmooName", value: undefined },
+      // Stripped by the 4-field rebuild, never spread through.
+      { path: "evil", value: undefined },
+      { path: "nested", value: undefined },
       { path: "canLend", value: BoolFlag.FALSE },
     ],
   },
@@ -731,7 +756,7 @@ describe("ApiClient backend-text sanitization", () => {
       maxMembers: 6,
       createdAt: "2026-04-26T00:00:00Z",
       apiEndpoint: "https://byo.example.com",
-      authToken: "tok-secret-value",
+      authToken: ISSUED_TOKEN,
       expiresAt: 1_700_000_000_000,
     };
 

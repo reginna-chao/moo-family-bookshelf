@@ -18,7 +18,7 @@ import {
  *
  * Client-synthesized auth-recovery throttle: `RECOVERY_COPY` stands in for its
  * message — the real one is produced by `buildRateLimitMessage` in
- * `@/api/client` and asserted by the "rate-limited recovery" suite in
+ * `@/api/rateLimitMessage` and asserted by the "rate-limited recovery" suite in
  * `tests/unit/client.test.ts`; this file only pins that whatever that builder
  * produced reaches the user untouched, so the exact value is illustrative, not
  * the contract. `synthesizedRecoveryError` raises it exactly as `client.ts`

@@ -45,6 +45,10 @@ import { BoolFlag, BorrowStatus } from "@/api/types";
  *    it to `""`; a NON-string `bookCoverUrl`, because the list path normalizes
  *    that field too (the single-object path leaves it alone); and two extra
  *    properties, which the 12-field rebuild must strip.
+ *  - `ISSUED_TOKEN` (the group fixtures' `authToken`) is a valid 64-char
+ *    lowercase hex string, because the issued-credential layer
+ *    (`shared/src/api/issuedCredentials.ts`) drops any other shape on
+ *    `createFamily` / `joinFamily`; its own cases live in `issuedCredentials.test.ts`.
  *
  * Expectation tables:
  *  - `GROUP_EXPECTATIONS` covers the three group methods governed by the shared
@@ -156,6 +160,8 @@ const MOCK_ENDPOINT = "https://test.workers.dev";
 const FAMILY_ID = "fam-abc123";
 const USER_ID = "a".repeat(64);
 const OTHER_USER_ID = "b".repeat(64);
+/** A token the issued-credential layer keeps. See the header → "Fixture shapes". */
+const ISSUED_TOKEN = "c".repeat(64);
 const SHELF_ID = "shelf-1";
 const REQUEST_ID = "req-123";
 const LIST_REQUEST_ID = "req-hostile-1";
@@ -222,7 +228,7 @@ const HOSTILE_GROUP = {
   maxMembers: 6,
   createdAt: { seconds: 1_700_000_000 },
   apiEndpoint: { host: "evil.example.com" },
-  authToken: "tok-secret-value",
+  authToken: ISSUED_TOKEN,
   expiresAt: 1_700_000_000_000,
 };
 
@@ -338,7 +344,7 @@ const GROUP_EXPECTATIONS: Expectation[] = [
   // Tri-state: a non-string endpoint degrades to null, never to "".
   { path: "data.apiEndpoint", value: null },
   // Deliberate exclusions — a credential, a flag and a number.
-  { path: "data.authToken", value: "tok-secret-value" },
+  { path: "data.authToken", value: ISSUED_TOKEN },
   { path: "data.members.0.canLend", value: BoolFlag.FALSE },
   { path: "data.maxMembers", value: 6 },
 ];
@@ -363,7 +369,7 @@ const MEMBERS_GROUP_EXPECTATIONS: Expectation[] = [
   // Tri-state: a non-string endpoint degrades to null, never to "".
   { path: "data.apiEndpoint", value: null },
   // Deliberate exclusions — a credential, a flag and a number.
-  { path: "data.authToken", value: "tok-secret-value" },
+  { path: "data.authToken", value: ISSUED_TOKEN },
   { path: "data.members.0.canLend", value: BoolFlag.FALSE },
   { path: "data.maxMembers", value: 6 },
 ];
@@ -652,7 +658,7 @@ describe("ApiClient backend-text sanitization", () => {
       maxMembers: 6,
       createdAt: "2026-04-26T00:00:00Z",
       apiEndpoint: "https://byo.example.com",
-      authToken: "tok-secret-value",
+      authToken: ISSUED_TOKEN,
       expiresAt: 1_700_000_000_000,
     };
 

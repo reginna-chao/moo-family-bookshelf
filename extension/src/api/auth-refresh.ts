@@ -7,17 +7,18 @@ import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
-  RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 import { isSelfDepartureActive } from "../storage/selfDeparture";
-
-/** Fallback cooldown (seconds) when a 429 body omits `retryAfter`. */
-const DEFAULT_RECOVERY_COOLDOWN_SECONDS = 300;
-
-/** 1 h cap on a backend `retryAfter` (the official worker asks ≤ 900 s; this stops a BYO backend
- *  locking recovery out). Mirrors `dialog/useRetryCountdown.ts`, kept local: api never imports dialog. */
-const MAX_RECOVERY_COOLDOWN_SECONDS = 3600;
+import {
+  isAuthToken,
+  isExpiresAt,
+} from "moo-family-bookshelf-shared/api/issuedCredentials";
+import {
+  clearRecoveryCooldown,
+  getActiveRecoveryCooldown,
+  setRecoveryCooldown,
+} from "./recoveryCooldown";
 
 /** Join codes meaning "member exists, supply the PWA-login secret (PIN/pattern/OTP)". Mirrors
  *  `dialog/useVerificationPrompt.ts`, kept local so the api layer never imports the dialog layer. */
@@ -180,19 +181,23 @@ export async function doRefreshToken(
       deps.setAuthToken(storedToken);
     }
 
-    const result = await deps.request<{ token: string; expiresAt: number }>(
+    const result = await deps.request<{ token?: unknown; expiresAt?: unknown }>(
       "/api/auth/refresh",
       { method: "POST", body: JSON.stringify({ userId, familyId }) },
       true,
     );
 
-    if (result.data?.token) {
-      deps.setAuthToken(result.data.token);
+    // A token or expiry in the wrong shape counts as not issued (docs/architecture.md →
+    // 伺服器回傳資料的檢查): a bad token takes the failure branch below.
+    const token = result.data?.token;
+    if (isAuthToken(token)) {
+      deps.setAuthToken(token);
       const storageUpdate: Record<string, unknown> = {
-        [AUTH_TOKEN_KEY]: result.data.token,
+        [AUTH_TOKEN_KEY]: token,
       };
-      if (result.data.expiresAt) {
-        storageUpdate[TOKEN_EXPIRES_AT_KEY] = result.data.expiresAt;
+      const expiresAt = result.data?.expiresAt;
+      if (isExpiresAt(expiresAt)) {
+        storageUpdate[TOKEN_EXPIRES_AT_KEY] = expiresAt;
       }
       await browser.storage.local.set(storageUpdate);
       await clearRecoveryCooldown();
@@ -258,43 +263,6 @@ export async function doRefreshToken(
   } catch {
     return { refreshed: false };
   }
-}
-
-/** Active deadline or undefined; an over-long one is re-saved (best-effort) at the 1 h max, so it self-heals. */
-async function getActiveRecoveryCooldown(): Promise<number | undefined> {
-  const stored = await browser.storage.local.get(RECOVERY_COOLDOWN_UNTIL_KEY);
-  const cooldownUntil = stored[RECOVERY_COOLDOWN_UNTIL_KEY];
-  if (typeof cooldownUntil !== "number") return undefined;
-  const now = Date.now();
-  const maxDeadline = now + MAX_RECOVERY_COOLDOWN_SECONDS * 1000;
-  if (cooldownUntil > maxDeadline) {
-    return setRecoveryCooldown(MAX_RECOVERY_COOLDOWN_SECONDS).catch(
-      () => maxDeadline,
-    );
-  }
-  return now < cooldownUntil ? cooldownUntil : undefined;
-}
-
-/** Persist a fresh recovery cooldown and return its epoch-ms deadline; the wait is clamped to
- *  `MAX_RECOVERY_COOLDOWN_SECONDS` so an untrusted backend cannot suppress auto-recovery forever. */
-async function setRecoveryCooldown(
-  retryAfterSeconds?: number,
-): Promise<number> {
-  const requested =
-    typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
-      ? retryAfterSeconds
-      : DEFAULT_RECOVERY_COOLDOWN_SECONDS;
-  const seconds = Math.min(requested, MAX_RECOVERY_COOLDOWN_SECONDS);
-  const cooldownUntil = Date.now() + seconds * 1000;
-  await browser.storage.local.set({
-    [RECOVERY_COOLDOWN_UNTIL_KEY]: cooldownUntil,
-  });
-  return cooldownUntil;
-}
-
-/** Clear the recovery cooldown so a recovered client is never stale-throttled. */
-async function clearRecoveryCooldown(): Promise<void> {
-  await browser.storage.local.remove(RECOVERY_COOLDOWN_UNTIL_KEY);
 }
 
 /**
@@ -367,8 +335,8 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<RecoveryResult> {
     members: Array<{ userId: string; displayName: string }>;
     maxMembers: number;
     createdAt: string;
-    authToken?: string;
-    expiresAt?: number;
+    authToken?: unknown;
+    expiresAt?: unknown;
   }>(
     `/api/family/${familyId}/join`,
     {
@@ -378,13 +346,16 @@ async function attemptJoinRecovery(deps: RefreshDeps): Promise<RecoveryResult> {
     true,
   );
 
-  if (joinResult.data?.authToken) {
-    deps.setAuthToken(joinResult.data.authToken);
+  // Same rule as the refresh above: a token in the wrong shape is a failed recovery.
+  const authToken = joinResult.data?.authToken;
+  if (isAuthToken(authToken)) {
+    deps.setAuthToken(authToken);
     const recoveryUpdate: Record<string, unknown> = {
-      [AUTH_TOKEN_KEY]: joinResult.data.authToken,
+      [AUTH_TOKEN_KEY]: authToken,
     };
-    if (joinResult.data.expiresAt) {
-      recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = joinResult.data.expiresAt;
+    const expiresAt = joinResult.data?.expiresAt;
+    if (isExpiresAt(expiresAt)) {
+      recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = expiresAt;
     }
     await browser.storage.local.set(recoveryUpdate);
     return { recovered: true };

@@ -125,6 +125,9 @@ vi.mock("@/constants", async (importOriginal) => {
 });
 
 const MOCK_ENDPOINT = "https://test.workers.dev";
+/** Issued tokens are 64-char lowercase hex; any other shape is dropped as not issued (#350). */
+const NEW_TOKEN = "d".repeat(64);
+const RECOVERED_TOKEN = "e".repeat(64);
 
 /** Re-key a logical storage-read object to the production `moo:` keys, so the
  *  mocked chrome.storage.local.get returns what auth-refresh.ts actually reads. */
@@ -1134,7 +1137,7 @@ describe("ApiClient", () => {
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ data: { token: "new-token" } }),
+          json: () => Promise.resolve({ data: { token: NEW_TOKEN } }),
         })
         // Retry original request → success
         .mockResolvedValueOnce({
@@ -1248,7 +1251,7 @@ describe("ApiClient", () => {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: () => Promise.resolve({ data: { token: "new-token" } }),
+            json: () => Promise.resolve({ data: { token: NEW_TOKEN } }),
           });
         }
         // All initial requests → 401
@@ -1440,7 +1443,7 @@ describe("ApiClient", () => {
                 members: [{ userId: "u1", displayName: "Test" }],
                 maxMembers: 6,
                 createdAt: "2026-01-01",
-                authToken: "recovered-token",
+                authToken: RECOVERED_TOKEN,
                 expiresAt: 9999999999,
               },
             }),
@@ -1482,7 +1485,7 @@ describe("ApiClient", () => {
       // New token should be stored
       expect(chrome.storage.local.set).toHaveBeenCalledWith(
         expect.objectContaining({
-          [AUTH_TOKEN_KEY]: "recovered-token",
+          [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
           [TOKEN_EXPIRES_AT_KEY]: 9999999999,
         }),
       );
@@ -1519,7 +1522,7 @@ describe("ApiClient", () => {
                 members: [],
                 maxMembers: 6,
                 createdAt: "2026-01-01",
-                authToken: "new-token",
+                authToken: NEW_TOKEN,
               },
             }),
         })
@@ -1647,7 +1650,7 @@ describe("ApiClient", () => {
                 members: [],
                 maxMembers: 2,
                 createdAt: "2026-01-01",
-                authToken: "recovered-token",
+                authToken: RECOVERED_TOKEN,
                 expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
               },
             }),

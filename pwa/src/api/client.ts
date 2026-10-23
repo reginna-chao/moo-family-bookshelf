@@ -2,7 +2,6 @@
  *  Response-handling rationale: docs/architecture.md → API client 的回應處理. */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
 import {
   sanitizeBorrowRequestText,
@@ -10,11 +9,13 @@ import {
   sanitizeFamilyGroupText,
   sanitizeMemberText,
   sanitizePersonalBooksText,
-  sanitizePublicShelfDataText,
   sanitizePublicShelfListText,
   sanitizePublicShelfResultText,
-  sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
+import {
+  sanitizeIssuedCredentials,
+  sanitizeIssuedFamilyGroup,
+} from "moo-family-bookshelf-shared/api/issuedCredentials";
 import { BoolFlag, ApiError } from "moo-family-bookshelf-shared/api/types";
 import type {
   ApiResponse,
@@ -39,10 +40,19 @@ import type {
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
-import { sanitizeFamilyMembersResponse } from "moo-family-bookshelf-shared/api/memberValidation";
+import {
+  sanitizeFamilyMember,
+  sanitizeFamilyMembersResponse,
+} from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
+import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
+import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
-import { readEnvelope } from "./envelope";
+import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
+import { fetchPublicShelf } from "./publicShelfFetch";
+import { fetchVersion } from "./versionFetch";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -123,17 +133,8 @@ export class ApiClient {
   }
 
   /** Check server API version. Returns null on network/parse errors. */
-  async checkVersion(): Promise<VersionInfo | null> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/version`);
-      if (!res.ok) return null;
-      const json = (await res.json()) as ApiResponse<VersionInfo>;
-      const data = json.data ?? null;
-      if (data === null) return null;
-      return sanitizeRecord(data, sanitizeVersionInfoText);
-    } catch {
-      return null;
-    }
+  checkVersion(): Promise<VersionInfo | null> {
+    return fetchVersion(this.baseUrl);
   }
 
   // --- HTTP helpers ---
@@ -167,43 +168,6 @@ export class ApiClient {
     });
   }
 
-  /** Unwrap an envelope response or throw an `ApiError` built from `error`. */
-  private unwrap<T>(res: ApiResponse<T>): T {
-    this.throwOnError(res);
-    if (res.data === undefined) {
-      throw new ApiError("EMPTY_RESPONSE", "response body missing data");
-    }
-    return res.data;
-  }
-
-  /** `unwrap` for bodyless (204) successes: only `error` throws — demanding `data` would turn every
-   *  successful 204 into a bogus EMPTY_RESPONSE. */
-  private unwrapVoid(res: ApiResponse<unknown>): void {
-    this.throwOnError(res);
-  }
-
-  /** Coerce a success payload's backend TEXT fields so no consumer holds a non-string `string` field
-   *  (`shared/src/api/safeText.ts`); error envelopes and bodyless successes pass untouched. */
-  private sanitizeEnvelope<T>(
-    res: ApiResponse<T>,
-    sanitize: (data: T) => T,
-  ): ApiResponse<T> {
-    if (res.data === undefined) return res;
-    return { ...res, data: sanitizeRecord(res.data, sanitize) };
-  }
-
-  /** Single chokepoint for every thrown `ApiError`: sanitizes `code` / `message` so a hostile value
-   *  cannot make the constructor itself throw (docs/architecture.md → API client 的回應處理). */
-  private throwOnError(res: ApiResponse<unknown>): void {
-    if (res.error) {
-      throw new ApiError(
-        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
-        safeErrorText(res.error.message, "請稍後再試"),
-        res.error.retryAfter,
-      );
-    }
-  }
-
   // --- Auth ---
 
   /** Family lookup by pre-hashed userId (server never sees the email). Unused by the PWA today, kept
@@ -212,7 +176,7 @@ export class ApiClient {
     userId: string,
     opts?: { verifySecret?: string },
   ): Promise<ApiResponse<LookupResult>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
@@ -222,17 +186,22 @@ export class ApiClient {
 
   // --- Personal Settings ---
 
+  /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
+   *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    this.validateHexId(userId, "userId");
-    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
-    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
+    assertHexId(userId, "userId");
+    const res = await this.get<unknown>(`/api/user/${userId}/books`);
+    return sanitizeEnvelope(
+      sanitizePersonalBooksResponse<PersonalBooks>(res),
+      sanitizePersonalBooksText,
+    );
   }
 
   async updatePersonalBooks(
     userId: string,
     data: PersonalBooks & { expectedLastUpdated?: string },
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/books`, data);
   }
 
@@ -242,7 +211,7 @@ export class ApiClient {
     userId: string,
     changes: Array<{ bookId: BookEntry["bookId"]; isShared: BoolFlag }>,
   ): Promise<ApiResponse<{ ok: boolean; applied: number }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.patch(`/api/user/${userId}/books`, { changes });
   }
 
@@ -254,7 +223,7 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
 
@@ -266,13 +235,13 @@ export class ApiClient {
     userId: string,
     displayName?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = {
       userId,
       displayName: displayName ?? "",
     };
     const res = await this.post<FamilyGroup>("/api/family", body);
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async joinFamily(
@@ -283,19 +252,22 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; authToken?: string; expiresAt?: number }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string | BoolFlag> = { userId };
     if (opts?.verifySecret !== undefined) body.verifySecret = opts.verifySecret;
     if (opts?.qrToken !== undefined) body.qrToken = opts.qrToken;
     if (opts?.recovery !== undefined) body.recovery = opts.recovery;
-    return this.post(`/api/family/${familyId}/join`, body);
+    return sanitizeEnvelope(
+      await this.post(`/api/family/${familyId}/join`, body),
+      sanitizeIssuedCredentials,
+    );
   }
 
   async leaveFamily(
     familyId: string,
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.del(`/api/family/${familyId}/member/${userId}`);
   }
 
@@ -303,7 +275,7 @@ export class ApiClient {
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(targetUserId, "targetUserId");
+    assertHexId(targetUserId, "targetUserId");
     return this.del(`/api/family/${familyId}/member/${targetUserId}`);
   }
 
@@ -313,7 +285,7 @@ export class ApiClient {
     familyId: string,
     targetUserId: string,
   ): Promise<ApiResponse<UnkickResult>> {
-    this.validateHexId(targetUserId, "targetUserId");
+    assertHexId(targetUserId, "targetUserId");
     return this.del(`/api/family/${familyId}/kicked/${targetUserId}`);
   }
 
@@ -322,8 +294,8 @@ export class ApiClient {
     userId: string,
     newOwnerId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
-    this.validateHexId(newOwnerId, "newOwnerId");
+    assertHexId(userId, "userId");
+    assertHexId(newOwnerId, "newOwnerId");
     return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
   }
 
@@ -333,7 +305,7 @@ export class ApiClient {
     const res = await this.get<unknown>(`/api/family/${familyId}/members`);
     // Structure layer first (rebuilds `data.members`, normalizes `apiEndpoint`), then the text layer
     // (`familyId` / `ownerId` / `createdAt`): docs/architecture.md → 伺服器回傳資料的檢查.
-    return this.sanitizeEnvelope(
+    return sanitizeEnvelope(
       sanitizeFamilyMembersResponse(res),
       sanitizeFamilyGroupText,
     );
@@ -344,7 +316,7 @@ export class ApiClient {
     userId: string,
     displayName: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/family/${familyId}/member/${userId}/displayName`, {
       displayName,
     });
@@ -353,7 +325,7 @@ export class ApiClient {
   // --- Account ---
 
   async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.del(`/api/user/${userId}`);
   }
 
@@ -365,7 +337,7 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
     const res = await this.get<unknown>(`/api/family/${familyId}/bookshelf`);
-    return this.sanitizeEnvelope(
+    return sanitizeEnvelope(
       sanitizeFamilyBookshelfResponse<FamilyBookshelf>(res),
       sanitizeFamilyBookshelfText,
     );
@@ -381,14 +353,14 @@ export class ApiClient {
       `/api/family/${familyId}/borrow`,
       payload,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
+    return sanitizeRecord(unwrap(res), sanitizeBorrowRequestText);
   }
 
   /** Read as `unknown` until `sanitizeBorrowRequests` checks it; `unwrap` runs first, owning the
    *  envelope contract (`ApiError` on `error`, `EMPTY_RESPONSE` on missing data). */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
     const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
-    return sanitizeBorrowRequests(this.unwrap(res));
+    return sanitizeBorrowRequests(unwrap(res));
   }
 
   async updateBorrowStatus(
@@ -398,34 +370,47 @@ export class ApiClient {
     const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
       status,
     });
-    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
+    return sanitizeRecord(unwrap(res), sanitizeBorrowRequestText);
   }
 
+  /** Read as `unknown` until `sanitizeFamilyMember` checks it (`unwrap` first); an unusable payload
+   *  throws, which every caller catches. See docs/architecture.md → API client 的回應處理. */
   async updateMemberSettings(
     familyId: string,
     uid: string,
     settings: MemberSettingsPayload,
   ): Promise<FamilyMember> {
-    const res = await this.patch<FamilyMember>(
+    const res = await this.patch<unknown>(
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizeMemberText);
+    const member = sanitizeFamilyMember(unwrap(res));
+    if (member === null) {
+      throw new ApiError(
+        "INVALID_RESPONSE",
+        "response is not a valid family member",
+      );
+    }
+    // Same two layers, same order as `getFamilyMembers`: the structural rebuild above, then the text
+    // layer on the surviving record's declared-string fields.
+    return sanitizeRecord(member, sanitizeMemberText);
   }
 
   // --- Verification ---
 
-  /** Get verification method for a user (no auth needed). */
+  /** No auth needed. Read as `unknown`; an unknown `method` becomes an `INVALID_RESPONSE` error
+   *  envelope, not a throw. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
-    this.validateHexId(userId, "userId");
-    return this.get(`/api/user/${userId}/verify`);
+    assertHexId(userId, "userId");
+    const res = await this.get<unknown>(`/api/user/${userId}/verify`);
+    return sanitizeVerifyInfoResponse<VerifyInfo>(res);
   }
 
   /** Get whether the setup prompt was already shown (requires auth token). */
   async getVerifyPrompted(
     userId: string,
   ): Promise<ApiResponse<VerifyPromptedInfo>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.get(`/api/user/${userId}/verify/prompted`);
   }
 
@@ -434,7 +419,7 @@ export class ApiClient {
     userId: string,
     body: SetVerifyBody,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/verify`, body);
   }
 
@@ -442,30 +427,30 @@ export class ApiClient {
   async markVerifyPrompted(
     userId: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.post(`/api/user/${userId}/verify/prompted`);
   }
 
   // --- Public Shelf (v1.2.0) ---
 
   async listPublicShelves(userId: string): Promise<{ shelves: PublicShelf[] }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfListText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfListText);
   }
 
   async createPublicShelf(
     userId: string,
     body: { title: string; expiresDays: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf`,
       body,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   async updatePublicShelf(
@@ -473,63 +458,39 @@ export class ApiClient {
     shelfId: string,
     body: { title?: string; expiresDays?: number | null },
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.put<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   async resetPublicShelfToken(
     userId: string,
     shelfId: string,
   ): Promise<{ shelf: PublicShelf }> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   /** Revoke a public shelf; throws `ApiError` on refusal, and the caller MUST NOT then report the link
    *  closed (the snapshot stays readable until this succeeds). */
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
-    this.unwrapVoid(res);
+    unwrapVoid(res);
   }
 
-  async getPublicShelf(shareToken: string): Promise<PublicShelfData> {
-    const url = `${this.baseUrl}/api/public/${shareToken}`;
-    const response = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-    });
-    const json = (await response.json()) as ApiResponse<PublicShelfData>;
-    if (json.error) {
-      // Sanitize before interpolation, or a hostile field throws before `status` is attached and a
-      // 404 loses its own screen (docs/architecture.md → API client 的回應處理).
-      const code = safeErrorText(json.error.code, "UNKNOWN_ERROR");
-      const message = safeErrorText(json.error.message, "請稍後再試");
-      const err = new Error(`${code}: ${message}`);
-      (err as Error & { status: number }).status = response.status;
-      throw err;
-    }
-    if (!json.data) {
-      throw new Error("EMPTY_RESPONSE: response body missing data");
-    }
-    // Own bare cast above, so this sanitizer is the ONLY guard before `PublicShelfPage` renders and
-    // `.toLowerCase()`s these fields (docs/architecture.md → API client 的回應處理).
-    return sanitizeRecord(json.data, sanitizePublicShelfDataText);
+  /** Bypasses `request()` (no auth, no dedup): the whole read lives in `fetchPublicShelf`. */
+  getPublicShelf(shareToken: string): Promise<PublicShelfData> {
+    return fetchPublicShelf(this.baseUrl, shareToken);
   }
 
   // --- Internal ---
-
-  private validateHexId(id: string, label: string): void {
-    if (!/^[a-f0-9]{64}$/.test(id)) {
-      throw new Error(`Invalid ${label}: expected 64-char hex string`);
-    }
-  }
 
   private async request<T>(
     path: string,

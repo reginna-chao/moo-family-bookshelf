@@ -39,10 +39,11 @@ describe("ApiClient verification methods", () => {
 
   describe("getVerifyMethod", () => {
     it("calls GET /api/user/:id/verify", async () => {
+      // A stale server still sends `prompted`; only `method` may reach the caller.
       globalThis.fetch = mockFetchSuccess({ method: "pin", prompted: 0 });
       const result = await client.getVerifyMethod("user-123");
 
-      expect(result.data).toEqual({ method: "pin", prompted: 0 });
+      expect(result.data).toStrictEqual({ method: "pin" });
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${MOCK_ENDPOINT}/api/user/user-123/verify`,
         expect.objectContaining({
@@ -62,6 +63,159 @@ describe("ApiClient verification methods", () => {
         message: "User not found",
       });
     });
+  });
+
+  describe("getVerifyMethod response validation", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    function mockFetchBody(body: unknown, status = 200) {
+      return vi.fn().mockResolvedValue({
+        ok: status >= 200 && status < 300,
+        status,
+        json: () => Promise.resolve(body),
+      });
+    }
+
+    it.each(["pin", "pattern", "code", "none"])(
+      "keeps the known method %s as exactly { method }",
+      async (method) => {
+        globalThis.fetch = mockFetchSuccess({
+          method,
+          prompted: 0,
+          extra: "x",
+        });
+        const result = await client.getVerifyMethod("user-123");
+
+        expect(result).toStrictEqual({ data: { method } });
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each<{ label: string; data: unknown; leak?: string }>([
+      { label: "an unknown method", data: { method: "bogus" }, leak: "bogus" },
+      { label: "an upper-cased method", data: { method: "PIN" }, leak: "PIN" },
+      { label: "a padded method", data: { method: " pin" }, leak: " pin" },
+      { label: "a missing method", data: {} },
+      { label: "a null method", data: { method: null } },
+      { label: "a numeric method", data: { method: 1 } },
+      {
+        label: "a prototype key",
+        data: { method: "__proto__" },
+        leak: "__proto__",
+      },
+      {
+        label: "an inherited name",
+        data: { method: "toString" },
+        leak: "toString",
+      },
+      {
+        label: "a constructor key",
+        data: { method: "constructor" },
+        leak: "constructor",
+      },
+      { label: "a bare method string as data", data: "pin" },
+      { label: "a number as data", data: 42 },
+      { label: "a boolean as data", data: true },
+      { label: "an array as data", data: [{ method: "pin" }] },
+    ])(
+      "turns $label into an INVALID_RESPONSE error with no data",
+      async ({ data, leak }) => {
+        globalThis.fetch = mockFetchSuccess(data);
+        const result = await client.getVerifyMethod("user-123");
+
+        expect(result).toStrictEqual({
+          error: {
+            code: "INVALID_RESPONSE",
+            message: "response is not a valid verify method",
+          },
+        });
+        expect("data" in result).toBe(false);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(String(warnSpy.mock.calls[0][0])).toMatch(
+          /^\[verifyValidation\]/,
+        );
+        if (leak !== undefined) {
+          expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(leak);
+        }
+      },
+    );
+
+    it("passes a backend error envelope through unchanged without a warning", async () => {
+      globalThis.fetch = mockFetchError("NOT_FOUND", "User not found", 404);
+      const result = await client.getVerifyMethod("user-123");
+
+      expect(result).toStrictEqual({
+        error: { code: "NOT_FOUND", message: "User not found" },
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: "an unknown method", method: "bogus" },
+      { label: "a valid method", method: "pin" },
+    ])(
+      "forwards a 200 error alone, dropping $label sent beside it",
+      async ({ method }) => {
+        const error = { code: "X", message: "m" };
+        globalThis.fetch = mockFetchBody({ error, data: { method } });
+        const result = await client.getVerifyMethod("user-123");
+
+        expect(result).toStrictEqual({ error: { code: "X", message: "m" } });
+        expect(result.error).toBe(error);
+        expect("data" in result).toBe(false);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it("still validates data sent beside error: null", async () => {
+      globalThis.fetch = mockFetchBody({
+        data: { method: "pattern", prompted: 1 },
+        error: null,
+      });
+      const result = await client.getVerifyMethod("user-123");
+
+      expect(result.data).toStrictEqual({ method: "pattern" });
+      expect(result.error).toBeNull();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown method sent beside error: null", async () => {
+      globalThis.fetch = mockFetchBody({
+        data: { method: "bogus" },
+        error: null,
+      });
+      const result = await client.getVerifyMethod("user-123");
+
+      expect(result).toStrictEqual({
+        error: {
+          code: "INVALID_RESPONSE",
+          message: "response is not a valid verify method",
+        },
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<{ label: string; body: Record<string, unknown> }>([
+      { label: "data: null", body: { data: null } },
+      { label: "no data key", body: {} },
+    ])(
+      "passes an envelope with $label through without a warning",
+      async ({ body }) => {
+        globalThis.fetch = mockFetchBody(body);
+        const result = await client.getVerifyMethod("user-123");
+
+        expect(result).toStrictEqual(body);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("setVerifyMethod", () => {

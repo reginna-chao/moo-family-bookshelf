@@ -14,7 +14,7 @@ import type { ApiClient } from "@/api/client";
  * real `useFamilyData` / `useFamilyShelfPrefs` run.
  *
  * Hostile error envelopes: both load paths read the `{ data, error }` envelope through `readEnvelope`,
- * which bare-casts `response.json()` (pwa/src/api/envelope.ts), and the endpoint is user-configurable
+ * which bare-casts `response.json()` (shared/src/api/readEnvelope.ts), and the endpoint is user-configurable
  * (BYO backend via the sync code's `@host`), so `error.message` is `unknown` at runtime. Each path
  * dropped it straight into React state the family shelf renders as a JSX child: React 19 throws on an
  * object/array and the app mounts no ErrorBoundary, so a refused refresh used to blank the page until

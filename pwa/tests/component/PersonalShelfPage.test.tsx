@@ -30,7 +30,7 @@ import { BoolFlag, type PersonalBooks, type ApiClient } from "@/api/client";
  * fixed toolbar on mobile (no Playwright test catches this).
  *
  * Hostile error envelopes: `getPersonalBooks` / `patchPersonalBooks` resolve the `{ data, error }`
- * envelope through `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/envelope.ts), and
+ * envelope through `readEnvelope`, which bare-casts `response.json()` (shared/src/api/readEnvelope.ts), and
  * the endpoint is user-configurable (BYO backend), so `error.message` is `unknown` at runtime. Both
  * the load and the save path put it into `errorMessage`, which the error view renders as a JSX child:
  * React 19 throws on an object/array and the app mounts no ErrorBoundary, so a refused load/save

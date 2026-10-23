@@ -61,7 +61,13 @@ import {
   sanitizeFamilyMembersResponse,
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
+import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
+import { sanitizeIssuedFamilyGroup } from "moo-family-bookshelf-shared/api/issuedCredentials";
+import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { isClientSynthesized, synthesizeError } from "./synthesizedError";
+import { buildRateLimitMessage } from "./rateLimitMessage";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -99,28 +105,6 @@ import { DEFAULT_PWA_URL } from "../constants";
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-/** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
- *  to exactly this one (docs/architecture.md → API client 的回應處理). */
-const NO_CONTENT_STATUS = 204;
-
-/** Read the `{ data, error }` envelope; a 204 is an empty envelope (`response.json()` would throw
- *  on it), every other response still parses — or throws — as JSON. */
-async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
-  if (response.status === NO_CONTENT_STATUS) return {};
-  return (await response.json()) as ApiResponse<T>;
-}
-
-/** User-facing copy for a rate-limited auto-recovery; appends the wait, rounded up to whole minutes,
- *  when the cooldown deadline is known and still ahead. */
-function buildRateLimitMessage(cooldownUntil?: number): string {
-  const base = "嘗試次數過多，請稍後再重新開啟書櫃";
-  if (cooldownUntil === undefined) return base;
-  const remainingMs = cooldownUntil - Date.now();
-  if (remainingMs <= 0) return base;
-  const minutes = Math.ceil(remainingMs / (60 * 1000));
-  return `${base}（約 ${minutes} 分鐘後）`;
-}
 
 export class ApiClient {
   private baseUrl: string;
@@ -275,7 +259,7 @@ export class ApiClient {
     userId: string,
     opts?: { verifySecret?: string },
   ): Promise<ApiResponse<LookupResult>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     const body: Record<string, string> = { userId };
     if (opts?.verifySecret !== undefined) {
       body.verifySecret = opts.verifySecret;
@@ -285,9 +269,14 @@ export class ApiClient {
 
   // --- Personal Settings ---
 
+  /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
+   *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
-    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
+    const res = await this.get<unknown>(`/api/user/${userId}/books`);
+    return this.sanitizeEnvelope(
+      sanitizePersonalBooksResponse<PersonalBooks>(res),
+      sanitizePersonalBooksText,
+    );
   }
 
   async updatePersonalBooks(
@@ -311,7 +300,7 @@ export class ApiClient {
     userId: string,
     flag: BoolFlag,
   ): Promise<ApiResponse<{ ok: boolean; newBookDefaultShared: BoolFlag }>> {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/new-book-default`, {
       newBookDefaultShared: flag,
     });
@@ -325,7 +314,7 @@ export class ApiClient {
   ): Promise<
     ApiResponse<{ ok: boolean; hidden: string[]; favorites: string[] }>
   > {
-    this.validateHexId(userId, "userId");
+    assertHexId(userId, "userId");
     return this.put(`/api/user/${userId}/family-prefs`, prefs);
   }
 
@@ -346,7 +335,7 @@ export class ApiClient {
       body.verifySecret = opts.verifySecret;
     }
     const res = await this.post<FamilyGroup>("/api/family", body);
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return this.sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async joinFamily(
@@ -366,7 +355,7 @@ export class ApiClient {
       `/api/family/${familyId}/join`,
       body,
     );
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return this.sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async updateDisplayName(
@@ -513,8 +502,11 @@ export class ApiClient {
 
   // --- Verification ---
 
+  /** Read as `unknown`; an unknown `method` becomes an `INVALID_RESPONSE` error envelope, not a throw.
+   *  See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getVerifyMethod(userId: string): Promise<ApiResponse<VerifyInfo>> {
-    return this.get(`/api/user/${userId}/verify`);
+    const res = await this.get<unknown>(`/api/user/${userId}/verify`);
+    return sanitizeVerifyInfoResponse<VerifyInfo>(res);
   }
 
   async setVerifyMethod(
@@ -722,11 +714,5 @@ export class ApiClient {
       },
       isReauthPending: () => this.reauthPending,
     });
-  }
-
-  private validateHexId(id: string, label: string): void {
-    if (!/^[a-f0-9]{64}$/.test(id)) {
-      throw new Error(`Invalid ${label}: expected 64-char hex string`);
-    }
   }
 }
