@@ -4,8 +4,8 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu } from "@/components/OverflowMenu";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
-import { safeBookUrl } from "@/utils/safeBookUrl";
-import { safeCoverUrl } from "@/utils/safeCoverUrl";
+import { safeBookUrl } from "moo-family-bookshelf-shared/safeUrl/safeBookUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 export interface FamilyBookCardProps {
   book: BookWithMember;

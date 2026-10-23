@@ -31,7 +31,7 @@ import {
   PERSONAL_BOOKS_CACHE_KEY,
   USER_ID_KEY,
 } from "@/constants";
-import { encodeSyncCode } from "@/crypto/syncCode";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
 import { NO_HOST_CODE, SPOOFED_CODE } from "../helpers/syncCodeHostFixtures";

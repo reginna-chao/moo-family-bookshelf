@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ApiClient } from "../api/client";
-import { encodeSyncCode } from "../crypto/syncCode";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { useDisplayName } from "./useDisplayName";
 import { useFloatingIconSize } from "./useFloatingIconSize";
 import { useAutoSyncInterval } from "./useAutoSyncInterval";

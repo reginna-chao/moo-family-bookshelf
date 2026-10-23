@@ -8,7 +8,7 @@ import { PublicShelfPage } from "@/pages/PublicShelfPage";
  * A public shelf is served to ANYONE holding the share token — no login, no
  * family membership — so its covers are the widest-reach render of somebody
  * else's server data in the whole PWA. `safeCoverUrl`
- * (pwa/src/utils/safeCoverUrl.ts) drops a cover outside the Readmoo host
+ * (shared/src/safeUrl/safeCoverUrl.ts) drops a cover outside the Readmoo host
  * whitelist, and this page then omits the `<img>` ENTIRELY (rather than
  * emitting `src=""`), so the browser issues no request at all and the book
  * title placeholder shows instead.

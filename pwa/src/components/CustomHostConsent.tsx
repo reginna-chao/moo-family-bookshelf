@@ -1,7 +1,7 @@
 /** Presentational consent gate for a QR arrival whose sync code carries a `valid` custom `@host`.
  *  Why it exists and why `variant="verify"`: docs/architecture.md → 登入頁的加入流程. */
 
-import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
+import type { SyncCodeApiHostResult } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
 
 export interface CustomHostConsentProps {

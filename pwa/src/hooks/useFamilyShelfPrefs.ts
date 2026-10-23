@@ -7,6 +7,7 @@ import {
   type FamilyPrefsIo,
   type FamilyShelfPrefs,
 } from "moo-family-bookshelf-shared/familyShelf/prefsSync";
+// Twin: extension/src/dialog/useFamilyShelfPrefs.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 export type { FamilyShelfPrefs };
 
@@ -14,9 +15,9 @@ export type { FamilyShelfPrefs };
  * Viewer-private family-shelf preferences (v1.5.0) — React adapter.
  *
  * The load-once / debounce / flush-on-unmount lifecycle lives in the shared
- * `FamilyPrefsSync` controller (the Extension uses the same one); this hook
- * only owns the React state and wires the controller to mount / unmount and to
- * the `[userId, apiClient]` load trigger.
+ * `FamilyPrefsSync` controller used by both apps; this hook only owns the
+ * React state and wires the controller to mount / unmount and to the
+ * `[userId, apiClient]` load trigger.
  */
 export function useFamilyShelfPrefs(
   userId: string,
@@ -25,8 +26,8 @@ export function useFamilyShelfPrefs(
   const [hiddenRefs, setHiddenRefs] = useState<Set<string>>(new Set());
   const [favoriteRefs, setFavoriteRefs] = useState<Set<string>>(new Set());
   const [syncFailed, setSyncFailed] = useState(false);
-  /** Latest userId/apiClient, refreshed every render so any flush (the unmount one included)
-   *  reads current values, not those captured at mount. */
+  /** Latest userId/apiClient, refreshed every render so any flush (the unmount one too) reads
+   *  current values, not those captured at mount. */
   const ioRef = useRef<FamilyPrefsIo>({ userId, api: apiClient });
   ioRef.current = { userId, api: apiClient };
   const [sync] = useState(
@@ -46,8 +47,8 @@ export function useFamilyShelfPrefs(
     return () => sync.detach();
   }, [sync]);
 
-  // `[userId, apiClient]` is the retry trigger until a load succeeds; afterwards the controller
-  // skips the body, so an identity change never clobbers unsaved optimistic edits.
+  // `[userId, apiClient]` retries the load until one succeeds; after that the controller skips it,
+  // so an identity change never clobbers unsaved optimistic edits.
   useEffect(() => {
     sync.load();
   }, [sync, userId, apiClient]);

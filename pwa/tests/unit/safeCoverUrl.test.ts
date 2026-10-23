@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
-import { safeCoverUrl } from "@/utils/safeCoverUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 /**
  * `safeCoverUrl` is the PWA's CODE-side half of the cover-URL beacon defence.

@@ -1,3 +1,4 @@
+// Twin: pwa/src/utils/appEnv.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 /** App environment from the Vite mode: "development" (`pnpm dev`) → local; "remote" (`pnpm dev:remote`,
  *  `pnpm build:dev`) → dev; anything else (`pnpm build` → "production") → prod. */
 

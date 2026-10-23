@@ -9,7 +9,7 @@ import {
   parseSyncCodeApiHost,
   SyncCodeError,
   type SyncCodeApiHostResult,
-} from "@/crypto/syncCode";
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 import {
   HALF_TYPED_PREFIXES,
@@ -18,7 +18,7 @@ import {
 } from "../../helpers/syncCodeHostFixtures";
 
 /**
- * Sync code encode / decode (`src/crypto/syncCode.ts`) and the `@host` display
+ * Sync code encode / decode (`shared/src/crypto/syncCode.ts`) and the `@host` display
  * readers `parseSyncCodeApiHost` / `displayedSyncCodeApiHost` (PWA).
  *
  * parseSyncCodeApiHost is the DISPLAY-only reader behind SyncCodeHostNote: it

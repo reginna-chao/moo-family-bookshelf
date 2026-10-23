@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+// Twin: extension/src/hooks/useTimedFlag.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 /**
  * A boolean flag that auto-resets to `false` after `durationMs`. Calling the

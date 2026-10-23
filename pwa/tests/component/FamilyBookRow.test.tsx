@@ -19,7 +19,7 @@ import { BoolFlag } from "@/api/client";
  *
  * Cover URL whitelist: a family-shelf cover is ANOTHER member's server data, so it is exactly the
  * value a hostile member would point at a tracking beacon to collect every viewer's IP / UA.
- * `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops it before it becomes an `<img src>`; LazyCover
+ * `safeCoverUrl` (shared/src/safeUrl/safeCoverUrl.ts) drops it before it becomes an `<img src>`; LazyCover
  * then renders the BookOpen fallback box. The CSP `img-src` in pwa/public/_headers is the second
  * layer (tests/unit/cspHeaders.test.ts) but is only served by Cloudflare Pages / Netlify — `vite dev`
  * / `vite preview` and plain static hosts have only this code filter, which is what the cases pin.
@@ -37,7 +37,7 @@ import { BoolFlag } from "@/api/client";
  * gate in when it fires (a click, not a render — lower rate, same severity) and in what could
  * substitute for it: nothing. The CSP in pwa/public/_headers is `img-src` only, which says nothing
  * about where a navigation may go, and that file is in any case only honoured by hosts that serve it.
- * `safeBookUrl` (pwa/src/utils/safeBookUrl.ts) is the whole defence. The degradation contract is
+ * `safeBookUrl` (shared/src/safeUrl/safeBookUrl.ts) is the whole defence. The degradation contract is
  * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because
  * an empty `href` resolves to the current document and a click would reload the PWA. With no `href`
  * the `<a>` has no `link` role and is inert, while the row's layout and content stay untouched. The

@@ -41,10 +41,15 @@ import {
 
 // Only decodeSyncCode is stubbed; parseSyncCodeApiHost stays real for the @host note.
 // See the header → "Sync-code mock".
-vi.mock("@/crypto/syncCode", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
-  decodeSyncCode: vi.fn(),
-}));
+vi.mock(
+  "moo-family-bookshelf-shared/crypto/syncCode",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("moo-family-bookshelf-shared/crypto/syncCode")
+    >()),
+    decodeSyncCode: vi.fn(),
+  }),
+);
 
 const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
   mockJoinFamily: vi.fn(),
@@ -57,7 +62,7 @@ vi.mock("@/api/client", () => ({
   })),
 }));
 
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {

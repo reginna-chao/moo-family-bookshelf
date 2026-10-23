@@ -152,13 +152,13 @@ The first run opens Chromium and requires manual Readmoo login. Login state is p
 
 ### Coverage Targets
 
-| Scope                   | Target |
-| ----------------------- | ------ |
-| `extension/src/crypto/` | ≥ 90%  |
-| `extension/src/api/`    | ≥ 80%  |
-| `extension/src/dialog/` | ≥ 70%  |
-| `worker/src/`           | ≥ 80%  |
-| Overall                 | ≥ 70%  |
+| Scope                   | Target                                                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `shared/src/crypto/`    | ≥ 90%（由 `extension/tests/` 與 `pwa/tests/` 覆蓋；各 package 的 coverage 只量自己的 `src/`，這一列目前沒有自動量測） |
+| `extension/src/api/`    | ≥ 80%                                                                                                                 |
+| `extension/src/dialog/` | ≥ 70%                                                                                                                 |
+| `worker/src/`           | ≥ 80%                                                                                                                 |
+| Overall                 | ≥ 70%                                                                                                                 |
 
 Run full coverage report:
 

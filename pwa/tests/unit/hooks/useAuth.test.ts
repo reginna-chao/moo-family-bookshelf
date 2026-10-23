@@ -59,7 +59,7 @@ import {
  */
 
 // Mock syncCode module
-vi.mock("@/crypto/syncCode", () => ({
+vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
   decodeSyncCode: vi.fn(),
   encodeSyncCode: vi.fn((data: { familyId: string; apiHost?: string }) => {
     const base = `moo-${data.familyId}`;
@@ -73,7 +73,10 @@ vi.mock("@/crypto/syncCode", () => ({
   },
 }));
 
-import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import {
+  decodeSyncCode,
+  SyncCodeError,
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 
 /** A full, adoptable endpoint URL: a bare host is a state the app can never hold.

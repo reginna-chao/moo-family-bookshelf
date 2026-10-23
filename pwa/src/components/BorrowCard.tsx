@@ -1,6 +1,6 @@
 import { BorrowStatus, type BorrowRequest } from "@/api/client";
 import { LazyCover } from "@/components/LazyCover";
-import { safeCoverUrl } from "@/utils/safeCoverUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 interface StatusStyle {
   label: string;

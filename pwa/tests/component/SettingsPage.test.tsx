@@ -58,7 +58,7 @@ import { DEFAULT_API_ENDPOINT } from "../../src/constants";
 const { mockEncodeSyncCode } = vi.hoisted(() => ({
   mockEncodeSyncCode: vi.fn().mockReturnValue("moo-fam1-key1"),
 }));
-vi.mock("@/crypto/syncCode", () => ({
+vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
   encodeSyncCode: mockEncodeSyncCode,
 }));
 

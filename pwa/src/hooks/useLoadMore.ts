@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+// Twin: extension/src/dialog/useLoadMore.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 interface UseLoadMoreOptions<T> {
   items: T[];

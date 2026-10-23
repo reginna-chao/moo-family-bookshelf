@@ -5,14 +5,14 @@ import {
   reconcileTitle,
   type PublicShelfUpdate,
 } from "moo-family-bookshelf-shared/publicShelf/diff";
-import type { ApiClient } from "../api/client";
-import type { PublicShelf } from "../api/types";
+import type { ApiClient, PublicShelf } from "../api/client";
 import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
 import {
   BLANK_TITLE_MESSAGE,
   publicShelfErrorMessage,
   publicShelfSaveErrorMessage,
 } from "./publicShareMessages";
+// Twin: pwa/src/hooks/usePublicShelfActions.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 export type PublicShelfViewState = "loading" | "empty" | "active" | "error";
 

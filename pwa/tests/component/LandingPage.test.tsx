@@ -100,10 +100,15 @@ import {
 
 // Only decodeSyncCode is stubbed; parseSyncCodeApiHost and classifySyncCodeApiHost stay real.
 // See the header → "Sync-code mock".
-vi.mock("@/crypto/syncCode", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
-  decodeSyncCode: vi.fn(),
-}));
+vi.mock(
+  "moo-family-bookshelf-shared/crypto/syncCode",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("moo-family-bookshelf-shared/crypto/syncCode")
+    >()),
+    decodeSyncCode: vi.fn(),
+  }),
+);
 
 // Mock ApiClient constructor so joinFamily and getVerifyMethod can be controlled
 const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
@@ -117,7 +122,10 @@ vi.mock("@/api/client", () => ({
   })),
 }));
 
-import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import {
+  decodeSyncCode,
+  SyncCodeError,
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {

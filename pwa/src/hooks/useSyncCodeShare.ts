@@ -4,7 +4,7 @@ import {
   buildLinkInviteMessage,
 } from "moo-family-bookshelf-shared/invite/messages";
 import type { ApiClient } from "@/api/client";
-import { encodeSyncCode } from "@/crypto/syncCode";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
 
 export interface SyncCodeShare {

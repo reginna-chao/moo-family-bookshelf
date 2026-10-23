@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+// Twin: extension/src/hooks/useDebouncedCallback.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 /**
  * Returns a stable debounced version of `fn`. Each invocation resets a

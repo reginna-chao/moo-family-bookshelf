@@ -1,5 +1,8 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import { decodeSyncCode, SyncCodeError } from "@/crypto/syncCode";
+import {
+  decodeSyncCode,
+  SyncCodeError,
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import { REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";

@@ -29,7 +29,7 @@ import { BoolFlag } from "@/api/client";
  * since the click happens precisely when the user believes they are opening Readmoo. Nothing in the
  * browser constrains where it goes: the dialog is injected into Readmoo pages, which send no CSP, and
  * `img-src` would say nothing about a navigation anyway (hence a separate defence from the
- * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is
+ * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (shared/src/safeUrl/safeBookUrl.ts) is
  * the only thing between the stored value and the click. The degradation contract is
  * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because an
  * empty `href` resolves to the current document and a click would reload the Readmoo page the dialog
@@ -43,7 +43,7 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
     title: "測試書籍",
     author: "測試作者",
     isbn: "",
-    // Must sit on a Readmoo cover host: `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) filters it
+    // Must sit on a Readmoo cover host: `safeCoverUrl` (shared/src/safeUrl/safeCoverUrl.ts) filters it
     // at render time, so any other host yields "" and no <img> at all.
     coverUrl: "https://cdn.readmoo.com/cover/test.jpg",
     readmooUrl: "https://readmoo.com/book/book-1",
