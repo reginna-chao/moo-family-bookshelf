@@ -131,6 +131,8 @@ describe("QrCodeLink", () => {
       "掃描此 QR Code 以在手機上開啟墨家書櫃",
     );
     expect(img).toBeInTheDocument();
+    // A drag would hand the data URL (it carries the token) to a page `dragstart` listener (#362).
+    expect(img.getAttribute("draggable")).toBe("false");
     expect(createQrToken).toHaveBeenCalledTimes(1);
     expect(createQrToken).toHaveBeenCalledWith("uid123");
   });

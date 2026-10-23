@@ -150,6 +150,9 @@ export function QrCodeLink({ syncCode, userId, apiClient }: QrCodeLinkProps) {
             alt="掃描此 QR Code 以在手機上開啟墨家書櫃"
             width={QR_BOX_SIZE}
             height={QR_BOX_SIZE}
+            // A drag would hand this data URL (it carries `qrt`) to a page `dragstart` listener,
+            // which the closed shadow root does not stop (#362).
+            draggable={false}
           />
         ) : (
           <QrBoxButton state={state} onClick={onRevealClick} />

@@ -255,11 +255,11 @@ function toggleDialog(): void {
   backdrop.id = MOO_ELEMENT_IDS.backdrop;
   backdrop.className = "moo-shell-backdrop";
 
-  // Light-DOM host owning the Shadow Root: a plain div (no stacking context / transform), so the fixed
-  // backdrop/dialog inside still cover the viewport. Toggle-off / invalidation paths remove it.
+  // Plain light-DOM host (no stacking context / transform): the fixed backdrop/dialog cover the viewport.
+  // Closed: page scripts get no `.shadowRoot` (no security boundary; docs/architecture.md → 浮動按鈕與 Dialog 外殼).
   const host = document.createElement("div");
   host.id = MOO_ELEMENT_IDS.host;
-  const shadowRoot = host.attachShadow({ mode: "open" });
+  const shadowRoot = host.attachShadow({ mode: "closed" });
 
   // Must run before backdrop/dialog are appended, so they never flash unstyled.
   injectShellStyles(shadowRoot);

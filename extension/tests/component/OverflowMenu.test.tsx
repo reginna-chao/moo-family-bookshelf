@@ -13,6 +13,8 @@ import { useIsMobile } from "@/hooks/useIsMobile";
  * `contains(event.target)` check treats the click as "outside" and closes the menu before the item's
  * onClick fires. useDismissableMenu must use `event.composedPath()`, which pierces the shadow boundary,
  * to recognise inside-menu clicks. A plain light-DOM portal container cannot reproduce retargeting.
+ * The shipped Dialog root is CLOSED (#362), where even composedPath() at `document` starts at the host,
+ * so the closed-root case pins that the hook's ShadowRoot listener keeps mouse selection working.
  *
  * Class contract: jsdom does not apply stylesheet rules, so classes are the observable contract. The
  * 28px (desktop) / 32px (mobile) trigger sizing moved from inline styles to `.moo-overflow__trigger` +
@@ -517,6 +519,82 @@ describe("OverflowMenu", () => {
       fireEvent.keyDown(first, { key: "Escape" });
 
       expect(menuInShadow()).toBeNull();
+      expect(shadowRoot.activeElement).toBe(trigger);
+    });
+  });
+
+  // Regression (#362): the shipped Dialog root is CLOSED, where a document listener's composedPath()
+  // starts at the host, so an option's mousedown must be recognised at the ShadowRoot.
+  describe("portaled into a real closed shadow root", () => {
+    let host: HTMLDivElement;
+
+    afterEach(() => {
+      host.remove();
+    });
+
+    it("fires onSelect on a mouse selection and closes the menu only afterwards", () => {
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      const shadowRoot = host.attachShadow({ mode: "closed" });
+      const reactContainer = document.createElement("div");
+      shadowRoot.appendChild(reactContainer);
+      const onSelect = vi.fn();
+      render(
+        <PortalContainerContext.Provider value={shadowRoot}>
+          <OverflowMenu items={[{ label: "隱藏書籍", onSelect }]} />
+        </PortalContainerContext.Provider>,
+        { container: reactContainer },
+      );
+
+      const trigger = shadowRoot.querySelector<HTMLButtonElement>(
+        'button[aria-label="更多選項"]',
+      );
+      if (!trigger) throw new Error("trigger not found in shadow root");
+      fireEvent.click(trigger);
+      const item =
+        shadowRoot.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      if (!item) throw new Error("menuitem not found in shadow root");
+
+      fireEvent.mouseDown(item);
+      // Still open after mousedown: closing here would unmount the option before its click.
+      expect(shadowRoot.querySelector('[role="menu"]')).not.toBeNull();
+      fireEvent.mouseUp(item);
+      fireEvent.click(item);
+
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(shadowRoot.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    // The menu's own Escape handler stops propagation at the ShadowRoot (React's portal listener);
+    // the hook's root listener must honour it, or one Escape closes twice.
+    it("closes exactly once and refocuses the trigger on Escape from a focused option", () => {
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      const shadowRoot = host.attachShadow({ mode: "closed" });
+      const reactContainer = document.createElement("div");
+      shadowRoot.appendChild(reactContainer);
+      const onOpenChange = vi.fn();
+      render(
+        <PortalContainerContext.Provider value={shadowRoot}>
+          <OverflowMenu items={THREE_ITEMS} onOpenChange={onOpenChange} />
+        </PortalContainerContext.Provider>,
+        { container: reactContainer },
+      );
+
+      const trigger = shadowRoot.querySelector<HTMLButtonElement>(
+        'button[aria-label="更多選項"]',
+      );
+      if (!trigger) throw new Error("trigger not found in shadow root");
+      fireEvent.click(trigger);
+      const first =
+        shadowRoot.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      if (!first) throw new Error("menuitem not found in shadow root");
+      expect(shadowRoot.activeElement).toBe(first);
+
+      fireEvent.keyDown(first, { key: "Escape" });
+
+      expect(onOpenChange.mock.calls).toEqual([[true], [false]]);
+      expect(shadowRoot.querySelector('[role="menu"]')).toBeNull();
       expect(shadowRoot.activeElement).toBe(trigger);
     });
   });
