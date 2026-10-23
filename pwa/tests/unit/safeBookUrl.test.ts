@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isAllowedBookUrl } from "moo-family-bookshelf-shared/config/readmoo";
-import { safeBookUrl } from "@/utils/safeBookUrl";
+import { safeBookUrl } from "moo-family-bookshelf-shared/safeUrl/safeBookUrl";
 
 /**
  * `safeBookUrl` is the PWA's RENDER-time whitelist for the per-book detail link

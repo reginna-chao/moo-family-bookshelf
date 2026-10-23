@@ -9,7 +9,7 @@ import {
 import {
   parseSyncCodeApiHost,
   type SyncCodeApiHostResult,
-} from "@/crypto/syncCode";
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 
 export interface UseSyncCodeHostVerdictResult {
   /** Verdict to render — already filtered by the shared display policy. */

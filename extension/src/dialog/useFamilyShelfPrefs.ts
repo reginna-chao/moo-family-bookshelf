@@ -7,6 +7,7 @@ import {
   type FamilyPrefsIo,
   type FamilyShelfPrefs,
 } from "moo-family-bookshelf-shared/familyShelf/prefsSync";
+// Twin: pwa/src/hooks/useFamilyShelfPrefs.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 export type { FamilyShelfPrefs };
 
@@ -14,7 +15,7 @@ export type { FamilyShelfPrefs };
  * Viewer-private family-shelf preferences (v1.5.0) — React adapter.
  *
  * The load-once / debounce / flush-on-unmount lifecycle lives in the shared
- * `FamilyPrefsSync` controller (identical on the PWA); this hook only owns the
+ * `FamilyPrefsSync` controller used by both apps; this hook only owns the
  * React state and wires the controller to mount / unmount and to the
  * `[userId, apiClient]` load trigger.
  */

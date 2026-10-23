@@ -4,7 +4,7 @@ import { DISPLAY_NAME_KEY } from "../constants";
 import {
   parseSyncCodeApiHost,
   type SyncCodeApiHostResult,
-} from "../crypto/syncCode";
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 import { useTimedFlag } from "../hooks/useTimedFlag";
 import { safeStorageGet } from "../storage/safeStorage";
 import { classifyAdoptedEndpoint } from "./adoptedEndpoint";

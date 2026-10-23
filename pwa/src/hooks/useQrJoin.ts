@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
 import type {

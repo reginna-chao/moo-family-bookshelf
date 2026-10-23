@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+// Twin: pwa/src/hooks/useAnchoredPosition.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 export interface AnchoredPosition {
   /** `position: fixed` top in CSS pixels. */

@@ -3,45 +3,20 @@
 
 import browser from "webextension-polyfill";
 import { ApiClient, FamilyGroup } from "../api/client";
-import { decodeSyncCode, encodeSyncCode } from "../crypto/syncCode";
 import {
-  DEFAULT_API_ENDPOINT,
-  USER_ID_KEY,
-  AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
-  FAMILY_ID_KEY,
-} from "../constants";
+  decodeSyncCode,
+  encodeSyncCode,
+} from "moo-family-bookshelf-shared/crypto/syncCode";
+import { DEFAULT_API_ENDPOINT, FAMILY_ID_KEY } from "../constants";
 import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { removedJoinText } from "moo-family-bookshelf-shared/unkick/messages";
 import type { useAutoSetup } from "./useAutoSetup";
 import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
+import { persistJoinCredentials } from "./persistJoinCredentials";
 
 // Re-exported so existing `./onboardingFlow` importers keep working.
 export { migratePersonalBooksCache };
-
-/** Persist auth/family credentials to chrome.storage.local — familyId DIRECTLY, not only via the
- *  background SET_FAMILY_ID message, which Firefox's sleeping event page can lose. */
-async function persistJoinCredentials(opts: {
-  userId: string;
-  familyId?: string;
-  authToken?: string;
-  expiresAt?: number;
-}): Promise<void> {
-  const storageData: Record<string, unknown> = {
-    [USER_ID_KEY]: opts.userId,
-  };
-  if (opts.familyId !== undefined) {
-    storageData[FAMILY_ID_KEY] = opts.familyId;
-  }
-  if (opts.authToken !== undefined) {
-    storageData[AUTH_TOKEN_KEY] = opts.authToken;
-  }
-  if (opts.expiresAt) {
-    storageData[TOKEN_EXPIRES_AT_KEY] = opts.expiresAt;
-  }
-  await browser.storage.local.set(storageData);
-}
 
 export interface RecoveryResult {
   recovered: boolean;

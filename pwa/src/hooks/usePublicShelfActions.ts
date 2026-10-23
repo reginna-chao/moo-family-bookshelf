@@ -12,6 +12,7 @@ import {
   publicShelfErrorMessage,
   publicShelfSaveErrorMessage,
 } from "@/utils/publicShareMessages";
+// Twin: extension/src/dialog/usePublicShelfActions.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 export type PublicShelfViewState = "loading" | "empty" | "active" | "error";
 
@@ -48,7 +49,6 @@ export interface PublicShelfActions {
 
 /**
  * Public-shelf state plus every write the dialog can perform.
- * Mirrors `extension/src/dialog/usePublicShelfActions.ts`.
  *
  * Failure policy: a rejected write NEVER advances the UI past what the server
  * confirmed. A failed delete keeps the active shelf on screen (the public link

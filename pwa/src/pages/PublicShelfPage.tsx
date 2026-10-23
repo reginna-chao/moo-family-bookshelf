@@ -3,7 +3,7 @@ import { Search, BookX, AlertCircle } from "lucide-react";
 import { ApiClient } from "@/api/client";
 import type { BookEntry, PublicShelfData } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
-import { safeCoverUrl } from "@/utils/safeCoverUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 interface PublicShelfPageProps {
   shareToken: string;

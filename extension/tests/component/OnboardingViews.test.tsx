@@ -45,14 +45,19 @@ import {
  * would leave a reassuring "will connect to api.moofamily.app" standing over a spoofed address —
  * lending the spoof exactly the legitimacy the warning exists to deny.
  */
-vi.mock("@/crypto/syncCode", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/crypto/syncCode")>()),
-  decodeSyncCode: vi.fn().mockReturnValue({
-    familyId: "abc123",
+vi.mock(
+  "moo-family-bookshelf-shared/crypto/syncCode",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("moo-family-bookshelf-shared/crypto/syncCode")
+    >()),
+    decodeSyncCode: vi.fn().mockReturnValue({
+      familyId: "abc123",
+    }),
   }),
-}));
+);
 
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 const mockDecodeSyncCode = vi.mocked(decodeSyncCode);
 
 describe("WelcomeView", () => {

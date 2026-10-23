@@ -1,5 +1,6 @@
-/** App environment from the Vite build mode: `pnpm dev` → "local"; `pnpm dev:remote` and
- *  `pnpm build:dev` (MODE "remote") → "dev"; `pnpm build` → "prod". */
+// Twin: extension/src/utils/appEnv.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
+/** App environment from the Vite mode: "development" (`pnpm dev`) → local; "remote" (`pnpm dev:remote`,
+ *  `pnpm build:dev`) → dev; anything else (`pnpm build` → "production") → prod. */
 
 export type AppEnv = "local" | "dev" | "prod";
 

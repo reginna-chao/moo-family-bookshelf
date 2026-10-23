@@ -16,6 +16,12 @@ import { describe, it, expect } from "vitest";
  * This test reads the files off disk and compares them after normalising the
  * differences that are structural rather than behavioural.
  *
+ * The same compare now covers every pair `.claude/rules/frontend.md` → Extension
+ * ↔ PWA twins classes as `必須一致（parity）` — the identical hooks, the
+ * import-only pairs and appEnv — one `TWINS` row each. Every such file carries a
+ * `// Twin: <other app's path>` pointer right after its imports, which is what
+ * the "names the other app's directory" check below holds it to.
+ *
  * A row leaves this table when its subject stops being a pair: the two
  * API-boundary validators that used to sit here graduated into `shared/`
  * (`shared/src/api/memberValidation.ts` and `shared/src/borrow/validation.ts`),
@@ -44,9 +50,21 @@ import { describe, it, expect } from "vitest";
  *
  * What normalize() erases — the three differences the twins are ALLOWED to
  * have, and nothing else:
- *   1. the directory each app keeps its own module in — the FILE NAME after it
- *      is left intact, so a rename on one side still fails this test;
- *   2. how each app resolves its crypto module (`../` vs the `@/` alias);
+ *   1. the directory each app keeps its own module in (`extension/src/dialog`,
+ *      `extension/src/hooks`, `extension/src/utils`, `pwa/src/hooks`,
+ *      `pwa/src/utils`, `pwa/src/components`, `{extension,pwa}/tests/helpers`)
+ *      — the FILE NAME after it is left intact, so a rename on one side still
+ *      fails this test;
+ *   2. the directory part of a relative or `@/` import specifier — the
+ *      Extension reaches `../api/client` where the PWA reaches `@/api/client`,
+ *      so `from "../api/client"` and `from "@/api/client"` both become
+ *      `from "<mod>/client"`. This is safe because the final MODULE NAME
+ *      survives (importing a different module still fails), only specifiers
+ *      that follow `from` / `import` are touched (any other string literal keeps
+ *      its directory), and a bare package specifier
+ *      (`moo-family-bookshelf-shared/…`, `react`) has no `./`, `../` or `@/`
+ *      prefix, so importing the shared module on one side and a local copy on
+ *      the other still fails;
  *   3. line wrapping — JSDoc leaders and whitespace runs collapse, so prose
  *      re-flowed to fit 80 columns is not mistaken for a behaviour change.
  * A JSDoc leader is a `*` followed by whitespace or by end of line, and nothing
@@ -78,6 +96,62 @@ const TWINS: TwinPair[] = [
       "These two files are deliberate twins: only the display policy lives in shared/, so a settle trigger added, removed or retimed on one side silently changes when the PWA and the Extension warn about a spoofed @host. Fix it by applying the same edit to both files — or, if the new logic has no app-specific dependency, move it into shared/src/api/syncCodeHost.ts and delete it from both twins.",
   },
   {
+    what: "the family-shelf preferences hook",
+    extension: "extension/src/dialog/useFamilyShelfPrefs.ts",
+    pwa: "pwa/src/hooks/useFamilyShelfPrefs.ts",
+    marker: "export function useFamilyShelfPrefs(",
+    stake:
+      "The load / debounce / flush-on-unmount policy already lives in shared/ (FamilyPrefsSync); these twins are only its React adapter, so a drift here means one app loads, saves or flushes a viewer's private family-shelf preferences differently from the other. Apply the same edit to both files — or move the new logic into shared/src/familyShelf/prefsSync.ts.",
+  },
+  {
+    what: "the load-more pagination hook",
+    extension: "extension/src/dialog/useLoadMore.ts",
+    pwa: "pwa/src/hooks/useLoadMore.ts",
+    marker: "export function useLoadMore<T>({",
+    stake:
+      "A drift changes how many books one app shows per page, or when it resets the list after a search or filter, while the other app keeps the old behaviour. Apply the same edit to both files — or, since the hook has no app-specific dependency, move it into shared/ and delete both twins.",
+  },
+  {
+    what: "the public-shelf actions hook",
+    extension: "extension/src/dialog/usePublicShelfActions.ts",
+    pwa: "pwa/src/hooks/usePublicShelfActions.ts",
+    marker: "export function usePublicShelfActions({",
+    stake:
+      "This hook owns every write behind a public share link — create, rename, expiry, reset, delete — and its rule that a failed write never advances the screen past what the server confirmed; a drift lets one app show a link as deleted or saved when it is not. Each side is otherwise tested only through its PublicShareDialog, so apply the same edit to both files.",
+  },
+  {
+    what: "the anchored-position hook",
+    extension: "extension/src/hooks/useAnchoredPosition.ts",
+    pwa: "pwa/src/hooks/useAnchoredPosition.ts",
+    marker: "export function useAnchoredPosition(): {",
+    stake:
+      "A drift makes the same dropdown open, flip or clamp differently in the two apps. Apply the same edit to both files — or move the pure computeAnchoredPosition into shared/, which has no app-specific dependency.",
+  },
+  {
+    what: "the debounced-callback hook",
+    extension: "extension/src/hooks/useDebouncedCallback.ts",
+    pwa: "pwa/src/hooks/useDebouncedCallback.ts",
+    marker: "export function useDebouncedCallback<Args extends unknown[]>(",
+    stake:
+      "Both apps debounce server writes through this hook, and its unmount cleanup is what stops a queued write from firing after the dialog is gone; a drift lets one app send writes the other would have dropped. Apply the same edit to both files.",
+  },
+  {
+    what: "the timed-flag hook",
+    extension: "extension/src/hooks/useTimedFlag.ts",
+    pwa: "pwa/src/hooks/useTimedFlag.ts",
+    marker: "export function useTimedFlag(",
+    stake:
+      "A drift changes how long a transient confirmation such as 已複製 stays on screen, or whether its timer survives an unmount, in one app only. Apply the same edit to both files.",
+  },
+  {
+    what: "the app-environment resolver",
+    extension: "extension/src/utils/appEnv.ts",
+    pwa: "pwa/src/utils/appEnv.ts",
+    marker: "export function getAppEnv(): AppEnv {",
+    stake:
+      "It reads each app's own import.meta.env.MODE, so it stays per app, but the Vite-mode → local / dev / prod mapping must agree: a drift makes one app treat a build as a different environment than the other does. Apply the same edit to both files.",
+  },
+  {
     what: "the sync-code @host test fixtures",
     extension: "extension/tests/helpers/syncCodeHostFixtures.ts",
     pwa: "pwa/tests/helpers/syncCodeHostFixtures.ts",
@@ -99,17 +173,22 @@ const TWINS: TwinPair[] = [
 
 /** Placeholder left where a known-divergent fragment used to be. */
 const TWIN_DIR = "<twin-dir>";
-const CRYPTO_MODULE = "<crypto/syncCode>";
+
+/** Placeholder left where an import specifier's directory part used to be. */
+const IMPORT_DIR = "<mod>";
 
 /** Erase the three differences the twins are ALLOWED to have, and nothing else.
  *  See the header → "What normalize() erases". */
 function normalize(source: string): string {
   return source
     .replace(
-      /extension\/src\/dialog|pwa\/src\/hooks|(?:extension|pwa)\/tests\/helpers/g,
+      /extension\/src\/(?:dialog|hooks|utils)|pwa\/src\/(?:hooks|utils|components)|(?:extension|pwa)\/tests\/helpers/g,
       TWIN_DIR,
     )
-    .replace(/(["'])(?:\.\.|@)\/crypto\/syncCode\1/g, `"${CRYPTO_MODULE}"`)
+    .replace(
+      /(\b(?:from|import)\s*\(?\s*)(["'])(?:@\/|(?:\.\.?\/)+)(?:[\w-]+\/)*/g,
+      `$1$2${IMPORT_DIR}/`,
+    )
     .replace(/^[ \t]*\*(?:[ \t]|$)/gm, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -143,20 +222,53 @@ describe("Extension / PWA twin modules", () => {
     },
   );
 
-  it("normalizes away the import specifier without hiding a real rename", () => {
+  it("normalizes away the twin directory without hiding a real rename", () => {
     // The normaliser is the only thing standing between "twins agree" and a
     // false green, so its substitutions are pinned here rather than trusted.
-    expect(normalize(`import x from "@/crypto/syncCode";`)).toBe(
-      normalize(`import x from "../crypto/syncCode";`),
-    );
-    expect(normalize(`import x from "@/crypto/syncCodeV2";`)).not.toBe(
-      normalize(`import x from "../crypto/syncCode";`),
-    );
     expect(normalize("pwa/src/hooks/useSyncCodeHostVerdict.ts")).toBe(
       normalize("extension/src/dialog/useSyncCodeHostVerdict.ts"),
     );
     expect(normalize("pwa/src/hooks/somethingElse.ts")).not.toBe(
       normalize("extension/src/dialog/useSyncCodeHostVerdict.ts"),
+    );
+    expect(normalize("extension/src/hooks/x.ts")).toBe(
+      normalize("pwa/src/hooks/x.ts"),
+    );
+    expect(normalize("extension/src/hooks/x.ts")).not.toBe(
+      normalize("pwa/src/hooks/y.ts"),
+    );
+    expect(normalize("extension/src/utils/appEnv.ts")).toBe(
+      normalize("pwa/src/utils/appEnv.ts"),
+    );
+  });
+
+  it("normalizes away an import's directory without hiding a different module", () => {
+    const importOf = (specifier: string) =>
+      normalize(`import { x } from "${specifier}";`);
+
+    expect(importOf("@/api/client")).toBe(importOf("../api/client"));
+    expect(importOf("./publicShareMessages")).toBe(
+      importOf("@/utils/publicShareMessages"),
+    );
+    expect(importOf("../hooks/useDebouncedCallback")).toBe(
+      importOf("@/hooks/useDebouncedCallback"),
+    );
+    expect(importOf("../../x/y")).toBe(importOf("@/y"));
+    expect(normalize(`const m = await import("../api/client");`)).toBe(
+      normalize(`const m = await import("@/api/client");`),
+    );
+
+    // The module name survives, and a package specifier is never erased, so a
+    // local copy standing in for the shared module still fails the compare.
+    expect(importOf("../api/client")).not.toBe(importOf("../api/clientV2"));
+    expect(importOf("moo-family-bookshelf-shared/crypto/syncCode")).not.toBe(
+      importOf("@/crypto/syncCode"),
+    );
+    expect(importOf("react")).not.toBe(importOf("./react"));
+
+    // Only import specifiers lose their directory; any other string keeps it.
+    expect(normalize(`const p = "./a/b";`)).not.toBe(
+      normalize(`const p = "./c/b";`),
     );
   });
 

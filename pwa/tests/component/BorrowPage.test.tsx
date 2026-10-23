@@ -24,7 +24,7 @@ import {
  * Borrow card cover: the borrow card renders its cover through `LazyCover`, so a cover that is missing
  * OR fails to load degrades to the same neutral placeholder instead of leaving a broken-image box. The
  * PWA runs TWO render-time beacon defences, not one:
- *   1. `safeCoverUrl` (pwa/src/utils/safeCoverUrl.ts) drops a cover outside the Readmoo host whitelist
+ *   1. `safeCoverUrl` (shared/src/safeUrl/safeCoverUrl.ts) drops a cover outside the Readmoo host whitelist
  *      BEFORE it can become an `<img src>` — a code-level filter, so jsdom observes it and the cover
  *      cases pin it.
  *   2. The CSP `img-src` in pwa/public/_headers (pinned by tests/unit/cspHeaders.test.ts), which only

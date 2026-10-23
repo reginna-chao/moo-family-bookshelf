@@ -94,7 +94,7 @@ beforeAll(() => {
 });
 
 // Mock sync code codec — tests set return values per case to simulate decoding.
-vi.mock("@/crypto/syncCode", () => ({
+vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
   SyncCodeError: class SyncCodeError extends Error {},
   decodeSyncCode: vi.fn(),
   encodeSyncCode: vi.fn(),
@@ -108,7 +108,7 @@ import {
   createNewFamily,
   CreateFamilyError,
 } from "@/dialog/onboardingFlow";
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 import type { ApiClient } from "@/api/client";
