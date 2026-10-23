@@ -8,6 +8,7 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
+  USER_EMAIL_KEY,
 } from "@/constants";
 
 /**
@@ -401,6 +402,29 @@ describe("background service worker", () => {
       expect(response).toBeInstanceOf(Promise);
       await expect(response).resolves.toBeDefined();
       expect(browser.storage.local.get).toHaveBeenCalled();
+    });
+  });
+
+  describe("runtime.onInstalled", () => {
+    it("purges both stored email keys in one storage call (#359)", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        const addListener = vi.mocked(browser.runtime.onInstalled.addListener);
+        expect(addListener).toHaveBeenCalledOnce();
+        const onInstalled = addListener.mock.calls[0][0] as () => void;
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+
+        onInstalled();
+
+        expect(browser.storage.local.remove).toHaveBeenCalledOnce();
+        // "userEmail" is the legacy unprefixed key; production does not export it.
+        expect(browser.storage.local.remove).toHaveBeenCalledWith([
+          USER_EMAIL_KEY,
+          "userEmail",
+        ]);
+      } finally {
+        logSpy.mockRestore();
+      }
     });
   });
 

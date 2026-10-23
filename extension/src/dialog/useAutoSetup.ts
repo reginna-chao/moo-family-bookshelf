@@ -8,11 +8,7 @@ import { uploadOnboardingBooks } from "./onboardingBooksUpload";
 import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 import { verifyAccountIdentity } from "./accountIdentityCheck";
 import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "./AccountCheckContext";
-import {
-  USER_EMAIL_KEY,
-  DISPLAY_NAME_KEY,
-  LAST_SYNC_AT_KEY,
-} from "../constants";
+import { DISPLAY_NAME_KEY, LAST_SYNC_AT_KEY } from "../constants";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 export type AutoSetupPhase =
@@ -80,7 +76,6 @@ export function useAutoSetup(): UseAutoSetupReturn {
         }
 
         await browser.storage.local.set({
-          [USER_EMAIL_KEY]: result.email,
           [DISPLAY_NAME_KEY]: result.displayName,
         });
 

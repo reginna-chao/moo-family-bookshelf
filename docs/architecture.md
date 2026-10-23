@@ -104,7 +104,7 @@
 - **不同**：顯示帳號不符畫面（`AccountMismatchScreen`），不掛載 `FamilyDataProvider` / `MainContent`，因此不讀書櫃資料、不自動同步，也碰不到任何寫入動作。「改用這個帳號重新設定」只清除本機的身分與家庭綁定（`familyBindingReset.ts` 的 `forgetStoredAccount`），不呼叫任何 API，原帳號仍留在家庭裡、伺服器資料不動，然後回到引導畫面。
 - **無法確認**（沒登入、頁面改版、載入太慢、任何錯誤）：照常進主畫面，但這次頁面載入不做個人書櫃的自動同步。同步前的重新確認若無法確認，自動同步直接略過、不顯示任何訊息；手動同步不上傳，並顯示原本的提示。
 - **尚未在真實的讀墨上驗證**（issue #277）：另一個分頁換了帳號後，沒有重新載入的讀墨分頁實際上會不會抓到新帳號的書、`#/me` 會不會顯示新帳號，都沒有實測過。同步前的重新確認是防禦性的保護；若 `#/me` 仍顯示舊帳號，登入 cookie 的否決就是針對這個未驗證情況的第二道防線。
-- Content Script 在 `#/me` 順手快取 email／顯示名稱時（`extension/src/content/profileCache.ts`），若 storage 已有 userId 且與這個 email 算出的不同，就什麼都不寫——顯示名稱會跟著原帳號的書單一起上傳。
+- Content Script 在 `#/me` 順手快取顯示名稱時（`extension/src/content/profileCache.ts`），若 storage 已有 userId 且與這頁 email 算出的不同，就什麼都不寫——顯示名稱會跟著原帳號的書單一起上傳。email 只用來比對，不會存進 storage（#359）。
 
 浮動按鈕上的待處理借閱數字（issue #275）用另一個訊號確認帳號：讀墨自己的登入 cookie。按鈕靠這個 cookie 確認相同；上面的 Dialog 帳號確認只認 `#/me` 判定相同，cookie 只用來否決（issue #277）。
 
@@ -1253,7 +1253,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **寫入與清除都是本機優先**（背景的 `SET_FAMILY_ID`／`CLEAR_FAMILY_ID`）：先寫或先清 `storage.local`，持久化就不依賴 `storage.sync`——它在 Firefox 可能 reject（沒登入帳號、Android 的限制、或偏好設定關閉）。sync 的寫入／移除是盡力而為，而且獨立包起來，失敗也擋不住本機那一步；所以解除綁定一定會清掉本機的 familyId 與認證資訊（auth token 與到期時間）。
 - **只存本機的偏好**：家庭書櫃的檢視模式只是本機的介面偏好，不該跟著使用者換裝置，所以不鏡像到 `storage.sync`。只有剛好存成 `"row"` 才讀成 `"row"`，其他值（包括沒設定、舊資料）一律讀成 `"grid"`。自動同步頻率也一樣只存 `storage.local`：每台裝置自己決定多久爬一次書櫃，Chrome 上設的值不會出現在 Firefox 或手機上；沒設定或值不認得時讀成「每天」。同步封存書籍、家庭書櫃按鈕大小和兩個書櫃的排序也只存 `storage.local`，讀到不認得的值時各自回到預設（關閉、中、預設排序；排序的舊值 `title`／`author` 會讀成 `-asc` 形式）。按鈕大小的型別與判斷只在 `floatingIconSize.ts` 定義一次，content script 的浮動按鈕也從那裡 import。這些偏好寫入失敗時畫面都不退回舊值：Dialog 直接寫 `storage.local` 幾乎不會失敗（只有擴充功能的 context 失效時才會，那時整個 Dialog 已經不能用了），真的失敗也只是這次的選擇沒存下來，比畫面在使用者眼前跳回舊值好。
 - **`safeStorageGet`**（`safeStorage.ts`）：擴充功能重新載入／更新／停用後，留在頁面上的 content script 變成孤兒，`browser.storage.local` 的參照斷掉，任何 `.get(...)` 都會拋出 `Extension context invalidated`，沒被接住的 `await` 就變成 uncaught promise rejection。`safeStorageGet` 先檢查 context，再吞掉任何讀取錯誤，回傳空物件，呼叫端就落回各自的預設值。刻意吞掉錯誤，所以它只用於盡力而為的**讀取**：讀取失敗必須讓使用者知道的地方不要用它，而且呼叫端拿到 `{}` 時必須仍然正確。
-- **storage key 前綴**：擴充功能的 storage key 一律以 `moo:` 開頭，與 PWA 一致。v1.4.0 起曾有一次性遷移把舊的無前綴 key（例如 `userId`、`familyId`）改名，已在 #346 移除；殘留的舊 key 與 `moo:storageMigrated` 旗標是無害的孤兒，不另外清除（舊的無前綴 `userEmail` 要不要一併清掉，交給 #359 決定）。已接受的殘餘風險：2026 年 6 月前就沒再開過的 Chrome 安裝更新後讀不到舊 key，會回到引導畫面，資料都在伺服器上，按「開始使用」就重新連回原家庭（舊的自訂 API 端點也讀不到，自架家庭要先重新設定端點）；Firefox 版一開始就用 `moo:` key，不受影響。
+- **storage key 前綴**：擴充功能的 storage key 一律以 `moo:` 開頭，與 PWA 一致。v1.4.0 起曾有一次性遷移把舊的無前綴 key（例如 `userId`、`familyId`）改名，已在 #346 移除；殘留的舊 key 與 `moo:storageMigrated` 旗標是無害的孤兒，不另外清除。email 是例外（#359）：擴充功能已不再儲存 email，背景的 `onInstalled`（安裝與每次更新都會觸發）會一併移除 `moo:userEmail` 與舊的無前綴 `userEmail`（`extension/src/background/purgeStoredEmail.ts`）。已接受的殘餘風險：2026 年 6 月前就沒再開過的 Chrome 安裝更新後讀不到舊 key，會回到引導畫面，資料都在伺服器上，按「開始使用」就重新連回原家庭（舊的自訂 API 端點也讀不到，自架家庭要先重新設定端點）；Firefox 版一開始就用 `moo:` key，不受影響。
 
 #### 書單同步
 

@@ -4,7 +4,7 @@
 // The scraper is bundled twice on purpose (this IIFE via ./profileCache, the ESM content-sync module
 // via syncBooks.ts): it is stateless — reads the DOM, holds no shared mutable state.
 import browser from "webextension-polyfill";
-import { tryScrapeAndCacheEmail } from "./profileCache";
+import { tryScrapeAndCacheProfile } from "./profileCache";
 import {
   isExtensionContextValid,
   cleanupMooFamilyUI,
@@ -383,7 +383,7 @@ if (!isExtensionContextValid()) {
 } else {
   const init = (): void => {
     waitAndInjectButton();
-    tryScrapeAndCacheEmail();
+    tryScrapeAndCacheProfile();
     listenForIconSizeChanges();
   };
 
@@ -395,6 +395,6 @@ if (!isExtensionContextValid()) {
 
   window.addEventListener("hashchange", () => {
     if (!recheckBadgeIfDialogOpen()) waitAndInjectButton();
-    tryScrapeAndCacheEmail();
+    tryScrapeAndCacheProfile();
   });
 }
