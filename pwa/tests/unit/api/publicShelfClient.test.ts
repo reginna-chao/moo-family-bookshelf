@@ -29,7 +29,7 @@ import {
  *
  * throwOnError — hostile envelope text: `throwOnError` is the single chokepoint
  * every thrown `ApiError` passes through, and both of its text inputs arrive via
- * `readEnvelope`, which bare-casts `response.json()` (src/api/client.ts). The
+ * `readEnvelope`, which bare-casts `response.json()` (src/api/envelope.ts). The
  * endpoint is user-configurable (the PWA adopts a sync code's `@host` too), so
  * `code` and `message` are `unknown` at runtime while the types call them
  * `string`. That gap costs more than wording. `ApiError`'s constructor

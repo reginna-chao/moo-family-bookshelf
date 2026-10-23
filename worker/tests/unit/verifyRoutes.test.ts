@@ -225,8 +225,7 @@ describe("GET /api/user/:id/verify", () => {
     const res = await request("GET", `/api/user/${VALID_USER_ID}/verify`);
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
-    expect(json.data.method).toBe("none");
-    expect(json.data.prompted).toBe(0);
+    expect(json).toEqual({ data: { method: "none" } });
   });
 
   it("should return stored method", async () => {
@@ -242,7 +241,27 @@ describe("GET /api/user/:id/verify", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as Json;
     expect(json.data.method).toBe("pin");
-    expect(json.data.prompted).toBe(1);
+    // `prompted` is owner-only since #343 — the public read must not carry it.
+    expect("prompted" in json.data).toBe(false);
+  });
+
+  it("should not reveal that an account was only ever prompted (#343)", async () => {
+    // Exactly what `POST /verify/prompted` leaves behind for a PWA user who
+    // dismissed the setup prompt: no method, but the prompted flag is set.
+    const record: VerifyRecord = {
+      method: "none",
+      hash: null,
+      salt: null,
+      prompted: 1,
+    };
+    await kv.put(kvKeys.verify(VALID_USER_ID), JSON.stringify(record));
+
+    const res = await request("GET", `/api/user/${VALID_USER_ID}/verify`);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Json;
+    // Byte-identical to an account with no record at all.
+    expect(json.data).toEqual({ method: "none" });
+    expect("prompted" in json.data).toBe(false);
   });
 
   it("should not expose hash or salt", async () => {
@@ -612,6 +631,123 @@ describe("POST /api/user/:id/verify/prompted", () => {
       },
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/user/:id/verify/prompted", () => {
+  function getPrompted(userId: string, token?: string) {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    return request("GET", `/api/user/${userId}/verify/prompted`, { headers });
+  }
+
+  async function seedVerifyRecord(userId: string, record: VerifyRecord) {
+    await kv.put(kvKeys.verify(userId), JSON.stringify(record));
+  }
+
+  it("should return 401 UNAUTHORIZED without a token", async () => {
+    await seedVerifyRecord(VALID_USER_ID, {
+      method: "none",
+      hash: null,
+      salt: null,
+      prompted: 1,
+    });
+
+    const res = await getPrompted(VALID_USER_ID);
+
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+    expect(json.data).toBeUndefined();
+  });
+
+  it("should return 401 UNAUTHORIZED for a valid token belonging to another user", async () => {
+    await seedVerifyRecord(VALID_USER_ID, {
+      method: "none",
+      hash: null,
+      salt: null,
+      prompted: 1,
+    });
+    const otherToken = await seedAuthToken(kv, OTHER_USER_ID);
+
+    const res = await getPrompted(VALID_USER_ID, otherToken);
+
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+    expect(json.data).toBeUndefined();
+  });
+
+  it.each([
+    {
+      label: "a prompted account with no method",
+      record: {
+        method: "none",
+        hash: null,
+        salt: null,
+        prompted: 1,
+      } as VerifyRecord,
+      expected: 1,
+    },
+    {
+      label: "a prompted account with a PIN",
+      record: {
+        method: "pin",
+        hash: "secret-hash",
+        salt: "secret-salt",
+        prompted: 1,
+        secretUpdatedAt: 1_700_000_000_000,
+      } as VerifyRecord,
+      expected: 1,
+    },
+    {
+      label: "an account never prompted",
+      record: {
+        method: "pin",
+        hash: "secret-hash",
+        salt: "secret-salt",
+        prompted: 0,
+      } as VerifyRecord,
+      expected: 0,
+    },
+    { label: "an account with no verify record", record: null, expected: 0 },
+  ])(
+    "should return only { prompted: $expected } to the owner for $label",
+    async ({ record, expected }) => {
+      if (record) await seedVerifyRecord(VALID_USER_ID, record);
+      const token = await seedAuthToken(kv, VALID_USER_ID);
+
+      const res = await getPrompted(VALID_USER_ID, token);
+
+      expect(res.status).toBe(200);
+      // Whole body: no method / hash / salt / secretUpdatedAt alongside it.
+      expect(await res.json()).toEqual({ data: { prompted: expected } });
+    },
+  );
+
+  it("should not write the verify record or create one when none exists", async () => {
+    const token = await seedAuthToken(kv, VALID_USER_ID);
+
+    const res = await getPrompted(VALID_USER_ID, token);
+
+    expect(res.status).toBe(200);
+    // A read must not mark the account prompted (that is POST's job).
+    expect(await kv.get(kvKeys.verify(VALID_USER_ID))).toBeNull();
+  });
+
+  it("should reflect a prompted mark written through POST /verify/prompted", async () => {
+    const token = await seedAuthToken(kv, VALID_USER_ID);
+    const before = await getPrompted(VALID_USER_ID, token);
+    expect(await before.json()).toEqual({ data: { prompted: 0 } });
+
+    const mark = await request(
+      "POST",
+      `/api/user/${VALID_USER_ID}/verify/prompted`,
+      { body: "{}", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(mark.status).toBe(200);
+
+    const after = await getPrompted(VALID_USER_ID, token);
+    expect(await after.json()).toEqual({ data: { prompted: 1 } });
   });
 });
 

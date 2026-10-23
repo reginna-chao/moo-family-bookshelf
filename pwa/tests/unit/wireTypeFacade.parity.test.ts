@@ -69,6 +69,8 @@ const CONSOLIDATED_NAMES = [
   "VersionInfo",
   "VerifyMethod",
   "VerifyInfo",
+  // Issue #343 — the owner-only prompted flag.
+  "VerifyPromptedInfo",
   "SetVerifyBody",
   "OtpInfo",
   "MemberSettingsPayload",

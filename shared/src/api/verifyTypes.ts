@@ -1,11 +1,16 @@
-/** PWA login verification shapes — `GET` / `PUT /api/user/:id/verify` and
- *  `POST /api/user/:id/verify/otp`. Re-exported by `api/types.ts`. */
+/** PWA login verification shapes — `GET` / `PUT /api/user/:id/verify`, the owner-only
+ *  `GET /api/user/:id/verify/prompted` and `POST /api/user/:id/verify/otp`. Re-exported by `api/types.ts`. */
+
+import type { BoolFlag } from "./types";
 
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";
 
 export interface VerifyInfo {
   method: VerifyMethod;
-  prompted: number;
+}
+
+export interface VerifyPromptedInfo {
+  prompted: BoolFlag;
 }
 
 export interface SetVerifyBody {

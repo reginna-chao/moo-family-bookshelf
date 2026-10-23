@@ -30,7 +30,7 @@ describe("ApiClient verification methods", () => {
   describe("getVerifyMethod", () => {
     it("should call GET /api/user/:id/verify", async () => {
       const responseData = {
-        data: { method: "pin" as VerifyMethod, prompted: 1 },
+        data: { method: "pin" as VerifyMethod },
       };
       mockFetch.mockResolvedValueOnce(jsonResponse(responseData));
 
@@ -39,7 +39,7 @@ describe("ApiClient verification methods", () => {
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url] = mockFetch.mock.calls[0];
       expect(url).toBe(`https://api.example.com/api/user/${USER_1}/verify`);
-      expect(result.data).toEqual({ method: "pin", prompted: 1 });
+      expect(result.data).toEqual({ method: "pin" });
     });
 
     it("should reject invalid userId", async () => {
@@ -47,6 +47,48 @@ describe("ApiClient verification methods", () => {
         "Invalid userId",
       );
     });
+  });
+
+  describe("getVerifyPrompted", () => {
+    it("should call GET /api/user/:id/verify/prompted with the auth token", async () => {
+      client.setAuthToken("test-token");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { prompted: 0 } }));
+
+      const result = await client.getVerifyPrompted(USER_1);
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `https://api.example.com/api/user/${USER_1}/verify/prompted`,
+      );
+      expect(init.method ?? "GET").toBe("GET");
+      expect(init.headers["Authorization"]).toBe("Bearer test-token");
+      expect(result).toEqual({ data: { prompted: 0 } });
+    });
+
+    it("should return the error envelope from a server without the route", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "NOT_FOUND", message: "Not found" } },
+          404,
+        ),
+      );
+
+      const result = await client.getVerifyPrompted(USER_1);
+
+      expect(result.data).toBeUndefined();
+      expect(result.error?.code).toBe("NOT_FOUND");
+    });
+
+    it.each(["invalid", "A".repeat(64), "a".repeat(63)])(
+      "should reject the non-hex userId %s without a request",
+      async (userId) => {
+        await expect(client.getVerifyPrompted(userId)).rejects.toThrow(
+          "Invalid userId",
+        );
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("setVerifyMethod", () => {

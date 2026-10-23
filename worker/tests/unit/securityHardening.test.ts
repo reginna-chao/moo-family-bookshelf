@@ -290,6 +290,15 @@ describe("isPublicRoute", () => {
     );
   });
 
+  it("should NOT match GET /api/user/:id/verify/prompted (owner-only read, #343)", () => {
+    expect(isPublicRoute("GET", "/api/user/abc123/verify/prompted")).toBe(
+      false,
+    );
+    expect(isPublicRoute("GET", "/api/user/abc123/verify/prompted/")).toBe(
+      false,
+    );
+  });
+
   it("should NOT match PUT /api/user/:id/verify (protected)", () => {
     expect(isPublicRoute("PUT", "/api/user/abc123/verify")).toBe(false);
   });

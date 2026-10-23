@@ -190,7 +190,7 @@ function advance(ms: number) {
 /** Make the next login attempt succeed without verification. */
 function mockSuccessfulJoin() {
   mockGetVerifyMethod.mockResolvedValue({
-    data: { method: "none", prompted: 0 },
+    data: { method: "none" },
   });
   mockJoinFamily.mockResolvedValue({
     data: { ok: true, authToken: "tok-123" },
@@ -216,7 +216,7 @@ describe("LandingPage retry back-off", () => {
   describe("VERIFICATION_LOCKED with a retryAfter hint", () => {
     beforeEach(() => {
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
       mockJoinFamily.mockResolvedValue({
         error: {
@@ -352,7 +352,7 @@ describe("LandingPage retry back-off", () => {
   describe("VERIFICATION_LOCKED without a retryAfter hint", () => {
     beforeEach(() => {
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "VERIFICATION_LOCKED", message: "Too many attempts" },
@@ -392,7 +392,7 @@ describe("LandingPage retry back-off", () => {
   describe("RATE_LIMITED with a retryAfter hint", () => {
     it("keeps the verification prompt mounted and blocks the confirm button", async () => {
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
       mockJoinFamily.mockResolvedValue({
         error: {
@@ -456,7 +456,7 @@ describe("LandingPage retry back-off", () => {
     describe("PIN challenge", () => {
       beforeEach(() => {
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "pin", prompted: 1 },
+          data: { method: "pin" },
         });
         mockJoinFamily.mockResolvedValue(rateLimited);
       });
@@ -518,7 +518,7 @@ describe("LandingPage retry back-off", () => {
       beforeEach(() => {
         restoreRect = stubPatternGridRect();
         mockGetVerifyMethod.mockResolvedValue({
-          data: { method: "pattern", prompted: 1 },
+          data: { method: "pattern" },
         });
         mockJoinFamily.mockResolvedValue(rateLimited);
       });
@@ -602,7 +602,7 @@ describe("LandingPage retry back-off", () => {
   describe("non-back-off errors while a challenge is open", () => {
     beforeEach(() => {
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "code", prompted: 1 },
+        data: { method: "code" },
       });
     });
 
@@ -658,7 +658,7 @@ describe("LandingPage retry back-off", () => {
 
     it("shows the failure on an open PIN prompt", async () => {
       mockGetVerifyMethod.mockResolvedValue({
-        data: { method: "pin", prompted: 1 },
+        data: { method: "pin" },
       });
       mockJoinFamily.mockResolvedValue({
         error: { code: "FAMILY_NOT_FOUND", message: "Family not found" },

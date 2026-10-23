@@ -55,10 +55,12 @@ vi.mock("@/hooks/useAuth", async (importOriginal) => {
   };
 });
 
-const { mockJoinFamily, mockGetVerifyMethod } = vi.hoisted(() => ({
-  mockJoinFamily: vi.fn(),
-  mockGetVerifyMethod: vi.fn(),
-}));
+const { mockJoinFamily, mockGetVerifyMethod, mockGetVerifyPrompted } =
+  vi.hoisted(() => ({
+    mockJoinFamily: vi.fn(),
+    mockGetVerifyMethod: vi.fn(),
+    mockGetVerifyPrompted: vi.fn(),
+  }));
 
 vi.mock("@/api/client", () => {
   class MockApiClient {
@@ -68,6 +70,7 @@ vi.mock("@/api/client", () => {
     setEndpoint = vi.fn();
     joinFamily = mockJoinFamily;
     getVerifyMethod = mockGetVerifyMethod;
+    getVerifyPrompted = mockGetVerifyPrompted;
     setVerifyMethod = vi.fn().mockResolvedValue({ data: { ok: true } });
     markVerifyPrompted = vi.fn().mockResolvedValue({ data: { ok: true } });
   }
@@ -171,10 +174,9 @@ describe("App re-login after a forced re-verification (#266)", () => {
     mockLogin.mockImplementation((next: Record<string, unknown>) =>
       setMockSession(next),
     );
-    // prompted: 1 keeps the signed-in VerifySetupPrompt out of the way.
-    mockGetVerifyMethod.mockResolvedValue({
-      data: { method: "code", prompted: 1 },
-    });
+    // The re-login's verification method; prompted: 1 keeps the signed-in VerifySetupPrompt away.
+    mockGetVerifyMethod.mockResolvedValue({ data: { method: "code" } });
+    mockGetVerifyPrompted.mockResolvedValue({ data: { prompted: 1 } });
   });
 
   afterEach(async () => {

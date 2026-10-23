@@ -13,8 +13,17 @@ import { ApiClient } from "@/api/client";
 /**
  * VerifySetupPrompt: the PWA overlay that sets up (or skips) login verification.
  *
+ * Prompt visibility (#343): whether the overlay opens is read from the owner-only
+ * `getVerifyPrompted` (`GET /api/user/:id/verify/prompted`), never from the public
+ * `getVerifyMethod`, which no longer carries `prompted`. Only an explicit `prompted: BoolFlag.FALSE`
+ * opens it; an error envelope (an older self-hosted server answers the new route with 404
+ * `NOT_FOUND`), a missing or wrongly typed field, and a rejected request all render nothing, so the
+ * user is never blocked. The "loading" and "done" steps BOTH render null, so a "renders nothing"
+ * assertion made before the request settles passes vacuously: `renderSettled` renders inside `act`
+ * and waits one macrotask there, which drains the component's `.then().catch()` chain first.
+ *
  * Hostile save-error envelopes: `setVerifyMethod` resolves the `{ data, error }` envelope through
- * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/client.ts), and the endpoint is
+ * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/envelope.ts), and the endpoint is
  * user-configurable (BYO backend), so `error.message` is `unknown` at runtime. This site used to read
  * it as `res.error.message || "…"`, and `||` lets every truthy non-string through — including
  * exactly the objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary above it, the
@@ -33,9 +42,9 @@ const USER_ID = "a".repeat(64);
 
 function createMockClient(overrides: Record<string, unknown> = {}) {
   return {
-    getVerifyMethod: vi
-      .fn()
-      .mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    getVerifyPrompted: vi.fn().mockResolvedValue({ data: { prompted: 0 } }),
+    // Present only so a test can assert the public GET is no longer used for visibility.
+    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none" } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
     markVerifyPrompted: vi.fn().mockResolvedValue({ data: { ok: true } }),
     ...overrides,
@@ -53,25 +62,82 @@ describe("VerifySetupPrompt", () => {
     vi.clearAllMocks();
   });
 
+  /** Render, then let `getVerifyPrompted` settle inside `act`. See the header → "Prompt visibility". */
+  async function renderSettled(client: ApiClient) {
+    let view: ReturnType<typeof render> | undefined;
+    await act(async () => {
+      view = render(
+        <VerifySetupPrompt
+          userId={USER_ID}
+          apiClient={client}
+          onComplete={mockOnComplete}
+        />,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    if (!view) throw new Error("render did not run");
+    return view;
+  }
+
   it("should show method choices when prompted === 0", async () => {
     const client = createMockClient();
 
-    render(
-      <VerifySetupPrompt
-        userId={USER_ID}
-        apiClient={client}
-        onComplete={mockOnComplete}
-      />,
-    );
+    await renderSettled(client);
 
-    await waitFor(() => {
-      expect(screen.getByText("設定登入驗證")).toBeInTheDocument();
-    });
-
+    expect(screen.getByText("設定登入驗證")).toBeInTheDocument();
     expect(screen.getByText("PIN 碼")).toBeInTheDocument();
     expect(screen.getByText("圖形驗證")).toBeInTheDocument();
     expect(screen.getByText("隨機驗證碼")).toBeInTheDocument();
     expect(screen.getByText("不設定驗證")).toBeInTheDocument();
+  });
+
+  it("should decide visibility from the owner-only prompted endpoint, not the public verify GET", async () => {
+    const client = createMockClient();
+
+    await renderSettled(client);
+
+    expect(client.getVerifyPrompted).toHaveBeenCalledTimes(1);
+    expect(client.getVerifyPrompted).toHaveBeenCalledWith(USER_ID);
+    expect(client.getVerifyMethod).not.toHaveBeenCalled();
+  });
+
+  // Each case would show the overlay if visibility were "not explicitly prompted" instead of "explicitly unprompted".
+  it.each([
+    {
+      name: "already prompted (prompted: 1)",
+      result: { data: { prompted: 1 } },
+    },
+    {
+      name: "an error envelope from a server without the route",
+      result: { error: { code: "NOT_FOUND", message: "Not found" } },
+    },
+    { name: "a data object missing the field", result: { data: {} } },
+    { name: "a string prompted value", result: { data: { prompted: "0" } } },
+    { name: "a null prompted value", result: { data: { prompted: null } } },
+    { name: "an empty envelope", result: {} },
+  ])("should render nothing for $name", async ({ result }) => {
+    const client = createMockClient({
+      getVerifyPrompted: vi.fn().mockResolvedValue(result),
+    });
+
+    const { container } = await renderSettled(client);
+
+    expect(client.getVerifyPrompted).toHaveBeenCalledWith(USER_ID);
+    expect(container.innerHTML).toBe("");
+    expect(screen.queryByText("設定登入驗證")).not.toBeInTheDocument();
+    expect(mockOnComplete).not.toHaveBeenCalled();
+  });
+
+  it("should render nothing when the prompted request rejects", async () => {
+    const client = createMockClient({
+      getVerifyPrompted: vi.fn().mockRejectedValue(new Error("network")),
+    });
+
+    const { container } = await renderSettled(client);
+
+    expect(client.getVerifyPrompted).toHaveBeenCalledWith(USER_ID);
+    expect(container.innerHTML).toBe("");
+    expect(mockOnComplete).not.toHaveBeenCalled();
   });
 
   // #342: the hint used to claim the verification is phone-only, but an Extension re-login needs it too.
@@ -89,29 +155,6 @@ describe("VerifySetupPrompt", () => {
     const tip = await screen.findByText(/擴充功能需要重新登入時/);
     expect(tip).toHaveTextContent("從擴充功能的「設定」改成新的");
     expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
-  });
-
-  it("should not render when already prompted", async () => {
-    const client = createMockClient({
-      getVerifyMethod: vi
-        .fn()
-        .mockResolvedValue({ data: { method: "none", prompted: 1 } }),
-    });
-
-    const { container } = render(
-      <VerifySetupPrompt
-        userId={USER_ID}
-        apiClient={client}
-        onComplete={mockOnComplete}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(mockOnComplete).not.toHaveBeenCalled();
-    });
-
-    // Component should render nothing
-    expect(container.innerHTML).toBe("");
   });
 
   it("should show confirm-skip warning when selecting no verification", async () => {
@@ -365,24 +408,6 @@ describe("VerifySetupPrompt", () => {
 
       expect(screen.getByText("驗證方式無效")).toBeInTheDocument();
       expect(screen.queryByText("儲存失敗，請重試。")).not.toBeInTheDocument();
-    });
-  });
-
-  it("should not render when API returns error", async () => {
-    const client = createMockClient({
-      getVerifyMethod: vi.fn().mockRejectedValue(new Error("network")),
-    });
-
-    const { container } = render(
-      <VerifySetupPrompt
-        userId={USER_ID}
-        apiClient={client}
-        onComplete={mockOnComplete}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(container.innerHTML).toBe("");
     });
   });
 });

@@ -134,15 +134,27 @@ export async function mockDefaultApiRoutes(
     });
   });
 
-  // Verify method — mark as already prompted to skip VerifySetupPrompt overlay
+  // Verify method (public GET); the prompt decision reads the route below
   await page.route("**/api/user/*/verify", (route) => {
     if (route.request().method() === "GET") {
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          data: { method: "none", prompted: 1 },
-        }),
+        body: JSON.stringify({ data: { method: "none" } }),
+      });
+    } else {
+      route.continue();
+    }
+  });
+
+  // Owner-only prompted flag — already prompted keeps the VerifySetupPrompt overlay away.
+  // `*` stops at `/`, so the `/verify` route above never matches this URL.
+  await page.route("**/api/user/*/verify/prompted", (route) => {
+    if (route.request().method() === "GET") {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: { prompted: 1 } }),
       });
     } else {
       route.continue();
