@@ -1,10 +1,10 @@
 /** Sync code encode/decode: `moo-{familyId}` (default API) or `moo-{familyId}@{host}` (custom API
- *  endpoint). See docs/architecture.md → 四、同步碼設計. */
+ *  endpoint). Shared by the Extension and the PWA. See docs/architecture.md → 四、同步碼設計. */
 
 import {
   classifySyncCodeApiHost,
   type SyncCodeApiHostResult,
-} from "moo-family-bookshelf-shared/api/syncCodeHost";
+} from "../api/syncCodeHost";
 
 export type { SyncCodeApiHostResult };
 
@@ -72,7 +72,7 @@ export function decodeSyncCode(code: string): SyncCodeData {
  * `{ kind: "none" }`. Use `decodeSyncCode` when the failure matters. The
  * verdict itself comes from the shared classifier, which runs the same
  * validation the join path adopts — so the note reflects what would actually be
- * adopted, not the raw string, and cannot drift from the PWA's note.
+ * adopted, not the raw string, and the Extension and PWA notes read the same.
  */
 export function parseSyncCodeApiHost(code: string): SyncCodeApiHostResult {
   let apiHost: string | undefined;

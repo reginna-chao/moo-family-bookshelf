@@ -8,7 +8,7 @@ import {
 import {
   parseSyncCodeApiHost,
   type SyncCodeApiHostResult,
-} from "@/crypto/syncCode";
+} from "moo-family-bookshelf-shared/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 
 /**

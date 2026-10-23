@@ -676,7 +676,7 @@ Extension 的行為：
   - 每次掛載只讀一次拒絕記錄，讀到之前什麼都不問，曾經拒絕的值不會先閃出面板再被壓下。
   - 新的詢問會清掉過時的錯誤提示，但只在真的有新詢問時：失敗的確認會把目標記為已拒絕，這會以「沒有要問的」重新跑一次判斷，若無條件清除，提示會在使用者看到之前就被抹掉。
   - 同步碼、邀請與 QR Code 一律用**這台裝置實際採用**的端點產生（`FamilySettings.tsx`），不用家庭記錄的值：拒絕切換的成員不能再把他拒絕的端點散布出去（或掃進第二台裝置）。`apiClient.setEndpoint()` 改動 client 不會觸發 React 重新 render，所以採用中的端點以 state 呈現：初始值取自 client（啟動時已套用存好的端點），只在確認成功時更新，而且鏡射 client **實際**的值（含正規化）而不是要求的值；確認後不必重開，同步碼就反映切換結果。
-- Extension 的這些讀寫集中在 `extension/src/storage/familyEndpointChoice.ts`（確認、拒絕、讀取、重設四種），全部直接存取 `storage.local`：確認時直接寫入（與背景的 `handleSetApiEndpoint` 寫法相同），之後的 `SET_API_ENDPOINT` 背景訊息只是盡力而為的第二條路徑；開啟 Dialog 時讀取已接受的端點（`readStoredApiEndpoint`）也直接讀，因為 `GET_API_ENDPOINT` 往返有同樣的 Firefox 失敗模式，會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/onboardingFlow.ts` 的 `persistJoinCredentials` 相同。
+- Extension 的這些讀寫集中在 `extension/src/storage/familyEndpointChoice.ts`（確認、拒絕、讀取、重設四種），全部直接存取 `storage.local`：確認時直接寫入（與背景的 `handleSetApiEndpoint` 寫法相同），之後的 `SET_API_ENDPOINT` 背景訊息只是盡力而為的第二條路徑；開啟 Dialog 時讀取已接受的端點（`readStoredApiEndpoint`）也直接讀，因為 `GET_API_ENDPOINT` 往返有同樣的 Firefox 失敗模式，會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/persistJoinCredentials.ts` 的 `persistJoinCredentials` 相同。
 
 PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板——PWA 只認同步碼帶進來的端點。這是刻意的：少一條可被管理者操控的通道，攻擊面就小一分。
 
@@ -741,7 +741,7 @@ Extension 設定頁 → 「連結手機」按鈕
   手機掃碼 → PWA 自動解析 → 儲存至 localStorage → 完成
 ```
 
-- 參數只有三個（`extension/src/constants.ts` 的 `buildPwaUrl()` 組裝、`pwa/src/hooks/useAuth.ts` 的 `tryParseQrParams()` 解析）：`code`（同步碼；`@host` 是**同步碼本身的一部分**，不是獨立參數）、`uid`（Extension 已算好的 userId）、`qrt`（一次性 QR 權杖，可選；有效時可略過 PIN／圖形／驗證碼挑戰）
+- 參數只有三個（`extension/src/constants.ts` 的 `buildPwaUrl()` 組裝、`pwa/src/utils/authUrlParams.ts` 的 `tryParseQrParams()` 解析）：`code`（同步碼；`@host` 是**同步碼本身的一部分**，不是獨立參數）、`uid`（Extension 已算好的 userId）、`qrt`（一次性 QR 權杖，可選；有效時可略過 PIN／圖形／驗證碼挑戰）
 - **用 fragment 而不是 query string 是刻意的**：`#` 之後的內容不會送到伺服器，同步碼與 userId 因此不會進入伺服器 access log 與 referrer header。寫成 query param 會讓這個保證整個失效
 - 零手動輸入、UX 最佳——**前提是同步碼指向官方預設端點**（沒有 `@host`），這也是絕大多數使用者走的路徑
 - 同步碼帶自訂 `@host` 時多一次確認：PWA 會先停在確認畫面揭露該伺服器位址，按下「確認並加入」之後才接回上述自動流程（按「取消」則落回手動輸入表單）。詳見上方〈同步碼位址的驗證與揭露〉的「QR Code 自動加入的確認閘門」
@@ -1071,8 +1071,8 @@ interface PublicShelfSnapshot {
 - 刻意不處理的欄位：
   - `authToken`：憑證，不渲染、也不呼叫字串方法；降為 `""` 只會把壞掉的後端藏在無聲的重新驗證迴圈後面，而不是請求本來就會得到的 401。
   - `error.message`／`error.code`：由錯誤文字的防護負責。
-  - 封面網址（`coverUrl`、`bookCoverUrl`）：它們會到的兩個地方都不會因非字串而當掉——`<img src>` 屬性由 DOM 轉成字串；而且先經過讀墨網址白名單（兩端的 `safeCoverUrl` → `shared/src/config/readmoo.ts` 的 `isAllowedCoverUrl`），白名單快速路徑的 `typeof` 防護讓非字串得到 `false`，而不是從 render 拋出 `TypeError`。白名單若拿掉這道防護，這個排除就不再安全，這兩個欄位必須改在文字層轉型；`extension/tests/unit/readmooConfig.test.ts` 的 describe「isAllowedCoverUrl / isAllowedBookUrl on non-string input」會先變紅。
-    - 兩端的 `safeCoverUrl`／`safeBookUrl`（共四個檔案，刻意保持相同）回傳 `String(url)` 而不是 `url`，這不是多餘的：白名單判斷的是 `new URL` 轉成字串**之後**的值，所以 `["https://cdn.readmoo.com/x.jpg"]` 這種陣列會被接受；若原樣回傳 `url`，等於把陣列掛著 `string` 型別交出去，第一個對它呼叫字串方法的消費端就會在 render 中拋出 `TypeError`（`useSearch` 正是這樣對待 `title`）。`coverUrl` 沒經過文字層，執行時其實是 `unknown`；`readmooUrl` 目前有經過文字層轉型，但那是另一個模組的決定，改了也不會有人回頭檢查這一行。目前的消費端只把它放進 `src`／`href` 屬性，或拿來判斷是否為空，所以這是地雷而不是現行的 bug；對真正的字串 `String()` 是恆等函式，判定與回傳值都不變。
+  - 封面網址（`coverUrl`、`bookCoverUrl`）：它們會到的兩個地方都不會因非字串而當掉——`<img src>` 屬性由 DOM 轉成字串；而且先經過讀墨網址白名單（兩端共用的 `safeCoverUrl` → `shared/src/config/readmoo.ts` 的 `isAllowedCoverUrl`），白名單快速路徑的 `typeof` 防護讓非字串得到 `false`，而不是從 render 拋出 `TypeError`。白名單若拿掉這道防護，這個排除就不再安全，這兩個欄位必須改在文字層轉型；`extension/tests/unit/readmooConfig.test.ts` 的 describe「isAllowedCoverUrl / isAllowedBookUrl on non-string input」會先變紅。
+    - `safeCoverUrl`／`safeBookUrl` 只有一份，位於 `shared/src/safeUrl/`，Extension 與 PWA 都直接 import；兩者回傳 `String(url)` 而不是 `url`，這不是多餘的：白名單判斷的是 `new URL` 轉成字串**之後**的值，所以 `["https://cdn.readmoo.com/x.jpg"]` 這種陣列會被接受；若原樣回傳 `url`，等於把陣列掛著 `string` 型別交出去，第一個對它呼叫字串方法的消費端就會在 render 中拋出 `TypeError`（`useSearch` 正是這樣對待 `title`）。`coverUrl` 沒經過文字層，執行時其實是 `unknown`；`readmooUrl` 目前有經過文字層轉型，但那是另一個模組的決定，改了也不會有人回頭檢查這一行。目前的消費端只把它放進 `src`／`href` 屬性，或拿來判斷是否為空，所以這是地雷而不是現行的 bug；對真正的字串 `String()` 是恆等函式，判定與回傳值都不變。
   - 數字、`BoolFlag` 與字串字面值聯集（`status`、`selectionMode`、`method`）：轉成 `string` 會破壞型別，它們的渲染處以 `ReadonlyMap` 查表防護。
 
 **結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：

@@ -28,7 +28,7 @@ const REQUEST: BorrowRequest = {
   bookId: "book-1",
   bookTitle: "深度學習",
   bookAuthor: "作者甲",
-  // Must sit on a Readmoo cover host: `safeCoverUrl` (extension/src/dialog/safeCoverUrl.ts) filters it
+  // Must sit on a Readmoo cover host: `safeCoverUrl` (shared/src/safeUrl/safeCoverUrl.ts) filters it
   // at render time, so any other host renders the placeholder instead of an <img>.
   bookCoverUrl: "https://cdn.readmoo.com/cover.jpg",
   status: BorrowStatus.PENDING,

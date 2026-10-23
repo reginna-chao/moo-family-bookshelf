@@ -1,5 +1,5 @@
 import { BorrowRequest, BorrowStatus } from "../api/client";
-import { safeCoverUrl } from "./safeCoverUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 export type BorrowActionVariant = "primary" | "danger" | "secondary";
 

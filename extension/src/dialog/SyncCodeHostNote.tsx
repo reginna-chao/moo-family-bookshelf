@@ -6,7 +6,7 @@ import {
   SYNC_CODE_HOST_NOTE_LEAD_IN,
   type SyncCodeHostNoteVariant,
 } from "moo-family-bookshelf-shared/hostNote/messages";
-import type { SyncCodeApiHostResult } from "../crypto/syncCode";
+import type { SyncCodeApiHostResult } from "moo-family-bookshelf-shared/crypto/syncCode";
 
 export interface SyncCodeHostNoteProps {
   /** Verdict from `parseSyncCodeApiHost` / `classifySyncCodeApiHost`. */

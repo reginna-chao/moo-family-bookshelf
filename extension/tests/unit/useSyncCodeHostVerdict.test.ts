@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { useSyncCodeHostVerdict } from "@/dialog/useSyncCodeHostVerdict";
-import { parseSyncCodeApiHost } from "@/crypto/syncCode";
+import { parseSyncCodeApiHost } from "moo-family-bookshelf-shared/crypto/syncCode";
 import {
   HALF_TYPED_PREFIXES,
   LAN_CODE,

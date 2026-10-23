@@ -1,4 +1,4 @@
-import { encodeSyncCode } from "@/crypto/syncCode";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import {
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,

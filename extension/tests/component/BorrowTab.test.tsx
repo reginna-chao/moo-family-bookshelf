@@ -86,7 +86,7 @@ function makeRequest(overrides: Partial<BorrowRequest> = {}): BorrowRequest {
     bookTitle: "測試書",
     bookAuthor: "測試作者",
     // Readmoo cover host on purpose: BorrowRequestCard filters any other host
-    // out at render time (extension/src/dialog/safeCoverUrl.ts).
+    // out at render time (shared/src/safeUrl/safeCoverUrl.ts).
     bookCoverUrl: "https://cdn.readmoo.com/cover/test.jpg",
     status: BorrowStatus.PENDING,
     createdAt: "2026-04-25T10:00:00.000Z",

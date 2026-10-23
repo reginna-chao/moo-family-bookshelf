@@ -5,8 +5,8 @@ import type { BookEntry } from "@/api/client";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { LazyCover } from "@/components/LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu";
-import { safeBookUrl } from "@/utils/safeBookUrl";
-import { safeCoverUrl } from "@/utils/safeCoverUrl";
+import { safeBookUrl } from "moo-family-bookshelf-shared/safeUrl/safeBookUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 export interface FamilyBookRowBook extends BookEntry {
   memberName: string;

@@ -3,7 +3,7 @@
 
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import type { ApiClient } from "../api/client";
-import type { SyncCodeApiHostResult } from "../crypto/syncCode";
+import type { SyncCodeApiHostResult } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 
 /**

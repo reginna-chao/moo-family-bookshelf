@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { CustomHostConsent } from "@/components/CustomHostConsent";
-import type { SyncCodeApiHostResult } from "@/crypto/syncCode";
-import { parseSyncCodeApiHost } from "@/crypto/syncCode";
+import type { SyncCodeApiHostResult } from "moo-family-bookshelf-shared/crypto/syncCode";
+import { parseSyncCodeApiHost } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 
 /**

@@ -206,7 +206,7 @@ import {
   isReauthPendingFor,
   markReauthPending,
 } from "@/utils/reauthPending";
-import { decodeSyncCode } from "@/crypto/syncCode";
+import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 // The terminal-failure copy under test is production's own — App resolves it from this map with
 // `.get`, so the assertions cannot drift from `pwa/src/utils/joinErrorMessages.ts`.
 import {

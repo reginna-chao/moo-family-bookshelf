@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isAllowedCoverUrl } from "moo-family-bookshelf-shared/config/readmoo";
-import { safeCoverUrl } from "@/dialog/safeCoverUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 /**
  * `safeCoverUrl` is the extension's RENDER-time half of the cover-URL beacon

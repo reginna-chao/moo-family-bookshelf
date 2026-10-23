@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
-import { encodeSyncCode } from "../crypto/syncCode";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { readSyncFamilyIdRemnant } from "../storage/familyId";
 // Type-only: see the note in onboardingFlowTypes.ts on the OnboardingViews loop.

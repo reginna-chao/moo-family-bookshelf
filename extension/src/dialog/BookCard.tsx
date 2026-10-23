@@ -3,8 +3,8 @@ import { BookEntry, BoolFlag } from "../api/client";
 import { FavoriteButton } from "./FavoriteButton";
 import { LazyCover } from "./LazyCover";
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu";
-import { safeBookUrl } from "./safeBookUrl";
-import { safeCoverUrl } from "./safeCoverUrl";
+import { safeBookUrl } from "moo-family-bookshelf-shared/safeUrl/safeBookUrl";
+import { safeCoverUrl } from "moo-family-bookshelf-shared/safeUrl/safeCoverUrl";
 
 export interface BookWithMember extends BookEntry {
   memberName: string;

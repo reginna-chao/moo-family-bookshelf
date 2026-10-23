@@ -25,7 +25,7 @@ import type { BookWithMember } from "@/dialog/BookCard";
  * unlike a cover that loads on render, which lowers the rate but not the severity. Nothing in the
  * browser constrains the destination: the dialog is injected into Readmoo pages, which send no CSP,
  * and `img-src` would say nothing about a navigation anyway (hence a separate defence from the
- * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (extension/src/dialog/safeBookUrl.ts) is
+ * `safeCoverUrl` gate, not a second use of it). `safeBookUrl` (shared/src/safeUrl/safeBookUrl.ts) is
  * the only thing between the stored value and the click. The degradation contract is
  * `href={safeBookUrl(...) || undefined}`: the attribute is OMITTED rather than set to `""`, because an
  * empty `href` resolves to the current document and a click would reload the Readmoo page the dialog
@@ -151,7 +151,7 @@ describe("FamilyBookRow", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  /** Server-supplied cover URLs on a no-CSP Readmoo page: `safeCoverUrl` (dialog/safeCoverUrl.ts) is all
+  /** Server-supplied cover URLs on a no-CSP Readmoo page: `safeCoverUrl` (shared/src/safeUrl/safeCoverUrl.ts) is all
    *  that stands between a stored tracking beacon and every viewer's IP / UA. */
   describe("cover URL whitelist", () => {
     it("renders the cover image when the URL is on a Readmoo cover host", () => {

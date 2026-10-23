@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isAllowedBookUrl } from "moo-family-bookshelf-shared/config/readmoo";
-import { safeBookUrl } from "@/dialog/safeBookUrl";
+import { safeBookUrl } from "moo-family-bookshelf-shared/safeUrl/safeBookUrl";
 
 /**
  * `safeBookUrl` is the extension's RENDER-time whitelist for the per-book

@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
-import { SyncCodeError } from "../crypto/syncCode";
+import { SyncCodeError } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { performJoin, restoreApiEndpoint } from "./onboardingFlow";
 import type { UseOnboardingFlowOptions } from "./onboardingFlowTypes";
 import type { OnboardingFlowStore } from "./useOnboardingFlowState";
