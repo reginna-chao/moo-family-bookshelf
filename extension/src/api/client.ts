@@ -64,8 +64,10 @@ import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api
 import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
 import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
+import { sanitizeIssuedFamilyGroup } from "moo-family-bookshelf-shared/api/issuedCredentials";
 import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { isClientSynthesized, synthesizeError } from "./synthesizedError";
+import { buildRateLimitMessage } from "./rateLimitMessage";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -103,17 +105,6 @@ import { DEFAULT_PWA_URL } from "../constants";
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-/** User-facing copy for a rate-limited auto-recovery; appends the wait, rounded up to whole minutes,
- *  when the cooldown deadline is known and still ahead. */
-function buildRateLimitMessage(cooldownUntil?: number): string {
-  const base = "嘗試次數過多，請稍後再重新開啟書櫃";
-  if (cooldownUntil === undefined) return base;
-  const remainingMs = cooldownUntil - Date.now();
-  if (remainingMs <= 0) return base;
-  const minutes = Math.ceil(remainingMs / (60 * 1000));
-  return `${base}（約 ${minutes} 分鐘後）`;
-}
 
 export class ApiClient {
   private baseUrl: string;
@@ -344,7 +335,7 @@ export class ApiClient {
       body.verifySecret = opts.verifySecret;
     }
     const res = await this.post<FamilyGroup>("/api/family", body);
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return this.sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async joinFamily(
@@ -364,7 +355,7 @@ export class ApiClient {
       `/api/family/${familyId}/join`,
       body,
     );
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return this.sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async updateDisplayName(

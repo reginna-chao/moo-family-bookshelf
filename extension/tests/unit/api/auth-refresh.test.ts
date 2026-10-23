@@ -91,7 +91,7 @@ import {
  * countdown vs. plain challenge).
  *
  * Recovery cooldown clamp: the requested wait is clamped to 1 hour
- * (MAX_RECOVERY_COOLDOWN_SECONDS in `src/api/auth-refresh.ts`) and any
+ * (MAX_RECOVERY_COOLDOWN_SECONDS in `src/api/recoveryCooldown.ts`) and any
  * non-positive/absent value falls back to 300s, so a hostile or buggy
  * self-hosted (BYO) backend cannot suppress auto-recovery effectively forever.
  * The persisted deadline is clamped on READ as well as on write: a value written
@@ -120,6 +120,17 @@ import {
  * the user to the family they are leaving, so it is skipped while the departure
  * mark is up — but the refresh POST still runs (a token fixed elsewhere recovers
  * without a join) and nothing is torn down.
+ *
+ * Issued credentials (#350): the refresh `token` and the recovery join's
+ * `authToken` are kept only when they are a 64-char lowercase hex string, and
+ * `expiresAt` only when it is a finite number above 0
+ * (`shared/src/api/issuedCredentials.ts`). A token in any other shape takes
+ * EXACTLY the path a missing token takes — on refresh, the failure branch and
+ * staged recovery; on the recovery join, `recovered: false` with no error code,
+ * i.e. the transient branch that keeps family data. A bad expiry is simply not
+ * stored while the token itself still is. Every fixture token is therefore in
+ * the issued shape (`FRESH_TOKEN` / `RECOVERED_TOKEN` / `UNUSED_TOKEN`), so a
+ * guard case's join, were it to fire, would recover and fail the assertions.
  *
  * isFamilyGoneError: the SINGLE definition of "the join target is gone for this
  * user". The underlying code set is exported READ-ONLY for one consumer — the
@@ -153,9 +164,16 @@ import {
  */
 
 interface RequestOutcome {
-  refresh: ApiResponse<{ token: string; expiresAt: number }>;
-  join: ApiResponse<{ authToken: string; expiresAt: number }>;
+  refresh: ApiResponse<{ token: unknown; expiresAt: unknown }>;
+  join: ApiResponse<{ authToken: unknown; expiresAt: unknown }>;
 }
+
+/** Tokens in the issued shape (64-char lowercase hex); distinct letters keep a
+ *  refreshed token apart from a recovered one. See the header → "Issued credentials". */
+const FRESH_TOKEN = "d".repeat(64);
+const RECOVERED_TOKEN = "e".repeat(64);
+/** Would be accepted if the join fired; the cases using it assert it never does. */
+const UNUSED_TOKEN = "f".repeat(64);
 
 /** Build an injected `request` that answers refresh vs. join by path. */
 function makeRequest(outcome: Partial<RequestOutcome>) {
@@ -289,7 +307,9 @@ describe("doRefreshToken", () => {
 
   it("returns not-refreshed without calling request when userId/familyId are missing", async () => {
     await seedStorage({}); // no userId/familyId
-    const deps = makeDeps({ refresh: { data: { token: "t", expiresAt: 1 } } });
+    const deps = makeDeps({
+      refresh: { data: { token: FRESH_TOKEN, expiresAt: 1 } },
+    });
 
     const result = await doRefreshToken(deps);
 
@@ -300,16 +320,16 @@ describe("doRefreshToken", () => {
   it("stores the new token and reports refreshed when refresh succeeds", async () => {
     await seedStorage();
     const deps = makeDeps({
-      refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
+      refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
     });
 
     const result = await doRefreshToken(deps);
 
     expect(result.refreshed).toBe(true);
-    expect(deps.setAuthToken).toHaveBeenCalledWith("fresh-token");
+    expect(deps.setAuthToken).toHaveBeenCalledWith(FRESH_TOKEN);
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
-        [AUTH_TOKEN_KEY]: "fresh-token",
+        [AUTH_TOKEN_KEY]: FRESH_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 9999,
       }),
     );
@@ -323,22 +343,137 @@ describe("doRefreshToken", () => {
     await seedStorage();
     const deps = makeDeps({
       refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-      join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+      join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
     });
 
     const result = await doRefreshToken(deps);
 
     expect(result.refreshed).toBe(true);
-    expect(deps.setAuthToken).toHaveBeenCalledWith("recovered-token");
+    expect(deps.setAuthToken).toHaveBeenCalledWith(RECOVERED_TOKEN);
     expect(chrome.storage.local.set).toHaveBeenCalledWith(
       expect.objectContaining({
-        [AUTH_TOKEN_KEY]: "recovered-token",
+        [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 8888,
       }),
     );
     expect(deps.onReauthRequired).not.toHaveBeenCalled();
     expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
     expect(familyWasCleared()).toBe(false);
+  });
+
+  // A token / expiry in the wrong shape counts as not issued. See the header →
+  // "Issued credentials".
+  describe("issued credential shape (#350)", () => {
+    /** True when production wrote `key` in any `storage.local.set` call. */
+    function storageKeyWasWritten(key: string): boolean {
+      return vi
+        .mocked(chrome.storage.local.set)
+        .mock.calls.some((call) => key in (call[0] as Record<string, unknown>));
+    }
+
+    const BAD_TOKENS: Array<{ name: string; token: unknown }> = [
+      { name: "a short string", token: "garbage" },
+      { name: "63 hex chars", token: "d".repeat(63) },
+      { name: "65 hex chars", token: "d".repeat(65) },
+      { name: "uppercase hex", token: "D".repeat(64) },
+      { name: "a number", token: 12345 },
+      { name: "an object", token: { value: FRESH_TOKEN } },
+    ];
+
+    const BAD_EXPIRIES: Array<{ name: string; expiresAt: unknown }> = [
+      { name: "a word", expiresAt: "soon" },
+      { name: "a numeric string", expiresAt: "1700000000000" },
+      { name: "NaN", expiresAt: Number.NaN },
+      { name: "Infinity", expiresAt: Number.POSITIVE_INFINITY },
+      { name: "0", expiresAt: 0 },
+      { name: "a negative number", expiresAt: -1 },
+    ];
+
+    for (const c of BAD_EXPIRIES) {
+      it(`stores a valid refreshed token but not an expiresAt that is ${c.name}`, async () => {
+        await seedStorage();
+        const deps = makeDeps({
+          refresh: { data: { token: FRESH_TOKEN, expiresAt: c.expiresAt } },
+        });
+
+        const result = await doRefreshToken(deps);
+
+        expect(result).toEqual({ refreshed: true });
+        expect(deps.setAuthToken).toHaveBeenCalledWith(FRESH_TOKEN);
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [AUTH_TOKEN_KEY]: FRESH_TOKEN,
+        });
+        expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(false);
+        expect(joinWasRequested(deps.request)).toBe(false);
+      });
+    }
+
+    for (const c of BAD_TOKENS) {
+      it(`treats a refreshed token that is ${c.name} as a failed refresh and recovers via join`, async () => {
+        await seedStorage();
+        const deps = makeDeps({
+          refresh: { data: { token: c.token, expiresAt: 9999 } },
+          join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
+        });
+
+        const result = await doRefreshToken(deps);
+
+        // The failure branch: the old token is dropped, then staged recovery runs.
+        expect(deps.setAuthToken).toHaveBeenCalledWith(null);
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+          AUTH_TOKEN_KEY,
+          TOKEN_EXPIRES_AT_KEY,
+        ]);
+        expect(joinRequestCount(deps.request)).toBe(1);
+        expect(deps.setAuthToken).not.toHaveBeenCalledWith(c.token);
+        expect(result).toEqual({ refreshed: true });
+        expect(await chrome.storage.local.get(AUTH_TOKEN_KEY)).toEqual({
+          [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
+        });
+        expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(true);
+      });
+    }
+
+    for (const c of BAD_TOKENS) {
+      it(`reports a recovery join whose authToken is ${c.name} as a transient failure`, async () => {
+        await seedStorage();
+        const deps = makeDeps({
+          refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+          join: { data: { authToken: c.token, expiresAt: 8888 } },
+        });
+
+        const result = await doRefreshToken(deps);
+
+        // No error code → the transient branch: nothing stored, nothing torn down.
+        expect(result).toEqual({ refreshed: false });
+        expect(deps.setAuthToken).not.toHaveBeenCalledWith(c.token);
+        expect(storageKeyWasWritten(AUTH_TOKEN_KEY)).toBe(false);
+        expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(false);
+        expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
+        expect(deps.onReauthRequired).not.toHaveBeenCalled();
+        expect(familyWasCleared()).toBe(false);
+        expect(endpointChoiceWasReset()).toBe(false);
+        expect(cooldownWriteValue()).toBeUndefined();
+        expect(cooldownWasCleared()).toBe(false);
+      });
+    }
+
+    it("stores a recovered token but not an expiresAt in the wrong shape", async () => {
+      await seedStorage();
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { data: { authToken: RECOVERED_TOKEN, expiresAt: "soon" } },
+      });
+
+      const result = await doRefreshToken(deps);
+
+      expect(result).toEqual({ refreshed: true });
+      expect(deps.setAuthToken).toHaveBeenCalledWith(RECOVERED_TOKEN);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
+      });
+      expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(false);
+    });
   });
 
   describe("recovery-failure branching by join error code", () => {
@@ -711,8 +846,8 @@ describe("doRefreshToken", () => {
       });
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-        // Would recover if called — the point is that it must NOT be called.
-        join: { data: { authToken: "should-not-be-used", expiresAt: 8888 } },
+        // Accepted if the join fired; the cooldown must keep it from firing.
+        join: { data: { authToken: UNUSED_TOKEN, expiresAt: 8888 } },
       });
 
       const result = await doRefreshToken(deps);
@@ -780,10 +915,8 @@ describe("doRefreshToken", () => {
           });
           const deps = makeDeps({
             refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-            // Would recover if called — the point is that it must NOT be called.
-            join: {
-              data: { authToken: "should-not-be-used", expiresAt: 8888 },
-            },
+            // Accepted if the join fired; the cooldown must keep it from firing.
+            join: { data: { authToken: UNUSED_TOKEN, expiresAt: 8888 } },
           });
 
           const result = await doRefreshToken(deps);
@@ -811,7 +944,7 @@ describe("doRefreshToken", () => {
         });
         const deps = makeDeps({
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-          join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+          join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
         });
 
         const first = await doRefreshToken(deps);
@@ -834,7 +967,7 @@ describe("doRefreshToken", () => {
         });
         const deps = makeDeps({
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-          join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+          join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
         });
 
         const result = await doRefreshToken(deps);
@@ -853,7 +986,7 @@ describe("doRefreshToken", () => {
       });
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-        join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+        join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
       });
 
       const result = await doRefreshToken(deps);
@@ -867,7 +1000,7 @@ describe("doRefreshToken", () => {
     it("clears the cooldown after a successful refresh", async () => {
       await seedStorage();
       const deps = makeDeps({
-        refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
+        refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
       });
 
       const result = await doRefreshToken(deps);
@@ -880,7 +1013,7 @@ describe("doRefreshToken", () => {
       await seedStorage();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-        join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+        join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
       });
 
       const result = await doRefreshToken(deps);
@@ -914,8 +1047,8 @@ describe("doRefreshToken", () => {
       const deps = makeDeps(
         {
           refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-          // Would recover if the join fired — it must NOT fire while latched.
-          join: { data: { authToken: "should-not-be-used", expiresAt: 8888 } },
+          // Accepted if the join fired; the latch must keep it from firing.
+          join: { data: { authToken: UNUSED_TOKEN, expiresAt: 8888 } },
         },
         () => true,
       );
@@ -958,7 +1091,7 @@ describe("doRefreshToken", () => {
     await seedStorage();
     const deps = makeDeps({
       refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-      join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+      join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
     });
 
     await doRefreshToken(deps);
@@ -992,7 +1125,7 @@ describe("doRefreshToken", () => {
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
         // Would re-add the user if the join fired — it must NOT fire.
-        join: { data: { authToken: "should-not-be-used", expiresAt: 8888 } },
+        join: { data: { authToken: UNUSED_TOKEN, expiresAt: 8888 } },
       });
 
       const result = await doRefreshToken(deps);
@@ -1021,13 +1154,13 @@ describe("doRefreshToken", () => {
       await seedStorage();
       endDeparture = await beginSelfDeparture();
       const deps = makeDeps({
-        refresh: { data: { token: "fresh-token", expiresAt: 9999 } },
+        refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
       });
 
       const result = await doRefreshToken(deps);
 
       expect(result).toEqual({ refreshed: true });
-      expect(deps.setAuthToken).toHaveBeenCalledWith("fresh-token");
+      expect(deps.setAuthToken).toHaveBeenCalledWith(FRESH_TOKEN);
       expect(joinWasRequested(deps.request)).toBe(false);
     });
 
@@ -1039,7 +1172,7 @@ describe("doRefreshToken", () => {
       await end();
       const deps = makeDeps({
         refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
-        join: { data: { authToken: "recovered-token", expiresAt: 8888 } },
+        join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
       });
 
       const result = await doRefreshToken(deps);

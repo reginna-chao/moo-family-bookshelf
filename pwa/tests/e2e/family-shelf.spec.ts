@@ -7,6 +7,8 @@ import {
 
 test.describe("Family shelf page", () => {
   const auth = createTestAuth();
+  // The client drops an issued token that is not 64-char lowercase hex (#350).
+  const REFRESHED_TOKEN = "f".repeat(64);
 
   test("should show loading state initially", async ({ page }) => {
     await page.goto("/");
@@ -58,7 +60,7 @@ test.describe("Family shelf page", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          data: { ok: true, authToken: "refreshed-token" },
+          data: { ok: true, authToken: REFRESHED_TOKEN },
         }),
       });
     });
@@ -99,7 +101,7 @@ test.describe("Family shelf page", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          data: { ok: true, authToken: "refreshed-token" },
+          data: { ok: true, authToken: REFRESHED_TOKEN },
         }),
       });
     });

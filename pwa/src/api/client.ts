@@ -11,8 +11,11 @@ import {
   sanitizePersonalBooksText,
   sanitizePublicShelfListText,
   sanitizePublicShelfResultText,
-  sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
+import {
+  sanitizeIssuedCredentials,
+  sanitizeIssuedFamilyGroup,
+} from "moo-family-bookshelf-shared/api/issuedCredentials";
 import { BoolFlag, ApiError } from "moo-family-bookshelf-shared/api/types";
 import type {
   ApiResponse,
@@ -49,6 +52,7 @@ import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
 import { fetchPublicShelf } from "./publicShelfFetch";
+import { fetchVersion } from "./versionFetch";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -129,17 +133,8 @@ export class ApiClient {
   }
 
   /** Check server API version. Returns null on network/parse errors. */
-  async checkVersion(): Promise<VersionInfo | null> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/version`);
-      if (!res.ok) return null;
-      const json = (await res.json()) as ApiResponse<VersionInfo>;
-      const data = json.data ?? null;
-      if (data === null) return null;
-      return sanitizeRecord(data, sanitizeVersionInfoText);
-    } catch {
-      return null;
-    }
+  checkVersion(): Promise<VersionInfo | null> {
+    return fetchVersion(this.baseUrl);
   }
 
   // --- HTTP helpers ---
@@ -246,7 +241,7 @@ export class ApiClient {
       displayName: displayName ?? "",
     };
     const res = await this.post<FamilyGroup>("/api/family", body);
-    return sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return sanitizeEnvelope(res, sanitizeIssuedFamilyGroup);
   }
 
   async joinFamily(
@@ -262,7 +257,10 @@ export class ApiClient {
     if (opts?.verifySecret !== undefined) body.verifySecret = opts.verifySecret;
     if (opts?.qrToken !== undefined) body.qrToken = opts.qrToken;
     if (opts?.recovery !== undefined) body.recovery = opts.recovery;
-    return this.post(`/api/family/${familyId}/join`, body);
+    return sanitizeEnvelope(
+      await this.post(`/api/family/${familyId}/join`, body),
+      sanitizeIssuedCredentials,
+    );
   }
 
   async leaveFamily(
