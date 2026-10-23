@@ -10,10 +10,11 @@ import {
 } from "vitest";
 
 /**
- * tryScrapeAndCacheEmail (issue #271): visiting Readmoo's `#/me` page caches
- * the profile's email + display name — but those keys describe the STORED user
+ * tryScrapeAndCacheProfile (issue #271): visiting Readmoo's `#/me` page caches
+ * the profile's display name — but that key describes the STORED user
  * (DISPLAY_NAME_KEY is uploaded with that user's books), so a different Readmoo
- * account visiting in the same browser profile must write nothing.
+ * account visiting in the same browser profile must write nothing. The email is
+ * scraped only for that account check and is never stored (#359).
  *
  * Real hashing and the setup.ts storage mock; the scraper (host-page DOM) is
  * mocked. The comparison awaits a real crypto digest, so "nothing was written"
@@ -25,7 +26,7 @@ vi.mock("@/content/scraper", () => ({
   scrapeDisplayName: vi.fn(),
 }));
 
-import { tryScrapeAndCacheEmail } from "@/content/profileCache";
+import { tryScrapeAndCacheProfile } from "@/content/profileCache";
 import { scrapeUserEmail, scrapeDisplayName } from "@/content/scraper";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { USER_ID_KEY, USER_EMAIL_KEY, DISPLAY_NAME_KEY } from "@/constants";
@@ -55,7 +56,7 @@ let digests: Promise<ArrayBuffer>[] = [];
 /** Fire the delayed scrape, then wait for the whole async cache pass to end. */
 async function runCachePass(expectHashing: boolean): Promise<void> {
   vi.useFakeTimers({ toFake: ["setTimeout"] });
-  tryScrapeAndCacheEmail();
+  tryScrapeAndCacheProfile();
   vi.advanceTimersByTime(PROFILE_DELAY_MS);
   vi.useRealTimers();
   await settleCachePass(expectHashing);
@@ -71,7 +72,15 @@ async function settleCachePass(expectHashing: boolean): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe("tryScrapeAndCacheEmail", () => {
+/** The page's email never reaches storage (#359); the display name did land. */
+async function expectEmailNotStored(): Promise<void> {
+  const stored = await chrome.storage.local.get(null);
+  expect(stored).not.toHaveProperty(USER_EMAIL_KEY);
+  expect(Object.values(stored)).not.toContain(PAGE_EMAIL);
+  expect(stored).toHaveProperty(DISPLAY_NAME_KEY, "Page Account");
+}
+
+describe("tryScrapeAndCacheProfile", () => {
   let digestSpy: { mockRestore: () => void } | null = null;
 
   beforeEach(async () => {
@@ -129,7 +138,7 @@ describe("tryScrapeAndCacheEmail", () => {
     });
   });
 
-  it("writes email and display name when the stored account is this one", async () => {
+  it("writes only the display name when the stored account is this one", async () => {
     await chrome.storage.local.set({
       [USER_ID_KEY]: await deriveUserId(PAGE_EMAIL),
     });
@@ -140,26 +149,26 @@ describe("tryScrapeAndCacheEmail", () => {
 
     expect(chrome.storage.local.set).toHaveBeenCalledOnce();
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
-      [USER_EMAIL_KEY]: PAGE_EMAIL,
       [DISPLAY_NAME_KEY]: "Page Account",
     });
+    await expectEmailNotStored();
   });
 
-  it("writes email and display name when no account is stored yet", async () => {
+  it("writes only the display name when no account is stored yet", async () => {
     await runCachePass(false);
 
     expect(chrome.storage.local.set).toHaveBeenCalledOnce();
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
-      [USER_EMAIL_KEY]: PAGE_EMAIL,
       [DISPLAY_NAME_KEY]: "Page Account",
     });
+    await expectEmailNotStored();
   });
 
   it("writes nothing when the profile panel shows no email", async () => {
     vi.mocked(scrapeUserEmail).mockReturnValue(null);
 
     vi.useFakeTimers({ toFake: ["setTimeout"] });
-    tryScrapeAndCacheEmail();
+    tryScrapeAndCacheProfile();
     vi.advanceTimersByTime(PROFILE_DELAY_MS);
     vi.useRealTimers();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -173,7 +182,7 @@ describe("tryScrapeAndCacheEmail", () => {
     setHash("#/library");
     vi.useFakeTimers({ toFake: ["setTimeout"] });
 
-    tryScrapeAndCacheEmail();
+    tryScrapeAndCacheProfile();
 
     expect(vi.getTimerCount()).toBe(0);
   });

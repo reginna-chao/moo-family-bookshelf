@@ -7,9 +7,12 @@ import {
   type BackgroundMessage,
   type MessageHandler,
 } from "./messageHandlers";
+import { purgeStoredEmail } from "./purgeStoredEmail";
 
 browser.runtime.onInstalled.addListener(() => {
   console.log("MooFamily Bookshelf installed");
+  // Fires on install AND every update: drops the email older versions stored (#359).
+  void purgeStoredEmail();
 
   // No scheduled background sync (alarms removed, permission dropped): a leftover alarm on an
   // upgraded device is inert. See docs/architecture.md → 背景 Service Worker 與訊息.

@@ -191,7 +191,7 @@
   <body>
     <header class="header">
       <h1>隱私政策</h1>
-      <p class="subtitle">最後更新：2026-10-22</p>
+      <p class="subtitle">最後更新：2026-10-23</p>
       <a href="index.html" class="back-link">&larr; 回到首頁</a>
     </header>
 
@@ -263,9 +263,12 @@
         </p>
         <p>
           <strong>原始 Email 永遠不會離開您的瀏覽器</strong
-          >。從「個人帳戶」頁面讀到的 Email 只存放在本機
-          <code>chrome.storage.local</code>，從登入 Cookie 讀到的 Email
-          則不會儲存。
+          >，也不會存下來。不論從「個人帳戶」頁面還是登入 Cookie 讀到的
+          Email，都只用來轉成識別碼、比對帳號。
+        </p>
+        <p>
+          舊版擴充功能曾把從「個人帳戶」頁面讀到的 Email 存在本機
+          <code>chrome.storage.local</code>，擴充功能更新後會自動刪除。
         </p>
         <p>伺服器只會收到雜湊後的匿名識別碼，無法反推出您的 Email。</p>
       </section>
@@ -334,7 +337,7 @@
           帳號刪除資料。
         </p>
         <p>
-          <strong>本機資料</strong>：瀏覽器中的本機資料（Email
+          <strong>本機資料</strong>：瀏覽器中的本機資料（顯示名稱、家庭 ID
           等）可透過擴充功能管理頁面移除。家庭 ID 同時儲存於 Chrome
           同步儲存空間（chrome.storage.sync），會隨 Google
           帳號保留以便跨裝置或重新安裝後恢復使用；如需徹底清除，可登出 Google

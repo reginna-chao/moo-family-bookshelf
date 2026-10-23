@@ -5,7 +5,7 @@ import browser from "webextension-polyfill";
 import { scrapeUserEmail, scrapeDisplayName } from "./scraper";
 import { compareAccountIdentity } from "./accountIdentity";
 import { isExtensionContextValid } from "../utils/extensionContext";
-import { USER_ID_KEY, USER_EMAIL_KEY, DISPLAY_NAME_KEY } from "../constants";
+import { USER_ID_KEY, DISPLAY_NAME_KEY } from "../constants";
 
 /** True when no account is stored yet, or the stored one is this email's. */
 async function isStoredAccount(email: string): Promise<boolean> {
@@ -22,20 +22,18 @@ async function cacheProfileIfStoredAccount(): Promise<void> {
   const displayName = scrapeDisplayName() ?? "";
   try {
     if (!(await isStoredAccount(email))) return;
-    await browser.storage.local.set({
-      [USER_EMAIL_KEY]: email,
-      [DISPLAY_NAME_KEY]: displayName,
-    });
+    await browser.storage.local.set({ [DISPLAY_NAME_KEY]: displayName });
   } catch {
     // Best-effort cache: an unreadable store or a failed hash writes nothing.
   }
 }
 
 /**
- * Opportunistically scrape user email when on the #/me page
- * and cache it in chrome.storage.local for later use.
+ * Opportunistically scrape the profile when on the #/me page and cache the
+ * display name in chrome.storage.local. The email is scraped only to confirm
+ * the stored account and is never stored (#359).
  */
-export function tryScrapeAndCacheEmail(): void {
+export function tryScrapeAndCacheProfile(): void {
   if (!isExtensionContextValid()) return;
   if (!location.hash.includes("/me")) return;
 

@@ -67,7 +67,12 @@ import {
   type BookEntry,
   type PersonalBooks,
 } from "@/api/client";
-import { LAST_SYNC_AT_KEY, PERSONAL_BOOKS_CACHE_KEY } from "@/constants";
+import {
+  DISPLAY_NAME_KEY,
+  LAST_SYNC_AT_KEY,
+  PERSONAL_BOOKS_CACHE_KEY,
+  USER_EMAIL_KEY,
+} from "@/constants";
 import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
 import {
   BOOKS_CONFLICT_MESSAGE,
@@ -144,6 +149,25 @@ describe("useAutoSetup", () => {
       displayName: "User Name",
     });
     expect(result.current.phase).toBe("idle");
+  });
+
+  it("scrapeProfile stores the display name but never the email (#359)", async () => {
+    const { result } = renderHook(() => useAutoSetup());
+
+    const promise = act(async () => {
+      await result.current.scrapeProfile();
+    });
+    await vi.advanceTimersByTimeAsync(1500);
+    await promise;
+
+    const writes = vi
+      .mocked(chrome.storage.local.set)
+      .mock.calls.map(([items]) => items as Record<string, unknown>);
+    expect(writes).toContainEqual({ [DISPLAY_NAME_KEY]: "User Name" });
+    for (const items of writes) {
+      expect(items).not.toHaveProperty(USER_EMAIL_KEY);
+      expect(Object.values(items)).not.toContain("user@example.com");
+    }
   });
 
   it("scrapeProfile returns null and sets error when email not found", async () => {

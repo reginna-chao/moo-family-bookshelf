@@ -11,9 +11,9 @@ import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 export type AccountIdentity = "match" | "mismatch" | "unknown";
 
 /**
- * Compare a scraped email against the stored userId. Never compare against the
- * cached USER_EMAIL_KEY instead: any account visiting `#/me` used to overwrite
- * it, so it does not identify the stored user. Rejects only if hashing fails.
+ * Compare a scraped email against the stored userId. Never compare against a
+ * stored USER_EMAIL_KEY instead: it is no longer written (#359), and any account
+ * visiting `#/me` used to overwrite it. Rejects only if hashing fails.
  */
 export async function compareAccountIdentity(
   email: string | null,

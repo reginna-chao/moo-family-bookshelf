@@ -42,6 +42,8 @@ export const FAMILY_ID_KEY = "moo:familyId";
 
 // Profile
 export const DISPLAY_NAME_KEY = "moo:displayName";
+// No longer written (#359): kept only so stored values can be removed (the background
+// purge on install/update and the family-binding reset).
 export const USER_EMAIL_KEY = "moo:userEmail";
 
 // Config

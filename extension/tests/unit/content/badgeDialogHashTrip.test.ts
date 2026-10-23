@@ -47,7 +47,7 @@ import {
  * hashes have settled plus a macrotask hop, a fetch the old code would send
  * has been sent. Verified red against the pre-fix listener (see run report).
  *
- * `tryScrapeAndCacheEmail` arms a 1s timer on `#/me`; the timers created during
+ * `tryScrapeAndCacheProfile` arms a 1s timer on `#/me`; the timers created during
  * a dispatch are captured and cleared in afterEach so none outlives its test.
  * The content script's window/storage listeners are module-level; they die
  * with this file's isolated jsdom environment.
