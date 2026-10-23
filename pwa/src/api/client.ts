@@ -2,7 +2,6 @@
  *  Response-handling rationale: docs/architecture.md → API client 的回應處理. */
 
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
 import {
   sanitizeBorrowRequestText,
@@ -43,8 +42,10 @@ import {
   sanitizeFamilyMembersResponse,
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
+import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
-import { readEnvelope } from "./envelope";
+import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
 import { fetchPublicShelf } from "./publicShelfFetch";
 
 /**
@@ -170,43 +171,6 @@ export class ApiClient {
     });
   }
 
-  /** Unwrap an envelope response or throw an `ApiError` built from `error`. */
-  private unwrap<T>(res: ApiResponse<T>): T {
-    this.throwOnError(res);
-    if (res.data === undefined) {
-      throw new ApiError("EMPTY_RESPONSE", "response body missing data");
-    }
-    return res.data;
-  }
-
-  /** `unwrap` for bodyless (204) successes: only `error` throws — demanding `data` would turn every
-   *  successful 204 into a bogus EMPTY_RESPONSE. */
-  private unwrapVoid(res: ApiResponse<unknown>): void {
-    this.throwOnError(res);
-  }
-
-  /** Coerce a success payload's backend TEXT fields so no consumer holds a non-string `string` field
-   *  (`shared/src/api/safeText.ts`); error envelopes and bodyless successes pass untouched. */
-  private sanitizeEnvelope<T>(
-    res: ApiResponse<T>,
-    sanitize: (data: T) => T,
-  ): ApiResponse<T> {
-    if (res.data === undefined) return res;
-    return { ...res, data: sanitizeRecord(res.data, sanitize) };
-  }
-
-  /** Single chokepoint for every thrown `ApiError`: sanitizes `code` / `message` so a hostile value
-   *  cannot make the constructor itself throw (docs/architecture.md → API client 的回應處理). */
-  private throwOnError(res: ApiResponse<unknown>): void {
-    if (res.error) {
-      throw new ApiError(
-        safeErrorText(res.error.code, "UNKNOWN_ERROR"),
-        safeErrorText(res.error.message, "請稍後再試"),
-        res.error.retryAfter,
-      );
-    }
-  }
-
   // --- Auth ---
 
   /** Family lookup by pre-hashed userId (server never sees the email). Unused by the PWA today, kept
@@ -225,10 +189,15 @@ export class ApiClient {
 
   // --- Personal Settings ---
 
+  /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
+   *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
     this.validateHexId(userId, "userId");
-    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
-    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
+    const res = await this.get<unknown>(`/api/user/${userId}/books`);
+    return sanitizeEnvelope(
+      sanitizePersonalBooksResponse<PersonalBooks>(res),
+      sanitizePersonalBooksText,
+    );
   }
 
   async updatePersonalBooks(
@@ -275,7 +244,7 @@ export class ApiClient {
       displayName: displayName ?? "",
     };
     const res = await this.post<FamilyGroup>("/api/family", body);
-    return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);
+    return sanitizeEnvelope(res, sanitizeFamilyGroupText);
   }
 
   async joinFamily(
@@ -336,7 +305,7 @@ export class ApiClient {
     const res = await this.get<unknown>(`/api/family/${familyId}/members`);
     // Structure layer first (rebuilds `data.members`, normalizes `apiEndpoint`), then the text layer
     // (`familyId` / `ownerId` / `createdAt`): docs/architecture.md → 伺服器回傳資料的檢查.
-    return this.sanitizeEnvelope(
+    return sanitizeEnvelope(
       sanitizeFamilyMembersResponse(res),
       sanitizeFamilyGroupText,
     );
@@ -368,7 +337,7 @@ export class ApiClient {
     familyId: string,
   ): Promise<ApiResponse<FamilyBookshelf>> {
     const res = await this.get<unknown>(`/api/family/${familyId}/bookshelf`);
-    return this.sanitizeEnvelope(
+    return sanitizeEnvelope(
       sanitizeFamilyBookshelfResponse<FamilyBookshelf>(res),
       sanitizeFamilyBookshelfText,
     );
@@ -384,14 +353,14 @@ export class ApiClient {
       `/api/family/${familyId}/borrow`,
       payload,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
+    return sanitizeRecord(unwrap(res), sanitizeBorrowRequestText);
   }
 
   /** Read as `unknown` until `sanitizeBorrowRequests` checks it; `unwrap` runs first, owning the
    *  envelope contract (`ApiError` on `error`, `EMPTY_RESPONSE` on missing data). */
   async listBorrowRequests(familyId: string): Promise<BorrowRequest[]> {
     const res = await this.get<unknown>(`/api/family/${familyId}/borrow`);
-    return sanitizeBorrowRequests(this.unwrap(res));
+    return sanitizeBorrowRequests(unwrap(res));
   }
 
   async updateBorrowStatus(
@@ -401,7 +370,7 @@ export class ApiClient {
     const res = await this.patch<BorrowRequest>(`/api/borrow/${requestId}`, {
       status,
     });
-    return sanitizeRecord(this.unwrap(res), sanitizeBorrowRequestText);
+    return sanitizeRecord(unwrap(res), sanitizeBorrowRequestText);
   }
 
   /** Read as `unknown` until `sanitizeFamilyMember` checks it (`unwrap` first); an unusable payload
@@ -415,7 +384,7 @@ export class ApiClient {
       `/api/family/${familyId}/member/${uid}`,
       settings,
     );
-    const member = sanitizeFamilyMember(this.unwrap(res));
+    const member = sanitizeFamilyMember(unwrap(res));
     if (member === null) {
       throw new ApiError(
         "INVALID_RESPONSE",
@@ -467,7 +436,7 @@ export class ApiClient {
     const res = await this.get<{ shelves: PublicShelf[] }>(
       `/api/user/${userId}/public-shelf`,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfListText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfListText);
   }
 
   async createPublicShelf(
@@ -479,7 +448,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf`,
       body,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   async updatePublicShelf(
@@ -492,7 +461,7 @@ export class ApiClient {
       `/api/user/${userId}/public-shelf/${shelfId}`,
       body,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   async resetPublicShelfToken(
@@ -503,7 +472,7 @@ export class ApiClient {
     const res = await this.post<{ shelf: PublicShelf }>(
       `/api/user/${userId}/public-shelf/${shelfId}/reset-token`,
     );
-    return sanitizeRecord(this.unwrap(res), sanitizePublicShelfResultText);
+    return sanitizeRecord(unwrap(res), sanitizePublicShelfResultText);
   }
 
   /** Revoke a public shelf; throws `ApiError` on refusal, and the caller MUST NOT then report the link
@@ -511,7 +480,7 @@ export class ApiClient {
   async deletePublicShelf(userId: string, shelfId: string): Promise<void> {
     this.validateHexId(userId, "userId");
     const res = await this.del(`/api/user/${userId}/public-shelf/${shelfId}`);
-    this.unwrapVoid(res);
+    unwrapVoid(res);
   }
 
   /** Bypasses `request()` (no auth, no dedup): the whole read lives in `fetchPublicShelf`. */

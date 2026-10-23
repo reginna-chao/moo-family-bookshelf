@@ -61,6 +61,8 @@ import {
   sanitizeFamilyMembersResponse,
 } from "moo-family-bookshelf-shared/api/memberValidation";
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
+import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
+import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { isClientSynthesized, synthesizeError } from "./synthesizedError";
 
 // Re-export all types so existing imports from "./client" continue to work
@@ -99,17 +101,6 @@ import { DEFAULT_PWA_URL } from "../constants";
 
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-/** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
- *  to exactly this one (docs/architecture.md → API client 的回應處理). */
-const NO_CONTENT_STATUS = 204;
-
-/** Read the `{ data, error }` envelope; a 204 is an empty envelope (`response.json()` would throw
- *  on it), every other response still parses — or throws — as JSON. */
-async function readEnvelope<T>(response: Response): Promise<ApiResponse<T>> {
-  if (response.status === NO_CONTENT_STATUS) return {};
-  return (await response.json()) as ApiResponse<T>;
-}
 
 /** User-facing copy for a rate-limited auto-recovery; appends the wait, rounded up to whole minutes,
  *  when the cooldown deadline is known and still ahead. */
@@ -285,9 +276,14 @@ export class ApiClient {
 
   // --- Personal Settings ---
 
+  /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
+   *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
   async getPersonalBooks(userId: string): Promise<ApiResponse<PersonalBooks>> {
-    const res = await this.get<PersonalBooks>(`/api/user/${userId}/books`);
-    return this.sanitizeEnvelope(res, sanitizePersonalBooksText);
+    const res = await this.get<unknown>(`/api/user/${userId}/books`);
+    return this.sanitizeEnvelope(
+      sanitizePersonalBooksResponse<PersonalBooks>(res),
+      sanitizePersonalBooksText,
+    );
   }
 
   async updatePersonalBooks(

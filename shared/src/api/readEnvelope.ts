@@ -1,6 +1,6 @@
-/** Envelope reading for `client.ts`; rationale: docs/architecture.md → API client 的回應處理. */
+/** Envelope reader shared by both API clients: docs/architecture.md → API client 的回應處理. */
 
-import type { ApiResponse } from "moo-family-bookshelf-shared/api/types";
+import type { ApiResponse } from "./types";
 
 /** The one bodyless status this API answers (`DELETE /api/user/:id/public-shelf/:shelfId`); keep it
  *  to exactly this one (docs/architecture.md → API client 的回應處理). */

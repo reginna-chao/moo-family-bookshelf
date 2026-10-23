@@ -23,7 +23,7 @@ import { ApiClient } from "@/api/client";
  * and waits one macrotask there, which drains the component's `.then().catch()` chain first.
  *
  * Hostile save-error envelopes: `setVerifyMethod` resolves the `{ data, error }` envelope through
- * `readEnvelope`, which bare-casts `response.json()` (pwa/src/api/envelope.ts), and the endpoint is
+ * `readEnvelope`, which bare-casts `response.json()` (shared/src/api/readEnvelope.ts), and the endpoint is
  * user-configurable (BYO backend), so `error.message` is `unknown` at runtime. This site used to read
  * it as `res.error.message || "…"`, and `||` lets every truthy non-string through — including
  * exactly the objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary above it, the

@@ -824,16 +824,16 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 #### API client 的回應處理
 
-`pwa/src/api/client.ts`（`readEnvelope` 自 #343 起在 `pwa/src/api/envelope.ts`）：
+`pwa/src/api/client.ts`（`unwrap`／`unwrapVoid`／`sanitizeEnvelope`／`throwOnError` 在 `pwa/src/api/envelopeHelpers.ts`）：
 
-- **沒有 body 的成功**：`DELETE /api/user/:id/public-shelf/:shelfId` 是這個 API 唯一不帶 body 的回應（204，RFC 9110 §15.3.5）。`response.json()` 遇到空 body 會拋 SyntaxError，呼叫端分不出它和真正的網路失敗——被拒的撤銷曾經因此被讀成「已刪除」。所以 `readEnvelope` 把 204 解析成空信封，其他回應照舊解析（格式錯誤的仍會拋錯）。只放行這一個狀態碼：API 從不回 205，放寬只會讓惡意後端可以把空 body 讀成確認成功；304 屬於 `!response.ok`，本來就走錯誤路徑。`unwrapVoid` 不要求 `data`，否則每個成功的 204 都會變成假的 `EMPTY_RESPONSE`。
+- **沒有 body 的成功**：`DELETE /api/user/:id/public-shelf/:shelfId` 是這個 API 唯一不帶 body 的回應（204，RFC 9110 §15.3.5）。`response.json()` 遇到空 body 會拋 SyntaxError，呼叫端分不出它和真正的網路失敗——被拒的撤銷曾經因此被讀成「已刪除」。所以 `readEnvelope` 把 204 解析成空信封（它只有一份，在 `shared/src/api/readEnvelope.ts`，兩端 client 都 import 它），其他回應照舊解析（格式錯誤的仍會拋錯）。只放行這一個狀態碼：API 從不回 205，放寬只會讓惡意後端可以把空 body 讀成確認成功；304 屬於 `!response.ok`，本來就走錯誤路徑。`unwrapVoid` 不要求 `data`，否則每個成功的 204 都會變成假的 `EMPTY_RESPONSE`。
 - **`throwOnError` 是所有 `ApiError` 的唯一出口**，錯誤文字在這裡統一處理，而不是在每個呼叫處各做一次。`code`／`message` 宣告為 `string`，實際上來自 `response.json()` 的直接轉型，後端又可以自架。`JSON.parse` 真的能產生 `{"toString":null,"valueOf":null}` 這種值，它會讓建構子的 ``super(`${code}: ${message}`)`` 拋出 TypeError，`ApiError` 根本建不起來：`err instanceof ApiError` 變成 false，需要 `code` 與 `retryAfter` 的在地化 429 退避分支被跳過，畫面改顯示英文的 TypeError。處理這兩個會被插入字串的欄位，保住的是錯誤的身分，而不只是措辭。`retryAfter` 原樣傳入，建構子自己會檢查。
 - **`getPublicShelf`**（實作在 `pwa/src/api/publicShelfFetch.ts` 的 `fetchPublicShelf`）不經 `readEnvelope`，自己直接轉型回應：
   - 錯誤欄位同樣先處理再插入字串，否則惡意的 `{"toString":null}` 會讓 `new Error(...)` 在掛上 `status` 之前就拋錯；`PublicShelfPage` 依 `status` 分流，404 就會失去「此公開書櫃不存在或已過期」畫面，落到一般的載入錯誤。
   - 成功的 `data` 只靠文字層這一道防護：`PublicShelfPage` 把 `title`／`book.title`／`book.author` 直接放進 JSX，搜尋時還會對它們呼叫 `.toLowerCase()`。
-- **成員清單、家庭書櫃、借閱清單先以 `unknown` 讀入**：結構檢查之前，線上的形狀只是後端的聲稱。成員清單與家庭書櫃整個信封一起檢查（呼叫端自己讀 `{ data, error }`，`error` 信封必須原樣送到），兩層的順序與理由見〈伺服器回傳資料的檢查〉。借閱清單先跑 `unwrap`——它負責信封契約（`error` 拋 `ApiError`、缺 `data` 拋 `EMPTY_RESPONSE`）——再交給 `sanitizeBorrowRequests`。
+- **成員清單、家庭書櫃、個人書單、借閱清單先以 `unknown` 讀入**：結構檢查之前，線上的形狀只是後端的聲稱。成員清單、家庭書櫃與個人書單整個信封一起檢查（呼叫端自己讀 `{ data, error }`，`error` 信封必須原樣送到），兩層的順序與理由見〈伺服器回傳資料的檢查〉。借閱清單先跑 `unwrap`——它負責信封契約（`error` 拋 `ApiError`、缺 `data` 拋 `EMPTY_RESPONSE`）——再交給 `sanitizeBorrowRequests`。
 - **`lookupUser`**：PWA 目前沒有使用（登入走同步碼），保留是為了與 Extension client 的契約一致，兩者才不會分歧。帶不帶 `verifySecret` 的回應差異見〈PWA 登入驗證機制〉。
-- **Extension 的 `extension/src/api/client.ts`**：`readEnvelope`（只放行 204）、`unwrapVoid`、`throwOnError` 與上面的規則相同。差別在 `throwOnError` 另外把 `isClientSynthesized` 套在**原始**的錯誤物件上，而不是處理過的文字：symbol 標記本身就是來源證明，不能從處理過的文字推斷（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
+- **Extension 的 `extension/src/api/client.ts`**：`readEnvelope`（只放行 204，與 PWA 共用 `shared/src/api/readEnvelope.ts` 這一份）、`unwrapVoid`、`throwOnError` 與上面的規則相同。差別在 `throwOnError` 另外把 `isClientSynthesized` 套在**原始**的錯誤物件上，而不是處理過的文字：symbol 標記本身就是來源證明，不能從處理過的文字推斷（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
 - **`updateMemberSettings`**（Extension 與 PWA 相同）：回應先以 `unknown` 讀入，`unwrap` 先跑（負責信封契約），再交給 `sanitizeFamilyMember` 做結構檢查，最後是文字層（與 `getFamilyMembers` 同順序）。結構檢查不過時拋出 `INVALID_RESPONSE`，這對每個呼叫端都安全：Extension 的三個呼叫處（`extension/src/dialog/BorrowTab.tsx` 的借出對象寫回、`extension/src/dialog/MemberList.tsx` 的 canLend 開關與刪除 readmooName）都會接住，交給 `memberSettingsErrorMessage`，格式錯誤的回應因此顯示成可重試的錯誤，而不會汙染 `members` 狀態。PWA 唯一的呼叫處（`pwa/src/components/MemberList.tsx` 的 canLend 開關）同樣接住並交給 `memberSettingsErrorMessage`；它不使用回傳的成員，成功後重新讀取成員清單。
 
 #### 公開書櫃設定的寫入
@@ -1060,7 +1060,7 @@ interface PublicShelfSnapshot {
 1. 物件被當成 JSX child 渲染：React 19 拋出 "Objects are not valid as a React child" 並卸載整棵樹（例如兩端 `MemberList.tsx` 渲染物件型別的 `displayName`）。
 2. 對非字串呼叫字串方法：`useSearch` 的 `title.toLowerCase()`、借閱分組 `sortNewestFirst` 的 `createdAt.localeCompare()`、公開分享對話框與 `publicShelf/diff.ts` 的 `title.trim()`、成員名稱查表的 `userId.slice(0, 8)`（Extension `BorrowTab.tsx` 的 `buildOwnerNameLookup`、PWA `BorrowPage.tsx` 的 `buildMemberNameMap`，都在父層 `useMemo` 裡、任何卡片掛載之前執行）。
 
-防護分兩層，都在兩端 API client 的邊界套用；規則放在 `shared/`，兩端就不可能對同一份資料套用不同規則。成員清單與家庭書櫃是**結構層先跑，文字層後跑**（見兩端 client 的 `getFamilyMembers`／`getFamilyBookshelf`）；借閱清單只走結構層，因為它本身就把 12 個欄位全部重建並轉型。
+防護分兩層，都在兩端 API client 的邊界套用；規則放在 `shared/`，兩端就不可能對同一份資料套用不同規則。成員清單、家庭書櫃與個人書單是**結構層先跑，文字層後跑**（見兩端 client 的 `getFamilyMembers`／`getFamilyBookshelf`／`getPersonalBooks`）；借閱清單只走結構層，因為它本身就把 12 個欄位全部重建並轉型。
 
 **文字層**（`shared/src/api/safeText.ts` 的基本函式，加上 client 實際呼叫的 `entityText.ts` 逐實體函式）：
 
@@ -1077,9 +1077,9 @@ interface PublicShelfSnapshot {
     - `safeCoverUrl`／`safeBookUrl` 只有一份，位於 `shared/src/safeUrl/`，Extension 與 PWA 都直接 import；兩者回傳 `String(url)` 而不是 `url`，這不是多餘的：白名單判斷的是 `new URL` 轉成字串**之後**的值，所以 `["https://cdn.readmoo.com/x.jpg"]` 這種陣列會被接受；若原樣回傳 `url`，等於把陣列掛著 `string` 型別交出去，第一個對它呼叫字串方法的消費端就會在 render 中拋出 `TypeError`（`useSearch` 正是這樣對待 `title`）。`coverUrl` 沒經過文字層，執行時其實是 `unknown`；`readmooUrl` 目前有經過文字層轉型，但那是另一個模組的決定，改了也不會有人回頭檢查這一行。目前的消費端只把它放進 `src`／`href` 屬性，或拿來判斷是否為空，所以這是地雷而不是現行的 bug；對真正的字串 `String()` 是恆等函式，判定與回傳值都不變。
   - 數字、`BoolFlag` 與字串字面值聯集（`status`、`selectionMode`、`method`）：轉成 `string` 會破壞型別，它們的渲染處以 `ReadonlyMap` 查表防護。
 
-**結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`，以及兩端 `updateMemberSettings` 收到的 `PATCH /api/family/:id/member/:uid` 回應；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：
+**結構層**（`shared/src/api/memberValidation.ts` → `GET /api/family/:id/members`，以及兩端 `updateMemberSettings` 收到的 `PATCH /api/family/:id/member/:uid` 回應；`bookshelfValidation.ts` → `GET /api/family/:id/bookshelf`；`personalBooksValidation.ts` → `GET /api/user/:id/books`；`shared/src/borrow/validation.ts` → `GET /api/family/:id/borrow`）：
 
-- **無法定位就丟棄**：元素不是 plain object，或身分欄位（成員 `userId`、書 `bookId`、借閱 `requestId`）不是非空字串，就整筆丟棄——它當不了 React key、名稱查表的鍵或家庭書櫃偏好 ref 的擁有者那一半，也當不了 `updateMemberSettings`／`removeMember` 的 `:uid` 或 `PATCH /api/borrow/:id` 的目標。
+- **無法定位就丟棄**（成員清單、家庭書櫃、借閱清單；個人書單相反，見下方「個人書單只轉換 `BoolFlag`，絕不丟書」）：元素不是 plain object，或身分欄位（成員 `userId`、書 `bookId`、借閱 `requestId`）不是非空字串，就整筆丟棄——它當不了 React key、名稱查表的鍵或家庭書櫃偏好 ref 的擁有者那一半，也當不了 `updateMemberSettings`／`removeMember` 的 `:uid` 或 `PATCH /api/borrow/:id` 的目標。
 - **其餘欄位正規化**：非字串降為 `""`（消費端都有 `||` 備援，`""` 對 `localeCompare` 與 `.slice` 都安全）。成員的兩個選填欄位不符宣告型別時直接省略：`canLend` 只接受 `BoolFlag` 的兩個值（`true`、`2`、`"1"` 都當作缺少），缺少照舊讀成 TRUE（兩端 `MemberList.tsx` 的 `canLend !== BoolFlag.FALSE`，相容還沒有這個欄位的舊版 Worker）；`readmooName` 缺少時，「尚未記錄」提示照舊顯示。
 - **家庭書櫃的身分欄位為什麼丟棄而不是正規化**：降為 `""` 仍保留元素，兩筆這樣的元素就會在空字串上相撞，造成四種看得到的後果（都不會當掉）：
   1. React key 重複：兩端的成員篩選選單以 `m.userId` 當 key（`memberFilterOptions.tsx`），書卡以 `` `${memberName}-${bookId}` `` 當 key（Extension `FamilyShelfBookList.tsx`、PWA `FamilyBookList.tsx`）。
@@ -1088,11 +1088,12 @@ interface PublicShelfSnapshot {
   4. 更新追蹤基準損壞：`baseline[member.userId]`（`shared/src/familyShelf/updateTracking.ts`）把所有壞成員塌縮到同一個 `""` 鍵，並存進 `chrome.storage.local`／`localStorage`。
 - **已知殘餘，刻意不處理**：規則是「可用」而不是「唯一」。兩名成員共用同一個非空 `userId` 會直接重現 1 與 4，若再共用 `bookId` 也會重現 3；同一名成員有兩本 `bookId` 相同的書會重現 1 與 3。只有 2 被完全排除（空白標籤需要 `userId === ""`，存活的成員不可能再有）。成員清單有相同的殘餘；官方 Worker 也不對 `bookId` 去重（`worker/src/routes/user.ts` 的 `parseBooks`），去重會是兩端的政策變更而不是邊界檢查，而且這些碰撞都不會讓畫面當掉。
 - **重建或保留**：成員清單與借閱清單的元素以全新物件字面值重建（成員最多 4 個欄位、借閱剛好 12 個），絕不展開原始元素，惡意的多餘屬性（包括 `JSON.parse` 產生的自有 `__proto__` 鍵）因此進不了畫面狀態。家庭書櫃刻意不同：存活的**成員**以 `{ ...element, books }` 保留——固定的欄位清單可能悄悄丟掉日後新增的欄位（例如對更新追蹤有意義的三態 `lastUpdated`），而重建要防的多餘屬性風險在這裡不存在，因為兩個消費端在進入畫面狀態前都會重建成 3 個欄位的新物件（Extension `useFamilyDataBookshelf.ts` 的 `parsedMembers`、PWA `useFamilyData.tsx` 的 `memberBooks`）。存活的**書**完全不動：`isShared`、`isArchived`、`coverUrl` 不在文字層處理的欄位裡，卻缺一不可——`isShared === BoolFlag.TRUE` 就是家庭書櫃的篩選本身，重建會把它們刪掉。欄位的型別轉換一律留給後跑的文字層。
+- **個人書單只轉換 `BoolFlag`，絕不丟書**（`personalBooksValidation.ts`）：自架 Worker 若回傳 `isShared: true`，`true === BoolFlag.TRUE` 不成立，這個值卻會經合併原樣 PUT 回伺服器，正是 `BoolFlag` 慣例要防的跨平台錯誤。所以每個 plain object 元素的 `isShared` 只有剛好是 `1` 才是 `BoolFlag.TRUE`，其他值（`true`、`"1"`、`2`、缺少）都當作 `BoolFlag.FALSE`——與 Worker 自己的 `toBoolFlag`（`worker/src/routes/user.ts`）相同，也符合預設不開放，不開放的書不可能因此變成開放；`isArchived` 只保留 `BoolFlag` 的兩個值，其他值直接省略鍵（缺少讀成未封存，`mergeBooks` 的 `?? existing?.isArchived ?? BoolFlag.FALSE`）。這一層絕不丟棄、不重排元素，也不碰 `bookId`：下一次整份 PUT 會以用戶端的書單取代伺服器上的，在這裡丟掉的書會從伺服器被刪掉。不是 plain object 的元素原樣通過（文字層的 `sanitizeList` 照舊處理）；`data` 不是物件或 `books` 不是陣列時整份原樣通過，交給文字層與 `loadSavedBooks`。元素以展開保留其餘欄位，與成員清單的重建相反，因為整份 PUT 會把不認得的書欄位送回伺服器，固定的欄位清單會把它們刪掉。`data` 的其他欄位（`removedUnsharedBookIds`、`familyShelfPrefs`、`newBookDefaultShared` 等）原樣通過。
 - 借閱的 `status` 不驗證：未知狀態由兩端的渲染處處理（Extension `BorrowRequestCard.tsx` 的 `STATUS_META.get(...) ?? UNKNOWN_STATUS`、PWA `BorrowCard.tsx` 中 `getStatusStyle` 的 `default:`），對它做的比較（`Set.has`、`===`）對任意值都安全。
 - 成員清單回應的 `apiEndpoint` 是唯一會進到 React child 的穿透欄位：Extension 的移轉管理權確認畫面原樣印出它（`MemberList.tsx` 的 `.moo-member-list__endpoint`），PWA 則經 `hooks/useFamilyData.tsx` 提供給任何畫面。因此字串原樣保留，其他值一律變成 `null`（`apiEndpoint ?? undefined` 本來就把它讀成「沒有自訂端點」）。
-- 容器壞掉時降為「沒有成員／沒有書／沒有申請」，不拋錯、也不新增錯誤代碼：使用者對它無能為力，空清單本來就能渲染。不是物件的 `data` 沒有可穿透的欄位，降為只有成員清單的資料，缺少的 `members` 再由陣列檢查回報。
+- 容器壞掉時降為「沒有成員／沒有書／沒有申請」（個人書單除外：壞掉的容器原樣通過，交給文字層與 `loadSavedBooks`），不拋錯、也不新增錯誤代碼：使用者對它無能為力，空清單本來就能渲染。不是物件的 `data` 沒有可穿透的欄位，降為只有成員清單的資料，缺少的 `members` 再由陣列檢查回報。
 - **檢查在 `{ data, error }` 信封內進行**（呼叫端自己讀信封）。帶 `error` 或沒有 `data` 的信封原樣通過——驗證失敗絕不能被洗成空清單（`.claude/rules/security-ux-invariants.md` 的 Invariant 2）。`error` 以 truthiness 判斷而不是 `!== undefined`：BYO 後端可以送 `error: null`，兩端的 `if (response.error)` 都會把它當成功並讀取 `data`，放行就等於整份資料沒經過檢查。`data` 以 nullish 判斷，理由方向相反：下游根本不讀它。
-- **只輸出彙總警告，絕不逐元素輸出**，惡意資料不能變成洗版。成員清單與借閱清單每次回應最多一行；家庭書櫃最多兩行（成員一行、書一行）。家庭書櫃把書的損失跨成員累計後輸出一行（「丟棄的書」與「書單整個不可用的成員」分開計數，因為不可用的容器藏著不知多少本書）；成員的容器警告與丟棄警告互斥，所以成員那一半最多一行。log 前綴（`[memberValidation]`、`[bookshelfValidation]`、`[borrowValidation]`）指的是檢查而不是檔名，兩端的測試都會比對它，搬檔時要保留。
+- **只輸出彙總警告，絕不逐元素輸出**，惡意資料不能變成洗版。成員清單、借閱清單與個人書單每次回應最多一行（個人書單只計算被轉換的旗標個數，不記錄值；缺少 `isArchived` 是正常情況，不計入，缺少 `isShared` 則計入）；家庭書櫃最多兩行（成員一行、書一行）。家庭書櫃把書的損失跨成員累計後輸出一行（「丟棄的書」與「書單整個不可用的成員」分開計數，因為不可用的容器藏著不知多少本書）；成員的容器警告與丟棄警告互斥，所以成員那一半最多一行。log 前綴（`[memberValidation]`、`[bookshelfValidation]`、`[personalBooksValidation]`、`[borrowValidation]`）指的是檢查而不是檔名，兩端的測試都會比對它，搬檔時要保留。
 
 **錯誤物件**（`shared/src/api/types.ts` 的 `ApiError`）：
 
