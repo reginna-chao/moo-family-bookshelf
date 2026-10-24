@@ -19,6 +19,14 @@ import { useDismissableMenu } from "@/hooks/useDismissableMenu";
  * open. The hook now also attaches a capture-phase `scroll` listener on the trigger's ShadowRoot (the
  * top of the propagation path for those events). These tests drive the hook with real DOM refs so
  * `triggerRef.current.getRootNode()` genuinely returns a `ShadowRoot`.
+ *
+ * Closed shadow root (regression, #362): the shipped Dialog's shadow root is CLOSED, and at a
+ * `document` listener `composedPath()` omits a closed tree's nodes — it starts at the host. A
+ * document-only hook therefore read a mousedown on a menu option as "outside" (the menu closed before
+ * the option's click) and an Escape inside the menu as "elsewhere" (focus never returned to the
+ * trigger). The hook now also listens for `mousedown` / `keydown` on the trigger's ShadowRoot, where
+ * the path still holds the inner nodes, and the document copy skips events the root copy already saw,
+ * so one event closes once. The closed-mode block pins those consequences plus listener cleanup.
  */
 
 interface HarnessProps {
@@ -561,6 +569,193 @@ describe("useDismissableMenu", () => {
       innerScrollContainer.dispatchEvent(
         new Event("scroll", { bubbles: false }),
       );
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  // Regression (#362): a document listener cannot see inside a CLOSED tree, so inside clicks and
+  // Escape must be recognised at the ShadowRoot. See the file header, "Closed shadow root".
+  describe("closed shadow root (mousedown / keydown)", () => {
+    let hosts: HTMLElement[] = [];
+
+    afterEach(() => {
+      for (const host of hosts) host.remove();
+      hosts = [];
+    });
+
+    function mountInClosedShadowRoot(
+      onClose: () => void,
+      beforeHook?: (root: ShadowRoot) => void,
+    ) {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      hosts.push(host);
+      const shadowRoot = host.attachShadow({ mode: "closed" });
+      beforeHook?.(shadowRoot);
+
+      const trigger = document.createElement("button");
+      const menu = document.createElement("div");
+      const menuItem = document.createElement("button");
+      menu.appendChild(menuItem);
+      // Inside the closed tree but outside both the menu and the trigger.
+      const innerOutside = document.createElement("div");
+      shadowRoot.append(trigger, menu, innerOutside);
+      const lightOutside = document.createElement("div");
+      document.body.appendChild(lightOutside);
+      hosts.push(lightOutside);
+
+      const triggerRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      const menuRef = createRef<HTMLElement>() as RefObject<HTMLElement>;
+      triggerRef.current = trigger;
+      menuRef.current = menu;
+
+      const view = renderHook(
+        ({ isOpen }: { isOpen: boolean }) =>
+          useDismissableMenu({ isOpen, onClose, triggerRef, menuRef }),
+        { initialProps: { isOpen: true } },
+      );
+      return {
+        view,
+        host,
+        shadowRoot,
+        trigger,
+        menuItem,
+        innerOutside,
+        lightOutside,
+      };
+    }
+
+    const mouseDown = (target: EventTarget) =>
+      target.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, composed: true }),
+      );
+    const escape = (target: EventTarget) =>
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+
+    it("pins the premise: the host exposes no shadowRoot", () => {
+      const { host } = mountInClosedShadowRoot(vi.fn());
+      expect(host.shadowRoot).toBeNull();
+    });
+
+    it("does not call onClose on a mousedown on a menu option", () => {
+      const onClose = vi.fn();
+      const { menuItem } = mountInClosedShadowRoot(onClose);
+
+      mouseDown(menuItem);
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("does not call onClose on a mousedown on the trigger", () => {
+      const onClose = vi.fn();
+      const { trigger } = mountInClosedShadowRoot(onClose);
+
+      mouseDown(trigger);
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("calls onClose once on a mousedown on a light-DOM element outside the host", () => {
+      const onClose = vi.fn();
+      const { lightOutside } = mountInClosedShadowRoot(onClose);
+
+      mouseDown(lightOutside);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    // Reaches both the root and the document listener: the document copy must skip it.
+    it("calls onClose exactly once on a mousedown inside the closed tree but outside the menu", () => {
+      const onClose = vi.fn();
+      const { innerOutside } = mountInClosedShadowRoot(onClose);
+
+      mouseDown(innerOutside);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes once and returns focus to the trigger on Escape from a focused menu option", () => {
+      const onClose = vi.fn();
+      const { host, shadowRoot, trigger, menuItem } =
+        mountInClosedShadowRoot(onClose);
+      menuItem.focus();
+      expect(shadowRoot.activeElement).toBe(menuItem);
+
+      escape(menuItem);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(shadowRoot.activeElement).toBe(trigger);
+      expect(document.activeElement).toBe(host);
+    });
+
+    it("closes once and refocuses the trigger on Escape after focus fell to the document", () => {
+      const onClose = vi.fn();
+      const { shadowRoot, trigger } = mountInClosedShadowRoot(onClose);
+      expect(document.activeElement).toBe(document.body);
+
+      escape(document.body);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(shadowRoot.activeElement).toBe(trigger);
+    });
+
+    // An earlier root listener (React's portal listener in production) that stops propagation owns
+    // the Escape; one that does not leaves the hook's close + refocus intact.
+    it.each([
+      { label: "stops propagation", stops: true, closes: 0, focus: "option" },
+      { label: "lets it bubble", stops: false, closes: 1, focus: "trigger" },
+    ])(
+      "honours an earlier ShadowRoot keydown listener that $label",
+      ({ stops, closes, focus }) => {
+        const onClose = vi.fn();
+        const { trigger, menuItem, shadowRoot } = mountInClosedShadowRoot(
+          onClose,
+          (root) =>
+            root.addEventListener("keydown", (e) => {
+              if (stops) e.stopPropagation();
+            }),
+        );
+        menuItem.focus();
+
+        escape(menuItem);
+
+        expect(onClose).toHaveBeenCalledTimes(closes);
+        expect(shadowRoot.activeElement).toBe(
+          focus === "trigger" ? trigger : menuItem,
+        );
+      },
+    );
+
+    it.each([
+      {
+        label: "on unmount",
+        stop: (v: { unmount: () => void }) => v.unmount(),
+      },
+      {
+        label: "when isOpen transitions to false",
+        stop: (v: { rerender: (p: { isOpen: boolean }) => void }) =>
+          v.rerender({ isOpen: false }),
+      },
+    ])("leaves no mousedown / keydown listener behind $label", ({ stop }) => {
+      const onClose = vi.fn();
+      const { view, shadowRoot, innerOutside, lightOutside } =
+        mountInClosedShadowRoot(onClose);
+
+      stop(view);
+      onClose.mockClear();
+      mouseDown(innerOutside);
+      mouseDown(shadowRoot);
+      mouseDown(lightOutside);
+      mouseDown(document);
+      escape(innerOutside);
+      escape(document.body);
 
       expect(onClose).not.toHaveBeenCalled();
     });

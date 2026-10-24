@@ -2,21 +2,51 @@
  *  and `extensionId` for E2E tests. */
 
 import { test as base, chromium, type BrowserContext } from "@playwright/test";
+import { existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const extensionPath = resolve(__dirname, "..", "..", "..", "dist");
+
+/**
+ * Which `pnpm build:e2e` artifact a spec loads. `"open"` (the default) is `dist-e2e-open/`, the copy
+ * whose Dialog shadow root is switched to open so Playwright locators can pierce it; `"closed"` is the
+ * real shipped `dist/` (closed root, #362), loaded only by specs that test what a page script can
+ * reach. Opt in per file / describe with `test.use({ distVariant: "closed" })`.
+ * See `.claude/rules/test.md` → E2E tooling.
+ */
+export type DistVariant = "open" | "closed";
+
+const DIST_DIRS: Record<DistVariant, string> = {
+  open: "dist-e2e-open",
+  closed: "dist",
+};
+
+/** Absolute path of the unpacked extension for `variant`; throws when `pnpm build:e2e` has not
+ *  produced it, so a missing copy fails loudly instead of loading nothing. */
+export function extensionPathFor(variant: DistVariant): string {
+  const path = resolve(__dirname, "..", "..", "..", DIST_DIRS[variant]);
+  if (!existsSync(resolve(path, "manifest.json"))) {
+    throw new Error(`${path} is missing: run \`pnpm build:e2e\` first.`);
+  }
+  return path;
+}
+
+export interface ExtensionOptions {
+  distVariant: DistVariant;
+}
 
 export interface ExtensionFixtures {
   context: BrowserContext;
   extensionId: string;
 }
 
-export const test = base.extend<ExtensionFixtures>({
-  // eslint-disable-next-line no-empty-pattern
-  context: async ({}, use) => {
+export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
+  distVariant: ["open", { option: true }],
+
+  context: async ({ distVariant }, use) => {
+    const extensionPath = extensionPathFor(distVariant);
     const useHeadedMode = process.env.E2E_HEADED === "1";
     const context = await chromium.launchPersistentContext("", {
       headless: false,

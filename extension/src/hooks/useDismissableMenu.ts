@@ -33,15 +33,47 @@ function focusIsNowhere(target: EventTarget | null): boolean {
   );
 }
 
+/** Runs `handler` once per event from the trigger's ShadowRoot (if any) and from `document`; the
+ *  document copy skips events the root copy already saw. The root copy honours a stopPropagation()
+ *  from earlier listeners on the same ShadowRoot (`cancelBubble`). Returns the cleanup. */
+function listenAtRootAndDocument<K extends "mousedown" | "keydown">(
+  shadowRoot: ShadowRoot | null,
+  type: K,
+  handler: (e: DocumentEventMap[K]) => void,
+): () => void {
+  const seenAtRoot = new WeakSet<Event>();
+  const atRoot = (e: Event) => {
+    seenAtRoot.add(e);
+    if (e.cancelBubble) return;
+    handler(e as DocumentEventMap[K]);
+  };
+  const atDocument = (e: DocumentEventMap[K]) => {
+    if (!seenAtRoot.has(e)) handler(e);
+  };
+  shadowRoot?.addEventListener(type, atRoot);
+  document.addEventListener(type, atDocument);
+  return () => {
+    shadowRoot?.removeEventListener(type, atRoot);
+    document.removeEventListener(type, atDocument);
+  };
+}
+
 /**
  * Encapsulates the dismissal side effects shared by portaled popup menus
  * (Extension): while open, closes the menu on outside click, Escape, scroll
- * (capture phase), or resize. Scroll is observed both at `window` (dev page /
- * light DOM and window-level scroll) and, when the trigger lives inside an open
- * shadow root, on that `ShadowRoot` in capture phase — `scroll` events are
- * `composed: false`, so a scroll inside the shadow tree never reaches `window`;
- * the shadow root is the top of the propagation path for those events.
+ * (capture phase), or resize.
  *
+ * When the trigger lives in a shadow root (open or closed), `mousedown` /
+ * `keydown` are observed on that `ShadowRoot` as well as on `document`. A
+ * document listener's composedPath() omits a CLOSED tree's nodes, so an inside
+ * click would read as outside; at the ShadowRoot the path still holds them.
+ * The document listeners stay for light DOM (the floating button, the dev page)
+ * and for keys fired on `<body>` after focus fell there, and skip any event the
+ * root listener already handled, so one event never closes or refocuses twice.
+ *
+ * Scroll is observed both at `window` (dev page / light DOM and window-level
+ * scroll) and on the `ShadowRoot` in capture phase — `scroll` events are
+ * `composed: false`, so a scroll inside the shadow tree never reaches `window`.
  * Scroll-to-dismiss only closes the menu when the page/panels BEHIND it scroll:
  * scrolls whose target is inside the menu (or the trigger) are ignored via
  * composedPath(), so the menu's own `overflow-y: auto` list can be scrolled to
@@ -91,24 +123,29 @@ export function useDismissableMenu({
       onCloseRef.current();
     }
 
-    // Shadow-tree scrolls never reach `window` (composed: false): also capture on the trigger's
-    // ShadowRoot; the window listener stays for light DOM. Twin: .claude/rules/frontend.md.
-    const scrollRoot = triggerRef.current?.getRootNode();
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
+    // Root listeners see a closed tree's nodes; shadow-tree scrolls never reach `window`
+    // (composed: false), so they are captured on the ShadowRoot too. Twin: .claude/rules/frontend.md.
+    const rootNode = triggerRef.current?.getRootNode();
+    const shadowRoot = rootNode instanceof ShadowRoot ? rootNode : null;
+    const stopPointerDown = listenAtRootAndDocument(
+      shadowRoot,
+      "mousedown",
+      handlePointerDown,
+    );
+    const stopKeyDown = listenAtRootAndDocument(
+      shadowRoot,
+      "keydown",
+      handleKeyDown,
+    );
     window.addEventListener("scroll", handleScroll, true);
     window.addEventListener("resize", handleClose);
-    if (scrollRoot instanceof ShadowRoot) {
-      scrollRoot.addEventListener("scroll", handleScroll, true);
-    }
+    shadowRoot?.addEventListener("scroll", handleScroll, true);
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
+      stopPointerDown();
+      stopKeyDown();
       window.removeEventListener("scroll", handleScroll, true);
       window.removeEventListener("resize", handleClose);
-      if (scrollRoot instanceof ShadowRoot) {
-        scrollRoot.removeEventListener("scroll", handleScroll, true);
-      }
+      shadowRoot?.removeEventListener("scroll", handleScroll, true);
     };
     // Refs are stable and onClose is read via onCloseRef; only isOpen should re-subscribe listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -60,6 +60,8 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
             alt="掃描此 QR Code 邀請家人加入書櫃"
             width={200}
             height={200}
+            // Not draggable for the same reason as the login QR in QrCodeLink.tsx.
+            draggable={false}
           />
         </div>
       )}

@@ -5,10 +5,8 @@
  * family creation, member joining via sync code, and leaving.
  */
 
-import { test, expect } from "./helpers/extension-fixture";
+import { test, expect, extensionPathFor } from "./helpers/extension-fixture";
 import { chromium } from "@playwright/test";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
 import {
   openDialog,
   waitForOnboarding,
@@ -25,10 +23,6 @@ import {
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY } from "../../src/constants";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const extensionPath = resolve(__dirname, "..", "..", "dist");
 
 test.describe("Family Lifecycle", () => {
   test("Dialog button appears on mock library page", async ({ context }) => {
@@ -47,6 +41,7 @@ test.describe("Family Lifecycle", () => {
   test("Full lifecycle: create family, get sync code, second user joins, verify members, leave", async ({
     context,
     extensionId,
+    distVariant,
   }) => {
     test.setTimeout(120_000);
     // Multi-browser-context test is inherently flaky (idle page + shared Worker)
@@ -104,6 +99,8 @@ test.describe("Family Lifecycle", () => {
 
     // --- User 2: Join family using a second persistent context ---
 
+    // Same artifact as the fixture's context (the open copy by default).
+    const extensionPath = extensionPathFor(distVariant);
     const useHeadedMode = process.env.E2E_HEADED === "1";
     const context2 = await chromium.launchPersistentContext("", {
       headless: false,

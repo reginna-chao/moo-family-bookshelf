@@ -8,6 +8,7 @@ worker/pnpm-lock.yaml
 # Build output
 dist/
 dist-backup/
+dist-e2e-open/
 dist-firefox/
 dist-firefox-amo/
 dist-firefox-direct/

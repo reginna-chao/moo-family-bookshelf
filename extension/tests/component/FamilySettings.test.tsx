@@ -312,6 +312,14 @@ describe("FamilySettings", () => {
     });
   });
 
+  // A drag would hand the invite QR's data URL to a page `dragstart` listener (#362).
+  it("renders the invite QR image as not draggable", async () => {
+    renderFamilySettings();
+
+    const img = await screen.findByAltText("掃描此 QR Code 邀請家人加入書櫃");
+    expect(img.getAttribute("draggable")).toBe("false");
+  });
+
   it("shows copy sync code button", async () => {
     renderFamilySettings();
 

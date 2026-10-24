@@ -3458,10 +3458,14 @@
   margin-bottom: 6px;
 }
 
+/* No selection: dragging (or copying) a selection holding the data-URL QR
+   would serialise it into the page's dragstart text/html (#362). */
 .moo-qr-link__box {
   display: flex;
   justify-content: center;
   padding: 8px 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* CTA text pill layered over the blurred placeholder. */
@@ -3574,10 +3578,13 @@
   padding: 12px;
 }
 
+/* No selection: same reason as .moo-qr-link__box. */
 .moo-invite-qr__box {
   display: flex;
   justify-content: center;
   padding: 8px 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .moo-invite-qr__hint {

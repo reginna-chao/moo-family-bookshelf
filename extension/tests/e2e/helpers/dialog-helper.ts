@@ -43,8 +43,8 @@ export async function openDialog(page: Page): Promise<Locator> {
   try {
     // First: wait for React to mount anything (including "載入中...")
     await expect(root).not.toBeEmpty({ timeout: 30_000 });
-    // Then wait for loading to resolve via a locator, which pierces the open shadow root
-    // (document.querySelector in waitForFunction cannot cross the shadow boundary).
+    // Locators pierce only OPEN roots: these helpers need the open copy dist-e2e-open/
+    // (see .claude/rules/test.md → E2E tooling); document.querySelector never crosses the boundary.
     await expect(root).not.toContainText("載入中...", { timeout: 30_000 });
   } catch (e) {
     const rootContent = await root.innerHTML().catch(() => "(unreadable)");
