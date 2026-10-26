@@ -58,11 +58,7 @@ export function FamilyBookList({
     const isOwnBook = book.ownerId === userId;
     const borrowRequestPending = pendingBookIds.has(book.bookId);
     const showBorrowButton =
-      !isOwnBook &&
-      viewerCanLend &&
-      ownerCanLend &&
-      !borrowRequestPending &&
-      canBorrow;
+      !isOwnBook && viewerCanLend && ownerCanLend && canBorrow;
     const key = `${book.memberName}-${book.bookId}`;
     const hideActionLabel = isHidden(book.ownerId, book.bookId)
       ? "取消隱藏"
