@@ -143,3 +143,33 @@ describe("BookRow — isDirty prop (Wave K)", () => {
     expect(screen.getByRole("button")).toBe(initialButton);
   });
 });
+
+describe("BookRow — share toggle a11y", () => {
+  const noop = vi.fn();
+
+  it("exposes the share state through aria-pressed and a titled label (#384)", () => {
+    const { rerender } = render(
+      <BookRow
+        book={makeBook({ isShared: BoolFlag.FALSE })}
+        selected={false}
+        onSelect={noop}
+        onToggle={noop}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "測試書籍 未開放分享" }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    rerender(
+      <BookRow
+        book={makeBook({ isShared: BoolFlag.TRUE })}
+        selected={false}
+        onSelect={noop}
+        onToggle={noop}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "測試書籍 已開放分享" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+});
