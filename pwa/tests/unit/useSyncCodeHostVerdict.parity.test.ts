@@ -120,6 +120,14 @@ const TWINS: TwinPair[] = [
       "This hook owns every write behind a public share link — create, rename, expiry, reset, delete — and its rule that a failed write never advances the screen past what the server confirmed; a drift lets one app show a link as deleted or saved when it is not. Each side is otherwise tested only through its PublicShareDialog, so apply the same edit to both files.",
   },
   {
+    what: "the client-side search hook",
+    extension: "extension/src/dialog/useSearch.ts",
+    pwa: "pwa/src/hooks/useSearch.ts",
+    marker: "export function useSearch<T extends Searchable>(",
+    stake:
+      "A drift changes how one app matches, debounces or resets the family-shelf search while the other keeps the old behaviour (#382 was exactly that: only the Extension cleared the search when the member filter changed). Apply the same edit to both files — or, since the hook has no app-specific dependency, move it into shared/ and delete both twins.",
+  },
+  {
     what: "the anchored-position hook",
     extension: "extension/src/hooks/useAnchoredPosition.ts",
     pwa: "pwa/src/hooks/useAnchoredPosition.ts",
