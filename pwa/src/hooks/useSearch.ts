@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+// Twin: extension/src/dialog/useSearch.ts — keep identical; parity-tested (.claude/rules/frontend.md → Extension ↔ PWA twins).
 
 interface Searchable {
   title: string;
@@ -8,6 +9,7 @@ interface Searchable {
 interface UseSearchResult<T> {
   searchTerm: string;
   setSearchTerm: (term: string) => void;
+  resetSearch: () => void;
   filteredItems: T[];
   isFiltering: boolean;
 }
@@ -51,5 +53,10 @@ export function useSearch<T extends Searchable>(
 
   const isFiltering = debouncedTerm.trim() !== "";
 
-  return { searchTerm, setSearchTerm, filteredItems, isFiltering };
+  const resetSearch = useCallback(() => {
+    setSearchTerm("");
+    setDebouncedTerm("");
+  }, []);
+
+  return { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering };
 }
