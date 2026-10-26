@@ -93,9 +93,8 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
     [memberFilteredBooks, categoryFilter],
   );
 
-  const { searchTerm, setSearchTerm, filteredItems, isFiltering } = useSearch(
-    categoryFilteredBooks,
-  );
+  const { searchTerm, setSearchTerm, resetSearch, filteredItems, isFiltering } =
+    useSearch(categoryFilteredBooks);
 
   const sortedBooks = useMemo(
     () => sortBooks(filteredItems, sort),
@@ -118,9 +117,10 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
     (value: MemberFilterValue) => {
       setFilterMember(value);
       setCategoryFilter("");
+      resetSearch();
       resetLoadMore();
     },
-    [resetLoadMore],
+    [resetSearch, resetLoadMore],
   );
 
   if (state === "loading") {

@@ -450,6 +450,70 @@ describe("FamilyShelfPage", () => {
     expect(screen.getByText("Alice Book")).toBeInTheDocument();
   });
 
+  it("switching the member filter clears the search term (#382)", async () => {
+    mockGetFamilyMembers.mockResolvedValue({
+      data: {
+        familyId: "fam-1",
+        ownerId: "user-self",
+        members: [
+          { userId: "user-alice", displayName: "Alice" },
+          { userId: "user-bob", displayName: "Bob" },
+        ],
+      },
+    });
+    mockGetFamilyBookshelf.mockResolvedValue({
+      data: {
+        familyId: "fam-1",
+        members: [
+          {
+            userId: "user-alice",
+            displayName: "Alice",
+            books: makeBooks([
+              {
+                bookId: "b1",
+                title: "Alpha",
+                author: "Author A",
+                isShared: BoolFlag.TRUE,
+              },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+          {
+            userId: "user-bob",
+            displayName: "Bob",
+            books: makeBooks([
+              {
+                bookId: "b2",
+                title: "Beta",
+                author: "Author B",
+                isShared: BoolFlag.TRUE,
+              },
+            ]),
+            lastUpdated: "2026-01-01",
+          },
+        ],
+      },
+    });
+
+    renderWithProvider(defaultProps);
+
+    await waitFor(() => {
+      expect(screen.getByText("Beta")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByPlaceholderText("搜尋書名或作者");
+    fireEvent.change(searchInput, { target: { value: "Alpha" } });
+    // Real timers: wait out the 300 ms debounce until Bob's book is filtered away.
+    await waitFor(() => {
+      expect(screen.queryByText("Beta")).not.toBeInTheDocument();
+    });
+
+    selectMemberOption("Bob");
+
+    expect(searchInput).toHaveValue("");
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+  });
+
   it("search filters books by title", async () => {
     mockGetFamilyMembers.mockResolvedValue({
       data: {
