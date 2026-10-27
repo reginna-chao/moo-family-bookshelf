@@ -1,4 +1,20 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
+import {
+  isPatternComplete,
+  pickSecretEntryError,
+  serializePattern,
+} from "moo-family-bookshelf-shared/verifyInput/rules";
+import {
+  formatPatternCounter,
+  PATTERN_MISMATCH_MESSAGE,
+} from "moo-family-bookshelf-shared/verifyInput/messages";
+import {
+  CANVAS_SIZE,
+  DOT_COUNT,
+  DOT_RADIUS,
+  getDotCenter,
+  getIndexFromPosition,
+} from "./patternGeometry";
 
 export interface PatternLockProps {
   onComplete: (pattern: string) => void;
@@ -9,33 +25,7 @@ export interface PatternLockProps {
   disabled?: boolean;
 }
 
-const GRID_SIZE = 3;
-const DOT_COUNT = GRID_SIZE * GRID_SIZE;
-const MIN_DOTS = 4;
-const CANVAS_SIZE = 200;
-const DOT_RADIUS = 12;
-const DOT_SPACING = CANVAS_SIZE / GRID_SIZE;
-const DOT_OFFSET = DOT_SPACING / 2;
-
 type SetupStep = "enter" | "confirm";
-
-function getDotCenter(index: number): { x: number; y: number } {
-  const col = index % GRID_SIZE;
-  const row = Math.floor(index / GRID_SIZE);
-  return {
-    x: col * DOT_SPACING + DOT_OFFSET,
-    y: row * DOT_SPACING + DOT_OFFSET,
-  };
-}
-
-function getIndexFromPosition(x: number, y: number): number | null {
-  for (let i = 0; i < DOT_COUNT; i++) {
-    const center = getDotCenter(i);
-    const dist = Math.sqrt((x - center.x) ** 2 + (y - center.y) ** 2);
-    if (dist <= DOT_RADIUS * 1.5) return i;
-  }
-  return null;
-}
 
 export function PatternLock({
   onComplete,
@@ -99,45 +89,35 @@ export function PatternLock({
     [drawing, selected, getEventPos],
   );
 
-  const finishPattern = useCallback(
-    (pattern: number[]) => {
-      const serialized = pattern.join(",");
-
-      if (pattern.length < MIN_DOTS) {
-        setMismatchError(`至少需要連接 ${MIN_DOTS} 個點`);
-        reset();
-        return;
-      }
-
-      if (mode === "verify") {
-        onComplete(serialized);
-        reset();
-        return;
-      }
-
-      if (setupStep === "enter") {
-        setFirstPattern(serialized);
-        setSetupStep("confirm");
-        reset();
-        return;
-      }
-
-      if (serialized === firstPattern) {
-        onComplete(serialized);
-      } else {
-        setMismatchError("圖形不一致，請重新繪製");
-      }
-      reset();
-    },
-    [mode, setupStep, firstPattern, onComplete, reset],
-  );
-
+  // Releasing (or sliding out of the grid) only ends the stroke; 確認 submits it.
   const handleEnd = useCallback(() => {
-    if (!drawing) return;
     setDrawing(false);
     setMousePos(null);
-    finishPattern(selected);
-  }, [drawing, selected, finishPattern]);
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    if (disabled || !isPatternComplete(selected)) return;
+    const serialized = serializePattern(selected);
+
+    if (mode === "verify") {
+      setSelected([]);
+      return onComplete(serialized);
+    }
+
+    if (setupStep === "enter") {
+      setFirstPattern(serialized);
+      setSetupStep("confirm");
+      setSelected([]);
+      return;
+    }
+
+    if (serialized === firstPattern) {
+      onComplete(serialized);
+    } else {
+      setMismatchError(PATTERN_MISMATCH_MESSAGE);
+      setSelected([]);
+    }
+  }, [disabled, selected, mode, setupStep, firstPattern, onComplete]);
 
   // Prevent scrolling on touch devices while drawing
   useEffect(() => {
@@ -150,7 +130,7 @@ export function PatternLock({
     return () => svg.removeEventListener("touchmove", prevent);
   }, [drawing]);
 
-  const displayError = error ?? mismatchError;
+  const displayError = pickSecretEntryError(mismatchError, error);
   const label =
     mode === "verify"
       ? "請繪製解鎖圖形"
@@ -230,6 +210,17 @@ export function PatternLock({
             );
           })}
         </svg>
+        <div className="moo-secret-entry__counter">
+          {formatPatternCounter(selected.length)}
+        </div>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={disabled || !isPatternComplete(selected)}
+          className="moo-button moo-pattern-lock__confirm"
+        >
+          確認
+        </button>
       </div>
       {displayError && (
         <div className="moo-secret-entry__error">{displayError}</div>

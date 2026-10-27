@@ -4037,6 +4037,13 @@
   margin-top: 8px;
 }
 
+/* Progress counter (「3/6-12 位」 / 「已連接 3 個點（最少 4 個）」) above each widget's 確認. */
+.moo-secret-entry__counter {
+  font-size: 12px;
+  color: var(--moo-text-faint);
+  margin: 8px 0;
+}
+
 /* PinInput's error sits closer (4px) than PatternLock's (8px). */
 .moo-secret-entry__error--tight {
   margin-top: 4px;
@@ -4120,8 +4127,10 @@
 }
 
 /* Fixed 44px height + horizontal-only padding keep the submit aligned with the
-   200px PIN field in its row; solid primary look comes from .moo-button. */
-.moo-pin-input__submit {
+   200px PIN field in its row; solid primary look comes from .moo-button.
+   PatternLock's 確認 reuses the same metrics so both widgets' buttons match. */
+.moo-pin-input__submit,
+.moo-pattern-lock__confirm {
   padding: 0 20px;
   height: 44px;
 }

@@ -15,7 +15,8 @@
     "./personal/*": "./src/personal/*",
     "./publicShelf/*": "./src/publicShelf/*",
     "./safeUrl/*": "./src/safeUrl/*",
-    "./unkick/*": "./src/unkick/*"
+    "./unkick/*": "./src/unkick/*",
+    "./verifyInput/*": "./src/verifyInput/*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

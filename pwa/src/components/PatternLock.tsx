@@ -1,5 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  isPatternComplete,
+  pickSecretEntryError,
+  serializePattern,
+} from "moo-family-bookshelf-shared/verifyInput/rules";
+import {
+  formatPatternCounter,
+  PATTERN_MISMATCH_MESSAGE,
+} from "moo-family-bookshelf-shared/verifyInput/messages";
 import { ErrorAlert } from "./ErrorAlert";
+import { DOT_COUNT, GRID_SIZE, dotPosition } from "./patternGeometry";
 
 interface PatternLockProps {
   onComplete: (pattern: string) => void;
@@ -12,24 +22,6 @@ interface PatternLockProps {
   /** Block confirmation and drawing and dim the grid (e.g. during a back-off countdown or an
    *  in-flight submit); Cancel stays available. Defaults to false. */
   disabled?: boolean;
-}
-
-const GRID_SIZE = 3;
-const DOT_COUNT = GRID_SIZE * GRID_SIZE;
-const MIN_DOTS = 4;
-
-/** Grid layout: 0-1-2 / 3-4-5 / 6-7-8 */
-function dotPosition(
-  index: number,
-  cellSize: number,
-  padding: number,
-): { cx: number; cy: number } {
-  const col = index % GRID_SIZE;
-  const row = Math.floor(index / GRID_SIZE);
-  return {
-    cx: padding + col * cellSize + cellSize / 2,
-    cy: padding + row * cellSize + cellSize / 2,
-  };
 }
 
 export function PatternLock({
@@ -145,12 +137,12 @@ export function PatternLock({
   }, [isDrawing, handleMove, handleEnd]);
 
   const handleConfirm = useCallback(() => {
-    if (disabled || selected.length < MIN_DOTS) return;
-    const pattern = selected.join(",");
+    if (disabled || !isPatternComplete(selected)) return;
+    const pattern = serializePattern(selected);
 
     if (mode === "verify") {
-      onComplete(pattern);
-      return;
+      setSelected([]);
+      return onComplete(pattern);
     }
 
     if (!isConfirming) {
@@ -163,7 +155,7 @@ export function PatternLock({
     if (pattern === confirmPattern) {
       onComplete(pattern);
     } else {
-      setMismatchError("兩次圖形不一致，請重新繪製。");
+      setMismatchError(PATTERN_MISMATCH_MESSAGE);
       setSelected([]);
     }
   }, [disabled, selected, mode, isConfirming, confirmPattern, onComplete]);
@@ -175,7 +167,7 @@ export function PatternLock({
         ? "請再次繪製圖形確認"
         : "設定圖形驗證（至少連接 4 個點）";
 
-  const displayError = mismatchError || error;
+  const displayError = pickSecretEntryError(mismatchError, error);
   // A local mismatch is static copy — it announces itself.
   const displayAnnouncement = mismatchError ? undefined : errorAnnouncement;
   const gridClass = disabled
@@ -211,7 +203,7 @@ export function PatternLock({
       <h2 className="text-lg font-bold text-gray-900 mb-4">{title}</h2>
 
       <ErrorAlert
-        message={displayError ?? ""}
+        message={displayError}
         announcement={displayAnnouncement}
         className="mb-3"
       />
@@ -258,13 +250,13 @@ export function PatternLock({
       </svg>
 
       <p className="text-xs text-gray-400 mb-3">
-        已連接 {selected.length} 個點（最少 {MIN_DOTS} 個）
+        {formatPatternCounter(selected.length)}
       </p>
 
       <button
         type="button"
         onClick={handleConfirm}
-        disabled={disabled || selected.length < MIN_DOTS}
+        disabled={disabled || !isPatternComplete(selected)}
         className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         確認
