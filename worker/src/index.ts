@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
@@ -91,16 +92,16 @@ app.use("/api/*", async (c, next) => {
   const tooLarge = () =>
     jsonError(c, 413, "PAYLOAD_TOO_LARGE", payloadTooLargeMessage(limit));
   const contentLength = c.req.header("Content-Length");
-  if (contentLength) {
-    const size = parseInt(contentLength, 10);
-    if (!Number.isNaN(size) && size > limit.maxBytes) return tooLarge();
-  } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
-    // No Content-Length: read body to verify size.
-    // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
-    const buf = await c.req.raw.clone().arrayBuffer();
-    if (buf.byteLength > limit.maxBytes) return tooLarge();
+  if (contentLength !== undefined) {
+    // A present but non-numeric Content-Length (empty included) is refused fail-closed.
+    if (!/^\d+$/.test(contentLength)) return tooLarge();
+    if (parseInt(contentLength, 10) > limit.maxBytes) return tooLarge();
+    return next();
   }
-  await next();
+  if (c.req.method === "GET" || c.req.method === "DELETE") return next();
+  // No length: hono/body-limit counts the body as it streams and stops at the
+  // limit instead of buffering it whole (issue #361).
+  return bodyLimit({ maxSize: limit.maxBytes, onError: tooLarge })(c, next);
 });
 
 // Per-request KV operation logging (middleware/kvOpCounting.ts) — must stay
