@@ -116,12 +116,17 @@ describe("VerificationSettings", () => {
   });
 
   // #342: the hint used to claim the verification is phone-only, but an Extension re-login needs it too.
-  it("tells the user the verification also guards Extension re-login and where to reset it", async () => {
+  // #396: a change now needs the current secret, so the old "reset it from 設定" advice is gone.
+  it("tells the user the verification also guards Extension re-login and that a change needs the current secret", async () => {
     const api = createMockApiClient();
     render(<VerificationSettings userId="user-1" apiClient={api} />);
 
     const tip = await screen.findByText(/擴充功能需要重新登入時/);
-    expect(tip).toHaveTextContent("從擴充功能的「設定」改成新的");
+    // JSX joins the source line break into one space; compare with whitespace removed.
+    expect(tip.textContent?.replace(/\s+/g, "")).toBe(
+      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的PIN碼或圖形；忘記的話，自架伺服器請找管理者協助。",
+    );
+    expect(tip).not.toHaveTextContent("從擴充功能的「設定」改成新的");
     expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
   });
 
@@ -485,10 +490,11 @@ describe("VerificationSettings", () => {
     it("keeps the saving indicator when the previous save's reset comes due", async () => {
       // A second save is reachable inside the 2s 已儲存 window; the first save's pending timer must not
       // drop it out of "saving". See the file header, "Save-reset timers".
+      // A `none` account: a PIN one would ask for its current secret first (#396).
       const api = createMockApiClient({
         getVerifyMethod: vi
           .fn()
-          .mockResolvedValue({ data: { method: "pin", prompted: 1 } }),
+          .mockResolvedValue({ data: { method: "none", prompted: 1 } }),
         setVerifyMethod: vi
           .fn()
           .mockResolvedValueOnce({ data: { ok: true } })
@@ -501,7 +507,7 @@ describe("VerificationSettings", () => {
       await act(async () => {
         render(<VerificationSettings userId="user-1" apiClient={api} />);
       });
-      expect(screen.getByText("目前方式：PIN 碼")).toBeInTheDocument();
+      expect(screen.getByText("目前方式：不設定驗證")).toBeInTheDocument();
 
       vi.useFakeTimers();
 

@@ -1469,7 +1469,11 @@ describe("FamilySettings", () => {
       fireEvent.click(screen.getByText("確定移除"));
 
       await waitFor(() => {
-        expect(apiClient.deleteAccount).toHaveBeenCalledWith("user-abc12345");
+        // A `none` account confirms without a current secret (#396).
+        expect(apiClient.deleteAccount).toHaveBeenCalledWith(
+          "user-abc12345",
+          undefined,
+        );
         expect(onLeave).toHaveBeenCalled();
       });
     });

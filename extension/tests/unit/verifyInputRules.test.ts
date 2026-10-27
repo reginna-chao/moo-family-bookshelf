@@ -10,6 +10,11 @@ import {
   serializePattern,
 } from "moo-family-bookshelf-shared/verifyInput/rules";
 import {
+  CURRENT_PATTERN_WRONG_MESSAGE,
+  CURRENT_PIN_WRONG_MESSAGE,
+  CURRENT_SECRET_UNAVAILABLE_MESSAGE,
+  currentSecretPrompt,
+  currentSecretWrongMessage,
   formatPatternCounter,
   formatPinCounter,
   PATTERN_MISMATCH_MESSAGE,
@@ -133,4 +138,56 @@ describe("verifyInput messages", () => {
   ])("formats the pattern counter for $count dots", ({ count, expected }) => {
     expect(formatPatternCounter(count)).toBe(expected);
   });
+});
+
+/** Copy of the current-secret step before a verify change or account deletion (#396); the render
+ *  sites are asserted in VerificationSettings.stepUp / FamilySettingsDeleteBlock component suites. */
+describe("current-secret messages", () => {
+  it("pins the wrong-secret and unavailable sentences", () => {
+    expect(CURRENT_PIN_WRONG_MESSAGE).toBe("目前的 PIN 碼不正確，請重新輸入。");
+    expect(CURRENT_PATTERN_WRONG_MESSAGE).toBe(
+      "目前的圖形不正確，請重新繪製。",
+    );
+    expect(CURRENT_SECRET_UNAVAILABLE_MESSAGE).toBe(
+      "伺服器要求驗證目前的 PIN 碼或圖形，請稍後再試。",
+    );
+  });
+
+  it.each([
+    { method: "pin", expected: CURRENT_PIN_WRONG_MESSAGE },
+    { method: "pattern", expected: CURRENT_PATTERN_WRONG_MESSAGE },
+  ] as const)(
+    "picks the wrong-secret copy for $method",
+    ({ method, expected }) => {
+      expect(currentSecretWrongMessage(method)).toBe(expected);
+    },
+  );
+
+  it.each([
+    {
+      method: "pin",
+      purpose: "change",
+      expected: "要更改登入驗證，請先輸入目前的 PIN 碼。",
+    },
+    {
+      method: "pattern",
+      purpose: "change",
+      expected: "要更改登入驗證，請先畫出目前的圖形。",
+    },
+    {
+      method: "pin",
+      purpose: "delete",
+      expected: "移除帳戶前，請先輸入目前的 PIN 碼。",
+    },
+    {
+      method: "pattern",
+      purpose: "delete",
+      expected: "移除帳戶前，請先畫出目前的圖形。",
+    },
+  ] as const)(
+    "builds the $purpose prompt for $method",
+    ({ method, purpose, expected }) => {
+      expect(currentSecretPrompt(method, purpose)).toBe(expected);
+    },
+  );
 });

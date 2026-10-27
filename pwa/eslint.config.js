@@ -16,7 +16,6 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/components/MemberList.tsx": 287,
   "src/components/PublicShareDialog.tsx": 298,
   "src/components/PatternLock.tsx": 276,
-  "src/components/VerifySetupPrompt.tsx": 250,
   "src/hooks/useAuth.ts": 258,
   "src/hooks/useFamilyData.tsx": 442,
   "src/hooks/usePublicShelfActions.ts": 278,
