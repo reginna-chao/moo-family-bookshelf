@@ -1,5 +1,7 @@
 import { useState, useCallback } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
+import type { SetVerifyBody } from "moo-family-bookshelf-shared/api/verifyTypes";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 
 interface UseVerifyMethodSaveOptions {
@@ -9,7 +11,7 @@ interface UseVerifyMethodSaveOptions {
   onTokenRotated?: (authToken: string) => void;
 }
 
-/** The setup prompt's save: store the chosen method, then mark the prompt as shown. */
+/** The setup prompt's save: stores the chosen method and the prompt-shown mark in ONE write. */
 export function useVerifyMethodSave({
   userId,
   apiClient,
@@ -22,7 +24,9 @@ export function useVerifyMethodSave({
     async (method: VerifyMethod, secret?: string) => {
       setSaving(true);
       setSaveError("");
-      const body: { method: VerifyMethod; secret?: string } = { method };
+      // No follow-up POST /verify/prompted: its stale read could overwrite the fresh method with
+      // `none` (#399, docs/architecture.md → PWA 登入驗證機制).
+      const body: SetVerifyBody = { method, prompted: BoolFlag.TRUE };
       if (secret) body.secret = secret;
       const res = await apiClient.setVerifyMethod(userId, body);
       if (res.error) {
@@ -35,8 +39,6 @@ export function useVerifyMethodSave({
       if (res.data?.authToken !== undefined) {
         onTokenRotated?.(res.data.authToken);
       }
-      // Mark as prompted
-      await apiClient.markVerifyPrompted(userId);
       setSaving(false);
       return true;
     },
