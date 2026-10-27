@@ -18,7 +18,10 @@ export function useRotatedTokenPersistence(
   return useCallback(
     (authToken: string) => {
       if (auth && isLiveSession(authRef.current, auth)) {
-        login({ ...auth, authToken });
+        // The new token's expiry is not passed up, so it reads as unknown and the next check renews.
+        const next: AuthState = { ...auth, authToken };
+        delete next.expiresAt;
+        login(next);
       }
     },
     [auth, authRef, login],

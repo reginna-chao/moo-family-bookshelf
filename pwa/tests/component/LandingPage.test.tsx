@@ -395,6 +395,36 @@ describe("LandingPage", () => {
       });
     });
 
+    // #364: the token's expiry reaches the session, so the proactive renewal knows when to renew.
+    it("should pass the join response's token expiry to onAuth", async () => {
+      mockDecodeSyncCode.mockReturnValue({ familyId: "fam-1" });
+      mockJoinFamily.mockResolvedValue({
+        data: {
+          ok: true,
+          authToken: "tok-123",
+          expiresAt: 1_900_000_000_000,
+        } as unknown as { ok: boolean },
+      });
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", "test@test.com");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockOnAuth).toHaveBeenCalledWith({
+          // sha256("moo:test@test.com") — hard-coded literal, see the first test above.
+          userId:
+            "fb665feb4ce879ca70bcd4bb4358b56daceb33815ef832461ced74b23c3c25eb",
+          familyId: "fam-1",
+          apiHost: undefined,
+          authToken: "tok-123",
+          expiresAt: 1_900_000_000_000,
+        });
+      });
+    });
+
     // #263: `recovery` belongs to App's silent token-recovery join only; a manual join stays plain, or
     // the server would refuse a user not (yet) listed in the family instead of adding them.
     it("should send a manual join without the recovery flag", async () => {

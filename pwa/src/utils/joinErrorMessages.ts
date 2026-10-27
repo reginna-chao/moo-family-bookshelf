@@ -1,4 +1,4 @@
-/** 繁體中文 copy for join failures that must be EXPLAINED, shared by `acquireNewToken` (App.tsx) and
+/** 繁體中文 copy for join failures that must be EXPLAINED, shared by `useRecoveryJoin` and
  *  `completeJoin` so the wording cannot drift. See docs/architecture.md → 背景自動復原的防護. */
 
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
