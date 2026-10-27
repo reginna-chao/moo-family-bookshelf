@@ -20,8 +20,9 @@ import {
  *
  * Harness: unlike App.test.tsx and App.reauthRelogin.test.tsx, `useAuth` and `ApiClient` are REAL
  * here, and `fetch` is the only network mock, so the observables are what production writes and
- * sends: the namespaced `authToken` key in localStorage and the `Authorization` header of the next
- * request. Pages, the family-data provider, InstallPrompt and VersionWarning are stubbed out; the
+ * sends: the namespaced `authToken` key in localStorage and the requests that leave, with their
+ * `Authorization` header. The save is a single PUT that carries `prompted: 1` and no follow-up POST
+ * (#399). Pages, the family-data provider, InstallPrompt and VersionWarning are stubbed out; the
  * SettingsPage stub exposes `onLogout` as a button so a test can end the session mid-save.
  *
  * Late callback (#258): the persist callback is bound to the session that rendered it. A save that
@@ -74,8 +75,6 @@ const PROMPTED_PATH = `${VERIFY_PATH}/prompted`;
 interface SentRequest {
   method: string;
   authorization: string | undefined;
-  /** The namespaced authToken key at the moment the request left. */
-  storedToken: string | null;
 }
 
 const mockFetch = vi.fn();
@@ -90,7 +89,8 @@ function routeKey(url: string, method: string): string {
   return `${method} ${new URL(url).pathname}`;
 }
 
-/** Answers the three verify calls the prompt makes and records each one as it is sent. */
+/** Answers the prompt's two verify calls (GET prompted + PUT) and records each one as it is sent.
+ *  A stray POST /verify/prompted is still answered, so it lands in `sent` instead of throwing (#399). */
 function installFetchRouter() {
   mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
     const method = init.method ?? "GET";
@@ -98,7 +98,6 @@ function installFetchRouter() {
     sent.set(key, {
       method,
       authorization: (init.headers as Record<string, string>)["Authorization"],
-      storedToken: localStorage.getItem(TOKEN_KEY),
     });
     if (key === `GET ${PROMPTED_PATH}`) return json({ data: { prompted: 0 } });
     if (key === `PUT ${VERIFY_PATH}`) return json(await answerPut());
@@ -151,7 +150,7 @@ describe("App verify-method token rotation", () => {
     localStorage.clear();
   });
 
-  it("persists the rotated token into the stored session before marking the prompt shown", async () => {
+  it("persists the rotated token into the stored session before the prompt closes", async () => {
     await renderPromptOpen();
 
     await act(async () => {
@@ -165,10 +164,8 @@ describe("App verify-method token rotation", () => {
     expect(sent.get(`PUT ${VERIFY_PATH}`)?.authorization).toBe(
       `Bearer ${OLD_TOKEN}`,
     );
-    // The follow-up carries the new token, and the session already held it when it left.
-    const marked = sent.get(`POST ${PROMPTED_PATH}`);
-    expect(marked?.authorization).toBe(`Bearer ${ROTATED_TOKEN}`);
-    expect(marked?.storedToken).toBe(ROTATED_TOKEN);
+    // The save is the only write: no follow-up POST /verify/prompted (#399).
+    expect(sent.has(`POST ${PROMPTED_PATH}`)).toBe(false);
     expect(localStorage.getItem(TOKEN_KEY)).toBe(ROTATED_TOKEN);
     expect(localStorage.getItem(USER_ID_KEY)).toBe(USER_ID);
     expect(screen.getByRole("button", { name: "設定" })).toBeInTheDocument();
@@ -183,12 +180,9 @@ describe("App verify-method token rotation", () => {
       fireEvent.click(screen.getByText("隨機驗證碼"));
     });
     await waitFor(() => {
-      expect(sent.has(`POST ${PROMPTED_PATH}`)).toBe(true);
+      expect(screen.queryByText("設定登入驗證")).not.toBeInTheDocument();
     });
 
-    expect(sent.get(`POST ${PROMPTED_PATH}`)?.authorization).toBe(
-      `Bearer ${OLD_TOKEN}`,
-    );
     expect(localStorage.getItem(TOKEN_KEY)).toBe(OLD_TOKEN);
   });
 
@@ -216,10 +210,9 @@ describe("App verify-method token rotation", () => {
     await act(async () => {
       releasePut(rotatedAnswer());
     });
-    // The save's tail still runs; once it has, the late callback has had its chance to write.
-    await waitFor(() => {
-      expect(sent.has(`POST ${PROMPTED_PATH}`)).toBe(true);
-    });
+    // The save's tail runs inside the act above; one more empty `act` flushes what it scheduled,
+    // so the late callback has had its chance to write.
+    await act(async () => {});
 
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(localStorage.getItem(USER_ID_KEY)).toBeNull();

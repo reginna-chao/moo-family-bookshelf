@@ -16,7 +16,7 @@ export interface VerifyPromptedInfo {
 export interface SetVerifyBody {
   method: VerifyMethod;
   secret?: string;
-  prompted?: number;
+  prompted?: BoolFlag;
 }
 
 /** `PUT /api/user/:id/verify` result. A new `pin` / `pattern` / `code` revokes the account's
