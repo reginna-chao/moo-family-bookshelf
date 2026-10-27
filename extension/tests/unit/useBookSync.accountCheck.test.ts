@@ -18,6 +18,9 @@ import type { ApiClient } from "@/api/client";
  *
  * Each skip has a `match` companion with the same mocks that DOES sync, so the
  * negative assertions cannot pass for an unrelated reason.
+ *
+ * No provider (#365): the hook throws at render instead of treating the account
+ * as confirmed, so a consumer mounted outside AccountCheckProvider never uploads.
  */
 
 vi.mock("@/sync/syncBooks", () => ({
@@ -90,6 +93,22 @@ describe("useBookSync account check", () => {
     vi.clearAllMocks();
     vi.mocked(canAutoSync).mockResolvedValue(true);
     vi.mocked(syncBooks).mockResolvedValue({ success: true, books: [] });
+  });
+
+  it("throws without an AccountCheckProvider instead of syncing", async () => {
+    // React logs the render error; keep the suite output clean.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    try {
+      expect(() =>
+        renderHook(() => useBookSync({ userId: "user-1", apiClient })),
+      ).toThrow(/AccountCheckProvider/);
+      await flushAsync();
+      expect(syncBooks).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   describe("mount auto-sync", () => {

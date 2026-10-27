@@ -25,17 +25,15 @@ export interface AccountCheck {
 export const ACCOUNT_UNCONFIRMED_SYNC_MESSAGE =
   "無法確認目前登入的讀墨帳號，這次沒有同步書單。請確認已登入讀墨後再試一次。";
 
-/** Value with NO provider: behaves as confirmed, exactly as before #271. App is the only
- *  production mount of the main view and always provides one. */
-const NO_PROVIDER: AccountCheck = {
-  status: "match",
-  recheck: () => Promise.resolve("match"),
-};
-
-const AccountCheckContext = createContext<AccountCheck>(NO_PROVIDER);
+// No default value: a consumer mounted without a provider throws instead of uploading (#365).
+const AccountCheckContext = createContext<AccountCheck | null>(null);
 
 export const AccountCheckProvider = AccountCheckContext.Provider;
 
 export function useAccountCheck(): AccountCheck {
-  return useContext(AccountCheckContext);
+  const ctx = useContext(AccountCheckContext);
+  if (!ctx) {
+    throw new Error("useAccountCheck must be used within AccountCheckProvider");
+  }
+  return ctx;
 }
