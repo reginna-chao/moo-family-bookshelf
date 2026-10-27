@@ -41,7 +41,8 @@ function optionClass(selected: boolean, active: boolean): string {
  * container (the Shadow Root in production, `document.body` on the dev page) and
  * positioned with `position: fixed` so the Dialog's `overflow: hidden` cannot
  * clip it. Closes on outside click, Escape, scroll, or resize — all listeners
- * attached only while open and removed on cleanup.
+ * attached only while open and removed on cleanup. Options are out of the Tab
+ * order (the listbox is the only focus target); Tab / Shift+Tab close the list.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   const [open, setOpen] = useState(false);
@@ -78,7 +79,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
     place(triggerRef.current, menuRef.current);
   }, [open, place, reset]);
 
-  // After a real open→close (Esc, outside click, selection) focus returns to the trigger;
+  // After a real open→close (Esc, Tab, outside click, selection) focus returns to the trigger;
   // wasOpenRef keeps the initial mount from stealing focus.
   useLayoutEffect(() => {
     if (open) {
@@ -110,6 +111,11 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   };
 
   const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // No preventDefault: close (the close effect refocuses the trigger) and keep the native Tab move.
+    if (e.key === "Tab") {
+      close();
+      return;
+    }
     const currentIndex = OPTIONS.findIndex((opt) => opt.value === activeValue);
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -176,6 +182,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
                   type="button"
                   role="option"
                   aria-selected={selected}
+                  tabIndex={-1}
                   onClick={() => handleSelect(opt.value)}
                   className={optionClass(selected, active)}
                 >

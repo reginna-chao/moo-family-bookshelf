@@ -232,6 +232,120 @@ describe("PublicShareDialog · modal focus management", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  /** Render the active-shelf view with an observable onClose, settled inside `act`. */
+  async function renderSettledModal() {
+    const onClose = vi.fn();
+    const view = await act(async () =>
+      render(
+        <PublicShareDialog
+          userId="user-1"
+          apiClient={makeActiveApiClient()}
+          defaultDisplayName="小明"
+          onClose={onClose}
+        />,
+      ),
+    );
+    // The last focusable control of the active view; pins that the load settled.
+    const lastControl = screen.getByRole("button", { name: "關閉公開分享" });
+    return { onClose, unmount: view.unmount, lastControl };
+  }
+
+  it("calls onClose on Escape, and not on other keys", async () => {
+    const { onClose } = await renderSettledModal();
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps Tab from the last focusable control back to the first", async () => {
+    const { lastControl } = await renderSettledModal();
+    lastControl.focus();
+
+    // fireEvent returns false when the trap called preventDefault().
+    expect(fireEvent.keyDown(lastControl, { key: "Tab" })).toBe(false);
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "關閉" }),
+    );
+  });
+
+  it("wraps Shift+Tab from the dialog container to the last focusable control", async () => {
+    const { lastControl } = await renderSettledModal();
+    const dialog = screen.getByRole("dialog");
+    expect(document.activeElement).toBe(dialog);
+
+    expect(fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true })).toBe(
+      false,
+    );
+
+    expect(document.activeElement).toBe(lastControl);
+  });
+
+  it("wraps Shift+Tab from the first focusable control to the last", async () => {
+    const { lastControl } = await renderSettledModal();
+    const first = screen.getByRole("button", { name: "關閉" });
+    first.focus();
+
+    expect(fireEvent.keyDown(first, { key: "Tab", shiftKey: true })).toBe(
+      false,
+    );
+
+    expect(document.activeElement).toBe(lastControl);
+  });
+
+  // Negative companion: away from the edges the browser's own Tab order applies.
+  it("leaves Tab between two inner controls to the browser", async () => {
+    await renderSettledModal();
+    const title = screen.getByLabelText("標題");
+    title.focus();
+
+    expect(fireEvent.keyDown(title, { key: "Tab" })).toBe(true);
+    expect(document.activeElement).toBe(title);
+  });
+
+  it("calls onClose on Escape pressed inside a form field (the key bubbles to window)", async () => {
+    const { onClose } = await renderSettledModal();
+
+    fireEvent.keyDown(screen.getByLabelText("標題"), { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops listening for Escape once unmounted", async () => {
+    const { onClose, unmount } = await renderSettledModal();
+
+    unmount();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("labels the icon-only close button 關閉 and closes through it", async () => {
+    const { onClose } = await renderSettledModal();
+
+    const closeButton = screen.getByRole("button", { name: "關閉" });
+    expect(closeButton).toHaveAttribute("type", "button");
+    fireEvent.click(closeButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on a backdrop click but not on a click inside the panel", async () => {
+    const { onClose } = await renderSettledModal();
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+
+    const backdrop = dialog.parentElement;
+    if (!backdrop) throw new Error("dialog has no backdrop");
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   describe("mounted inside an open shadow root", () => {
     let host: HTMLDivElement;
     let shadowRoot: ShadowRoot;

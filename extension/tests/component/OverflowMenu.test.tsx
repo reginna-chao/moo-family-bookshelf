@@ -353,6 +353,70 @@ describe("OverflowMenu", () => {
       expect(document.activeElement).not.toBe(trigger);
     });
 
+    // The trigger must hold focus BEFORE onSelect runs: a destructive option can unmount the row
+    // and strand focus on <body>.
+    it("refocuses the trigger before onSelect when an item is activated by keyboard", () => {
+      let focusedDuringSelect: Element | null = null;
+      const onSelect = vi.fn(() => {
+        focusedDuringSelect = document.activeElement;
+      });
+      render(<OverflowMenu items={[{ label: "隱藏書籍", onSelect }]} />);
+      const trigger = screen.getByRole("button", { name: "更多選項" });
+      fireEvent.click(trigger);
+
+      fireEvent.click(screen.getByRole("menuitem", { name: "隱藏書籍" }), {
+        detail: 0,
+      });
+
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(focusedDuringSelect).toBe(trigger);
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    // The user moved to another control while the menu stayed open: closing must not steal it back.
+    it("leaves focus alone on an outside mousedown when focus is not in the panel", () => {
+      render(
+        <div>
+          <button type="button">outside</button>
+          <OverflowMenu items={THREE_ITEMS} />
+        </div>,
+      );
+      const trigger = screen.getByRole("button", { name: "更多選項" });
+      fireEvent.click(trigger);
+      const outside = screen.getByRole("button", { name: "outside" });
+      outside.focus();
+
+      fireEvent.mouseDown(outside);
+
+      // Positive companion: the mousedown did dismiss the menu.
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(outside);
+      expect(document.activeElement).not.toBe(trigger);
+    });
+
+    // An enclosing modal listens for Escape too; the menu owns it, or one key press closes both.
+    it("stops Escape on the menu from reaching a document-level keydown listener and closes once", () => {
+      const onOpenChange = vi.fn();
+      render(<OverflowMenu items={THREE_ITEMS} onOpenChange={onOpenChange} />);
+      fireEvent.click(screen.getByRole("button", { name: "更多選項" }));
+      const seen: string[] = [];
+      const listener = (e: KeyboardEvent) => seen.push(e.key);
+      document.addEventListener("keydown", listener);
+      try {
+        // Positive companion: a key the menu ignores does bubble to the document.
+        fireEvent.keyDown(focusedElement(), { key: "a" });
+        expect(seen).toEqual(["a"]);
+
+        fireEvent.keyDown(focusedElement(), { key: "Escape" });
+
+        expect(seen).toEqual(["a"]);
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+        expect(onOpenChange.mock.calls).toEqual([[true], [false]]);
+      } finally {
+        document.removeEventListener("keydown", listener);
+      }
+    });
+
     it("re-focuses the first item when the menu is reopened after keyboard navigation", () => {
       const { trigger } = openMenu();
 

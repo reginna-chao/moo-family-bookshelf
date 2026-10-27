@@ -60,8 +60,10 @@ export function MemberDropdown({
     <div className="relative flex-1 min-w-0">
       <button
         ref={triggerRef}
+        type="button"
         onClick={handleToggle}
         aria-label={memberFilterAccessibleName(current.label, current.count)}
+        aria-haspopup="listbox"
         aria-expanded={open}
         className="flex items-center justify-between w-full rounded-lg border border-gray-300 bg-white pl-3 pr-3 py-2.5 text-sm text-gray-700 focus-visible:border-blue-500 focus-visible:ring-1 focus-visible:ring-blue-500 outline-none"
       >
@@ -97,6 +99,7 @@ export function MemberDropdown({
             return (
               <button
                 key={opt.key}
+                type="button"
                 role="option"
                 aria-selected={selected}
                 onClick={() => handleSelect(opt.value)}

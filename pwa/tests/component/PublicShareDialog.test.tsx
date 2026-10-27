@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { PublicShareDialog } from "@/components/PublicShareDialog";
@@ -11,7 +11,7 @@ import {
 } from "@/utils/publicShareMessages";
 
 /**
- * PublicShareDialog: refused writes never advance the UI.
+ * PublicShareDialog: modal focus management, and refused writes never advance the UI.
  *
  * Readiness: `findByLabelText` alone is not a readiness signal — DOM presence != effects flushed. It
  * waits with the act environment disabled and ends on a bare `setTimeout(0)`, so React may still owe
@@ -82,6 +82,152 @@ function createDeferred<T>() {
   });
   return { promise, resolve: (value: T) => settle(value) };
 }
+
+/** Modal keyboard model, matching extension/tests/component/PublicShareDialog.test.tsx: focus moves in
+ *  on open and back to the opener on close, Escape closes, Tab / Shift+Tab wrap inside the panel. */
+describe("PublicShareDialog · modal focus management", () => {
+  let opener: HTMLButtonElement;
+
+  beforeEach(() => {
+    opener = document.createElement("button");
+    opener.textContent = "公開分享";
+    document.body.appendChild(opener);
+    opener.focus();
+  });
+
+  afterEach(() => {
+    opener.remove();
+  });
+
+  /** Render the active-shelf view with an observable onClose, settled inside `act`. */
+  async function renderSettledModal() {
+    const onClose = vi.fn();
+    const view = await act(async () =>
+      render(
+        <PublicShareDialog
+          userId="user-1"
+          apiClient={makeActiveApiClient()}
+          defaultDisplayName="小明"
+          onClose={onClose}
+        />,
+      ),
+    );
+    // The last focusable control of the active view; pins that the load settled.
+    const lastControl = screen.getByRole("button", { name: "關閉公開分享" });
+    return { onClose, unmount: view.unmount, lastControl };
+  }
+
+  it("exposes modal semantics on the focusable dialog container", async () => {
+    await renderSettledModal();
+
+    const dialog = screen.getByRole("dialog", { name: "公開書櫃分享" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-label", "公開書櫃分享");
+    expect(dialog).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("labels the icon-only close button 關閉 and closes through it", async () => {
+    const { onClose } = await renderSettledModal();
+
+    const closeButton = screen.getByRole("button", { name: "關閉" });
+    expect(closeButton).toHaveAttribute("type", "button");
+    fireEvent.click(closeButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus into the dialog container on open", async () => {
+    await renderSettledModal();
+
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    expect(opener).not.toHaveFocus();
+  });
+
+  it("calls onClose on Escape, and not on other keys", async () => {
+    const { onClose } = await renderSettledModal();
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onClose on Escape pressed inside a form field (the key bubbles to window)", async () => {
+    const { onClose } = await renderSettledModal();
+
+    fireEvent.keyDown(screen.getByLabelText("標題"), { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps Tab from the last focusable control back to the first", async () => {
+    const { lastControl } = await renderSettledModal();
+    lastControl.focus();
+
+    // fireEvent returns false when the trap called preventDefault().
+    expect(fireEvent.keyDown(lastControl, { key: "Tab" })).toBe(false);
+
+    expect(screen.getByRole("button", { name: "關閉" })).toHaveFocus();
+  });
+
+  it.each<{ name: string; start: () => HTMLElement }>([
+    { name: "the dialog container", start: () => screen.getByRole("dialog") },
+    {
+      name: "the first focusable control",
+      start: () => screen.getByRole("button", { name: "關閉" }),
+    },
+  ])("wraps Shift+Tab from $name to the last control", async ({ start }) => {
+    const { lastControl } = await renderSettledModal();
+    const from = start();
+    from.focus();
+
+    expect(fireEvent.keyDown(from, { key: "Tab", shiftKey: true })).toBe(false);
+
+    expect(lastControl).toHaveFocus();
+  });
+
+  // Negative companion: away from the edges the browser's own Tab order applies.
+  it("leaves Tab between two inner controls to the browser", async () => {
+    await renderSettledModal();
+    const title = screen.getByLabelText("標題");
+    title.focus();
+
+    expect(fireEvent.keyDown(title, { key: "Tab" })).toBe(true);
+    expect(title).toHaveFocus();
+  });
+
+  it("restores focus to the opener when the dialog unmounts", async () => {
+    const { unmount } = await renderSettledModal();
+    expect(opener).not.toHaveFocus();
+
+    unmount();
+
+    expect(opener).toHaveFocus();
+  });
+
+  it("stops listening for Escape once unmounted", async () => {
+    const { onClose, unmount } = await renderSettledModal();
+
+    unmount();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a backdrop click but not on a click inside the panel", async () => {
+    const { onClose } = await renderSettledModal();
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+
+    const backdrop = dialog.parentElement;
+    if (!backdrop) throw new Error("dialog has no backdrop");
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
 
 /** Fail-open fix: a refused write never advances the UI past what the server confirmed, and its reason
  *  reaches the user in 繁體中文. See the header → "Refused writes". */

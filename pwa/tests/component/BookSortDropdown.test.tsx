@@ -13,6 +13,14 @@ import type { BookSortMode } from "moo-family-bookshelf-shared/familyShelf/sortB
 
 afterEach(cleanup);
 
+const OPTIONS: Array<{ value: BookSortMode; label: string }> = [
+  { value: "default", label: "預設順序" },
+  { value: "title-asc", label: "書名 A → Z" },
+  { value: "title-desc", label: "書名 Z → A" },
+  { value: "author-asc", label: "作者 A → Z" },
+  { value: "author-desc", label: "作者 Z → A" },
+];
+
 /** Opens the popover by clicking the trigger and returns its listbox. */
 function openListbox(): HTMLElement {
   fireEvent.click(screen.getByLabelText("排序方式"));
@@ -229,5 +237,212 @@ describe("BookSortDropdown", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       expect(screen.getByLabelText("排序方式")).not.toHaveFocus();
     });
+  });
+
+  it("marks the trigger as a non-submitting button that opens a listbox", () => {
+    render(<BookSortDropdown value="default" onChange={vi.fn()} />);
+
+    const trigger = screen.getByRole("button", { name: "排序方式" });
+    expect(trigger).toHaveAttribute("type", "button");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("renders every option as a non-submitting button", () => {
+    render(<BookSortDropdown value="default" onChange={vi.fn()} />);
+
+    const options = within(openListbox()).getAllByRole("option");
+    expect(options).toHaveLength(OPTIONS.length);
+    for (const option of options) {
+      expect(option).toHaveAttribute("type", "button");
+    }
+  });
+
+  // Listbox keyboard model, matching extension/tests/component/BookSortDropdown.test.tsx: focus
+  // stays on the listbox and aria-activedescendant names the option the arrow keys point at.
+  describe("keyboard navigation", () => {
+    function openMenu(value: BookSortMode = "default", onChange = vi.fn()) {
+      render(<BookSortDropdown value={value} onChange={onChange} />);
+      const trigger = screen.getByRole("button", { name: "排序方式" });
+      fireEvent.click(trigger);
+      return { trigger, listbox: screen.getByRole("listbox"), onChange };
+    }
+
+    /** The id of the option currently pointed at by aria-activedescendant. */
+    function activeOptionId(listbox: HTMLElement): string | null {
+      return listbox.getAttribute("aria-activedescendant");
+    }
+
+    /** The DOM id of a given option, looked up by its visible label. */
+    function optionId(label: string): string {
+      const { id } = screen.getByRole("option", { name: label });
+      expect(id).not.toBe("");
+      return id;
+    }
+
+    it("focuses the listbox on open so the arrow keys reach it", () => {
+      const { listbox } = openMenu();
+
+      expect(listbox).toHaveFocus();
+      expect(listbox).toHaveAttribute("tabindex", "-1");
+      expect(listbox).toHaveAttribute("aria-label", "排序方式選單");
+    });
+
+    it.each(OPTIONS)(
+      "seeds aria-activedescendant from value '$value' on open",
+      ({ value, label }) => {
+        const { listbox } = openMenu(value);
+
+        expect(activeOptionId(listbox)).toBe(optionId(label));
+      },
+    );
+
+    it("moves the active descendant down through every option with ArrowDown", () => {
+      const { listbox } = openMenu("default");
+
+      for (const { label } of OPTIONS.slice(1)) {
+        fireEvent.keyDown(listbox, { key: "ArrowDown" });
+        expect(activeOptionId(listbox)).toBe(optionId(label));
+      }
+    });
+
+    it("moves the active descendant up through every option with ArrowUp", () => {
+      const { listbox } = openMenu("author-desc");
+
+      for (const { label } of [...OPTIONS].reverse().slice(1)) {
+        fireEvent.keyDown(listbox, { key: "ArrowUp" });
+        expect(activeOptionId(listbox)).toBe(optionId(label));
+      }
+    });
+
+    it.each<{ name: string; value: BookSortMode; key: string; label: string }>([
+      {
+        name: "ArrowUp at the top",
+        value: "default",
+        key: "ArrowUp",
+        label: "預設順序",
+      },
+      {
+        name: "ArrowDown at the bottom",
+        value: "author-desc",
+        key: "ArrowDown",
+        label: "作者 Z → A",
+      },
+    ])("stays put on $name (no wrap)", ({ value, key, label }) => {
+      const { listbox } = openMenu(value);
+
+      fireEvent.keyDown(listbox, { key });
+
+      expect(activeOptionId(listbox)).toBe(optionId(label));
+    });
+
+    it.each<{ key: string; from: BookSortMode; label: string }>([
+      { key: "Home", from: "author-desc", label: "預設順序" },
+      { key: "End", from: "default", label: "作者 Z → A" },
+    ])("jumps to $label on $key", ({ key, from, label }) => {
+      const { listbox } = openMenu(from);
+
+      fireEvent.keyDown(listbox, { key });
+
+      expect(activeOptionId(listbox)).toBe(optionId(label));
+    });
+
+    it.each(["ArrowDown", "ArrowUp", "Home", "End", "Enter", " "])(
+      "prevents the browser default for key '%s'",
+      (key) => {
+        const { listbox } = openMenu("title-desc");
+
+        // fireEvent returns false when the handler called preventDefault().
+        expect(fireEvent.keyDown(listbox, { key })).toBe(false);
+      },
+    );
+
+    it.each<{
+      name: string;
+      moves: string[];
+      commit: string;
+      expected: BookSortMode;
+    }>([
+      {
+        name: "Enter",
+        moves: ["ArrowDown"],
+        commit: "Enter",
+        expected: "title-asc",
+      },
+      { name: "Space", moves: ["End"], commit: " ", expected: "author-desc" },
+    ])(
+      "selects the active option with $name, closes and refocuses the trigger",
+      ({ moves, commit, expected }) => {
+        const onChange = vi.fn();
+        const { trigger, listbox } = openMenu("default", onChange);
+
+        for (const key of moves) fireEvent.keyDown(listbox, { key });
+        fireEvent.keyDown(listbox, { key: commit });
+
+        expect(onChange).toHaveBeenCalledTimes(1);
+        expect(onChange).toHaveBeenCalledWith(expected);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(trigger).toHaveFocus();
+      },
+    );
+
+    it("re-seeds the active option from value when reopened after arrow moves", () => {
+      const { trigger, listbox } = openMenu("title-asc");
+      fireEvent.keyDown(listbox, { key: "End" });
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      fireEvent.click(trigger);
+
+      const reopened = screen.getByRole("listbox");
+      expect(activeOptionId(reopened)).toBe(optionId("書名 A → Z"));
+    });
+
+    // Selected stays blue; only a keyboard-active option that is NOT selected turns grey.
+    it("greys out the keyboard-active option only while it is not the selected one", () => {
+      const { listbox } = openMenu("default");
+      const selected = screen.getByRole("option", { name: "預設順序" });
+      const next = screen.getByRole("option", { name: "書名 A → Z" });
+      expect(selected).toHaveClass("bg-blue-50");
+      expect(selected).not.toHaveClass("bg-gray-100");
+      expect(next).not.toHaveClass("bg-gray-100");
+
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+
+      expect(next).toHaveClass("bg-gray-100");
+      expect(selected).toHaveClass("bg-blue-50");
+      const greyed = within(listbox)
+        .getAllByRole("option")
+        .filter((o) => o.classList.contains("bg-gray-100"));
+      expect(greyed).toEqual([next]);
+    });
+
+    it("keeps every option out of the Tab order", () => {
+      const { listbox } = openMenu("default");
+
+      const options = within(listbox).getAllByRole("option");
+      expect(options).toHaveLength(OPTIONS.length);
+      for (const option of options) {
+        expect(option).toHaveAttribute("tabindex", "-1");
+      }
+    });
+
+    // PWA-only rule (the Extension refocuses the trigger): Tab leaves focus to the browser.
+    it.each([
+      { name: "Tab", shiftKey: false },
+      { name: "Shift+Tab", shiftKey: true },
+    ])(
+      "closes without selecting and keeps the native focus move on $name",
+      ({ shiftKey }) => {
+        const onChange = vi.fn();
+        const { trigger, listbox } = openMenu("default", onChange);
+        fireEvent.keyDown(listbox, { key: "ArrowDown" });
+
+        // fireEvent returns true when the handler did NOT call preventDefault().
+        expect(fireEvent.keyDown(listbox, { key: "Tab", shiftKey })).toBe(true);
+
+        expect(onChange).not.toHaveBeenCalled();
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(document.activeElement).not.toBe(trigger);
+      },
+    );
   });
 });
