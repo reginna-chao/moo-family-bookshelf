@@ -13,3 +13,30 @@ test-results/
 .dev.vars
 .DS_Store
 Thumbs.db
+
+# The main checkout's .claude/worktrees/ holds whole copies of other worktrees
+# (821 MB against a 186 MB repo); nothing under .claude/ belongs in an image.
+.claude/
+
+# Patterns without `**/` match only the context root; these mirror .gitignore so worker/.dev.vars, worker/.wrangler/
+# (local KV state) and extension/.verify-selectors-profile/ (a Chrome profile with a Readmoo login) never reach an image.
+**/.wrangler/
+**/.dev.vars
+**/coverage/
+**/playwright-report/
+**/test-results/
+**/.verify-selectors-profile/
+# Real Readmoo page dumps with personal data (see .gitignore).
+docs/resource/
+**/dist-*/
+**/web-ext-artifacts*/
+# Untracked local env files only; the git-tracked .env.example / .env.production /
+# .env.remote stay in the context.
+**/.env
+**/.env.local
+# Local wrangler configs carrying the Cloudflare account / KV namespace ids.
+**/wrangler.local.toml
+**/wrangler.backup.local.toml
+# Editor state.
+.vscode/
+.idea/

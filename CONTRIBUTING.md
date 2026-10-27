@@ -32,6 +32,21 @@ cp .env.example .env
 - `.env.production` — committed, prod URLs **only** (no secrets; see [Security Notes](#security-notes))
 - `.env.example` — committed, dev defaults template
 
+### Docker development environment
+
+`Dockerfile` and `docker-compose.yml` are a pinned, reproducible dev environment (a digest-pinned Node image plus a fixed pnpm version), kept so the project can still be started years from now even without a working local toolchain. The everyday workflow above does not need Docker.
+
+```bash
+docker compose up            # all three services
+docker compose up worker     # or a single service: worker / pwa / extension
+```
+
+- **Worker**: `http://localhost:8787` (`wrangler dev`, started with `DEV_MODE=1` so the localhost CORS allow-list applies)
+- **PWA**: `https://localhost:5173` — the dev server uses a self-signed certificate; accept the browser warning
+- **Extension**: build output is written to `extension/dist` on the host; load that folder as an unpacked extension
+
+Hot reload covers only each package's `src/` and `shared/src/`, which are mounted into the containers. Anything else — `index.html`, `public/`, Vite plugins, config files, dependency changes — is baked into the image, so run `docker compose build` after changing it.
+
 ## Project Structure
 
 | Directory       | Description                                         |
@@ -260,6 +275,9 @@ Every push/PR triggers:
 - TypeScript type checking
 - Unit + component tests
 - E2E tests (on PR to `main`)
+- Prettier formatting (`pnpm format:check`, whole repo)
+- Production dependency audit (`pnpm audit --prod --audit-level=high`)
+- Docker dev environment build (only when Docker-related files, a `package.json`, the lockfile or `pnpm-workspace.yaml` change)
 
 ## Security Notes
 

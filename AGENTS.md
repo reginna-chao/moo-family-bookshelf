@@ -85,6 +85,8 @@ moo-family-bookshelf/
 │       ├── cicd.yml            # CI (lint/typecheck/test/build) + CD (Worker/PWA/Pages deploy, Release)
 │       ├── claude-code-review.yml # Automatic Claude review on every PR open / ready / reopen
 │       └── claude.yml          # Manual @claude trigger: re-review and Q&A from a comment / issue
+├── Dockerfile                   # Long-term reproducible dev environment (pinned Node image + pnpm); extension-dev / worker-dev / pwa-dev targets
+├── docker-compose.yml           # `docker compose up`: Worker :8787, PWA :5173 (HTTPS), Extension build → extension/dist
 ├── AGENTS.md                    # This file
 └── CLAUDE.md                    # → AGENTS.md
 ```
@@ -170,6 +172,9 @@ Every push/PR triggers:
 - `pwa-check`: lint → typecheck → test → build
 - `e2e` (PR to `main` only): build extension + start a local `wrangler dev` Worker (Miniflare) + Playwright E2E
 - `pwa-e2e` (PR to `main` only): PWA Playwright E2E
+- `format`: `pnpm format:check` (Prettier) over the whole repo, on every push/PR with no path filter — docs and config files included, which no package filter covers. The local lint-staged hook alone is skippable with `--no-verify`
+- `audit`: `pnpm audit --prod --audit-level=high`, on every push/PR with no path filter (a new advisory arrives without any file changing). Dev-only dependencies are excluded on purpose — wrangler / miniflare tooling carries high advisories that never ship to a user. It reads only the lockfile, so the job installs nothing
+- `docker`: only when `Dockerfile`, `docker-compose.yml`, `.dockerignore`, any `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `cicd.yml` change (the `docker` path filter) — `docker compose build`, then an in-image `pnpm build` of the extension, PWA and Worker via `docker run` (never `docker compose run`, whose bind mounts would hide a dependency missing from the image). `worker-check` also runs on the `docker` filter, because `worker/tests/unit/nodeEngineFloor.test.ts` checks the Dockerfile's pnpm / Node versions; it is deliberately not part of the `worker` filter, which also gates `deploy-worker-dev`
 
 ### Claude Review (GitHub Actions)
 

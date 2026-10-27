@@ -24,7 +24,7 @@
     "@hono/zod-openapi": "^1.4.0",
     "hono": "^4.12.25",
     "moo-family-bookshelf-shared": "workspace:*",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
