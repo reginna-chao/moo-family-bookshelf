@@ -26,7 +26,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/PersonalShelf.tsx": 400,
   "src/dialog/PublicShareDialog.tsx": 413,
   "src/dialog/VerificationPrompt.tsx": 206,
-  "src/dialog/VerificationSettings.tsx": 289,
+  "src/dialog/VerificationSettings.tsx": 225,
   "src/dialog/onboardingFlow.ts": 402,
   "src/dialog/usePublicShelfActions.ts": 278,
   "src/dialog/useVerificationPrompt.ts": 303,

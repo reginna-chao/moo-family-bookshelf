@@ -13,6 +13,7 @@ import {
 import { VERIFY_SECRET_MAX_LENGTH } from "../utils/validation";
 import {
   chargePerUserRateLimit,
+  getCallerIp,
   peekPerUserRateLimit,
   RATE_LIMITED_MESSAGE,
   type PerUserRateLimitReading,
@@ -86,7 +87,8 @@ export function passedAgainstStaleVerifyRecord(
  * Render a {@link VerificationError} as the standard JSON error envelope.
  *
  * Shared by every caller of {@link validateVerification} (family create, family
- * join, auth lookup) so all of them emit the exact same codes and statuses.
+ * join, auth lookup, and the {@link enforceCurrentSecret} step-up) so all of them
+ * emit the exact same codes and statuses.
  * `retryAfter` is carried by the 429 variants only; `jsonError` omits both the
  * body field and the `Retry-After` header when it is undefined.
  */
@@ -99,24 +101,28 @@ export function verificationErrorResponse(
 }
 
 /**
- * 400 response for a `verifySecret` field that is present but malformed — not a
+ * 400 response for a secret field that is present but malformed — not a
  * string, or longer than {@link VERIFY_SECRET_MAX_LENGTH} (see
  * `sanitizeVerifySecret`).
  *
  * Shared by every entry point of the gate (family create, family join, auth
- * lookup) so one malformed body cannot produce three different statuses. The
- * check belongs to the handlers, before the gate: a value that is not a secret
- * at all is a request-format error, not a failed verification, so it must never
- * be charged against the caller's failure budget or the account's ceiling.
+ * lookup) so one malformed body cannot produce three different statuses, and by
+ * the step-up callers of {@link enforceCurrentSecret} (`PUT /api/user/:id/verify`,
+ * `DELETE /api/user/:id`), which pass `field = "currentSecret"`; the code stays
+ * `INVALID_VERIFY_SECRET`. The check belongs to the handlers, before the gate: a
+ * value that is not a secret at all is a request-format error, not a failed
+ * verification, so it must never be charged against the caller's failure budget
+ * or the account's ceiling.
  */
 export function verifySecretFormatResponse(
   c: Context<{ Bindings: Env }>,
+  field = "verifySecret",
 ): Response & TypedResponse<ErrorBody, 400, "json"> {
   return jsonError(
     c,
     400,
     "INVALID_VERIFY_SECRET",
-    `verifySecret must be a string of ${VERIFY_SECRET_MAX_LENGTH} characters or fewer`,
+    `${field} must be a string of ${VERIFY_SECRET_MAX_LENGTH} characters or fewer`,
   );
 }
 
@@ -265,8 +271,10 @@ async function chargeWrongGuess(
  *
  * The shared gate for every public endpoint that mints a token for, or reveals
  * data bound to, an email-derived userId: `POST /api/family` (create),
- * `POST /api/family/:id/join`, and `POST /api/auth/lookup`. Accounts with no
- * `verify:{userId}` record (or `method: "none"`) pass through unchanged.
+ * `POST /api/family/:id/join`, and `POST /api/auth/lookup` — and, through
+ * {@link enforceCurrentSecret}, the step-up of `PUT /api/user/:id/verify` and
+ * `DELETE /api/user/:id`. Accounts with no `verify:{userId}` record (or
+ * `method: "none"`) pass through unchanged.
  *
  * Two independent brakes, deliberately keyed differently:
  *
@@ -354,16 +362,28 @@ async function chargeWrongGuess(
  *
  * This function never writes `verify:{userId}`.
  *
+ * `opts.record`, when supplied (`null` included — "already looked, nothing
+ * there"), is the caller's own read of `verify:{userId}` and replaces this
+ * function's read — the step-up path ({@link enforceCurrentSecret}) already
+ * holds it. Left `undefined`, the record is read here, as before.
+ *
  * Returns: { valid: true, record } (the `verify:{userId}` record read, `null` when absent) or error response.
  */
 export async function validateVerification(
   env: Env,
   userId: string,
   secret: string | undefined,
-  opts: { callerKey: string; consumeOtp?: boolean },
+  opts: {
+    callerKey: string;
+    consumeOtp?: boolean;
+    record?: VerifyRecord | null;
+  },
 ): Promise<VerificationResult> {
   const kv = env.KV;
-  const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
+  const record =
+    opts.record !== undefined
+      ? opts.record
+      : await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
 
   // No verification set or method is 'none' — allow through
   if (!record || record.method === "none") {
@@ -441,4 +461,64 @@ export async function validateVerification(
   }
 
   return { valid: true, record };
+}
+
+/** True when changing this account's verification or deleting it needs the CURRENT secret (#396): a configured
+ *  pin/pattern record. `none` / `code` / no record never do; a corrupted pin/pattern record does, like the gate. */
+function needsCurrentSecret(record: VerifyRecord | null): boolean {
+  if (!isVerificationConfigured(record)) return false;
+  return record?.method === "pin" || record?.method === "pattern";
+}
+
+/**
+ * Step-up for an authenticated owner's sensitive write (#396): `PUT /api/user/:id/verify`
+ * and `DELETE /api/user/:id` must present the account's CURRENT PIN / pattern when
+ * one is configured. Returns `null` to proceed, else the error response to send.
+ *
+ * `record` and `presentedAuth` are the handler's own reads of `verify:{userId}` and
+ * `auth:{userId}` (`readPresentedAuth(...).auth`) — this function reads neither
+ * again. `currentSecret` is `sanitizeVerifySecret()`'s value, passed through
+ * unchanged: `""` means "not supplied", exactly as for {@link validateVerification}.
+ *
+ * - Stale record ({@link passedAgainstStaleVerifyRecord}) ⇒ `403 VERIFICATION_REQUIRED`
+ *   whatever its shape — absent, `none` and `code` included — checked FIRST, with no
+ *   comparison, no counter charge and no KV write: this colo has not seen the owner's
+ *   latest secret, so passing would let a current-token holder who lacks it switch
+ *   verification off or delete the account, and comparing would charge the owner's
+ *   correct new secret as a wrong guess. The client asks again; a caught-up colo passes.
+ * - Not stale and no step-up needed (`none` / `code` / no record) ⇒ `null`; a supplied
+ *   secret is ignored. Covers an account that never had a PIN (`auth` has no `secretAt`),
+ *   one that switched PIN ⇒ `none` / `code` (that save's `secretUpdatedAt` ≥ `secretAt`)
+ *   and a missing `auth:` record (TTL gap).
+ * - Otherwise the login gate itself decides, with the caller's IP as the lockout
+ *   key and the handler's record — byte-identical responses (`403
+ *   VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429 VERIFICATION_LOCKED` /
+ *   `RATE_LIMITED` + `retryAfter`). A correct secret always passes and charges
+ *   nothing (Invariant 6); the lockout key is shared with PWA login on purpose.
+ *
+ * See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+ */
+export async function enforceCurrentSecret(
+  c: Context<{ Bindings: Env }>,
+  userId: string,
+  record: VerifyRecord | null,
+  currentSecret: string | undefined,
+  presentedAuth: AuthRecord | null,
+): Promise<(Response & TypedResponse<ErrorBody, 403 | 429, "json">) | null> {
+  if (passedAgainstStaleVerifyRecord(presentedAuth, record)) {
+    return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
+  }
+
+  if (!needsCurrentSecret(record)) return null;
+
+  const verification = await validateVerification(
+    c.env,
+    userId,
+    currentSecret,
+    { callerKey: getCallerIp(c), record },
+  );
+  if (!verification.valid) {
+    return verificationErrorResponse(c, verification.error);
+  }
+  return null;
 }

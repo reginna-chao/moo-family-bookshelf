@@ -4,13 +4,13 @@
 
 ## 1. 背景：會卡死的情境
 
-設了 PIN 或圖形驗證的帳號，在三個地方都要過驗證閘門：建立家庭、加入家庭、查詢所屬家庭（`worker/src/services/verification.ts` 的 `validateVerification`，呼叫端在 `worker/src/routes/family.ts` 與 `worker/src/routes/auth.ts`）。能更改驗證方式的 `PUT /api/user/:id/verify`、能讓手機略過驗證的 `POST /api/user/:id/qr-token`、以及 `DELETE /api/user/:id` 都需要有效的 auth token（`callerId === userId`）。
+設了 PIN 或圖形驗證的帳號，在三個地方都要過驗證閘門：建立家庭、加入家庭、查詢所屬家庭（`worker/src/services/verification.ts` 的 `validateVerification`，呼叫端在 `worker/src/routes/family.ts` 與 `worker/src/routes/auth.ts`）。能更改驗證方式的 `PUT /api/user/:id/verify`、能讓手機略過驗證的 `POST /api/user/:id/qr-token`、以及 `DELETE /api/user/:id` 都需要有效的 auth token（`callerId === userId`）；#396 起，帳號目前是 PIN／圖形時，`PUT /api/user/:id/verify` 與 `DELETE /api/user/:id` 還要先出示目前的密鑰（`enforceCurrentSecret`，同在 `worker/src/services/verification.ts`）。
 
-只要還有一台裝置握有有效 token，忘記驗證方式並不會卡住：在擴充功能設定裡重新設定即可，或產生 QR Code 讓手機略過驗證加入。卡死只發生在「忘記驗證方式，而且 token 已經不在」：
+因此還有一台裝置握有有效 token 時，忘記 PIN／圖形也無法在擴充功能設定裡自己重設，處境與「token 已經不在」相同，只差這台裝置在 token 有效期間仍能照常使用，也還能產生 QR Code 讓手機略過驗證加入。本計畫的救援對象因此包括這兩種情況；下面先說明 token 不在時為何卡死：
 
 - 同一個帳號只有一把 token（`auth:{userId}`，`getOrGenerateAuthToken` 讓多台裝置共用），效期 90 天（`TOKEN_TTL_SECONDS`），只在重新發 token 或 `POST /api/auth/refresh` 時續期；
 - 自己離開家庭、被管理者移出都會刪掉這把 token（`deleteAuthToken`，`worker/src/routes/family.ts`）；
-- 這時閘門要密鑰、改密鑰要 token、發 token 要過閘門，刪除帳號也要 token。現行唯一的出口是 KV 管理者把 `verify:{userId}` 改寫成臨時 PIN（`worker/DEPLOY.md` → 使用者忘記登入驗證時）。
+- 這時閘門要密鑰、改密鑰要 token（PIN／圖形帳號還要目前的密鑰）、發 token 要過閘門，刪除帳號也要 token 與目前的密鑰。現行唯一的出口是 KV 管理者把 `verify:{userId}` 改寫成臨時 PIN（`worker/DEPLOY.md` → 使用者忘記登入驗證時）。
 - 刪除帳號（`DELETE /api/user/:id`）不會造成卡死：它把驗證設定與 token 一起刪掉（#341，`worker/src/routes/user.ts`），之後同一個 Email 重新開始時沒有密鑰要過。
 
 ## 2. 為什麼用 Email
@@ -45,7 +45,7 @@
 - QR Token 的略過只在加入家庭時生效（`worker/src/routes/family.ts` 的 join 路徑），建立家庭不吃它，而卡死的人常常已經不在任何家庭裡；
 - 不發 token 讓救援端點的權限範圍只剩「改驗證設定」，少一條發 auth token 的路徑。這不會降低重設 token 外洩的後果：能設新密鑰就能通過閘門，`POST /api/auth/lookup` 帶正確密鑰會回傳 familyId（即同步碼），接著加入家庭就拿到 auth token；不在任何家庭的人則能直接建立家庭。重設 token 外洩等同帳號接管，所以它必須只能用一次、短效、只放在網址 `#` 之後。
 
-重設畫面不提供「隨機驗證碼」：那個方式要靠仍登入的電腦產生驗證碼，正是卡死的人沒有的東西。
+重設畫面不提供「隨機驗證碼」：那個方式要靠仍登入的電腦產生驗證碼，正是 token 已經不在的人沒有的東西。
 
 ## 5. 新增的 KV key 與端點（預估）
 

@@ -65,8 +65,10 @@ import {
  * decision nor the back-off hint may be read off `verify:{userId}`.
  *
  * Failure-streak voiding after a secret change (owner recovery path): an owner
- * who forgot their PIN/pattern resets it through the AUTHENTICATED
- * `PUT /api/user/:id/verify` (callerId === userId). That stamps
+ * changes their PIN/pattern through the AUTHENTICATED
+ * `PUT /api/user/:id/verify` (callerId === userId; since #396 the request also
+ * carries the CURRENT secret as `currentSecret`, from the owner's own address —
+ * not the attacker's locked-out one). That stamps
  * `secretUpdatedAt`, which voids any failure streak that began earlier: the
  * streak accumulated against a secret that no longer exists, so honouring it
  * would lock the owner out of their own account right after a legitimate
@@ -157,11 +159,12 @@ function seedFamily(userId: string, familyId: string) {
   return seedFamilyWithMembers([userId], familyId);
 }
 
-/** Set a PIN for `userId` through the real verify route (hash + salt included). */
-async function setPin(userId: string, pin: string) {
+/** Set a PIN for `userId` through the real verify route (hash + salt included); an account that
+ *  already holds a PIN passes it as `currentSecret` (#396). */
+async function setPin(userId: string, pin: string, currentSecret?: string) {
   const token = await seedAuthToken(kv, userId);
   const res = await request("PUT", `/api/user/${userId}/verify`, {
-    body: JSON.stringify({ method: "pin", secret: pin }),
+    body: JSON.stringify({ method: "pin", secret: pin, currentSecret }),
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(res.status).toBe(200);
@@ -1272,9 +1275,9 @@ describe("Verification failure streak voiding after a secret change", () => {
     );
     expect(beforeReset.status).toBe(429);
 
-    // The owner resets the forgotten PIN on their own account.
+    // The owner changes the PIN on their own account, proving the current one.
     vi.setSystemTime(T1);
-    await setPin(VALID_USER_ID, NEW_PIN);
+    await setPin(VALID_USER_ID, NEW_PIN, CORRECT_PIN);
 
     // Same caller IP, new secret: the pre-reset streak no longer applies.
     const res = await joinFamily(VALID_USER_ID, NEW_PIN, ATTACKER_IP);
@@ -1295,7 +1298,7 @@ describe("Verification failure streak voiding after a secret change", () => {
     );
 
     vi.setSystemTime(T1);
-    await setPin(VALID_USER_ID, NEW_PIN);
+    await setPin(VALID_USER_ID, NEW_PIN, CORRECT_PIN);
 
     const res = await joinFamily(VALID_USER_ID, WRONG_PIN, ATTACKER_IP);
     expect(res.status).toBe(403);
@@ -1363,7 +1366,7 @@ describe("Verification failure streak voiding after a secret change", () => {
     await submitWrongSecrets(VERIFY_MAX_FAILURES, ATTACKER_IP);
 
     vi.setSystemTime(T1);
-    await setPin(VALID_USER_ID, NEW_PIN);
+    await setPin(VALID_USER_ID, NEW_PIN, CORRECT_PIN);
 
     // Caller B burns theirs AFTER the reset.
     vi.setSystemTime(T1 + 1000);
@@ -1486,7 +1489,7 @@ describe("Verification KV write budget on the void-streak paths", () => {
     await submitWrongSecrets(failCount, ATTACKER_IP);
 
     vi.setSystemTime(T1);
-    await setPin(VALID_USER_ID, NEW_PIN);
+    await setPin(VALID_USER_ID, NEW_PIN, CORRECT_PIN);
 
     vi.setSystemTime(T2);
     const raw = await kv.get(failKey);
