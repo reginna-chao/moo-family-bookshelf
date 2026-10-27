@@ -35,7 +35,9 @@ function optionClass(selected: boolean, active: boolean): string {
  * Sort dropdown (PWA): icon-button trigger + popover listbox, mirroring the
  * Extension BookSortDropdown behavior with Tailwind styling. Opening focuses
  * the listbox; Arrow keys / Home / End move the active option and Enter /
- * Space choose it. Closes on outside click or Escape via useDismissableMenu.
+ * Space choose it. Options are out of the Tab order (the listbox is the only
+ * focus target); Tab / Shift+Tab close the list and move focus on as usual.
+ * Closes on outside click or Escape via useDismissableMenu.
  * Choosing an option or pressing Escape returns focus to the trigger.
  */
 export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
@@ -74,6 +76,11 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
   };
 
   const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // No preventDefault: close and let the browser move focus to the next / previous control.
+    if (e.key === "Tab") {
+      close();
+      return;
+    }
     const currentIndex = OPTIONS.findIndex((opt) => opt.value === activeValue);
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -138,6 +145,7 @@ export function BookSortDropdown({ value, onChange }: BookSortDropdownProps) {
                 type="button"
                 role="option"
                 aria-selected={selected}
+                tabIndex={-1}
                 onClick={() => handleSelect(opt.value)}
                 className={`w-full px-3 py-2 text-sm text-left ${optionClass(selected, active)}`}
               >

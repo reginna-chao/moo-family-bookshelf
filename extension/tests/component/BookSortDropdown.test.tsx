@@ -312,5 +312,34 @@ describe("BookSortDropdown", () => {
       expect(screen.queryByRole("option")).not.toBeInTheDocument();
       expect(document.activeElement).toBe(trigger);
     });
+
+    it("keeps every option out of the Tab order", () => {
+      openMenu("default");
+
+      const options = screen.getAllByRole("option");
+      expect(options).toHaveLength(OPTIONS.length);
+      for (const option of options) {
+        expect(option).toHaveAttribute("tabindex", "-1");
+      }
+    });
+
+    it.each([
+      { name: "Tab", shiftKey: false },
+      { name: "Shift+Tab", shiftKey: true },
+    ])(
+      "closes without selecting and keeps the native focus move on $name",
+      ({ shiftKey }) => {
+        const onChange = vi.fn();
+        const { trigger, listbox } = openMenu("default", onChange);
+        fireEvent.keyDown(listbox, { key: "ArrowDown" });
+
+        // fireEvent returns true when the handler did NOT call preventDefault().
+        expect(fireEvent.keyDown(listbox, { key: "Tab", shiftKey })).toBe(true);
+
+        expect(onChange).not.toHaveBeenCalled();
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(document.activeElement).toBe(trigger);
+      },
+    );
   });
 });

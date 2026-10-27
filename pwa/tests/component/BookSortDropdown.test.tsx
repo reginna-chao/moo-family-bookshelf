@@ -414,5 +414,35 @@ describe("BookSortDropdown", () => {
         .filter((o) => o.classList.contains("bg-gray-100"));
       expect(greyed).toEqual([next]);
     });
+
+    it("keeps every option out of the Tab order", () => {
+      const { listbox } = openMenu("default");
+
+      const options = within(listbox).getAllByRole("option");
+      expect(options).toHaveLength(OPTIONS.length);
+      for (const option of options) {
+        expect(option).toHaveAttribute("tabindex", "-1");
+      }
+    });
+
+    // PWA-only rule (the Extension refocuses the trigger): Tab leaves focus to the browser.
+    it.each([
+      { name: "Tab", shiftKey: false },
+      { name: "Shift+Tab", shiftKey: true },
+    ])(
+      "closes without selecting and keeps the native focus move on $name",
+      ({ shiftKey }) => {
+        const onChange = vi.fn();
+        const { trigger, listbox } = openMenu("default", onChange);
+        fireEvent.keyDown(listbox, { key: "ArrowDown" });
+
+        // fireEvent returns true when the handler did NOT call preventDefault().
+        expect(fireEvent.keyDown(listbox, { key: "Tab", shiftKey })).toBe(true);
+
+        expect(onChange).not.toHaveBeenCalled();
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(document.activeElement).not.toBe(trigger);
+      },
+    );
   });
 });
