@@ -46,7 +46,7 @@ export const BookRow = React.memo(function BookRow({
       />
       <LazyCover
         src={book.coverUrl}
-        alt={book.title}
+        alt=""
         width={40}
         height={60}
         className="moo-shelf-row__cover"
@@ -74,6 +74,8 @@ export const BookRow = React.memo(function BookRow({
       <button
         data-toggle-btn
         onClick={() => onToggle(book.bookId)}
+        aria-pressed={isOn}
+        aria-label={`${book.title} ${isOn ? "已開放分享" : "未開放分享"}`}
         className={toggleClass}
       >
         {isOn ? "開放" : "未開放"}
