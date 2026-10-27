@@ -9,6 +9,7 @@ import {
   verificationLockedMessage,
 } from "@/dialog/verificationMessages";
 import { dimmedAncestor } from "./helpers/dimStyle";
+import { drawPattern, patternConfirmButton } from "./helpers/patternGrid";
 
 function renderPrompt(overrides: Partial<VerificationPromptProps> = {}) {
   const props: VerificationPromptProps = {
@@ -25,30 +26,10 @@ function renderPrompt(overrides: Partial<VerificationPromptProps> = {}) {
   return props;
 }
 
-/** Simulate a valid pattern draw on the PatternLock SVG (viewBox 200x200). */
-function drawPattern(svg: Element, dotIndices: number[]) {
-  const SPACING = 200 / 3;
-  const OFFSET = SPACING / 2;
-  const posOf = (index: number) => ({
-    clientX: (index % 3) * SPACING + OFFSET,
-    clientY: Math.floor(index / 3) * SPACING + OFFSET,
-  });
-  vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
-    left: 0,
-    top: 0,
-    right: 200,
-    bottom: 200,
-    width: 200,
-    height: 200,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-  });
-  fireEvent.mouseDown(svg, posOf(dotIndices[0]));
-  for (let i = 1; i < dotIndices.length; i++) {
-    fireEvent.mouseMove(svg, posOf(dotIndices[i]));
-  }
-  fireEvent.mouseUp(svg);
+/** Draw `dots` on the PatternLock, then press its 確認 — releasing alone never submits (#385). */
+function submitPattern(dots: number[]) {
+  drawPattern(dots);
+  fireEvent.click(patternConfirmButton());
 }
 
 /** Distinguishing fragment of the OTP-guidance copy shown for a genuine "code". */
@@ -166,8 +147,9 @@ describe("VerificationPrompt", () => {
       const props = renderPrompt({ method: "pattern", countdownSeconds: 45 });
 
       // A full 4-dot draw that would normally complete the pattern.
-      drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+      submitPattern([0, 3, 6, 7]);
 
+      expect(patternConfirmButton()).toBeDisabled();
       expect(props.onSubmit).not.toHaveBeenCalled();
     });
 
@@ -190,6 +172,10 @@ describe("VerificationPrompt", () => {
         renderPrompt({ method: "pin", submitting: false, ...overrides });
 
         expect(screen.getByLabelText("PIN 碼輸入")).toBeEnabled();
+        // 確認 stays disabled until the PIN is long enough (#385), so type a complete one first.
+        fireEvent.change(screen.getByLabelText("PIN 碼輸入"), {
+          target: { value: "123456" },
+        });
         expect(screen.getByText("確認")).toBeEnabled();
       },
     );
@@ -223,7 +209,7 @@ describe("VerificationPrompt", () => {
     it("fires onSubmit from a pattern draw once the countdown has cleared", () => {
       const props = renderPrompt({ method: "pattern", countdownSeconds: null });
 
-      drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+      submitPattern([0, 3, 6, 7]);
 
       expect(props.onSubmit).toHaveBeenCalledWith("0,3,6,7");
     });
@@ -294,13 +280,14 @@ describe("VerificationPrompt", () => {
   it("does not fire onSubmit from a pattern draw while submitting", () => {
     const props = renderPrompt({ method: "pattern", submitting: true });
     // A full 4-dot draw that would normally complete the pattern.
-    drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+    submitPattern([0, 3, 6, 7]);
+    expect(patternConfirmButton()).toBeDisabled();
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
   it("fires onSubmit from a pattern draw when not submitting (guard is off by default)", () => {
     const props = renderPrompt({ method: "pattern", submitting: false });
-    drawPattern(screen.getByRole("application"), [0, 3, 6, 7]);
+    submitPattern([0, 3, 6, 7]);
     expect(props.onSubmit).toHaveBeenCalledWith("0,3,6,7");
   });
 

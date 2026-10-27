@@ -560,7 +560,8 @@ describe("LandingPage retry back-off", () => {
         fireEvent.click(confirmButton());
         await flush(10);
 
-        expect(connectedDotsText()).toBe("已連接 4 個點（最少 4 個）");
+        expect(connectedDotsText()).toBe("已連接 0 個點（最少 4 個）");
+        expect(confirmButton()).toBeDisabled();
         expect(mockJoinFamily).toHaveBeenCalledTimes(callsWhenLocked);
         expect(mockOnAuth).not.toHaveBeenCalled();
       });
@@ -578,9 +579,11 @@ describe("LandingPage retry back-off", () => {
 
         expect(screen.queryByRole("alert")).not.toBeInTheDocument();
         expect(patternGrid()).not.toHaveAttribute("aria-disabled");
-        expect(confirmButton()).toBeEnabled();
+        expect(confirmButton()).toBeDisabled();
 
         mockSuccessfulJoin();
+        drawPattern(VALID_PATTERN);
+        expect(confirmButton()).toBeEnabled();
         fireEvent.click(confirmButton());
         await waitForAuth();
       });

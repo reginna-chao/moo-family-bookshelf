@@ -1,4 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  isPinComplete,
+  normalizePinInput,
+  pickSecretEntryError,
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+} from "moo-family-bookshelf-shared/verifyInput/rules";
+import {
+  formatPinCounter,
+  PIN_MISMATCH_MESSAGE,
+} from "moo-family-bookshelf-shared/verifyInput/messages";
 import { ErrorAlert } from "./ErrorAlert";
 
 interface PinInputProps {
@@ -13,9 +24,6 @@ interface PinInputProps {
    *  Cancel stays available. Defaults to false. */
   disabled?: boolean;
 }
-
-const PIN_MIN = 6;
-const PIN_MAX = 12;
 
 export function PinInput({
   onComplete,
@@ -41,8 +49,8 @@ export function PinInput({
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value.replace(/\D/g, "");
-      if (value.length > PIN_MAX) return;
+      const value = normalizePinInput(e.target.value);
+      if (value === null) return;
       setMismatchError("");
       setCurrentPin(value);
     },
@@ -50,7 +58,7 @@ export function PinInput({
   );
 
   const handleConfirm = useCallback(() => {
-    if (disabled || currentPin.length < PIN_MIN) return;
+    if (disabled || !isPinComplete(currentPin)) return;
 
     if (mode === "verify") {
       onComplete(currentPin);
@@ -67,7 +75,7 @@ export function PinInput({
     if (pin === confirmPin) {
       onComplete(pin);
     } else {
-      setMismatchError("兩次輸入的 PIN 碼不一致，請重新輸入。");
+      setMismatchError(PIN_MISMATCH_MESSAGE);
       setConfirmPin("");
     }
   }, [disabled, currentPin, mode, isConfirming, pin, confirmPin, onComplete]);
@@ -87,9 +95,9 @@ export function PinInput({
       ? "請輸入 PIN 碼"
       : isConfirming
         ? "請再次輸入 PIN 碼確認"
-        : `設定 PIN 碼（${PIN_MIN}-${PIN_MAX} 位數字）`;
+        : `設定 PIN 碼（${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} 位數字）`;
 
-  const displayError = mismatchError || error;
+  const displayError = pickSecretEntryError(mismatchError, error);
   // A local mismatch is static copy — it announces itself.
   const displayAnnouncement = mismatchError ? undefined : errorAnnouncement;
 
@@ -106,17 +114,17 @@ export function PinInput({
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder={`${PIN_MIN}-${PIN_MAX} 位數字`}
+        placeholder={`${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} 位數字`}
         aria-label="PIN 輸入"
         className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-center text-lg tracking-widest focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-2 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
       />
 
       <p className="text-xs text-gray-400 mb-3">
-        {currentPin.length}/{PIN_MIN}-{PIN_MAX} 位
+        {formatPinCounter(currentPin.length)}
       </p>
 
       <ErrorAlert
-        message={displayError ?? ""}
+        message={displayError}
         announcement={displayAnnouncement}
         className="mb-3"
       />
@@ -124,7 +132,7 @@ export function PinInput({
       <button
         type="button"
         onClick={handleConfirm}
-        disabled={disabled || currentPin.length < PIN_MIN}
+        disabled={disabled || !isPinComplete(currentPin)}
         className="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         確認

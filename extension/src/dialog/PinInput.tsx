@@ -1,4 +1,15 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
+import {
+  isPinComplete,
+  normalizePinInput,
+  pickSecretEntryError,
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+} from "moo-family-bookshelf-shared/verifyInput/rules";
+import {
+  formatPinCounter,
+  PIN_MISMATCH_MESSAGE,
+} from "moo-family-bookshelf-shared/verifyInput/messages";
 
 export interface PinInputProps {
   onComplete: (pin: string) => void;
@@ -10,16 +21,6 @@ export interface PinInputProps {
 }
 
 type SetupStep = "enter" | "confirm";
-
-const PIN_MIN = 6;
-const PIN_MAX = 12;
-
-function validatePin(pin: string): string | null {
-  if (!/^\d+$/.test(pin)) return "PIN 碼只能包含數字";
-  if (pin.length < PIN_MIN || pin.length > PIN_MAX)
-    return `PIN 碼長度須為 ${PIN_MIN}-${PIN_MAX} 位數`;
-  return null;
-}
 
 export function PinInput({
   onComplete,
@@ -57,21 +58,14 @@ export function PinInput({
   }, []);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Allow only digits, up to max length
-    if (value !== "" && !/^\d+$/.test(value)) return;
-    if (value.length > PIN_MAX) return;
+    const value = normalizePinInput(e.target.value);
+    if (value === null) return;
     setPin(value);
     setLocalError("");
   }, []);
 
   const handleSubmit = useCallback(() => {
-    if (disabled) return;
-    const validationError = validatePin(pin);
-    if (validationError) {
-      setLocalError(validationError);
-      return;
-    }
+    if (disabled || !isPinComplete(pin)) return;
 
     if (mode === "verify") {
       onComplete(pin);
@@ -91,7 +85,7 @@ export function PinInput({
     if (pin === firstPin) {
       onComplete(pin);
     } else {
-      setLocalError("PIN 碼不一致，請重新輸入");
+      setLocalError(PIN_MISMATCH_MESSAGE);
       setPin("");
       focusInputSoon();
     }
@@ -106,7 +100,7 @@ export function PinInput({
     [handleSubmit],
   );
 
-  const displayError = error ?? localError;
+  const displayError = pickSecretEntryError(localError, error);
   const label =
     mode === "verify"
       ? "請輸入 PIN 碼"
@@ -131,7 +125,7 @@ export function PinInput({
       >
         <div className="moo-secret-entry__label">{label}</div>
         <div className="moo-pin-input__hint">
-          {PIN_MIN}-{PIN_MAX} 位數字
+          {PIN_MIN_LENGTH}-{PIN_MAX_LENGTH} 位數字
         </div>
         <div className="moo-pin-input__row">
           <input
@@ -143,17 +137,20 @@ export function PinInput({
             onKeyDown={handleKeyDown}
             disabled={disabled}
             aria-label="PIN 碼輸入"
-            placeholder={`輸入 ${PIN_MIN}-${PIN_MAX} 位數字`}
+            placeholder={`輸入 ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} 位數字`}
             className="moo-pin-input__field"
             style={{ border: `2px solid ${fieldBorderColor}` }}
           />
           <button
             onClick={handleSubmit}
-            disabled={disabled}
+            disabled={disabled || !isPinComplete(pin)}
             className="moo-button moo-pin-input__submit"
           >
             確認
           </button>
+        </div>
+        <div className="moo-secret-entry__counter">
+          {formatPinCounter(pin.length)}
         </div>
       </div>
       {displayError && (
