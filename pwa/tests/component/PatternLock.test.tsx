@@ -9,9 +9,23 @@ import {
   stubPatternGridRect,
 } from "./helpers/patternGrid";
 
+/**
+ * PatternLock: enabled / disabled behaviour, error announcement, and the twin contract.
+ *
+ * Twin contract (#385): `pwa/src/components/PatternLock.tsx` and `extension/src/dialog/PatternLock.tsx`
+ * are a `必須一致（行為測試）` pair (`.claude/rules/frontend.md` → Extension ↔ PWA twins). The
+ * `describe("twin contract (#385)")` block here and its namesake in
+ * `extension/tests/component/PatternLock.test.tsx` carry identically titled cases with the same
+ * dots and the same expected strings — edit both or neither. The grids differ (280 viewBox here,
+ * 200 there), so each side drives its own `helpers/patternGrid.ts`. The literals are pinned against
+ * `shared/src/verifyInput/` in `extension/tests/unit/verifyInputRules.test.ts`.
+ */
+
 /** A valid (>= 4 dots) pattern: top row then the middle-right dot. */
 const VALID_PATTERN = [0, 1, 2, 5];
 const VALID_PATTERN_SECRET = "0,1,2,5";
+const PATTERN_MISMATCH = "兩次圖形不一致，請重新繪製。";
+const EXTERNAL_ERROR = "伺服器錯誤";
 
 interface SetupOptions {
   mode?: "setup" | "verify";
@@ -241,9 +255,95 @@ describe("PatternLock", () => {
       fireEvent.click(confirmButton());
 
       const alert = screen.getByRole("alert");
-      expect(alert.textContent).toBe("兩次圖形不一致，請重新繪製。");
+      expect(alert.textContent).toBe(PATTERN_MISMATCH);
       expect(screen.getAllByRole("alert")).toHaveLength(1);
       expect(screen.queryByText(TICKING_ERROR)).not.toBeInTheDocument();
+    });
+  });
+
+  /** Identically titled cases live in `extension/tests/component/PatternLock.test.tsx`. See the file
+   *  header, "Twin contract (#385)". */
+  describe("twin contract (#385)", () => {
+    it("keeps 確認 disabled with 3 dots and never calls onComplete", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} />);
+
+      drawPattern([0, 1, 2]);
+
+      expect(connectedDotsText()).toBe("已連接 3 個點（最少 4 個）");
+      expect(confirmButton()).toBeDisabled();
+      fireEvent.click(confirmButton());
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it('does not submit on release; 確認 submits "0,1,2,5"', () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} />);
+
+      drawPattern([0, 1, 2, 5]);
+
+      expect(connectedDotsText()).toBe("已連接 4 個點（最少 4 個）");
+      expect(onComplete).not.toHaveBeenCalled();
+
+      fireEvent.click(confirmButton());
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith("0,1,2,5");
+    });
+
+    it("clears the drawing after a verify submit so 確認 cannot resend it", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} />);
+
+      drawPattern([0, 1, 2, 5]);
+      fireEvent.click(confirmButton());
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith("0,1,2,5");
+      expect(connectedDotsText()).toBe("已連接 0 個點（最少 4 個）");
+      expect(confirmButton()).toBeDisabled();
+
+      fireEvent.click(confirmButton());
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the exact mismatch copy when the setup redraw differs", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="setup" onComplete={onComplete} />);
+
+      drawPattern([0, 1, 2, 5]);
+      fireEvent.click(confirmButton());
+      drawPattern([3, 4, 5, 8]);
+      fireEvent.click(confirmButton());
+
+      expect(screen.getByText(PATTERN_MISMATCH)).toBeInTheDocument();
+      expect(connectedDotsText()).toBe("已連接 0 個點（最少 4 個）");
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it("shows the mismatch over the error prop, then the error prop once a new stroke starts", () => {
+      render(
+        <PatternLock
+          mode="setup"
+          onComplete={vi.fn()}
+          error={EXTERNAL_ERROR}
+        />,
+      );
+      expect(screen.getByText(EXTERNAL_ERROR)).toBeInTheDocument();
+
+      drawPattern([0, 1, 2, 5]);
+      fireEvent.click(confirmButton());
+      drawPattern([3, 4, 5, 8]);
+      fireEvent.click(confirmButton());
+
+      expect(screen.getByText(PATTERN_MISMATCH)).toBeInTheDocument();
+      expect(screen.queryByText(EXTERNAL_ERROR)).not.toBeInTheDocument();
+
+      drawPattern([0]);
+
+      expect(screen.getByText(EXTERNAL_ERROR)).toBeInTheDocument();
+      expect(screen.queryByText(PATTERN_MISMATCH)).not.toBeInTheDocument();
     });
   });
 });

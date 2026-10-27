@@ -51,6 +51,37 @@ describe("CategoryFilter", () => {
     expect(screen.getByLabelText("篩選分類")).toBeInTheDocument();
   });
 
+  it("marks the trigger as a non-submitting button that opens a listbox", () => {
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "韓國耽美"])}
+      />,
+    );
+
+    const trigger = screen.getByLabelText("篩選分類");
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveAttribute("type", "button");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("renders every option, 全部分類 included, as a non-submitting button", () => {
+    render(
+      <CategoryFilter
+        {...defaultProps}
+        books={makeBooks(["奇幻冒險", "韓國耽美", ""])}
+        open={true}
+      />,
+    );
+
+    const options = screen.getAllByRole("option");
+    // 全部分類 + 奇幻冒險 + 韓國耽美 + 未分類.
+    expect(options).toHaveLength(4);
+    for (const option of options) {
+      expect(option).toHaveAttribute("type", "button");
+    }
+  });
+
   it("does not show popover when closed", () => {
     render(
       <CategoryFilter

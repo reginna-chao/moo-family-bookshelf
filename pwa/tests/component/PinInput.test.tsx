@@ -3,7 +3,20 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PinInput } from "@/components/PinInput";
 
+/**
+ * PinInput: enabled / disabled behaviour, error announcement, and the twin contract.
+ *
+ * Twin contract (#385): `pwa/src/components/PinInput.tsx` and `extension/src/dialog/PinInput.tsx`
+ * are a `必須一致（行為測試）` pair (`.claude/rules/frontend.md` → Extension ↔ PWA twins). The
+ * `describe("twin contract (#385)")` block here and its namesake in
+ * `extension/tests/component/PinInput.test.tsx` carry identically titled cases with the same input
+ * and the same expected strings — edit both or neither. The literals are pinned against
+ * `shared/src/verifyInput/` in `extension/tests/unit/verifyInputRules.test.ts`.
+ */
+
 const VALID_PIN = "123456";
+const PIN_MISMATCH = "兩次輸入的 PIN 碼不一致，請重新輸入。";
+const EXTERNAL_ERROR = "伺服器錯誤";
 
 interface SetupOptions {
   mode?: "setup" | "verify";
@@ -229,9 +242,69 @@ describe("PinInput", () => {
       fireEvent.click(confirmButton());
 
       const alert = screen.getByRole("alert");
-      expect(alert.textContent).toBe("兩次輸入的 PIN 碼不一致，請重新輸入。");
+      expect(alert.textContent).toBe(PIN_MISMATCH);
       expect(screen.getAllByRole("alert")).toHaveLength(1);
       expect(screen.queryByText(TICKING_ERROR)).not.toBeInTheDocument();
+    });
+  });
+
+  /** Identically titled cases live in `extension/tests/component/PinInput.test.tsx`. See the file
+   *  header, "Twin contract (#385)". */
+  describe("twin contract (#385)", () => {
+    it('strips non-digits silently: "12a345" becomes "12345"', () => {
+      render(<PinInput mode="verify" onComplete={vi.fn()} />);
+
+      typePin("12a345");
+
+      expect(pinField()).toHaveValue("12345");
+      expect(screen.getByText("5/6-12 位")).toBeInTheDocument();
+    });
+
+    it("keeps 確認 disabled and Enter inert at 5 digits", () => {
+      const onComplete = vi.fn();
+      render(<PinInput mode="verify" onComplete={onComplete} />);
+
+      typePin("12345");
+
+      expect(confirmButton()).toBeDisabled();
+      pressEnter();
+      fireEvent.click(confirmButton());
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(screen.getByText("5/6-12 位")).toBeInTheDocument();
+    });
+
+    it("shows the exact mismatch copy when the setup confirm differs", () => {
+      const onComplete = vi.fn();
+      render(<PinInput mode="setup" onComplete={onComplete} />);
+
+      typePin("123456");
+      fireEvent.click(confirmButton());
+      typePin("654321");
+      fireEvent.click(confirmButton());
+
+      expect(screen.getByText(PIN_MISMATCH)).toBeInTheDocument();
+      expect(pinField()).toHaveValue("");
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it("shows the mismatch over the error prop, then the error prop once the user types again", () => {
+      render(
+        <PinInput mode="setup" onComplete={vi.fn()} error={EXTERNAL_ERROR} />,
+      );
+      expect(screen.getByText(EXTERNAL_ERROR)).toBeInTheDocument();
+
+      typePin("123456");
+      fireEvent.click(confirmButton());
+      typePin("654321");
+      fireEvent.click(confirmButton());
+
+      expect(screen.getByText(PIN_MISMATCH)).toBeInTheDocument();
+      expect(screen.queryByText(EXTERNAL_ERROR)).not.toBeInTheDocument();
+
+      typePin("1");
+
+      expect(screen.getByText(EXTERNAL_ERROR)).toBeInTheDocument();
+      expect(screen.queryByText(PIN_MISMATCH)).not.toBeInTheDocument();
     });
   });
 });

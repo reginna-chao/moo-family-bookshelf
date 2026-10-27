@@ -82,6 +82,26 @@ describe("MemberDropdown", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("marks the trigger as a non-submitting button that opens a listbox", () => {
+    renderDropdown();
+
+    const trigger = memberFilterTrigger();
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveAttribute("type", "button");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("renders every option as a non-submitting button", () => {
+    renderDropdown();
+
+    const options = within(openMenu()).getAllByRole("option");
+    // all, all-except-self, self, Alice, Bob, favorite, hidden (Carol has no books).
+    expect(options).toHaveLength(7);
+    for (const option of options) {
+      expect(option).toHaveAttribute("type", "button");
+    }
+  });
+
   it("reflects a member value on the trigger when that member is selected", () => {
     renderDropdown({ value: "user-a" });
     expect(memberFilterTrigger()).toHaveTextContent("Alice");

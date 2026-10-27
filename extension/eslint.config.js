@@ -22,7 +22,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/MemberList.tsx": 389,
   "src/dialog/Onboarding.tsx": 244,
   "src/dialog/OverflowMenu.tsx": 206,
-  "src/dialog/PatternLock.tsx": 253,
+  "src/dialog/PatternLock.tsx": 244,
   "src/dialog/PersonalShelf.tsx": 400,
   "src/dialog/PublicShareDialog.tsx": 413,
   "src/dialog/VerificationPrompt.tsx": 206,
