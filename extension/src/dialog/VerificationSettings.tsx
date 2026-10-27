@@ -5,6 +5,7 @@ import type { VerifyMethod } from "../api/types";
 import { PinInput } from "./PinInput";
 import { PatternLock } from "./PatternLock";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
+import { saveVerifyMethod } from "./saveVerifyMethod";
 
 export interface VerificationSettingsProps {
   userId: string;
@@ -101,9 +102,7 @@ export function VerificationSettings({
 
       setSaveState("saving");
       setSaveError("");
-      const body: { method: VerifyMethod; secret?: string } = { method };
-      if (secret) body.secret = secret;
-      const result = await apiClient.setVerifyMethod(userId, body);
+      const result = await saveVerifyMethod(apiClient, userId, method, secret);
       if (result.error) {
         setSaveState("error");
         setSaveError(safeErrorText(result.error.message, "儲存失敗，請重試"));

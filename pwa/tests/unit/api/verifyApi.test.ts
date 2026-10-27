@@ -279,6 +279,157 @@ describe("ApiClient verification methods", () => {
     });
   });
 
+  /** A new pin / pattern / code revokes the old token server-side (#378): the replacement must be on
+   *  the client before the next request, and a malformed one must never be adopted. */
+  describe("setVerifyMethod token rotation", () => {
+    const OLD_TOKEN = "old-token";
+    const ROTATED_TOKEN = "0123456789abcdef".repeat(4);
+    const ROTATED_EXPIRY = 1_700_000_000_000;
+    const WARN_PREFIX = /^\[issuedCredentials\]/;
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      client.setAuthToken(OLD_TOKEN);
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    /** The PUT answers `putBody`; the follow-up markVerifyPrompted answers ok. */
+    function mockPutThenPost(putBody: unknown) {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(putBody))
+        .mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+    }
+
+    function authHeaderOfCall(index: number): string | undefined {
+      const [, init] = mockFetch.mock.calls[index];
+      return (init as { headers: Record<string, string> }).headers[
+        "Authorization"
+      ];
+    }
+
+    it.each(["pin", "pattern", "code"] as const)(
+      "should send the rotated token on the next request after saving %s",
+      async (method) => {
+        mockPutThenPost({
+          data: {
+            method,
+            prompted: 1,
+            authToken: ROTATED_TOKEN,
+            expiresAt: ROTATED_EXPIRY,
+          },
+        });
+
+        const result = await client.setVerifyMethod(USER_1, {
+          method,
+          ...(method === "code" ? {} : { secret: "123456" }),
+        });
+        await client.markVerifyPrompted(USER_1);
+
+        expect(result).toStrictEqual({
+          data: {
+            method,
+            prompted: 1,
+            authToken: ROTATED_TOKEN,
+            expiresAt: ROTATED_EXPIRY,
+          },
+        });
+        // The PUT itself still authenticates with the token it replaced.
+        expect(authHeaderOfCall(0)).toBe(`Bearer ${OLD_TOKEN}`);
+        expect(authHeaderOfCall(1)).toBe(`Bearer ${ROTATED_TOKEN}`);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each<{ label: string; authToken: unknown; leak?: string }>([
+      { label: "a short string", authToken: "abc", leak: "abc" },
+      {
+        label: "upper-case hex",
+        authToken: "ABCDEF0123456789".repeat(4),
+        leak: "ABCDEF0123456789",
+      },
+      {
+        label: "63 hex chars",
+        authToken: "a".repeat(63),
+        leak: "a".repeat(63),
+      },
+      { label: "a number", authToken: 42 },
+      { label: "null", authToken: null },
+      { label: "an object", authToken: { token: ROTATED_TOKEN } },
+    ])(
+      "should keep the current token and drop $label as authToken",
+      async ({ authToken, leak }) => {
+        mockPutThenPost({ data: { method: "pin", prompted: 1, authToken } });
+
+        const result = await client.setVerifyMethod(USER_1, {
+          method: "pin",
+          secret: "123456",
+        });
+        await client.markVerifyPrompted(USER_1);
+
+        expect(result).toStrictEqual({ data: { method: "pin", prompted: 1 } });
+        expect(authHeaderOfCall(1)).toBe(`Bearer ${OLD_TOKEN}`);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(String(warnSpy.mock.calls[0][0])).toMatch(WARN_PREFIX);
+        if (leak !== undefined) {
+          expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(leak);
+        }
+      },
+    );
+
+    it("should adopt a valid token but drop an unusable expiry beside it", async () => {
+      mockPutThenPost({
+        data: {
+          method: "pattern",
+          prompted: 1,
+          authToken: ROTATED_TOKEN,
+          expiresAt: "tomorrow",
+        },
+      });
+
+      const result = await client.setVerifyMethod(USER_1, {
+        method: "pattern",
+        secret: "0,1,2,5",
+      });
+      await client.markVerifyPrompted(USER_1);
+
+      expect(result).toStrictEqual({
+        data: { method: "pattern", prompted: 1, authToken: ROTATED_TOKEN },
+      });
+      expect(authHeaderOfCall(1)).toBe(`Bearer ${ROTATED_TOKEN}`);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0][0])).toMatch(WARN_PREFIX);
+    });
+
+    it("should keep the current token without a warning when none issues no token", async () => {
+      mockPutThenPost({ data: { method: "none", prompted: 1 } });
+
+      const result = await client.setVerifyMethod(USER_1, { method: "none" });
+      await client.markVerifyPrompted(USER_1);
+
+      expect(result).toStrictEqual({ data: { method: "none", prompted: 1 } });
+      expect(authHeaderOfCall(1)).toBe(`Bearer ${OLD_TOKEN}`);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("should adopt nothing from an error envelope that also carries a token", async () => {
+      const body = {
+        error: { code: "X", message: "m" },
+        data: { method: "pin", prompted: 1, authToken: ROTATED_TOKEN },
+      };
+      mockPutThenPost(body);
+
+      const result = await client.setVerifyMethod(USER_1, {
+        method: "pin",
+        secret: "123456",
+      });
+      await client.markVerifyPrompted(USER_1);
+
+      expect(result).toStrictEqual(body);
+      expect(authHeaderOfCall(1)).toBe(`Bearer ${OLD_TOKEN}`);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("markVerifyPrompted", () => {
     it("should call POST /api/user/:id/verify/prompted", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));

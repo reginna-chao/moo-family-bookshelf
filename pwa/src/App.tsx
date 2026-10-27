@@ -14,6 +14,8 @@ import {
   useSessionApiClient,
 } from "./hooks/useSessionApiClient";
 import { recoveryJoinBlocked } from "./hooks/recoveryJoinGate";
+import { useAutoAcquireToken } from "./hooks/useAutoAcquireToken";
+import { useRotatedTokenPersistence } from "./hooks/useRotatedTokenPersistence";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -189,17 +191,8 @@ function AuthenticatedApp() {
 
   // Same client across a token swap, new one per session (#256) — see the hook.
   const apiClient = useSessionApiClient(auth, acquireNewToken);
-
-  // Auto-acquire auth token if missing (e.g., QR code entry)
-  const [acquiringToken, setAcquiringToken] = useState(false);
-  const tokenAcquired = useRef(false);
-  useEffect(() => {
-    if (!auth || auth.authToken || tokenAcquired.current) return;
-    tokenAcquired.current = true;
-    setAcquiringToken(true);
-
-    void acquireNewToken().finally(() => setAcquiringToken(false));
-  }, [auth, acquireNewToken]);
+  const acquiringToken = useAutoAcquireToken(auth, acquireNewToken);
+  const persistRotatedToken = useRotatedTokenPersistence(auth, authRef, login);
 
   if (isLoading || acquiringToken) {
     return (
@@ -238,6 +231,7 @@ function AuthenticatedApp() {
           userId={auth.userId}
           apiClient={apiClient}
           onComplete={() => setVerifySetupDone(true)}
+          onTokenRotated={persistRotatedToken}
         />
       )}
       <MainContent

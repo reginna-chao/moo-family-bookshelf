@@ -60,6 +60,19 @@ async function seedFamily(userId: string, familyId: string) {
   );
 }
 
+/** Set the joining user's verification through the real route; returns the token valid afterwards:
+ *  a `pin` / `pattern` PUT rotates the seeded token, `code` keeps it (#378). */
+async function setVerification(body: Record<string, string>): Promise<string> {
+  const seeded = await seedAuthToken(kv, VALID_USER_ID);
+  const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+    body: JSON.stringify(body),
+    headers: { Authorization: `Bearer ${seeded}` },
+  });
+  expect(res.status).toBe(200);
+  const { data } = (await res.json()) as Json;
+  return body.method === "code" ? seeded : (data.authToken as string);
+}
+
 beforeEach(() => {
   kv = createMockKV();
 });
@@ -151,10 +164,9 @@ describe("Join with QR token bypass", () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
     // Set up PIN verification for the joining user
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
+    const userAuthToken = await setVerification({
+      method: "pin",
+      secret: "123456",
     });
 
     // Generate QR token
@@ -184,10 +196,9 @@ describe("Join with QR token bypass", () => {
   it("should delete qrToken after one-time use", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
+    const userAuthToken = await setVerification({
+      method: "pin",
+      secret: "123456",
     });
 
     // Generate QR token
@@ -211,10 +222,9 @@ describe("Join with QR token bypass", () => {
   it("should reject reused qrToken: existing member with PIN set still must verify (SEC-1)", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
+    const userAuthToken = await setVerification({
+      method: "pin",
+      secret: "123456",
     });
 
     // Generate QR token
@@ -253,10 +263,9 @@ describe("Join with QR token bypass", () => {
   it("should still consume the qrToken on the first (successful) join", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
+    const userAuthToken = await setVerification({
+      method: "pin",
+      secret: "123456",
     });
 
     const qrRes = await request("POST", `/api/user/${VALID_USER_ID}/qr-token`, {
@@ -287,11 +296,7 @@ describe("Join with QR token bypass", () => {
     const qrJson = (await qrRes.json()) as Json;
 
     // Set up PIN for the joining user
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
-    });
+    await setVerification({ method: "pin", secret: "123456" });
 
     // Try to join with the wrong user's QR token
     const joinRes = await request(
@@ -313,11 +318,7 @@ describe("Join with QR token bypass", () => {
   it("should fall through to verification when qrToken is expired (not in KV)", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
-    });
+    await setVerification({ method: "pin", secret: "123456" });
 
     // Use a fabricated token that doesn't exist in KV (simulates expired)
     const fakeToken = "f".repeat(64);
@@ -341,11 +342,7 @@ describe("Join with QR token bypass", () => {
   it("should still allow normal verification flow when no qrToken is provided", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pin", secret: "123456" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
-    });
+    await setVerification({ method: "pin", secret: "123456" });
 
     // Join with correct verifySecret, no qrToken
     const joinRes = await request(
@@ -380,10 +377,9 @@ describe("Join with QR token bypass", () => {
   it("should bypass verification even with pattern method set", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "pattern", secret: "0,1,2,5,8" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
+    const userAuthToken = await setVerification({
+      method: "pattern",
+      secret: "0,1,2,5,8",
     });
 
     // Generate QR token
@@ -449,11 +445,7 @@ describe("Join with QR token bypass", () => {
   it("should bypass verification even with OTP method set", async () => {
     await seedFamily(OTHER_USER_ID, VALID_FAMILY_ID);
 
-    const userAuthToken = await seedAuthToken(kv, VALID_USER_ID);
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "code" }),
-      headers: { Authorization: `Bearer ${userAuthToken}` },
-    });
+    const userAuthToken = await setVerification({ method: "code" });
 
     // Generate QR token
     const qrRes = await request("POST", `/api/user/${VALID_USER_ID}/qr-token`, {

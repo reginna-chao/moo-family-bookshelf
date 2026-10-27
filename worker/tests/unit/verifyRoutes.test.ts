@@ -167,6 +167,17 @@ async function setPin(userId: string, pin: string) {
   expect(res.status).toBe(200);
 }
 
+/** Switch VALID_USER_ID to the `code` method. `code` sets no secret, so it rotates nothing (#378):
+ *  the caller's token keeps working for the OTP push that follows. */
+async function switchToCode(token: string): Promise<void> {
+  const res = await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
+    body: JSON.stringify({ method: "code" }),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as Json).data).not.toHaveProperty("authToken");
+}
+
 // Joins the target family as `userId`; `callerIp` goes out as `cf-connecting-ip` (omit = no IP).
 // See the header → "Fixtures".
 function joinFamily(userId: string, verifySecret?: string, callerIp?: string) {
@@ -820,11 +831,8 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
 
-    // Set method to code
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "code" }),
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
+    // Set method to code — no rotation (#378), so ownerToken still pushes the OTP
+    await switchToCode(ownerToken);
 
     // Generate OTP
     const otpRes = await request(
@@ -848,10 +856,7 @@ describe("Verification in join flow", () => {
 
     const ownerToken = await seedAuthToken(kv, VALID_USER_ID);
 
-    await request("PUT", `/api/user/${VALID_USER_ID}/verify`, {
-      body: JSON.stringify({ method: "code" }),
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
+    await switchToCode(ownerToken);
 
     const otpRes = await request(
       "POST",

@@ -10,6 +10,7 @@ import { VerificationSettings } from "@/dialog/VerificationSettings";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
+import { AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY } from "@/constants";
 
 /**
  * VerificationSettings: choosing the PWA-login verification method, the save / OTP-generation
@@ -49,6 +50,13 @@ import type { VerifyMethod } from "@/api/types";
  * failed generation lands inside it: handleGenerateOtp resets the status on entry — the same status
  * the save's pending timer owns — so unless that timer is superseded there too, it fires afterwards
  * and wipes an error the user has not read.
+ *
+ * Rotated token storage (#378): a new pin / pattern / code revokes the account's shared auth token and the
+ * response carries its replacement. `apiClient` already holds it (pinned in tests/unit/api/verifyApi.test.ts),
+ * but other Readmoo tabs, the background and the content scripts read the token from `browser.storage.local`,
+ * so the save (`extension/src/dialog/saveVerifyMethod.ts`) writes `AUTH_TOKEN_KEY` (+ `TOKEN_EXPIRES_AT_KEY`
+ * when issued) there. The server already switched methods, so a storage failure is only logged: the panel
+ * must still report 已儲存, not a failed save the user would retry. `none` issues no token and writes nothing.
  */
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
@@ -253,6 +261,148 @@ describe("VerificationSettings", () => {
 
     await waitFor(() => {
       expect(screen.getByText("驗證方式無效")).toBeInTheDocument();
+    });
+  });
+
+  /** The token a new pin / pattern / code rotated reaches `browser.storage.local`; a storage failure never fails
+   *  the save. See the file header, "Rotated token storage". */
+  describe("rotated token storage", () => {
+    const ROTATED_TOKEN = "0123456789abcdef".repeat(4);
+    const ROTATED_EXPIRY = 1_700_000_000_000;
+
+    afterEach(async () => {
+      // The storage mock's backing object lives for the whole file.
+      await chrome.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+    });
+
+    /** Choose PIN and enter 123456 twice; `act` is the barrier for the save it triggers. */
+    async function savePin(api: ApiClient) {
+      render(<VerificationSettings userId="user-1" apiClient={api} />);
+      await waitFor(() => {
+        expect(screen.getByText("PIN 碼")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("PIN 碼"));
+      for (let i = 0; i < 2; i++) {
+        fireEvent.change(screen.getByLabelText("PIN 碼輸入"), {
+          target: { value: "123456" },
+        });
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "確認" }));
+        });
+      }
+    }
+
+    it("stores the rotated token and its expiry after a PIN save", async () => {
+      const api = createMockApiClient({
+        setVerifyMethod: vi.fn().mockResolvedValue({
+          data: {
+            method: "pin",
+            prompted: 1,
+            authToken: ROTATED_TOKEN,
+            expiresAt: ROTATED_EXPIRY,
+          },
+        }),
+      });
+
+      await savePin(api);
+
+      expect(await screen.findByText("已儲存")).toBeInTheDocument();
+      expect(api.setVerifyMethod).toHaveBeenCalledWith("user-1", {
+        method: "pin",
+        secret: "123456",
+      });
+      expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
+        [TOKEN_EXPIRES_AT_KEY]: ROTATED_EXPIRY,
+      });
+    });
+
+    it("stores the token alone when no expiry was issued", async () => {
+      const api = createMockApiClient({
+        setVerifyMethod: vi.fn().mockResolvedValue({
+          data: { method: "code", prompted: 1, authToken: ROTATED_TOKEN },
+        }),
+      });
+      render(<VerificationSettings userId="user-1" apiClient={api} />);
+      await waitFor(() => {
+        expect(screen.getByText("隨機驗證碼")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("隨機驗證碼"));
+      });
+
+      expect(screen.getByText("已儲存")).toBeInTheDocument();
+      // Exact-object match: a stale TOKEN_EXPIRES_AT_KEY write would fail here.
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
+      });
+    });
+
+    it("still reports the save as done when storing the token fails", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(
+        new Error("QUOTA_BYTES quota exceeded"),
+      );
+      const api = createMockApiClient({
+        setVerifyMethod: vi.fn().mockResolvedValue({
+          data: {
+            method: "pin",
+            prompted: 1,
+            authToken: ROTATED_TOKEN,
+            expiresAt: ROTATED_EXPIRY,
+          },
+        }),
+      });
+
+      try {
+        await savePin(api);
+
+        expect(await screen.findByText("已儲存")).toBeInTheDocument();
+        expect(screen.queryByText("儲存失敗，請重試")).not.toBeInTheDocument();
+        expect(screen.getByText("目前方式：PIN 碼")).toBeInTheDocument();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(String(warnSpy.mock.calls[0][0])).toMatch(
+          /^\[VerificationSettings\]/,
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("writes nothing when saving none, which issues no token", async () => {
+      const api = createMockApiClient({
+        setVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "none", prompted: 1 } }),
+      });
+      render(<VerificationSettings userId="user-1" apiClient={api} />);
+      await waitFor(() => {
+        expect(screen.getByText("不設定驗證")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("不設定驗證"));
+      await act(async () => {
+        fireEvent.click(screen.getByText("確定不設定驗證"));
+      });
+
+      expect(screen.getByText("已儲存")).toBeInTheDocument();
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when the save itself fails", async () => {
+      const api = createMockApiClient({
+        setVerifyMethod: vi.fn().mockResolvedValue({
+          error: { code: "SERVER_ERROR", message: "伺服器忙碌" },
+          data: { authToken: ROTATED_TOKEN },
+        }),
+      });
+
+      await savePin(api);
+
+      expect(await screen.findByText("伺服器忙碌")).toBeInTheDocument();
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
   });
 

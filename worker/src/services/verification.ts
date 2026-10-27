@@ -5,6 +5,7 @@ import {
   VERIFY_MAX_FAILURES,
   VERIFY_LOCKOUT_MS,
   VERIFY_FAIL_TTL_SECONDS,
+  type AuthRecord,
   type VerifyRecord,
   type VerifyFailRecord,
   type OtpRecord,
@@ -51,9 +52,35 @@ export type VerificationError =
       status: 403;
     };
 
-/** Outcome of a verification check. */
+/** Outcome of a verification check; a pass carries the `verify:{userId}` record it was decided on. */
 export type VerificationResult =
-  { valid: true } | { valid: false; error: VerificationError };
+  | { valid: true; record: VerifyRecord | null }
+  | { valid: false; error: VerificationError };
+
+/** The 403 asking for the account's secret — the gate's no-secret answer, reused by join's #378 refusals. */
+export const VERIFICATION_REQUIRED_ERROR: VerificationError = {
+  code: "VERIFICATION_REQUIRED",
+  message: "此帳號需要驗證才能登入",
+  status: 403,
+};
+
+/**
+ * True when a passed verification was decided on a verify record older than the
+ * one `auth`'s token rotation was written for (`AuthRecord.secretAt`, #378): a
+ * stale colo compared a superseded secret, or saw no secret at all, so the join
+ * must not hand out a token and `POST /verify/prompted` must not write the record
+ * back. `auth` without `secretAt` never trips it. See
+ * docs/architecture.md → PWA 登入驗證機制.
+ */
+export function passedAgainstStaleVerifyRecord(
+  auth: AuthRecord | null,
+  record: VerifyRecord | null,
+): boolean {
+  const secretAt = auth?.secretAt;
+  if (typeof secretAt !== "number") return false;
+  const recordAt = record?.secretUpdatedAt;
+  return typeof recordAt !== "number" || secretAt > recordAt;
+}
 
 /**
  * Render a {@link VerificationError} as the standard JSON error envelope.
@@ -330,7 +357,7 @@ async function chargeWrongGuess(
  *
  * This function never writes `verify:{userId}`.
  *
- * Returns: { valid: true } or error response.
+ * Returns: { valid: true, record } (the `verify:{userId}` record read, `null` when absent) or error response.
  */
 export async function validateVerification(
   env: Env,
@@ -343,7 +370,7 @@ export async function validateVerification(
 
   // No verification set or method is 'none' — allow through
   if (!record || record.method === "none") {
-    return { valid: true };
+    return { valid: true, record };
   }
 
   const failKey = kvKeys.verifyFail(userId, opts.callerKey);
@@ -370,14 +397,7 @@ export async function validateVerification(
   // No secret: no attempt, nothing charged, no KV write — a void leftover stays inert until its
   // TTL or the next request overwrites / clears it.
   if (!secret || typeof secret !== "string") {
-    return {
-      valid: false,
-      error: {
-        code: "VERIFICATION_REQUIRED",
-        message: "此帳號需要驗證才能登入",
-        status: 403,
-      },
-    };
+    return { valid: false, error: VERIFICATION_REQUIRED_ERROR };
   }
 
   // Compare FIRST: the target-keyed ceiling must never refuse a correct secret, or any third party
@@ -392,7 +412,7 @@ export async function validateVerification(
 
   // Corrupted record — treat as no verification
   if (matched === null) {
-    return { valid: true };
+    return { valid: true, record };
   }
 
   if (!matched) {
@@ -423,5 +443,5 @@ export async function validateVerification(
     await kv.delete(failKey);
   }
 
-  return { valid: true };
+  return { valid: true, record };
 }

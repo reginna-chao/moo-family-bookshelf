@@ -65,6 +65,7 @@ import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/p
 import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
 import { sanitizeIssuedFamilyGroup } from "moo-family-bookshelf-shared/api/issuedCredentials";
+import { adoptRotatedVerifyToken } from "moo-family-bookshelf-shared/api/verifyTokenRotation";
 import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { isClientSynthesized, synthesizeError } from "./synthesizedError";
 import { buildRateLimitMessage } from "./rateLimitMessage";
@@ -509,11 +510,10 @@ export class ApiClient {
     return sanitizeVerifyInfoResponse<VerifyInfo>(res);
   }
 
-  async setVerifyMethod(
-    userId: string,
-    body: SetVerifyBody,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.put(`/api/user/${userId}/verify`, body);
+  /** A new pin / pattern revokes the old token (#378): its replacement is on this client on return. */
+  async setVerifyMethod(userId: string, body: SetVerifyBody) {
+    const res = await this.put<unknown>(`/api/user/${userId}/verify`, body);
+    return adoptRotatedVerifyToken(res, (token) => this.setAuthToken(token));
   }
 
   async generateOtp(userId: string): Promise<ApiResponse<OtpInfo>> {

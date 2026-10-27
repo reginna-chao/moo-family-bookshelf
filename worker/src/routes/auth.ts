@@ -8,8 +8,9 @@ import {
   sanitizeVerifySecret,
 } from "../utils/validation";
 import {
-  getOrGenerateAuthToken,
   getAuthenticatedUserId,
+  getPresentedAuthToken,
+  renewPresentedAuthToken,
 } from "../middleware/auth";
 import { getCallerIp } from "../middleware/rateLimit";
 import {
@@ -203,7 +204,15 @@ authRoutes.openapi(refreshRoute, async (c) => {
     }
   }
 
-  const newToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
+  // Never hands out a token other than the bearer (#378); a stale colo renewing the OLD token
+  // is an accepted residual — docs/architecture.md → PWA 登入驗證機制.
+  const presentedToken = getPresentedAuthToken(c);
+  const newToken = presentedToken
+    ? await renewPresentedAuthToken(c.env.KV, body.userId, presentedToken)
+    : null;
+  if (!newToken) {
+    return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
+  }
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { token: newToken, expiresAt } }, 200);
