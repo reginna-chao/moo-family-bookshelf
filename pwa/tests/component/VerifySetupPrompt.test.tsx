@@ -7,6 +7,7 @@ import {
   waitFor,
   act,
 } from "@testing-library/react";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { VerifySetupPrompt } from "@/components/VerifySetupPrompt";
 import { ApiClient } from "@/api/client";
 
@@ -35,8 +36,13 @@ import { ApiClient } from "@/api/client";
  * Rotated token hand-off (#378): a new pin / pattern / code revokes the account's shared auth token and
  * the save's response carries its replacement. The client already adopted it (pinned in
  * tests/unit/api/verifyApi.test.ts); the prompt hands it to `onTokenRotated` so App can persist it into
- * the session, and must do so BEFORE `markVerifyPrompted` — anything sent afterwards belongs to the new
- * token's session. Asserted on `invocationCallOrder`, Vitest's global call sequence across mocks.
+ * the session, and must do so BEFORE `onComplete` — whatever App does next belongs to the new token's
+ * session. Asserted on `invocationCallOrder`, Vitest's global call sequence across mocks.
+ *
+ * One write per save (#399): the chosen method and the prompt-shown mark travel together in the PUT
+ * body (`prompted: BoolFlag.TRUE`), and the save sends NO follow-up `markVerifyPrompted`
+ * (`POST /verify/prompted`). That POST, on a stale KV read, wrote `{ method: "none", prompted: 1 }` and
+ * silently replaced the method just chosen. Only the 「之後再說」 dismiss still calls it alone.
  */
 
 // Mock the ApiClient
@@ -215,10 +221,13 @@ describe("VerifySetupPrompt", () => {
     fireEvent.click(screen.getByText("確定不設定"));
 
     await waitFor(() => {
-      expect(mockSetVerify).toHaveBeenCalledWith(USER_ID, { method: "none" });
-      expect(mockMarkPrompted).toHaveBeenCalledWith(USER_ID);
+      expect(mockSetVerify).toHaveBeenCalledWith(USER_ID, {
+        method: "none",
+        prompted: BoolFlag.TRUE,
+      });
       expect(mockOnComplete).toHaveBeenCalled();
     });
+    expect(mockMarkPrompted).not.toHaveBeenCalled();
   });
 
   it("should call markVerifyPrompted and onComplete when dismissing", async () => {
@@ -291,7 +300,8 @@ describe("VerifySetupPrompt", () => {
     });
   });
 
-  it("should call setVerifyMethod with code and complete when selecting random code", async () => {
+  // #399: a follow-up POST /verify/prompted could overwrite the fresh `code` with `none`. See the header.
+  it("should save the prompted mark in the PUT and send no POST /verify/prompted after choosing code (#399)", async () => {
     const mockSetVerify = vi.fn().mockResolvedValue({ data: { ok: true } });
     const mockMarkPrompted = vi.fn().mockResolvedValue({ data: { ok: true } });
     const client = createMockClient({
@@ -314,10 +324,14 @@ describe("VerifySetupPrompt", () => {
     fireEvent.click(screen.getByText("隨機驗證碼"));
 
     await waitFor(() => {
-      expect(mockSetVerify).toHaveBeenCalledWith(USER_ID, { method: "code" });
-      expect(mockMarkPrompted).toHaveBeenCalledWith(USER_ID);
+      expect(mockSetVerify).toHaveBeenCalledWith(USER_ID, {
+        method: "code",
+        prompted: BoolFlag.TRUE,
+      });
       expect(mockOnComplete).toHaveBeenCalled();
     });
+    expect(mockSetVerify).toHaveBeenCalledTimes(1);
+    expect(mockMarkPrompted).not.toHaveBeenCalled();
   });
 
   it("should go back to choose step when cancelling from PIN setup", async () => {
@@ -450,7 +464,7 @@ describe("VerifySetupPrompt", () => {
       });
     }
 
-    /** `act` is the barrier for the save and the markVerifyPrompted call chained after it. */
+    /** `act` is the barrier for the save and the `onComplete` chained after it. */
     async function clickAndSettle(element: HTMLElement) {
       await act(async () => {
         fireEvent.click(element);
@@ -468,31 +482,23 @@ describe("VerifySetupPrompt", () => {
       );
     }
 
-    it("should hand the rotated token over before marking the prompt shown", async () => {
+    it("should hand the rotated token over before completing", async () => {
       const onTokenRotated = vi.fn();
-      const markVerifyPrompted = vi
-        .fn()
-        .mockResolvedValue({ data: { ok: true } });
       const client = createMockClient({
         setVerifyMethod: vi.fn().mockResolvedValue(rotatedResponse("code")),
-        markVerifyPrompted,
       });
       await renderWith(client, onTokenRotated);
 
       await clickAndSettle(screen.getByText("隨機驗證碼"));
 
       expect(onTokenRotated).toHaveBeenCalledWith(ROTATED_TOKEN);
-      expectCalledBefore(onTokenRotated, markVerifyPrompted);
-      expectCalledBefore(markVerifyPrompted, mockOnComplete);
+      expectCalledBefore(onTokenRotated, mockOnComplete);
     });
 
     it("should hand the rotated token over after a PIN is set up", async () => {
       const onTokenRotated = vi.fn();
       const setVerifyMethod = vi.fn().mockResolvedValue(rotatedResponse("pin"));
-      const markVerifyPrompted = vi
-        .fn()
-        .mockResolvedValue({ data: { ok: true } });
-      const client = createMockClient({ setVerifyMethod, markVerifyPrompted });
+      const client = createMockClient({ setVerifyMethod });
       await renderWith(client, onTokenRotated);
 
       fireEvent.click(screen.getByText("PIN 碼"));
@@ -507,11 +513,11 @@ describe("VerifySetupPrompt", () => {
 
       expect(setVerifyMethod).toHaveBeenCalledWith(USER_ID, {
         method: "pin",
+        prompted: BoolFlag.TRUE,
         secret: "123456",
       });
       expect(onTokenRotated).toHaveBeenCalledWith(ROTATED_TOKEN);
-      expectCalledBefore(onTokenRotated, markVerifyPrompted);
-      expect(mockOnComplete).toHaveBeenCalledTimes(1);
+      expectCalledBefore(onTokenRotated, mockOnComplete);
     });
 
     it("should not call onTokenRotated when the save issues no token", async () => {
@@ -552,18 +558,13 @@ describe("VerifySetupPrompt", () => {
     });
 
     it("should complete normally when no onTokenRotated is passed", async () => {
-      const markVerifyPrompted = vi
-        .fn()
-        .mockResolvedValue({ data: { ok: true } });
       const client = createMockClient({
         setVerifyMethod: vi.fn().mockResolvedValue(rotatedResponse("code")),
-        markVerifyPrompted,
       });
       await renderWith(client);
 
       await clickAndSettle(screen.getByText("隨機驗證碼"));
 
-      expect(markVerifyPrompted).toHaveBeenCalledWith(USER_ID);
       expect(mockOnComplete).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
