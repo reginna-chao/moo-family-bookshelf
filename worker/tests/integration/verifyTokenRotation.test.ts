@@ -98,8 +98,12 @@ import {
  * refusal of a secret checked against an older verify record lives in
  * `joinStaleVerifyRecord.test.ts`.
  *
- * Every request runs with DEV_MODE: the verify-write ceiling is not under test
- * here (`verifyWriteRateLimit.test.ts` covers it). `Date` is pinned (timers stay
+ * Current secret (#396): once the account holds a PIN / pattern, every later
+ * verify PUT — whatever the target method — carries that PIN as `currentSecret`
+ * (`withCurrentPin`). The step-up itself is covered by `verifyStepUp.test.ts`.
+ *
+ * Every request runs with DEV_MODE: the verify-set ceiling is not under test
+ * here (`verifySetRateLimit.test.ts` covers it). `Date` is pinned (timers stay
  * real) so `expiresAt` can be asserted exactly.
  */
 
@@ -152,6 +156,11 @@ async function request(
 
 function putVerify(token: string, body: unknown): Promise<Response> {
   return request("PUT", `/api/user/${USER_ID}/verify`, token, body);
+}
+
+/** A verify PUT body from a PIN account, carrying its current PIN. See the header → "Current secret". */
+function withCurrentPin(body: object): object {
+  return { ...body, currentSecret: PIN };
 }
 
 /** PUT a PIN and return the token the rotation issued. */
@@ -412,7 +421,7 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
     const first = await setPin(await seedAuthToken(kv, USER_ID));
     vi.setSystemTime(PINNED_NOW + 5_000);
 
-    const res = await putVerify(first, SECRET_METHODS[1].body);
+    const res = await putVerify(first, withCurrentPin(SECRET_METHODS[1].body));
 
     expect(res.status).toBe(200);
     expect((await readVerifyRecord(kv, USER_ID))?.secretUpdatedAt).toBe(
@@ -437,7 +446,10 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
     const firstToken = await seedAuthToken(kv, USER_ID);
     const secondToken = await setPin(firstToken);
 
-    const second = await putVerify(secondToken, SECRET_METHODS[1].body);
+    const second = await putVerify(
+      secondToken,
+      withCurrentPin(SECRET_METHODS[1].body),
+    );
     expect(second.status).toBe(200);
     const thirdToken = ((await second.json()) as Json).data.authToken as string;
 
@@ -543,7 +555,7 @@ describe("PUT /api/user/:id/verify — methods none and code keep the session", 
       const seeded = await seedAuthToken(kv, USER_ID);
       const token = await setPin(seeded);
 
-      const res = await putVerify(token, { method });
+      const res = await putVerify(token, withCurrentPin({ method }));
 
       expect(res.status).toBe(200);
       expect(((await res.json()) as Json).data).not.toHaveProperty("authToken");
@@ -650,7 +662,7 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
   it("admits the token auth:{userId} names in the same state", async () => {
     const { next } = await revokedButAccepted();
 
-    const res = await putVerify(next, SECRET_METHODS[1].body);
+    const res = await putVerify(next, withCurrentPin(SECRET_METHODS[1].body));
 
     expect(res.status).toBe(200);
     const { data } = (await res.json()) as Json;
@@ -782,7 +794,9 @@ describe("POST /api/family/:id/join — a QR minted before a PIN change", () => 
 
   it("admits a stale QR once verification is turned off (nothing left to verify)", async () => {
     const { next, qr } = await qrThenPinChange();
-    expect((await putVerify(next, { method: "none" })).status).toBe(200);
+    expect(
+      (await putVerify(next, withCurrentPin({ method: "none" }))).status,
+    ).toBe(200);
 
     const res = await join({ qrToken: qr });
 
@@ -940,7 +954,9 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
   it("stays usable across a switch to code (the token survives; the OTP is skipped)", async () => {
     const token = await setPin(await seedAuthToken(kv, USER_ID));
     const qr = await mintQr(token);
-    expect((await putVerify(token, { method: "code" })).status).toBe(200);
+    expect(
+      (await putVerify(token, withCurrentPin({ method: "code" }))).status,
+    ).toBe(200);
 
     const res = await join({ qrToken: qr });
 

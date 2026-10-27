@@ -4,15 +4,14 @@ import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
 import { PinInput } from "./PinInput";
 import { PatternLock } from "./PatternLock";
+import { CurrentSecretStep } from "./CurrentSecretStep";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
-import { saveVerifyMethod } from "./saveVerifyMethod";
+import { useVerifyMethodFlow } from "./useVerifyMethodFlow";
 
 export interface VerificationSettingsProps {
   userId: string;
   apiClient: ApiClient;
 }
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 /** Per-method label in button order (a Map keeps insertion order). A Map, not an object literal: the
  *  unvalidated `method` must not resolve `"__proto__"` / `"toString"` to a member React cannot render. */
@@ -30,47 +29,16 @@ export function VerificationSettings({
   userId,
   apiClient,
 }: VerificationSettingsProps) {
-  const [currentMethod, setCurrentMethod] = useState<VerifyMethod | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<VerifyMethod | null>(
-    null,
-  );
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [saveError, setSaveError] = useState("");
-  const [showSetup, setShowSetup] = useState(false);
-  const [showNoneWarning, setShowNoneWarning] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const flow = useVerifyMethodFlow({ userId, apiClient });
+  const { currentMethod, selectedMethod, saveState, saveError } = flow;
+  const { showSetup, showNoneWarning, askingSecret, currentSecret } = flow;
+  const { clearSavedTimer, setSaveState, setSaveError, handleSave } = flow;
 
   // OTP state
   const [otpCode, setOtpCode] = useState<string | null>(null);
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [otpCountdown, setOtpCountdown] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  /** Pending "saved" → "idle" reset; cleared on unmount and before rescheduling. */
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      const result = await apiClient.getVerifyMethod(userId);
-      if (cancelled) return;
-      if (result.data) {
-        setCurrentMethod(result.data.method);
-      } else {
-        setCurrentMethod("none");
-      }
-      setLoading(false);
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, apiClient]);
 
   // OTP countdown timer
   useEffect(() => {
@@ -94,61 +62,16 @@ export function VerificationSettings({
     };
   }, [otpExpiresAt]);
 
-  const handleSave = useCallback(
-    async (method: VerifyMethod, secret?: string) => {
-      // A new save supersedes any pending saved→idle reset: letting the old timer
-      // fire mid-flight would drop saveState out of "saving" (and out of "error").
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-
-      setSaveState("saving");
-      setSaveError("");
-      const result = await saveVerifyMethod(apiClient, userId, method, secret);
-      if (result.error) {
-        setSaveState("error");
-        setSaveError(safeErrorText(result.error.message, "儲存失敗，請重試"));
-        return;
-      }
-      setCurrentMethod(method);
-      setSelectedMethod(null);
-      setShowSetup(false);
-      setShowNoneWarning(false);
-      setSaveState("saved");
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setSaveState("idle"), 2000);
-    },
-    [userId, apiClient],
-  );
-
-  const handleMethodSelect = useCallback(
-    (method: VerifyMethod) => {
-      setSelectedMethod(method);
-      setSaveState("idle");
-      setSaveError("");
-      setOtpCode(null);
-      setOtpExpiresAt(null);
-
-      if (method === "pin" || method === "pattern") {
-        setShowSetup(true);
-        setShowNoneWarning(false);
-        return;
-      }
-      if (method === "none") {
-        setShowSetup(false);
-        setShowNoneWarning(true);
-        return;
-      }
-      // "code" — save immediately (no secret needed)
-      setShowSetup(false);
-      setShowNoneWarning(false);
-      void handleSave(method);
-    },
-    [handleSave],
-  );
+  const handleMethodSelect = (method: VerifyMethod) => {
+    setOtpCode(null);
+    setOtpExpiresAt(null);
+    flow.handleMethodSelect(method);
+  };
 
   const handleGenerateOtp = useCallback(async () => {
     // A new OTP generation supersedes any pending saved→idle reset: the stale
     // timer would dismiss this handler's own failure banner mid-flight.
-    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    clearSavedTimer();
 
     setSaveState("idle");
     setSaveError("");
@@ -174,12 +97,13 @@ export function VerificationSettings({
     }
     setOtpCode(code);
     setOtpExpiresAt(expiresAt);
-  }, [userId, apiClient]);
+  }, [userId, apiClient, clearSavedTimer, setSaveState, setSaveError]);
 
-  if (loading) {
+  if (flow.loading) {
     return <div className="moo-verify__loading">載入中...</div>;
   }
 
+  const stepError = saveState === "error" ? saveError : undefined;
   return (
     <div className="moo-verify">
       <div className="moo-verify__title">登入驗證</div>
@@ -188,7 +112,8 @@ export function VerificationSettings({
         {METHOD_LABELS.get(currentMethod ?? "none") ?? UNKNOWN_METHOD_LABEL}
       </div>
       <div className="moo-verify__tip">
-        提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。忘記的話，可以在還保持登入的電腦上，從擴充功能的「設定」改成新的。
+        提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的
+        PIN 碼或圖形；忘記的話，自架伺服器請找管理者協助。
       </div>
 
       {/* Method selection buttons */}
@@ -211,12 +136,23 @@ export function VerificationSettings({
         })}
       </div>
 
+      {/* Current PIN / pattern, before any change on such an account (#396) */}
+      {askingSecret && currentMethod !== null && (
+        <CurrentSecretStep
+          method={currentMethod}
+          purpose="change"
+          onComplete={flow.handleCurrentSecret}
+          error={stepError}
+          disabled={saveState === "saving"}
+        />
+      )}
+
       {/* PIN setup */}
       {showSetup && selectedMethod === "pin" && (
         <PinInput
           mode="setup"
-          onComplete={(pin) => void handleSave("pin", pin)}
-          error={saveState === "error" ? saveError : undefined}
+          onComplete={(pin) => void handleSave("pin", pin, currentSecret)}
+          error={stepError}
         />
       )}
 
@@ -224,8 +160,8 @@ export function VerificationSettings({
       {showSetup && selectedMethod === "pattern" && (
         <PatternLock
           mode="setup"
-          onComplete={(pattern) => void handleSave("pattern", pattern)}
-          error={saveState === "error" ? saveError : undefined}
+          onComplete={(p) => void handleSave("pattern", p, currentSecret)}
+          error={stepError}
         />
       )}
 
@@ -238,7 +174,7 @@ export function VerificationSettings({
             </div>
           </div>
           <button
-            onClick={() => void handleSave("none")}
+            onClick={() => void handleSave("none", undefined, currentSecret)}
             disabled={saveState === "saving"}
             className="moo-button moo-button--warn moo-button--sm moo-verify__none-confirm"
           >
@@ -279,7 +215,7 @@ export function VerificationSettings({
           已儲存
         </div>
       )}
-      {saveState === "error" && !showSetup && (
+      {saveState === "error" && !showSetup && !askingSecret && (
         <div className="moo-verify__status moo-verify__status--error">
           {saveError}
         </div>

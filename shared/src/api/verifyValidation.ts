@@ -21,6 +21,12 @@ function isVerifyMethod(value: unknown): value is VerifyMethod {
   return typeof value === "string" && VERIFY_METHODS.has(value);
 }
 
+/** Whether changing the verify settings or deleting the account must first present the current
+ *  secret (#396): only a PIN or a pattern has one; `code` and `none` do not. */
+export function requiresCurrentSecret(method: VerifyMethod): boolean {
+  return method === "pin" || method === "pattern";
+}
+
 /**
  * Validate a `GET /api/user/:id/verify` envelope at the API boundary.
  *

@@ -106,6 +106,10 @@ export type {
   CreateBorrowPayload,
 } from "moo-family-bookshelf-shared/borrow/types";
 
+function jsonInit(method: string, body?: unknown): RequestInit {
+  return { method, body: body != null ? JSON.stringify(body) : undefined };
+}
+
 export class ApiClient {
   private baseUrl: string;
   private transport = new ApiTransport(() => this.baseUrl);
@@ -143,28 +147,19 @@ export class ApiClient {
   }
 
   private post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "POST",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("POST", body));
   }
 
   private put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "PUT",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("PUT", body));
   }
 
-  private del<T>(path: string): Promise<ApiResponse<T>> {
-    return this.request(path, { method: "DELETE" });
+  private del<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, jsonInit("DELETE", body));
   }
 
   private patch<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "PATCH",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("PATCH", body));
   }
 
   // --- Auth ---
@@ -349,9 +344,14 @@ export class ApiClient {
 
   // --- Account ---
 
-  async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
+  /** `currentSecret` is required while the account's method is PIN / pattern (#396). */
+  async deleteAccount(
+    userId: string,
+    currentSecret?: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
     assertHexId(userId, "userId");
-    return this.del(`/api/user/${userId}`);
+    const body = currentSecret === undefined ? undefined : { currentSecret };
+    return this.del(`/api/user/${userId}`, body);
   }
 
   // --- Family Bookshelf ---

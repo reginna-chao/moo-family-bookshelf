@@ -14,7 +14,8 @@ import {
  * cannot trigger a silent recovery join that re-adds the user. Outcomes and
  * copy are unchanged; the mark is up for the request and the force-logout, and
  * gone afterwards in every branch. Twin:
- * `extension/tests/unit/dialog/useFamilySettingsDelete.test.ts`.
+ * `extension/tests/unit/dialog/useFamilySettingsDelete.test.ts`. The current-secret step-up
+ * (#396) is covered in useDeleteAccount.stepUp.test.ts.
  */
 
 type DeleteRes = ApiResponse<{ ok: boolean }>;
@@ -57,7 +58,8 @@ describe("useDeleteAccount", () => {
 
     await confirmDelete(hook);
 
-    expect(send).toHaveBeenCalledWith(USER_ID);
+    // No current secret entered: the client then sends no body (pwa/tests/unit/api/verifyApi.test.ts).
+    expect(send).toHaveBeenCalledWith(USER_ID, undefined);
     expect(onForceLogout).toHaveBeenCalledTimes(1);
     expect(seen).toEqual({ send: [true], settle: [true] });
     expect(hook.result.current.deleteError).toBeNull();

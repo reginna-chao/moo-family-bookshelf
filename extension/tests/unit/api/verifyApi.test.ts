@@ -244,6 +244,22 @@ describe("ApiClient verification methods", () => {
       expect(JSON.parse(call[1].body as string)).toEqual({ method: "code" });
     });
 
+    it("sends the current secret beside the new one (#396)", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.setVerifyMethod("user-123", {
+        method: "pin",
+        secret: "654321",
+        currentSecret: "123456",
+      });
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(call[1].body as string)).toEqual({
+        method: "pin",
+        secret: "654321",
+        currentSecret: "123456",
+      });
+    });
+
     it("returns error on failure", async () => {
       globalThis.fetch = mockFetchError("INVALID_METHOD", "Invalid method");
       const result = await client.setVerifyMethod("user-123", {
@@ -446,6 +462,40 @@ describe("ApiClient verification methods", () => {
       const result = await client.generateOtp("user-123");
 
       expect(result.error?.code).toBe("METHOD_NOT_SET");
+    });
+  });
+
+  /** A PIN / pattern account deletes with its current secret in the body (#396); without one the
+   *  request carries no body at all, exactly as before. */
+  describe("deleteAccount", () => {
+    it("sends DELETE /api/user/:id with { currentSecret } when given", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      const result = await client.deleteAccount("user-123", "0,3,6,7");
+
+      expect(result.data).toEqual({ ok: true });
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe(`${MOCK_ENDPOINT}/api/user/user-123`);
+      expect(call[1].method).toBe("DELETE");
+      expect(JSON.parse(call[1].body as string)).toEqual({
+        currentSecret: "0,3,6,7",
+      });
+    });
+
+    it("sends no body when no secret is given", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.deleteAccount("user-123");
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe(`${MOCK_ENDPOINT}/api/user/user-123`);
+      expect(call[1].method).toBe("DELETE");
+      expect(call[1].body).toBeUndefined();
+    });
+
+    it("passes a refused secret through as an error envelope", async () => {
+      globalThis.fetch = mockFetchError("VERIFICATION_FAILED", "wrong", 403);
+      const result = await client.deleteAccount("user-123", "000000");
+
+      expect(result.error?.code).toBe("VERIFICATION_FAILED");
     });
   });
 });

@@ -72,6 +72,7 @@ const mockGetFamilyBookshelf = vi.fn();
 const mockLeaveFamily = vi.fn();
 const mockUpdateDisplayName = vi.fn();
 const mockDeleteAccount = vi.fn();
+const mockGetVerifyMethod = vi.fn();
 const mockRemoveMember = vi.fn();
 const mockUnkickMember = vi.fn();
 const mockApiClient = {
@@ -80,6 +81,7 @@ const mockApiClient = {
   leaveFamily: mockLeaveFamily,
   updateDisplayName: mockUpdateDisplayName,
   deleteAccount: mockDeleteAccount,
+  getVerifyMethod: mockGetVerifyMethod,
   removeMember: mockRemoveMember,
   unkickMember: mockUnkickMember,
   getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
@@ -140,6 +142,13 @@ function renderWithMembers(memberIds: string[], ownerId: string) {
   return renderWithProvider();
 }
 
+/** 移除帳戶 reads the verify method before the confirm opens (#396); `act` lets that read settle. */
+async function openDeleteConfirm() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+  });
+}
+
 describe("SettingsPage", () => {
   beforeEach(() => {
     // Mock clipboard API
@@ -153,6 +162,8 @@ describe("SettingsPage", () => {
         ownerId: defaultProps.userId,
       },
     });
+    // Default: no PIN / pattern, so 確定移除 deletes without a current secret (step-up: SettingsDeleteAccountSection.test.tsx)
+    mockGetVerifyMethod.mockResolvedValue({ data: { method: "none" } });
     // Default: bookshelf loads successfully (needed by FamilyDataProvider)
     mockGetFamilyBookshelf.mockResolvedValue({
       data: { familyId: defaultProps.familyId, members: [] },
@@ -1021,7 +1032,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    await openDeleteConfirm();
 
     expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
     expect(screen.getByText("將移除墨家書櫃中的所有資料")).toBeInTheDocument();
@@ -1039,7 +1050,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    await openDeleteConfirm();
     expect(screen.getByText("確定要移除帳戶嗎？")).toBeInTheDocument();
 
     // Find cancel button in delete section (last 取消 since it's after logout section)
@@ -1060,11 +1071,14 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    await openDeleteConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
 
     await waitFor(() => {
-      expect(mockDeleteAccount).toHaveBeenCalledWith(defaultProps.userId);
+      expect(mockDeleteAccount).toHaveBeenCalledWith(
+        defaultProps.userId,
+        undefined,
+      );
     });
     await waitFor(() => {
       expect(defaultProps.onForceLogout).toHaveBeenCalled();
@@ -1084,7 +1098,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    await openDeleteConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
 
     await waitFor(() => {
@@ -1102,7 +1116,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "移除帳戶" }));
+    await openDeleteConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定移除" }));
 
     await waitFor(() => {

@@ -1,4 +1,6 @@
+import { requiresCurrentSecret } from "moo-family-bookshelf-shared/api/verifyValidation";
 import type { ApiClient } from "../api/client";
+import { CurrentSecretStep } from "./CurrentSecretStep";
 import { useFamilySettingsDelete } from "./useFamilySettingsDelete";
 
 export interface FamilySettingsDeleteBlockProps {
@@ -22,8 +24,16 @@ export function FamilySettingsDeleteBlock({
     setDeleteState,
     deleteError,
     setDeleteError,
+    requiredMethod,
+    secretError,
+    startConfirming,
     handleDeleteConfirm,
   } = useFamilySettingsDelete({ userId, apiClient, onLeave });
+  // A PIN / pattern account confirms with its current secret: the entry's own 確認 submits (#396).
+  const secretMethod =
+    requiredMethod !== null && requiresCurrentSecret(requiredMethod)
+      ? requiredMethod
+      : null;
 
   return (
     <div className="moo-settings__section-divider--spaced">
@@ -32,7 +42,7 @@ export function FamilySettingsDeleteBlock({
       )}
       {deleteState === "idle" && (
         <button
-          onClick={() => setDeleteState("confirming")}
+          onClick={() => void startConfirming()}
           className="moo-button moo-button--outline-danger moo-button--block moo-settings__danger-btn"
         >
           移除帳戶
@@ -50,13 +60,23 @@ export function FamilySettingsDeleteBlock({
               <li>下次登入時將重新設定</li>
             </ul>
           </div>
+          {secretMethod !== null && (
+            <CurrentSecretStep
+              method={secretMethod}
+              purpose="delete"
+              onComplete={(secret) => void handleDeleteConfirm(secret)}
+              error={secretError}
+            />
+          )}
           <div className="moo-settings__confirm-row">
-            <button
-              onClick={() => void handleDeleteConfirm()}
-              className="moo-button moo-button--danger moo-settings__confirm-yes"
-            >
-              確定移除
-            </button>
+            {secretMethod === null && (
+              <button
+                onClick={() => void handleDeleteConfirm()}
+                className="moo-button moo-button--danger moo-settings__confirm-yes"
+              >
+                確定移除
+              </button>
+            )}
             <button
               onClick={() => {
                 setDeleteState("idle");
