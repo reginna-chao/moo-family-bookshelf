@@ -375,8 +375,9 @@ All development and design go through a **single skill entry: `/develop`**. It t
   (Apache-2.0; `.claude/agents/references/goldfish/VENDORED.md`). `/develop` dispatches it on the
   `PLAN.md` draft between the execution plan and the GO gate — full cycle only, never in fix mode —
   with a `persona` (`implementation-readiness` / `codebase-details`, plus `design-critic` when the
-  plan touches an API contract, a KV schema or a timer). It reads no conversation and no
-  `CLAUDE.md`; the orchestrator (the Elephant) classifies its findings for the user as
+  plan touches an API contract, a KV schema or a timer). It reads no conversation and no startup
+  `CLAUDE.md` (a path-scoped rule file still loads when it opens a matching source file — a
+  convention check, not plan context); the orchestrator (the Elephant) classifies its findings for the user as
   🟢 建議修 / 🟡 可修可不修 / 🔴 不成立 and re-audits at most once
   (`.claude/skills/develop/references/code-cycle.md` → "Goldfish plan review").
 - **Why a top-level `.claude/rules/` here (not per-area role files):** moo is a single repo with

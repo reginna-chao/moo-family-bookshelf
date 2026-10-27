@@ -29,8 +29,12 @@ project on a per-token budget; the two personas that catch what the project's ow
 
 - Dispatched ONLY by `/develop`, full cycle only, never in fix mode or the bug fast-path.
 - `omitClaudeMd: true` and `tools: Read, Glob, Grep` — the reviewer sees the `PLAN.md` draft and the
-  files it names, nothing from the conversation and nothing from `CLAUDE.md` / `AGENTS.md`. That
-  isolation is the whole point: a review in the same context is not a goldfish review.
+  files it names, nothing from the conversation and nothing from the startup `CLAUDE.md` /
+  `AGENTS.md`. That isolation is the whole point: a review in the same context is not a goldfish
+  review. It is NOT isolation from the repository's conventions: `omitClaudeMd` skips only what
+  loads at startup, so a path-scoped `.claude/rules/*.md` (`frontend.md`, `backend.md`, `test.md`)
+  still loads when the reviewer opens a matching source file. `goldfish.md` tells it to treat such a
+  file as a convention check, never as context that fills a gap in the plan.
 - The Elephant (the `/develop` orchestrator) classifies each finding with upstream `egm-resolve`'s
   four categories (PROPOSE FIX / ESCALATE / DECLINE / CONTEST) and shows the user three lights
   (🟢 建議修 / 🟡 可修可不修 / 🔴 不成立). The rules "a contest must be checkable", "never change a
