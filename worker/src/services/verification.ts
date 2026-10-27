@@ -480,11 +480,16 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  * again. `currentSecret` is `sanitizeVerifySecret()`'s value, passed through
  * unchanged: `""` means "not supplied", exactly as for {@link validateVerification}.
  *
- * - No step-up needed (`none` / `code` / no record) ⇒ `null`; a supplied secret is ignored.
  * - Stale record ({@link passedAgainstStaleVerifyRecord}) ⇒ `403 VERIFICATION_REQUIRED`
- *   with no comparison, no counter charge and no KV write: this colo has not seen
- *   the owner's latest secret, so comparing would charge the owner's correct new
- *   secret as a wrong guess. The client asks again; a caught-up colo passes.
+ *   whatever its shape — absent, `none` and `code` included — checked FIRST, with no
+ *   comparison, no counter charge and no KV write: this colo has not seen the owner's
+ *   latest secret, so passing would let a current-token holder who lacks it switch
+ *   verification off or delete the account, and comparing would charge the owner's
+ *   correct new secret as a wrong guess. The client asks again; a caught-up colo passes.
+ * - Not stale and no step-up needed (`none` / `code` / no record) ⇒ `null`; a supplied
+ *   secret is ignored. Covers an account that never had a PIN (`auth` has no `secretAt`),
+ *   one that switched PIN ⇒ `none` / `code` (that save's `secretUpdatedAt` ≥ `secretAt`)
+ *   and a missing `auth:` record (TTL gap).
  * - Otherwise the login gate itself decides, with the caller's IP as the lockout
  *   key and the handler's record — byte-identical responses (`403
  *   VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429 VERIFICATION_LOCKED` /
@@ -500,11 +505,11 @@ export async function enforceCurrentSecret(
   currentSecret: string | undefined,
   presentedAuth: AuthRecord | null,
 ): Promise<(Response & TypedResponse<ErrorBody, 403 | 429, "json">) | null> {
-  if (!needsCurrentSecret(record)) return null;
-
   if (passedAgainstStaleVerifyRecord(presentedAuth, record)) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
+
+  if (!needsCurrentSecret(record)) return null;
 
   const verification = await validateVerification(
     c.env,
