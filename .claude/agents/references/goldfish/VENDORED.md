@@ -1,0 +1,37 @@
+# Vendored: Elephant-Goldfish Model (EGM) — reviewer personas
+
+- Upstream: https://github.com/google/elephant-goldfish-model
+- Author: Google LLC — Apache License 2.0 (see `LICENSE`, kept verbatim)
+- Upstream commit: `b3a35956759bf7f024af2ff061b2e0b44b438e4c` (2026-10-26)
+- Vendored on: 2026-10-27
+
+## What is included
+
+`../goldfish.md` is an ADAPTATION, not a copy: it folds three upstream reviewer personas —
+`agents/implementation_readiness.md`, `agents/codebase_details.md`, `agents/design_critic.md` — and
+the quality bar of `resources/document_standards/implementation-readiness-standard.md` into one
+agent selected by a `persona` input, in this project's agent format. Dropped: the BRAINSTORM mode of
+each persona, the `zoom_out` / `comprehension` / `structural` / `style` personas, the five-stage
+review pipeline (`skills/egm_review`), the `synthesizer` and `bootstrap` orchestrators, and the
+`egm-*` skills. Nothing under `skills/` or `resources/` is copied.
+
+## Why an adaptation instead of the plugin
+
+The upstream skills carry `disable-model-invocation: true` and are started by a human typing
+`/egm:…`. This project routes every change through `/develop` and wants the goldfish review to run
+automatically inside it, between the execution plan and the GO gate, with no second entry point —
+so the review step lives in `.claude/skills/develop/references/code-cycle.md` and only the reviewer
+persona is taken from upstream. The five-stage pipeline was judged too expensive for a one-developer
+project on a per-token budget; the two personas that catch what the project's own reviewer cannot
+(a plan that leaves decisions to the coder, a plan that contradicts the code) were kept.
+
+## How this project uses it
+
+- Dispatched ONLY by `/develop`, full cycle only, never in fix mode or the bug fast-path.
+- `omitClaudeMd: true` and `tools: Read, Glob, Grep` — the reviewer sees the `PLAN.md` draft and the
+  files it names, nothing from the conversation and nothing from `CLAUDE.md` / `AGENTS.md`. That
+  isolation is the whole point: a review in the same context is not a goldfish review.
+- The Elephant (the `/develop` orchestrator) classifies each finding with upstream `egm-resolve`'s
+  four categories (PROPOSE FIX / ESCALATE / DECLINE / CONTEST) and shows the user three lights
+  (🟢 建議修 / 🟡 可修可不修 / 🔴 不成立). The rules "a contest must be checkable", "never change a
+  severity" and "never contest a comprehension gap" are upstream's and are kept.

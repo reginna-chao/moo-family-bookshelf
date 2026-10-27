@@ -354,10 +354,11 @@ All development and design go through a **single skill entry: `/develop`**. It t
 │   ├── user-facing-copy.md # plain-language rules for CHANGELOG / release notes / site / UI strings
 │   └── security-ux-invariants.md
 ├── agents/         # role agents (invisible in the slash menu)
-│   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md
-│   └── references/designer/{pencil-mockup,logo,icon,banner}.md
+│   ├── coder.md  tester.md  reviewer.md  security-auditor.md  designer.md  goldfish.md
+│   ├── references/designer/{pencil-mockup,logo,icon,banner}.md
+│   └── references/goldfish/{VENDORED.md,LICENSE}   # provenance of goldfish.md (Google EGM, Apache-2.0)
 ├── reports/        # retro reports — written by /develop's retro (offered once per run, at the commit gate), consumed & cleared by /distill
-├── runs/           # one <slug>/PLAN.md per in-flight /develop run (決定 / 計畫 / Fix Cycle Log) — written at GO so a later session can resume, deleted or kept at the commit gate
+├── runs/           # one <slug>/PLAN.md per in-flight /develop run (決定 / 計畫 / 金魚審查 / Fix Cycle Log) — drafted after the decision gate, reviewed by the goldfish, marked 已 GO at GO so a later session can resume, deleted or kept at the commit gate
 └── skills/         # slash-menu entries
     ├── develop/        # SKILL.md (router) + references/{code-cycle,design,retro}.md
     ├── distill/        # fold retro reports into durable rules, then clear them
@@ -370,6 +371,14 @@ All development and design go through a **single skill entry: `/develop`**. It t
   `backend`, or `config` for repo configuration with no runtime code); the agent then `Read`s the
   matching `.claude/rules/*.md` (none for `config`) and runs the right commands.
   The Fix Cycle (CRITICAL auto-fix / SUGGESTION decision) lives in `/develop`, not in the agents.
+- **`goldfish` is the fresh-context plan reviewer**, adapted from Google's Elephant-Goldfish Model
+  (Apache-2.0; `.claude/agents/references/goldfish/VENDORED.md`). `/develop` dispatches it on the
+  `PLAN.md` draft between the execution plan and the GO gate — full cycle only, never in fix mode —
+  with a `persona` (`implementation-readiness` / `codebase-details`, plus `design-critic` when the
+  plan touches an API contract, a KV schema or a timer). It reads no conversation and no
+  `CLAUDE.md`; the orchestrator (the Elephant) classifies its findings for the user as
+  🟢 建議修 / 🟡 可修可不修 / 🔴 不成立 and re-audits at most once
+  (`.claude/skills/develop/references/code-cycle.md` → "Goldfish plan review").
 - **Why a top-level `.claude/rules/` here (not per-area role files):** moo is a single repo with
   just one FE/BE split, so one shared set of rules — sliced by **scope/concern** (`frontend.md`,
   `backend.md`, `test.md`, `global.md`) — has the least duplication and fits well.
