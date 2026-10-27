@@ -291,6 +291,23 @@ describe("PatternLock", () => {
       expect(onComplete).toHaveBeenCalledWith("0,1,2,5");
     });
 
+    it("clears the drawing after a verify submit so 確認 cannot resend it", () => {
+      const onComplete = vi.fn();
+      render(<PatternLock mode="verify" onComplete={onComplete} />);
+
+      drawPattern([0, 1, 2, 5]);
+      fireEvent.click(confirmButton());
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith("0,1,2,5");
+      expect(connectedDotsText()).toBe("已連接 0 個點（最少 4 個）");
+      expect(confirmButton()).toBeDisabled();
+
+      fireEvent.click(confirmButton());
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
     it("shows the exact mismatch copy when the setup redraw differs", () => {
       const onComplete = vi.fn();
       render(<PatternLock mode="setup" onComplete={onComplete} />);

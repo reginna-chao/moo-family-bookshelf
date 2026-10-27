@@ -141,8 +141,8 @@ export function PatternLock({
     const pattern = serializePattern(selected);
 
     if (mode === "verify") {
-      onComplete(pattern);
-      return;
+      setSelected([]);
+      return onComplete(pattern);
     }
 
     if (!isConfirming) {

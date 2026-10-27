@@ -100,8 +100,8 @@ export function PatternLock({
     const serialized = serializePattern(selected);
 
     if (mode === "verify") {
-      onComplete(serialized);
-      return;
+      setSelected([]);
+      return onComplete(serialized);
     }
 
     if (setupStep === "enter") {
