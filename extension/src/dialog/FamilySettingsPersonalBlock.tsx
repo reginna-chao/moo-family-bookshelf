@@ -100,7 +100,7 @@ export function FamilySettingsPersonalBlock({
           onChange={onAutoSyncIntervalChange}
         />
         <div className="moo-settings__hint">
-          家庭書櫃自動讀取書單的頻率；手動同步不受此限制
+          開啟個人書櫃時，距離上次同步超過這段時間就會自動同步；手動同步不受此限制
         </div>
       </div>
       <div className="moo-settings__block">
