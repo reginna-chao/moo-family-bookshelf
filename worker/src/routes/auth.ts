@@ -44,6 +44,11 @@ const lookupRoute = createRoute({
     "answers 200 with `requiresVerification: 1` and NO membership data — the " +
     "client should prompt for the secret and retry. Accounts without " +
     "verification always get `requiresVerification: 0` and the full result. " +
+    "The same no-membership `requiresVerification: 1` answer is also returned " +
+    "when the check passed (a supplied `verifySecret` matched, or this colo " +
+    "saw no verification configured, with or without a secret) against a verify record older " +
+    "than the account's last PIN/pattern change (`AuthRecord.secretAt`); the " +
+    "client should prompt for the secret and retry. " +
     "A `verifySecret` that is present but malformed (not a string, or longer " +
     "than 256 characters) is rejected with 400 `INVALID_VERIFY_SECRET`, the " +
     "same as on family create/join.",

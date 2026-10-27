@@ -1,5 +1,5 @@
 // Onboarding's auth lookup: maps lookup's 200 `requiresVerification: TRUE` onto the join-side
-// verification codes, so a withheld payload never reads as "no family" (docs/architecture.md → 認證 API).
+// verification code, so a withheld payload never reads as "no family" (docs/architecture.md → 認證 API).
 
 import { BoolFlag } from "../api/client";
 import type { ApiClient, LookupResult } from "../api/client";
@@ -41,15 +41,9 @@ export async function lookupFamily(opts: {
     return { ok: false, errorCode: "EMPTY_RESPONSE" };
   }
   if (res.data.requiresVerification === BoolFlag.TRUE) {
-    // Withheld data is never "no family": REQUIRED without a secret; with one, a failed attempt
-    // (VERIFICATION_FAILED) so the user is told why.
-    return {
-      ok: false,
-      errorCode:
-        opts.verifySecret === undefined
-          ? "VERIFICATION_REQUIRED"
-          : "VERIFICATION_FAILED",
-    };
+    // Withheld data is never "no family". With a secret this only happens on a stale colo (a superseded
+    // record, or none seen, #378): the secret may be right, so ask again, not "failed".
+    return { ok: false, errorCode: "VERIFICATION_REQUIRED" };
   }
 
   return { ok: true, data: res.data };

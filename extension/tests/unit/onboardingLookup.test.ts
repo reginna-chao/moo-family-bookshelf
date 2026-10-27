@@ -93,45 +93,36 @@ describe("lookupFamily", () => {
       });
     });
 
-    it("reports VERIFICATION_FAILED when the payload is still withheld after a secret was sent", async () => {
-      const apiClient = createMockApiClient(
-        vi.fn().mockResolvedValue({
-          data: {
-            existingFamilyId: null,
-            memberCount: 0,
-            requiresVerification: BoolFlag.TRUE,
-          },
-        }),
-      );
+    // A wrong secret is always a 403 envelope; the probe after a sent secret means a stale colo
+    // compared a superseded verify record (#378), so the secret may be right — ask again.
+    it.each([
+      ["a non-empty secret", "999999"],
+      ["an empty-string secret (the Worker reads it as no secret)", ""],
+    ])(
+      "re-asks for the secret (REQUIRED, not FAILED) when the payload is still withheld after %s",
+      async (_label, verifySecret) => {
+        const apiClient = createMockApiClient(
+          vi.fn().mockResolvedValue({
+            data: {
+              existingFamilyId: null,
+              memberCount: 0,
+              requiresVerification: BoolFlag.TRUE,
+            },
+          }),
+        );
 
-      const outcome = await lookupFamily({
-        apiClient,
-        userId: USER_ID,
-        verifySecret: "999999",
-      });
+        const outcome = await lookupFamily({
+          apiClient,
+          userId: USER_ID,
+          verifySecret,
+        });
 
-      expect(outcome).toEqual({ ok: false, errorCode: "VERIFICATION_FAILED" });
-    });
-
-    it("treats an empty-string secret as an attempt (FAILED, not REQUIRED)", async () => {
-      const apiClient = createMockApiClient(
-        vi.fn().mockResolvedValue({
-          data: {
-            existingFamilyId: null,
-            memberCount: 0,
-            requiresVerification: BoolFlag.TRUE,
-          },
-        }),
-      );
-
-      const outcome = await lookupFamily({
-        apiClient,
-        userId: USER_ID,
-        verifySecret: "",
-      });
-
-      expect(outcome).toEqual({ ok: false, errorCode: "VERIFICATION_FAILED" });
-    });
+        expect(outcome).toEqual({
+          ok: false,
+          errorCode: "VERIFICATION_REQUIRED",
+        });
+      },
+    );
 
     it("never treats a withheld payload as a truthy family, even if the server also sends a familyId", async () => {
       // Defensive: a buggy/older backend that flags the gate but leaks the id
