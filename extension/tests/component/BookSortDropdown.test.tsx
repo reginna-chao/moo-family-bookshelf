@@ -110,6 +110,10 @@ describe("BookSortDropdown", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "排序方式" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   describe("keyboard navigation", () => {
@@ -236,6 +240,74 @@ describe("BookSortDropdown", () => {
       const { trigger } = openMenu("default");
 
       fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(screen.queryByRole("option")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it("renders the trigger and every option as non-submitting buttons", () => {
+      const { trigger } = openMenu("default");
+
+      expect(trigger).toHaveAttribute("type", "button");
+      const options = screen.getAllByRole("option");
+      expect(options).toHaveLength(OPTIONS.length);
+      for (const option of options) {
+        expect(option).toHaveAttribute("type", "button");
+      }
+    });
+
+    it("focuses the listbox once open so the arrow keys reach it", () => {
+      const { listbox } = openMenu("default");
+
+      expect(document.activeElement).toBe(listbox);
+    });
+
+    it.each(["ArrowDown", "ArrowUp", "Home", "End", "Enter", " "])(
+      "prevents the browser default for key '%s'",
+      (key) => {
+        const { listbox } = openMenu("title-desc");
+
+        // fireEvent returns false when the handler called preventDefault().
+        expect(fireEvent.keyDown(listbox, { key })).toBe(false);
+      },
+    );
+
+    it("re-seeds the active option from value when reopened after arrow moves", () => {
+      const { trigger, listbox } = openMenu("title-asc");
+      fireEvent.keyDown(listbox, { key: "End" });
+      expect(activeOptionId(listbox)).toBe(optionId("作者 Z → A"));
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      fireEvent.click(trigger);
+
+      const reopened = screen.getByRole("listbox");
+      expect(activeOptionId(reopened)).toBe(optionId("書名 A → Z"));
+    });
+
+    // Selected keeps its own modifier; only a keyboard-active option that is NOT selected turns grey.
+    it("marks the keyboard-active option as active only while it is not the selected one", () => {
+      const { listbox } = openMenu("default");
+      const selected = screen.getByRole("option", { name: "預設順序" });
+      const next = screen.getByRole("option", { name: "書名 A → Z" });
+      expect(selected).toHaveClass("moo-sort__option--selected");
+      expect(selected).not.toHaveClass("moo-sort__option--active");
+      expect(next).not.toHaveClass("moo-sort__option--active");
+
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+
+      expect(next).toHaveClass("moo-sort__option--active");
+      expect(selected).toHaveClass("moo-sort__option--selected");
+      const greyed = screen
+        .getAllByRole("option")
+        .filter((o) => o.classList.contains("moo-sort__option--active"));
+      expect(greyed).toEqual([next]);
+    });
+
+    // Extension-only rule (the PWA leaves focus alone here): any close refocuses the trigger.
+    it("refocuses the trigger after an outside mousedown closes the menu", () => {
+      const { trigger } = openMenu("default");
+
+      fireEvent.mouseDown(document.body);
 
       expect(screen.queryByRole("option")).not.toBeInTheDocument();
       expect(document.activeElement).toBe(trigger);

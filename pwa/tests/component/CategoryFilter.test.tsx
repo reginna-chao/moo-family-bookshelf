@@ -77,6 +77,25 @@ describe("CategoryFilter", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("marks the trigger as a non-submitting button that opens a listbox", () => {
+    renderFilter();
+
+    expect(trigger().tagName).toBe("BUTTON");
+    expect(trigger()).toHaveAttribute("type", "button");
+    expect(trigger()).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("renders every option, 全部分類 included, as a non-submitting button", () => {
+    renderFilter();
+
+    const options = within(openListbox()).getAllByRole("option");
+    // 全部分類 + 小說 + 漫畫 + 未分類.
+    expect(options).toHaveLength(4);
+    for (const option of options) {
+      expect(option).toHaveAttribute("type", "button");
+    }
+  });
+
   it("opens a listbox with 全部分類 first, the categories, and 未分類 last with counts", () => {
     renderFilter();
 

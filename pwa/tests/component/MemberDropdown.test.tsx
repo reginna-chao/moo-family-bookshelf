@@ -101,6 +101,26 @@ describe("MemberDropdown", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("marks the trigger as a non-submitting button that opens a listbox", () => {
+    renderDropdown();
+
+    const trigger = memberFilterTrigger();
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveAttribute("type", "button");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("renders every option as a non-submitting button", () => {
+    renderDropdown();
+
+    const options = within(openListbox()).getAllByRole("option");
+    // 所有人的書 / 其他家人的書 / 自己的書 / Alice / 我的最愛 / 隱藏的書 (Bob has no books).
+    expect(options).toHaveLength(6);
+    for (const option of options) {
+      expect(option).toHaveAttribute("type", "button");
+    }
+  });
+
   it("falls back to the first option's label when value matches no option", () => {
     renderDropdown({ value: "unknown-user" });
     expect(memberFilterTrigger()).toHaveTextContent("所有人的書");

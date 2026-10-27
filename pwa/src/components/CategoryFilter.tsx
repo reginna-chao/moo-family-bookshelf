@@ -67,8 +67,10 @@ export function CategoryFilter({
     <div className="relative flex-shrink-0">
       <button
         ref={triggerRef}
+        type="button"
         onClick={handleToggle}
         aria-label="篩選分類"
+        aria-haspopup="listbox"
         aria-expanded={open}
         className={`flex items-center justify-center w-10 h-10 rounded-lg border transition-colors ${
           isActive
@@ -86,6 +88,7 @@ export function CategoryFilter({
           aria-label="分類選單"
         >
           <button
+            type="button"
             role="option"
             aria-selected={value === ""}
             onClick={() => handleSelect("")}
@@ -101,6 +104,7 @@ export function CategoryFilter({
           {categories.map((cat) => (
             <button
               key={cat.value}
+              type="button"
               role="option"
               aria-selected={value === cat.value}
               onClick={() => handleSelect(cat.value)}
