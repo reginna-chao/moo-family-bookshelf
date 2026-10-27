@@ -146,7 +146,7 @@ moo-family-bookshelf/
 ### Conventions
 
 - Run `pnpm test` before pushing; CI will gate on this.
-- Coverage targets: api/worker ≥ 80%, dialog ≥ 70%, overall ≥ 70%.
+- Coverage targets: `worker/src/` ≥ 90%; `extension/src/api/` and `pwa/src/api/` ≥ 80% (lines / statements); Extension and PWA overall ≥ 70%.
 - Tests must clean up state (no leaked timers, mocks, or KV entries).
 - Worker integration tests run the Hono app in-process against the in-memory `createMockKV()` (`worker/tests/helpers/mockKv.ts`) — never connect to real Cloudflare in CI. Details and the mock's limits: `.claude/rules/test.md`.
 - E2E tests load the built Extension into a real Chrome instance via Playwright.
@@ -191,7 +191,9 @@ Release body: the release job reads `docs/release-notes/v<X.Y.Z>.md` (curated, b
 
 When `CHANGELOG.md` is written: between releases, every `/develop` run writes its user-observable change into the `## 未釋出` section at the top of the file, in the same commit as the change, and **never** into an already-tagged `## vX.Y.Z` entry — a version entry is frozen the moment its tag exists. `/bump-ver` is the only step that renames `## 未釋出` to the new version heading, and it only adds bullets for commits that section does not describe yet. Full detail: `.claude/rules/user-facing-copy.md` → "Where a change is recorded".
 
-### Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+### Secrets
+
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (Worker and PWA deploys), `KV_NAMESPACE_ID_DEV`, `KV_NAMESPACE_ID_PROD` (substituted into `wrangler.toml` by the Worker deploys; the backup Worker is built but never deployed by CI), `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` (Firefox add-on submission), `CLAUDE_CODE_OAUTH_TOKEN` (the two Claude review workflows). `GITHUB_TOKEN` is also used, but GitHub provides it automatically — nothing to configure.
 
 ### Dev Script Maintenance Note
 
@@ -257,35 +259,84 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## API Endpoints
 
+This table is compared against the routes the Worker actually registers by `worker/tests/unit/agentsApiTable.test.ts` (method + path; one row more or fewer fails CI). Descriptions of the 33 `createRoute` rows are each route's `summary` and are not checked; the four Meta rows come from `worker/src/index.ts`.
+
 ### Authentication
 
-| Method | Path                | Description                                            |
-| ------ | ------------------- | ------------------------------------------------------ |
-| `POST` | `/api/auth/lookup`  | Look up family membership by pre-hashed userId         |
-| `POST` | `/api/auth/refresh` | Refresh auth token (uses userId + familyId membership) |
+| Method | Path                | Description                         |
+| ------ | ------------------- | ----------------------------------- |
+| `POST` | `/api/auth/lookup`  | Look up family membership by userId |
+| `POST` | `/api/auth/refresh` | Refresh auth token                  |
 
 ### Personal Settings
 
-| Method | Path                             | Description                                             |
-| ------ | -------------------------------- | ------------------------------------------------------- |
-| `GET`  | `/api/user/:id/books`            | Get personal book list + sharing settings               |
-| `PUT`  | `/api/user/:id/books`            | Update sharing settings                                 |
-| `PUT`  | `/api/user/:id/new-book-default` | Set 新書預設開放 (`newBookDefaultShared`, a `BoolFlag`) |
+| Method   | Path                             | Description                                                        |
+| -------- | -------------------------------- | ------------------------------------------------------------------ |
+| `GET`    | `/api/user/:id/books`            | Get user books                                                     |
+| `PUT`    | `/api/user/:id/books`            | Save user books                                                    |
+| `PATCH`  | `/api/user/:id/books`            | Partially update user books (diff-only)                            |
+| `PUT`    | `/api/user/:id/new-book-default` | Save the caller's new-book default-sharing setting                 |
+| `PUT`    | `/api/user/:id/family-prefs`     | Save per-viewer family-shelf preferences (hidden and/or favorites) |
+| `DELETE` | `/api/user/:id`                  | Delete user account                                                |
+
+### Verification & Login
+
+| Method | Path                            | Description                                              |
+| ------ | ------------------------------- | -------------------------------------------------------- |
+| `GET`  | `/api/user/:id/verify`          | Get verification method                                  |
+| `PUT`  | `/api/user/:id/verify`          | Set or change verification method                        |
+| `POST` | `/api/user/:id/verify/otp`      | Generate OTP code                                        |
+| `GET`  | `/api/user/:id/verify/prompted` | Get whether the user was prompted to set up verification |
+| `POST` | `/api/user/:id/verify/prompted` | Mark user as prompted for verification                   |
+| `POST` | `/api/user/:id/qr-token`        | Generate QR token for verification bypass                |
+
+### Public Shelf
+
+| Method   | Path                                              | Description                     |
+| -------- | ------------------------------------------------- | ------------------------------- |
+| `GET`    | `/api/user/:id/public-shelf`                      | List user public shelves        |
+| `POST`   | `/api/user/:id/public-shelf`                      | Create a public shelf           |
+| `PUT`    | `/api/user/:id/public-shelf/:shelfId`             | Update a public shelf           |
+| `POST`   | `/api/user/:id/public-shelf/:shelfId/reset-token` | Reset public shelf share token  |
+| `DELETE` | `/api/user/:id/public-shelf/:shelfId`             | Delete a public shelf           |
+| `GET`    | `/api/public/:shareToken`                         | Get public shelf by share token |
 
 ### Family Group
 
-| Method   | Path                          | Description                |
-| -------- | ----------------------------- | -------------------------- |
-| `POST`   | `/api/family`                 | Create new family group    |
-| `POST`   | `/api/family/:id/join`        | Join family with sync code |
-| `DELETE` | `/api/family/:id/member/:uid` | Leave family               |
-| `GET`    | `/api/family/:id/members`     | List family members        |
+| Method   | Path                                      | Description                                   |
+| -------- | ----------------------------------------- | --------------------------------------------- |
+| `POST`   | `/api/family`                             | Create a new family                           |
+| `POST`   | `/api/family/:id/join`                    | Join an existing family                       |
+| `DELETE` | `/api/family/:id/member/:uid`             | Remove a member from the family               |
+| `DELETE` | `/api/family/:id/kicked/:uid`             | Clear a member's removal tombstone (un-kick)  |
+| `GET`    | `/api/family/:id/members`                 | List family members                           |
+| `PUT`    | `/api/family/:id/member/:uid/displayName` | Update member display name                    |
+| `PATCH`  | `/api/family/:id/member/:uid`             | Update member settings (canLend, readmooName) |
+| `PUT`    | `/api/family/:id/transfer`                | Transfer family ownership                     |
+| `PUT`    | `/api/family/:id/endpoint`                | Update family API endpoint                    |
 
 ### Family Bookshelf
 
-| Method | Path                        | Description                              |
-| ------ | --------------------------- | ---------------------------------------- |
-| `GET`  | `/api/family/:id/bookshelf` | Aggregated shared books from all members |
+| Method | Path                        | Description                     |
+| ------ | --------------------------- | ------------------------------- |
+| `GET`  | `/api/family/:id/bookshelf` | Get aggregated family bookshelf |
+
+### Borrow
+
+| Method  | Path                     | Description                  |
+| ------- | ------------------------ | ---------------------------- |
+| `POST`  | `/api/family/:id/borrow` | Create a borrow request      |
+| `GET`   | `/api/family/:id/borrow` | List family borrow requests  |
+| `PATCH` | `/api/borrow/:requestId` | Update borrow request status |
+
+### Meta
+
+| Method | Path                 | Description                                                       |
+| ------ | -------------------- | ----------------------------------------------------------------- |
+| `GET`  | `/`                  | Health check                                                      |
+| `GET`  | `/api/version`       | Report apiVersion / serverVersion for client compatibility checks |
+| `GET`  | `/api/_openapi.json` | OpenAPI 3.1 document (dev mode only; 404 in production)           |
+| `GET`  | `/api/_docs`         | Swagger UI (dev mode only; 404 in production)                     |
 
 ## Security & Privacy Rules
 

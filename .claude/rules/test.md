@@ -59,12 +59,11 @@ Two Node scripts outside `tests/` feed the Extension E2E suite. Their comments p
 
 ### Coverage Targets
 
-| Scope                   | Target |
-| ----------------------- | ------ |
-| `extension/src/api/`    | >= 80% |
-| `extension/src/dialog/` | >= 70% |
-| `worker/src/`           | >= 80% |
-| Overall                 | >= 70% |
+| Scope                                  | Target                                             |
+| -------------------------------------- | -------------------------------------------------- |
+| `worker/src/`                          | >= 90% (lines / branches / functions / statements) |
+| `extension/src/api/`, `pwa/src/api/`   | >= 80% (lines / statements)                        |
+| `extension/src/`, `pwa/src/` (overall) | >= 70%                                             |
 
 ### Naming
 

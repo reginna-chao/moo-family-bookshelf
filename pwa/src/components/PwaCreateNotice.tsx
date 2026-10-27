@@ -7,9 +7,11 @@ interface PwaCreateNoticeProps {
 }
 
 /**
- * One-time notice shown after a user creates a new family in the PWA,
- * explaining that book scanning requires the desktop Extension.
- * Stores dismissal in localStorage so it only shows once.
+ * Notice explaining that book scanning needs the desktop Extension. Mounted
+ * on every signed-in view (`App.tsx`), so it shows after each login on each
+ * device until the user presses 確定; dismissal is remembered per userId in
+ * localStorage (`pwaNoticeShown`), and logging out clears that mark
+ * (`removeUserKeys` in `hooks/useAuth.ts`), so the next login shows it again.
  */
 export function PwaCreateNotice({ userId, onDismiss }: PwaCreateNoticeProps) {
   const [visible, setVisible] = useState(false);
