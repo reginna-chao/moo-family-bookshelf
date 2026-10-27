@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import React from "react";
-import { FamilyBookCard } from "@/components/FamilyBookCard";
+import {
+  FamilyBookCard,
+  type FamilyBookCardProps,
+} from "@/components/FamilyBookCard";
 import { BoolFlag } from "@/api/client";
 import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
 
@@ -20,8 +23,11 @@ import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
  * Netlify — `vite dev` / `vite preview` and plain static hosts have only this
  * code filter, which is what the cases below pin.
  *
- * Scope of this file: the two server-data URL gates (cover and book link). The
- * card's borrow control, favorite and hide-menu behaviour is covered through
+ * Scope of this file: the two server-data URL gates (cover and book link), plus
+ * the borrow control's pending-state contract (#393) — nothing unless
+ * `showBorrowButton`, else one disabled 「申請中」 button — mirrored on the
+ * Extension side by extension/tests/component/BookCard.borrow-button.test.tsx.
+ * The card's favorite and hide-menu behaviour is covered through
  * FamilyShelfPage's own suites.
  *
  * Cover fallback probe: coverFallback finds LazyCover's BookOpen fallback box by `bg-gray-100`. The
@@ -75,7 +81,10 @@ function makeBook(overrides: Partial<BookWithMember> = {}): BookWithMember {
   };
 }
 
-function renderCard(book: BookWithMember) {
+function renderCard(
+  book: BookWithMember,
+  overrides: Partial<FamilyBookCardProps> = {},
+) {
   return render(
     <FamilyBookCard
       book={book}
@@ -87,6 +96,7 @@ function renderCard(book: BookWithMember) {
       onBorrowClick={() => {}}
       onHideToggle={() => {}}
       onFavoriteToggle={() => {}}
+      {...overrides}
     />,
   );
 }
@@ -194,5 +204,28 @@ describe("FamilyBookCard", () => {
       expect(screen.getByText("測試作者")).toBeInTheDocument();
       expect(screen.getByText("Alice")).toBeInTheDocument();
     });
+  });
+
+  describe("borrow control while a request is pending (#393)", () => {
+    it.each([
+      { showBorrowButton: true, expectButton: true },
+      { showBorrowButton: false, expectButton: false },
+    ])(
+      "renders a disabled 申請中 button only when showBorrowButton is $showBorrowButton",
+      ({ showBorrowButton, expectButton }) => {
+        renderCard(makeBook(), {
+          showBorrowButton,
+          borrowRequestPending: true,
+        });
+
+        if (expectButton) {
+          expect(screen.getByRole("button", { name: "申請中" })).toBeDisabled();
+        } else {
+          expect(screen.queryByRole("button", { name: "申請中" })).toBeNull();
+          expect(screen.queryByRole("button", { name: "申請借閱" })).toBeNull();
+        }
+        expect(screen.queryByText("申請已送出")).toBeNull();
+      },
+    );
   });
 });

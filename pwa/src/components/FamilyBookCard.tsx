@@ -31,21 +31,19 @@ function BorrowControl({
   "isOwnBook" | "showBorrowButton" | "borrowRequestPending" | "onBorrowClick"
 >) {
   if (isOwnBook) return null;
-  if (borrowRequestPending) {
-    return (
-      <span className="inline-flex items-center text-[11px] text-gray-400 px-2 py-1">
-        申請已送出
-      </span>
-    );
-  }
   if (!showBorrowButton) return null;
   return (
     <button
       type="button"
       onClick={onBorrowClick}
-      className="inline-flex items-center text-[11px] font-semibold text-blue-600 border border-blue-600 rounded-full px-2.5 py-1 hover:bg-blue-50 transition-colors"
+      disabled={borrowRequestPending}
+      className={`inline-flex items-center text-[11px] font-semibold rounded-full px-2.5 py-1 ${
+        borrowRequestPending
+          ? "text-gray-400 border border-gray-200 cursor-not-allowed"
+          : "text-blue-600 border border-blue-600 hover:bg-blue-50 transition-colors"
+      }`}
     >
-      申請借閱
+      {borrowRequestPending ? "申請中" : "申請借閱"}
     </button>
   );
 }
