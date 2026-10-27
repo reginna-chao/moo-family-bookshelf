@@ -1,3 +1,4 @@
+import { createElement, type ReactNode } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BoolFlag, type ApiClient } from "@/api/client";
@@ -31,6 +32,19 @@ vi.mock("@/sync/syncBooks", () => ({
 
 import { useBookSync, type UseBookSyncOptions } from "@/dialog/useBookSync";
 import { syncBooks, canAutoSync } from "@/sync/syncBooks";
+import {
+  AccountCheckProvider,
+  type AccountCheck,
+} from "@/dialog/AccountCheckContext";
+
+// A confirmed account; the account-check cases live in useBookSync.accountCheck.test.ts.
+const MATCH_ACCOUNT: AccountCheck = {
+  status: "match",
+  recheck: vi.fn().mockResolvedValue("match"),
+};
+
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(AccountCheckProvider, { value: MATCH_ACCOUNT }, children);
 
 function createMockApiClient(): ApiClient {
   return {
@@ -80,7 +94,9 @@ describe("useBookSync", () => {
 
   describe("initial state", () => {
     it("starts with idle syncStatus and empty progressMessage", () => {
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       expect(result.current.syncStatus).toBe("idle");
       expect(result.current.syncError).toBe("");
@@ -100,7 +116,7 @@ describe("useBookSync", () => {
       });
       vi.mocked(canAutoSync).mockResolvedValue(true);
 
-      renderHook(() => useBookSync(makeOptions()));
+      renderHook(() => useBookSync(makeOptions()), { wrapper });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -120,7 +136,7 @@ describe("useBookSync", () => {
       });
       vi.mocked(canAutoSync).mockResolvedValue(false);
 
-      renderHook(() => useBookSync(makeOptions()));
+      renderHook(() => useBookSync(makeOptions()), { wrapper });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -155,7 +171,7 @@ describe("useBookSync", () => {
       });
 
       const options = makeOptions();
-      const { result } = renderHook(() => useBookSync(options));
+      const { result } = renderHook(() => useBookSync(options), { wrapper });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -192,7 +208,9 @@ describe("useBookSync", () => {
           }),
       );
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       // Let canAutoSync resolve
       await act(async () => {
@@ -229,7 +247,9 @@ describe("useBookSync", () => {
         error: "Network error",
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -250,7 +270,9 @@ describe("useBookSync", () => {
         books: [],
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -268,7 +290,9 @@ describe("useBookSync", () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
       vi.mocked(syncBooks).mockRejectedValue(new Error("Unexpected error"));
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -286,7 +310,9 @@ describe("useBookSync", () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
       vi.mocked(syncBooks).mockRejectedValue("string error");
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -304,7 +330,7 @@ describe("useBookSync", () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
 
       const options = makeOptions();
-      const { rerender } = renderHook(() => useBookSync(options));
+      const { rerender } = renderHook(() => useBookSync(options), { wrapper });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
@@ -324,7 +350,7 @@ describe("useBookSync", () => {
   describe("manual sync (triggerManualSync)", () => {
     it("calls syncBooks with navigate: true", async () => {
       const options = makeOptions();
-      const { result } = renderHook(() => useBookSync(options));
+      const { result } = renderHook(() => useBookSync(options), { wrapper });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -360,7 +386,9 @@ describe("useBookSync", () => {
         books: mockBooks,
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -379,7 +407,9 @@ describe("useBookSync", () => {
     it("stays syncing when the previous sync's done->idle reset comes due", async () => {
       // A manual sync inside the 2s "done" window supersedes the done->idle timer.
       // See the header → "Done-timer supersede".
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       // First manual sync completes and arms the done->idle reset.
       await act(async () => {
@@ -414,7 +444,9 @@ describe("useBookSync", () => {
         error: "Upload failed",
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -430,7 +462,9 @@ describe("useBookSync", () => {
         books: [],
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -449,7 +483,9 @@ describe("useBookSync", () => {
         })
         .mockResolvedValueOnce({ success: true, books: [] });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -473,7 +509,9 @@ describe("useBookSync", () => {
         return { success: true, books: [] };
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -490,7 +528,9 @@ describe("useBookSync", () => {
         return { success: true, books: [] };
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -504,7 +544,9 @@ describe("useBookSync", () => {
   // the counts reflect the last SUCCESSFUL sync only.
   describe("syncNoticeCounts", () => {
     it("starts with every count at 0", () => {
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       expect(result.current.syncNoticeCounts).toEqual({
         renamedBookCount: 0,
         removedBookCount: 0,
@@ -524,7 +566,9 @@ describe("useBookSync", () => {
         fieldCapBlankedCount: 3,
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await result.current.triggerManualSync();
       });
@@ -541,7 +585,9 @@ describe("useBookSync", () => {
         renamedBookCount: 2,
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });
@@ -568,7 +614,9 @@ describe("useBookSync", () => {
         })
         .mockResolvedValueOnce({ success: true, books: [] });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -610,7 +658,9 @@ describe("useBookSync", () => {
         })
         .mockResolvedValueOnce({ success: true, books: [] });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -662,7 +712,9 @@ describe("useBookSync", () => {
           autoShareHeldCount: 130,
         });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -712,7 +764,9 @@ describe("useBookSync", () => {
     };
 
     it("starts empty", () => {
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       expect(result.current.lastSyncRenamedBooks).toEqual([]);
     });
 
@@ -721,14 +775,17 @@ describe("useBookSync", () => {
         .mockResolvedValueOnce(FIRST)
         .mockResolvedValueOnce(SECOND);
       const seen: Array<{ books: unknown; renamed: unknown }> = [];
-      const { result } = renderHook(() => {
-        const sync = useBookSync(makeOptions());
-        seen.push({
-          books: sync.lastSyncBooks,
-          renamed: sync.lastSyncRenamedBooks,
-        });
-        return sync;
-      });
+      const { result } = renderHook(
+        () => {
+          const sync = useBookSync(makeOptions());
+          seen.push({
+            books: sync.lastSyncBooks,
+            renamed: sync.lastSyncRenamedBooks,
+          });
+          return sync;
+        },
+        { wrapper },
+      );
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -773,7 +830,9 @@ describe("useBookSync", () => {
           books: [bookOf("210000000000009")],
         });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -797,7 +856,9 @@ describe("useBookSync", () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
       vi.mocked(syncBooks).mockResolvedValue(FIRST);
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });
@@ -833,7 +894,9 @@ describe("useBookSync", () => {
     };
 
     it("starts undefined", () => {
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       expect(result.current.lastSyncLastUpdated).toBeUndefined();
     });
 
@@ -842,14 +905,17 @@ describe("useBookSync", () => {
         .mockResolvedValueOnce(FIRST)
         .mockResolvedValueOnce(SECOND);
       const seen: Array<{ books: unknown; stamp: unknown }> = [];
-      const { result } = renderHook(() => {
-        const sync = useBookSync(makeOptions());
-        seen.push({
-          books: sync.lastSyncBooks,
-          stamp: sync.lastSyncLastUpdated,
-        });
-        return sync;
-      });
+      const { result } = renderHook(
+        () => {
+          const sync = useBookSync(makeOptions());
+          seen.push({
+            books: sync.lastSyncBooks,
+            stamp: sync.lastSyncLastUpdated,
+          });
+          return sync;
+        },
+        { wrapper },
+      );
 
       await act(async () => {
         await result.current.triggerManualSync();
@@ -882,7 +948,9 @@ describe("useBookSync", () => {
         lastUpdated: "2026-09-30T10:00:09.000Z",
       });
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await result.current.triggerManualSync();
       });
@@ -901,7 +969,9 @@ describe("useBookSync", () => {
         .mockResolvedValueOnce(FIRST)
         .mockResolvedValueOnce(noStamp);
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await result.current.triggerManualSync();
       });
@@ -917,7 +987,9 @@ describe("useBookSync", () => {
       vi.mocked(canAutoSync).mockResolvedValue(true);
       vi.mocked(syncBooks).mockResolvedValue(FIRST);
 
-      const { result } = renderHook(() => useBookSync(makeOptions()));
+      const { result } = renderHook(() => useBookSync(makeOptions()), {
+        wrapper,
+      });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });

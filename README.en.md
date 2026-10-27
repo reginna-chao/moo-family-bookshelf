@@ -13,6 +13,10 @@ Easily browse books shared by family members on your Readmoo family account.
 - **You decide what to share** — All books are private by default and you share them one by one; you can also turn on "new-book default sharing" in the settings, after which books not yet in your personal shelf (e.g. new purchases, or books moved back from the archive) are shared with your family automatically when you sync
 - **Data security** — All data is transmitted over TLS and protected by auth tokens for access control
 - **Settings persist across families** — Leaving or switching families won't reset your sharing preferences
+- **Public shelf links** — Turn your shared books into a standalone page for friends outside the family; set an expiry, reset or close the link any time
+- **Login protection** — Guard your account with a PIN, a pattern lock or a one-time code, checked when you join or rejoin on a new device
+- **Self-hosted backend** — Keep the data in your own Cloudflare account; the sync code carries the server address so family members land on the same server
+- **Your own view** — Mark favourites or hide books in the family bookshelf; it only changes what you see, and your family isn't told
 - **Mobile friendly** — Browse the family bookshelf on your phone via the mobile web app
 
 ## Installation

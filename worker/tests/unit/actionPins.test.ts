@@ -79,12 +79,13 @@
  * prose is allowed and only a missing or non-version comment is red.
  *
  * CI REACHABILITY (.claude/rules/test.md → "Cross-package parity tests must be
- * CI-reachable"): this guard lives in `worker-check`, so it runs only when
- * `.github/workflows/cicd.yml` → `changes.worker` matches the change. That
- * filter must list `.github/workflows/**` — NOT just `cicd.yml` — or an edit
- * to `claude.yml` / `claude-code-review.yml` (exactly the change class that
- * un-pins an action) never runs this file. Narrowing that glob back silently
- * blinds the guard on two of the three workflows it covers.
+ * CI-reachable"): this guard lives in `worker-check`, which a workflow edit
+ * reaches through `.github/workflows/cicd.yml` → the `workflows` path filter
+ * (it feeds `worker-check`'s `if:`). That filter must list `.github/workflows/**`
+ * — NOT just `cicd.yml` — or an edit to `claude.yml` / `claude-code-review.yml`
+ * (exactly the change class that un-pins an action) never runs this file.
+ * Narrowing that glob back silently blinds the guard on two of the three
+ * workflows it covers.
  *
  * No YAML library is used: neither `yaml` nor `js-yaml` is resolvable in this
  * workspace, and a new dependency is a non-goal

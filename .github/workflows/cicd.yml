@@ -93,6 +93,12 @@ jobs:
             workflows:
               - '.github/workflows/**'
               - '.github/dependabot.yml'
+              # worker/tests/unit/agentsApiTable.test.ts compares the API table in
+              # AGENTS.md against the Worker's registered routes, so an edit to
+              # AGENTS.md alone must reach worker-check. Deliberately NOT in `worker`:
+              # that output also gates deploy-worker-dev and the two E2E jobs, and a
+              # docs-only push must not redeploy an unchanged Worker nor run E2E.
+              - 'AGENTS.md'
               # ciSuccessGate.test.ts requires every filter to name the workflow itself.
               - '.github/workflows/cicd.yml'
 
