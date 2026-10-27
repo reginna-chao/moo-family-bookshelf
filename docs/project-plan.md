@@ -322,13 +322,13 @@ Chrome Extension 僅限桌面端使用，手機端採用 **PWA 行動網頁** �
 
 #### 功能範圍
 
-| 功能                      | PWA 支援 | 說明                             |
-| ------------------------- | -------- | -------------------------------- |
-| 瀏覽家庭開放書櫃          | ✅       | 核心功能                         |
-| 加入家庭（輸入同步碼）    | ✅       | 首次使用時                       |
-| 個人書櫃管理（開放/關閉） | ✅       | 需搭配讀墨網頁爬取書單，可能受限 |
-| 建立新家庭                | ✅       | 可在 PWA 操作                    |
-| 自訂 API 端點             | ✅       | 與 Extension 相同的設定項        |
+| 功能                      | PWA 支援 | 說明                               |
+| ------------------------- | -------- | ---------------------------------- |
+| 瀏覽家庭開放書櫃          | ✅       | 核心功能                           |
+| 加入家庭（輸入同步碼）    | ✅       | 首次使用時                         |
+| 個人書櫃管理（開放/關閉） | ✅       | 需搭配讀墨網頁爬取書單，可能受限   |
+| 建立新家庭                | ❌       | 需使用 Extension；PWA 只能加入家庭 |
+| 自訂 API 端點             | ✅       | 與 Extension 相同的設定項          |
 
 #### PWA 與 Extension 共用後端
 
@@ -500,10 +500,16 @@ jobs:
 
 ### CI/CD 所需的 GitHub Secrets
 
-| Secret                  | 用途                |
-| ----------------------- | ------------------- |
-| `CLOUDFLARE_API_TOKEN`  | Worker / Pages 部署 |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 帳號識別 |
+| Secret                    | 用途                                                         |
+| ------------------------- | ------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`    | Worker / Pages 部署                                          |
+| `CLOUDFLARE_ACCOUNT_ID`   | Cloudflare 帳號識別                                          |
+| `KV_NAMESPACE_ID_DEV`     | 部署 dev Worker 時寫進 `wrangler.toml`                       |
+| `KV_NAMESPACE_ID_PROD`    | 部署正式 Worker 時寫進 `wrangler.toml`                       |
+| `AMO_JWT_ISSUER`          | Firefox 附加元件送審                                         |
+| `AMO_JWT_SECRET`          | Firefox 附加元件送審                                         |
+| `CLAUDE_CODE_OAUTH_TOKEN` | 兩個 Claude 審查 workflow                                    |
+| `GITHUB_TOKEN`            | GitHub 自動提供，不需設定（Release 與 Claude workflow 使用） |
 
 > 不需要額外的 secrets 做測試：Worker 測試用記憶體內的模擬 KV，E2E 用本地 `wrangler dev`（Miniflare），都不連接真實 Cloudflare。
 
