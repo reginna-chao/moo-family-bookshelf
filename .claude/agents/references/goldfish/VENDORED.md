@@ -31,7 +31,9 @@ project on a per-token budget; the two personas that catch what the project's ow
 - Requires Claude Code 2.1.271 or later: `omitClaudeMd` is ignored silently by older versions and
   the review then runs with `CLAUDE.md` loaded. Every goldfish report opens with a `rules seen`
   field (`goldfish.md` → Output format), so the orchestrator sees on each run whether the isolation
-  held; a non-`none` value on a current Claude Code is a bug to investigate, not a residual.
+  held. A path-scoped rule matching a file the goldfish read (`frontend.md`, `backend.md`,
+  `test.md`) is expected there; `CLAUDE.md`, `AGENTS.md` or a rule without `paths` can only have
+  loaded at startup, and on a current Claude Code that is a bug to investigate, not a residual.
 - `omitClaudeMd: true` and `tools: Read, Glob, Grep` — the reviewer sees the `PLAN.md` draft and the
   files it names, nothing from the conversation and nothing from the startup `CLAUDE.md` /
   `AGENTS.md`. That isolation is the whole point: a review in the same context is not a goldfish
