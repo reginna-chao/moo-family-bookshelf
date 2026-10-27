@@ -1,7 +1,9 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { BoolFlag, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { BoolFlag, TOKEN_TTL_SECONDS, type VerifyRecord } from "../kv/schema";
 import { getMemberFamilyId } from "../kv/families";
+import { getVerifyRecord } from "../kv/verify";
 import {
   isValidFamilyId,
   isValidSha256Hex,
@@ -10,11 +12,13 @@ import {
 import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
+  readAuthRecord,
   renewPresentedAuthToken,
 } from "../middleware/auth";
 import { getCallerIp } from "../middleware/rateLimit";
 import {
   isVerificationConfigured,
+  passedAgainstStaleVerifyRecord,
   validateVerification,
   verificationErrorResponse,
   verifySecretFormatResponse,
@@ -67,6 +71,20 @@ const refreshRoute = createRoute({
 
 // --- Handlers ---
 
+/** Lookup's "verification required" answer: 200 with no membership data, so the client prompts and retries. */
+function verificationRequiredProbe(c: Context<{ Bindings: Env }>) {
+  return c.json(
+    {
+      data: {
+        existingFamilyId: null,
+        memberCount: 0,
+        requiresVerification: BoolFlag.TRUE,
+      },
+    },
+    200,
+  );
+}
+
 // POST /api/auth/lookup — look up family membership by userId (public, no auth required)
 authRoutes.openapi(lookupRoute, async (c) => {
   let body: { userId: string; verifySecret?: unknown } | null;
@@ -100,20 +118,12 @@ authRoutes.openapi(lookupRoute, async (c) => {
 
   // Verification gate BEFORE any membership read (familyId is the sync code); exactly ONE verify-record
   // read per request. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
+  let verifyRecord: VerifyRecord | null;
   if (verifySecret === undefined) {
-    if (await isVerificationConfigured(c.env.KV, userId)) {
-      // Informational, not an error: the client uses this to know it must prompt
-      // for the secret and retry. No membership data is revealed.
-      return c.json(
-        {
-          data: {
-            existingFamilyId: null,
-            memberCount: 0,
-            requiresVerification: BoolFlag.TRUE,
-          },
-        },
-        200,
-      );
+    verifyRecord = await getVerifyRecord(c.env.KV, userId);
+    // Informational, not an error: the client prompts for the secret and retries.
+    if (isVerificationConfigured(verifyRecord)) {
+      return verificationRequiredProbe(c);
     }
   } else {
     // A supplied secret is a real attempt; consumeOtp: false because create/join resends the SAME
@@ -127,6 +137,14 @@ authRoutes.openapi(lookupRoute, async (c) => {
     if (!verification.valid) {
       return verificationErrorResponse(c, verification.error);
     }
+    verifyRecord = verification.record;
+  }
+
+  // Passed against a verify record older than the last PIN/pattern rotation (#378): ask for the secret,
+  // disclose nothing. See docs/architecture.md → PWA 登入驗證機制.
+  const auth = await readAuthRecord(c.env.KV, userId);
+  if (passedAgainstStaleVerifyRecord(auth, verifyRecord)) {
+    return verificationRequiredProbe(c);
   }
 
   // Live membership only (pointer → record that still lists the user, `services/membership.ts`); an

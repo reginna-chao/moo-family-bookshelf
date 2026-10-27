@@ -355,6 +355,13 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     return verificationErrorResponse(c, verification.error);
   }
 
+  // Same stale-record refusal as join (#378), still before any write; `auth` is reused by the mint below.
+  // See docs/architecture.md → PWA 登入驗證機制.
+  const auth = await readAuthRecord(c.env.KV, body.userId);
+  if (passedAgainstStaleVerifyRecord(auth, verification.record)) {
+    return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
+  }
+
   if (membership === "orphaned") {
     await deleteMemberFamilyId(c.env.KV, body.userId);
   }
@@ -378,7 +385,7 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   await putMemberFamilyId(c.env.KV, body.userId, familyId);
   await putFamilyRecord(c.env.KV, familyId, record);
 
-  const authToken = await generateAuthToken(c.env.KV, body.userId);
+  const authToken = await generateAuthToken(c.env.KV, body.userId, auth);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 201);

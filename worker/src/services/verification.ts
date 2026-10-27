@@ -125,7 +125,8 @@ export function verifySecretFormatResponse(
  * `verify:{userId}` record exists and its `method` is not `"none"`.
  *
  * For callers that must *report* the requirement (auth lookup) rather than
- * attempt a check. Performs exactly one KV read and never writes.
+ * attempt a check. Pure: the caller reads `verify:{userId}` once and keeps the
+ * record for the stale-record check ({@link passedAgainstStaleVerifyRecord}).
  *
  * NOT an exact inverse of {@link validateVerification}'s pass-through set:
  * that function ALSO passes through a corrupted pin/pattern record (`method`
@@ -136,11 +137,7 @@ export function verifySecretFormatResponse(
  * Detecting corruption here would require duplicating the hash/salt inspection
  * for a state that `PUT /:id/verify` cannot produce.
  */
-export async function isVerificationConfigured(
-  kv: KVNamespace,
-  userId: string,
-): Promise<boolean> {
-  const record = await kv.get<VerifyRecord>(kvKeys.verify(userId), "json");
+export function isVerificationConfigured(record: VerifyRecord | null): boolean {
   return record !== null && record.method !== "none";
 }
 

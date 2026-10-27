@@ -32,6 +32,15 @@ import {
  * state for an unlisted user today); its capacity check (`409 FAMILY_FULL`)
  * runs BEFORE this one, which the ordering case pins.
  *
+ * The same check guards the other two gate entry points. Create
+ * (`POST /api/family`) answers the same 403 with zero writes — no orphan
+ * pointer delete, no `member:` / `family:` put, no mint, so the account's
+ * current token keeps working — and reuses that one `auth:` read for the mint.
+ * Lookup (`POST /api/auth/lookup`) answers its existing "verification
+ * required" probe on both disclosing branches (no secret with nothing
+ * configured; a secret that passed) and reads no `member:` / `family:` key;
+ * its configured-no-secret probe still reads only `verify:`.
+ *
  * Every request runs with DEV_MODE (per-IP limits are not under test); `Date`
  * is pinned so the verify-record timestamps are exact.
  */
@@ -325,5 +334,169 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
 
     expect(res.status).toBe(200);
     expect(((await res.json()) as Json).data.authToken).toBe(TOKEN);
+  });
+});
+
+function create(verifySecret: string | undefined): Promise<Response> {
+  return request("POST", "/api/family", {
+    userId: USER_ID,
+    displayName: "Alice",
+    verifySecret,
+  });
+}
+
+/** Create's membership states that reach the gate; `orphaned` points at a missing family. */
+const CREATE_STATES = [
+  { state: "no pointer", seed: async () => {} },
+  {
+    state: "orphaned pointer",
+    seed: () => kv.put(kvKeys.member(USER_ID), FAMILY_ID),
+  },
+];
+
+describe("POST /api/family — a secret checked against a stale verify record", () => {
+  it.each(cross(CREATE_STATES, STALE_RECORDS))(
+    "$state: refuses $label with zero writes and keeps the current token",
+    async ({ seed, record, secret }) => {
+      await seed();
+      const pointerBefore = await kv.get(kvKeys.member(USER_ID));
+      await seedAuth(SECRET_AT);
+      await seedVerify(await record());
+      const ops = watchKvOps(kv);
+
+      await expectVerificationRequired(await create(secret));
+
+      expect(ops.writeTrail()).toEqual([]);
+      expect(ops.getKeys()).toContain(kvKeys.auth(USER_ID));
+      expect(await kv.get(kvKeys.authToken(TOKEN))).toBe(USER_ID);
+      expect(await kv.get(kvKeys.member(USER_ID))).toBe(pointerBefore);
+    },
+  );
+
+  it.each(CURRENT_RECORDS)(
+    "admits $label, reading auth: once and carrying secretAt",
+    async ({ record, secret }) => {
+      await seedAuth(SECRET_AT);
+      await seedVerify(await record());
+      const ops = watchKvOps(kv);
+
+      const res = await create(secret);
+      // Counted before the assertions below read auth: themselves.
+      const authReads = ops
+        .getKeys()
+        .filter((key) => key === kvKeys.auth(USER_ID));
+
+      expect(res.status).toBe(201);
+      expect(authReads).toHaveLength(1);
+      const data = ((await res.json()) as Json).data;
+      expect(data.authToken).not.toBe(TOKEN);
+      expect(await kv.get(kvKeys.member(USER_ID))).toBe(data.familyId);
+      const stored = await kv.get<AuthRecord>(kvKeys.auth(USER_ID), "json");
+      expect(stored?.token).toBe(data.authToken);
+      expect(stored?.secretAt).toBe(SECRET_AT);
+      expect(await kv.get(kvKeys.authToken(TOKEN))).toBeNull();
+    },
+  );
+
+  it.each(STALE_RECORDS)(
+    "never trips without secretAt on the auth record ($label)",
+    async ({ record, secret }) => {
+      await seedAuth();
+      await seedVerify(await record());
+
+      const res = await create(secret);
+
+      expect(res.status).toBe(201);
+    },
+  );
+
+  it("never trips without an auth record", async () => {
+    await seedVerify(await pinRecord(PIN));
+
+    const res = await create(PIN);
+
+    expect(res.status).toBe(201);
+    const stored = await kv.get<AuthRecord>(kvKeys.auth(USER_ID), "json");
+    expect(stored?.secretAt).toBeUndefined();
+  });
+});
+
+function lookup(verifySecret: string | undefined): Promise<Response> {
+  return request("POST", "/api/auth/lookup", { userId: USER_ID, verifySecret });
+}
+
+async function seedLiveMembership(): Promise<void> {
+  await seedFamily([OWNER_ID, USER_ID]);
+  await kv.put(kvKeys.member(USER_ID), FAMILY_ID);
+}
+
+async function expectProbe(res: Response): Promise<void> {
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    data: { existingFamilyId: null, memberCount: 0, requiresVerification: 1 },
+  });
+}
+
+describe("POST /api/auth/lookup — a secret checked against a stale verify record", () => {
+  it.each(STALE_RECORDS)(
+    "answers the probe for $label and reads no membership",
+    async ({ record, secret }) => {
+      await seedLiveMembership();
+      await seedAuth(SECRET_AT);
+      await seedVerify(await record());
+      const ops = watchKvOps(kv);
+
+      await expectProbe(await lookup(secret));
+
+      expect(ops.getKeys()).toContain(kvKeys.auth(USER_ID));
+      expect(ops.getKeys()).not.toContain(kvKeys.member(USER_ID));
+      expect(ops.getKeys()).not.toContain(kvKeys.family(FAMILY_ID));
+    },
+  );
+
+  it.each(CURRENT_RECORDS)(
+    "discloses the membership for $label",
+    async ({ record, secret }) => {
+      await seedLiveMembership();
+      await seedAuth(SECRET_AT);
+      await seedVerify(await record());
+
+      const res = await lookup(secret);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: {
+          existingFamilyId: FAMILY_ID,
+          memberCount: 2,
+          requiresVerification: 0,
+        },
+      });
+    },
+  );
+
+  it.each(STALE_RECORDS)(
+    "discloses without secretAt on the auth record ($label)",
+    async ({ record, secret }) => {
+      await seedLiveMembership();
+      await seedAuth();
+      await seedVerify(await record());
+
+      const res = await lookup(secret);
+
+      expect(((await res.json()) as Json).data.existingFamilyId).toBe(
+        FAMILY_ID,
+      );
+    },
+  );
+
+  it("keeps the configured-no-secret probe to one verify: read", async () => {
+    await seedLiveMembership();
+    await seedAuth(SECRET_AT);
+    await seedVerify(await pinRecord(PIN, SECRET_AT));
+    const ops = watchKvOps(kv);
+
+    await expectProbe(await lookup(undefined));
+
+    expect(ops.getKeys()).toEqual([kvKeys.verify(USER_ID)]);
   });
 });
