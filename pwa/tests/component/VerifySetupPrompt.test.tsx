@@ -28,9 +28,15 @@ import { ApiClient } from "@/api/client";
  * it as `res.error.message || "…"`, and `||` lets every truthy non-string through — including
  * exactly the objects and arrays React 19 refuses as a JSX child. With no ErrorBoundary above it, the
  * throw took the whole page white while this overlay (`fixed inset-0`) was covering it. The fallback
- * literal lives in VerifySetupPrompt.tsx (`saveMethod`) and is read back off the production render
+ * literal lives in useVerifyMethodSave.ts (`saveMethod`) and is read back off the production render
  * path; `getByText` matches the node's whole text, so a hostile value that had reached state would
  * fail there rather than hide inside the same node.
+ *
+ * Rotated token hand-off (#378): a new pin / pattern / code revokes the account's shared auth token and
+ * the save's response carries its replacement. The client already adopted it (pinned in
+ * tests/unit/api/verifyApi.test.ts); the prompt hands it to `onTokenRotated` so App can persist it into
+ * the session, and must do so BEFORE `markVerifyPrompted` — anything sent afterwards belongs to the new
+ * token's session. Asserted on `invocationCallOrder`, Vitest's global call sequence across mocks.
  */
 
 // Mock the ApiClient
@@ -386,7 +392,7 @@ describe("VerifySetupPrompt", () => {
           }),
         );
 
-        // Production literal (VerifySetupPrompt.tsx `saveMethod`), whole-text match so a hostile value
+        // Production literal (useVerifyMethodSave.ts `saveMethod`), whole-text match so a hostile value
         // cannot hide in the same node. See the header → "Hostile save-error envelopes".
         expect(screen.getByText("儲存失敗，請重試。")).toHaveAttribute(
           "role",
@@ -408,6 +414,158 @@ describe("VerifySetupPrompt", () => {
 
       expect(screen.getByText("驗證方式無效")).toBeInTheDocument();
       expect(screen.queryByText("儲存失敗，請重試。")).not.toBeInTheDocument();
+    });
+  });
+
+  /** The rotated token goes to `onTokenRotated` before anything else is sent. See the header →
+   *  "Rotated token hand-off". */
+  describe("rotated token hand-off", () => {
+    const ROTATED_TOKEN = "0123456789abcdef".repeat(4);
+
+    function rotatedResponse(method: string) {
+      return {
+        data: {
+          method,
+          prompted: 1,
+          authToken: ROTATED_TOKEN,
+          expiresAt: 1_700_000_000_000,
+        },
+      };
+    }
+
+    async function renderWith(
+      client: ApiClient,
+      onTokenRotated?: (authToken: string) => void,
+    ) {
+      await act(async () => {
+        render(
+          <VerifySetupPrompt
+            userId={USER_ID}
+            apiClient={client}
+            onComplete={mockOnComplete}
+            onTokenRotated={onTokenRotated}
+          />,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    /** `act` is the barrier for the save and the markVerifyPrompted call chained after it. */
+    async function clickAndSettle(element: HTMLElement) {
+      await act(async () => {
+        fireEvent.click(element);
+      });
+    }
+
+    function expectCalledBefore(
+      first: ReturnType<typeof vi.fn>,
+      second: ReturnType<typeof vi.fn>,
+    ) {
+      expect(first).toHaveBeenCalledTimes(1);
+      expect(second).toHaveBeenCalledTimes(1);
+      expect(first.mock.invocationCallOrder[0]).toBeLessThan(
+        second.mock.invocationCallOrder[0],
+      );
+    }
+
+    it("should hand the rotated token over before marking the prompt shown", async () => {
+      const onTokenRotated = vi.fn();
+      const markVerifyPrompted = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true } });
+      const client = createMockClient({
+        setVerifyMethod: vi.fn().mockResolvedValue(rotatedResponse("code")),
+        markVerifyPrompted,
+      });
+      await renderWith(client, onTokenRotated);
+
+      await clickAndSettle(screen.getByText("隨機驗證碼"));
+
+      expect(onTokenRotated).toHaveBeenCalledWith(ROTATED_TOKEN);
+      expectCalledBefore(onTokenRotated, markVerifyPrompted);
+      expectCalledBefore(markVerifyPrompted, mockOnComplete);
+    });
+
+    it("should hand the rotated token over after a PIN is set up", async () => {
+      const onTokenRotated = vi.fn();
+      const setVerifyMethod = vi.fn().mockResolvedValue(rotatedResponse("pin"));
+      const markVerifyPrompted = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true } });
+      const client = createMockClient({ setVerifyMethod, markVerifyPrompted });
+      await renderWith(client, onTokenRotated);
+
+      fireEvent.click(screen.getByText("PIN 碼"));
+      fireEvent.change(screen.getByLabelText("PIN 輸入"), {
+        target: { value: "123456" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "確認" }));
+      fireEvent.change(screen.getByLabelText("PIN 輸入"), {
+        target: { value: "123456" },
+      });
+      await clickAndSettle(screen.getByRole("button", { name: "確認" }));
+
+      expect(setVerifyMethod).toHaveBeenCalledWith(USER_ID, {
+        method: "pin",
+        secret: "123456",
+      });
+      expect(onTokenRotated).toHaveBeenCalledWith(ROTATED_TOKEN);
+      expectCalledBefore(onTokenRotated, markVerifyPrompted);
+      expect(mockOnComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not call onTokenRotated when the save issues no token", async () => {
+      const onTokenRotated = vi.fn();
+      const client = createMockClient({
+        setVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "none", prompted: 1 } }),
+      });
+      await renderWith(client, onTokenRotated);
+
+      fireEvent.click(screen.getByText("不設定驗證"));
+      await clickAndSettle(screen.getByText("確定不設定"));
+
+      expect(mockOnComplete).toHaveBeenCalledTimes(1);
+      expect(onTokenRotated).not.toHaveBeenCalled();
+    });
+
+    it("should not call onTokenRotated when the save fails", async () => {
+      const onTokenRotated = vi.fn();
+      const markVerifyPrompted = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true } });
+      const client = createMockClient({
+        setVerifyMethod: vi.fn().mockResolvedValue({
+          error: { code: "SERVER_ERROR", message: "伺服器忙碌" },
+        }),
+        markVerifyPrompted,
+      });
+      await renderWith(client, onTokenRotated);
+
+      await clickAndSettle(screen.getByText("隨機驗證碼"));
+
+      expect(screen.getByText("伺服器忙碌")).toBeInTheDocument();
+      expect(onTokenRotated).not.toHaveBeenCalled();
+      expect(markVerifyPrompted).not.toHaveBeenCalled();
+      expect(mockOnComplete).not.toHaveBeenCalled();
+    });
+
+    it("should complete normally when no onTokenRotated is passed", async () => {
+      const markVerifyPrompted = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true } });
+      const client = createMockClient({
+        setVerifyMethod: vi.fn().mockResolvedValue(rotatedResponse("code")),
+        markVerifyPrompted,
+      });
+      await renderWith(client);
+
+      await clickAndSettle(screen.getByText("隨機驗證碼"));
+
+      expect(markVerifyPrompted).toHaveBeenCalledWith(USER_ID);
+      expect(mockOnComplete).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 });

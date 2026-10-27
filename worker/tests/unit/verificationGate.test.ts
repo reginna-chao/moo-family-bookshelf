@@ -363,6 +363,7 @@ async function issueOtp(userId: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(set.status).toBe(200);
+  // `code` sets no secret, so it rotates nothing (#378): the seeded token pushes the OTP.
 
   const res = await apiRequest("POST", `/api/user/${userId}/verify/otp`, {
     body: {},

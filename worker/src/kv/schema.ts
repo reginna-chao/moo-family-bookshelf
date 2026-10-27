@@ -396,6 +396,10 @@ export const MAX_FAMILY_PREF_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
 export interface AuthRecord {
   token: string;
   createdAt: string;
+  /** Epoch ms of the `verify:{userId}.secretUpdatedAt` the PIN/pattern rotation was written for (#378); a join
+   *  that passed against an older verify record is refused. OPTIONAL: absent until such a rotation; later
+   *  mints carry the replaced record's value forward (`generateAuthToken`). */
+  secretAt?: number;
 }
 
 /** Token TTL: 90 days in seconds. Shared by auth middleware and routes. */
@@ -409,6 +413,9 @@ export const QR_TOKEN_TTL_SECONDS = 5 * 60;
 
 export interface QrTokenRecord {
   userId: string;
+  /** Hex SHA-256 of the auth token that minted it (`hashTokenForQrBinding`, #378). OPTIONAL (added after
+   *  release): absent ⇒ never bypasses verification (`isQrBoundToCurrentToken` in `middleware/auth.ts`). */
+  tokenHash?: string;
 }
 
 /** Verification method for PWA login. */

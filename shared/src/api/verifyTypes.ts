@@ -19,6 +19,15 @@ export interface SetVerifyBody {
   prompted?: number;
 }
 
+/** `PUT /api/user/:id/verify` result. A new `pin` / `pattern` / `code` revokes the account's
+ *  shared auth token and issues `authToken` + `expiresAt`; `none` issues neither. */
+export interface SetVerifyResult {
+  method: VerifyMethod;
+  prompted: BoolFlag;
+  authToken?: string;
+  expiresAt?: number;
+}
+
 export interface OtpInfo {
   code: string;
   expiresAt: number;

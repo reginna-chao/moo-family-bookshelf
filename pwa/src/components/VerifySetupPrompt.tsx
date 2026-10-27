@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { ApiClient } from "@/api/client";
-import type { VerifyMethod } from "@/api/client";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
+import { useVerifyMethodSave } from "@/hooks/useVerifyMethodSave";
 
 interface VerifySetupPromptProps {
   userId: string;
   apiClient: ApiClient;
   onComplete: () => void;
+  /** Gets the token a new pin / pattern rotated (#378); the caller persists it. */
+  onTokenRotated?: (authToken: string) => void;
 }
 
 type Step =
@@ -24,10 +25,14 @@ export function VerifySetupPrompt({
   userId,
   apiClient,
   onComplete,
+  onTokenRotated,
 }: VerifySetupPromptProps) {
   const [step, setStep] = useState<Step>("loading");
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const { saving, saveError, setSaveError, saveMethod } = useVerifyMethodSave({
+    userId,
+    apiClient,
+    onTokenRotated,
+  });
 
   useEffect(() => {
     void apiClient
@@ -41,26 +46,6 @@ export function VerifySetupPrompt({
         setStep("done");
       });
   }, [userId, apiClient]);
-
-  const saveMethod = useCallback(
-    async (method: VerifyMethod, secret?: string) => {
-      setSaving(true);
-      setSaveError("");
-      const body: { method: VerifyMethod; secret?: string } = { method };
-      if (secret) body.secret = secret;
-      const res = await apiClient.setVerifyMethod(userId, body);
-      if (res.error) {
-        setSaveError(safeErrorText(res.error.message, "儲存失敗，請重試。"));
-        setSaving(false);
-        return false;
-      }
-      // Mark as prompted
-      await apiClient.markVerifyPrompted(userId);
-      setSaving(false);
-      return true;
-    },
-    [userId, apiClient],
-  );
 
   const handlePinComplete = useCallback(
     async (pin: string) => {

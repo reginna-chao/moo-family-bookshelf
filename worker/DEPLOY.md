@@ -240,7 +240,9 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 只有在沒有任何裝置登入（自己離開家庭、被移出，或很久沒用）時，才需要管理者介入：把他的驗證設定改寫成一組臨時 PIN，再把臨時 PIN 告訴他。伺服器無法替你確認對方是不是本人，這一步完全依賴你自己的判斷，確認是本人之後再做。原因與目前的政策見 `docs/architecture.md` → PWA 登入驗證機制 → 忘記驗證方式時。
 
-不要直接刪除他的驗證設定。刪除會留下一段沒有驗證的空窗，知道他 Email 和同步碼的家人可以在這段時間搶先登入；搶到的登入在他之後重設 PIN 時不會失效。改寫成臨時 PIN 就沒有空窗。臨時 PIN 你自己也知道，在他改掉之前你等於能登入他的帳號，所以請他登入後立刻改掉。
+帳號被接管時也用同樣的方式處理：有人在伺服器資料還沒同步到各節點的空窗內，用舊的 token 改掉了他的驗證設定（`docs/architecture.md` → PWA 登入驗證機制 → 安全措施，#396 追蹤的殘餘風險）。這時他的 token 續期與改驗證設定都會收到 401，自己的 PIN 或圖形也登入不了，手上的裝置救不回來。照下面的步驟改寫成臨時 PIN；接管者手上的 token 要等他用臨時 PIN 登入、再改成自己的 PIN 或圖形之後才會失效。
+
+不要直接刪除他的驗證設定。刪除會留下一段沒有驗證的空窗，知道他 Email 和同步碼的家人可以在這段時間搶先登入；直到他設定新的 PIN 或圖形之前，對方都能看到他的完整書單、修改他的開放設定。設定新的 PIN 或圖形會撤銷其他裝置的登入（KV 傳播期間除外）。改寫成臨時 PIN 就沒有空窗。臨時 PIN 你自己也知道，在他改掉之前你等於能登入他的帳號，所以請他登入後立刻改掉。
 
 1. 算出他的 userId（`sha256("moo:" + Email 轉小寫並去掉前後空白)`，與擴充功能、PWA 用的 `deriveUserId` 相同）。這行指令會把 Email 留在終端機的歷史紀錄裡，做完可自行清除：
 
@@ -254,7 +256,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key get "verify:<上一步的 userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡：
+3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`，其中的 `secretUpdatedAt` 取自你這台電腦的時間。先確認本機時鐘正確：它要比對方最後一次換密鑰的時間晚，否則臨時 PIN 登入會一直被要求重新驗證。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡：
 
    ```bash
    node -e "const c=require('crypto');const pin=process.argv[1];const salt=c.randomBytes(16).toString('hex');const hash=c.createHash('sha256').update(salt+pin).digest('hex');require('fs').writeFileSync('temp-verify.json',JSON.stringify({method:'pin',hash,salt,prompted:0,secretUpdatedAt:Date.now()}))" "246813"

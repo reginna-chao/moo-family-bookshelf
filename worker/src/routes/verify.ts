@@ -3,6 +3,7 @@ import type { Env } from "../utils/env";
 import {
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
+  TOKEN_TTL_SECONDS,
   type VerifyRecord,
   type OtpRecord,
   type QrTokenRecord,
@@ -12,14 +13,22 @@ import {
   putVerifyRecord,
   putOtpRecord,
   putQrTokenRecord,
+  deleteOtpRecord,
 } from "../kv/verify";
 import {
   isValidVerifyMethod,
   isValidPin,
   isValidPattern,
 } from "../utils/validation";
-import { getAuthenticatedUserId } from "../middleware/auth";
+import {
+  generateAuthToken,
+  getAuthenticatedUserId,
+  getPresentedAuthToken,
+  hashTokenForQrBinding,
+  readPresentedAuth,
+} from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
+import { passedAgainstStaleVerifyRecord } from "../services/verification";
 import { hashSecret } from "../utils/crypto";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
@@ -98,7 +107,9 @@ const putVerifyRoute = createRoute({
     params: UserIdParam,
   },
   responses: {
-    200: jsonRes("Updated verification settings"),
+    200: jsonRes(
+      "Updated verification settings; for pin/pattern also the rotated authToken + expiresAt (the old token is revoked). code/none keep the token",
+    ),
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
     429: jsonRes("Rate limited"),
@@ -164,6 +175,17 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     }
   }
 
+  // Only the token `auth:{userId}` names may change the secret (#378): a revoked bearer that a stale colo
+  // still accepts gets this handler's generic 401. See docs/architecture.md → PWA 登入驗證機制.
+  const presentedToken = getPresentedAuthToken(c);
+  const [presented, existing] = await Promise.all([
+    readPresentedAuth(c.env.KV, userId, presentedToken),
+    getVerifyRecord(c.env.KV, userId),
+  ]);
+  if (!presented.current || presentedToken === null) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+
   let hash: string | null = null;
   let salt: string | null = null;
 
@@ -171,8 +193,6 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     salt = generateSalt();
     hash = await hashSecret(salt, body.secret);
   }
-
-  const existing = await getVerifyRecord(c.env.KV, userId);
 
   const record: VerifyRecord = {
     method,
@@ -186,7 +206,31 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
 
   await putVerifyRecord(c.env.KV, userId, record);
 
-  return c.json({ data: { method: record.method, prompted: record.prompted } });
+  if (method !== "pin" && method !== "pattern") {
+    return c.json({
+      data: { method: record.method, prompted: record.prompted },
+    });
+  }
+
+  // A new PIN/pattern revokes the shared token (#378) AFTER the record write and drops a pending one-time
+  // code; `code` keeps the token (the Extension cannot enter an OTP). See docs/architecture.md → PWA 登入驗證機制.
+  // No `auth:` record (TTL gap): the presented bearer is still the one to revoke; only `.token` is read.
+  // `secretAt` lets a stale-node join be refused (`passedAgainstStaleVerifyRecord`).
+  const replaced = presented.auth ?? { token: presentedToken, createdAt: "" };
+  const [authToken] = await Promise.all([
+    generateAuthToken(c.env.KV, userId, replaced, record.secretUpdatedAt),
+    deleteOtpRecord(c.env.KV, userId),
+  ]);
+  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+
+  return c.json({
+    data: {
+      method: record.method,
+      prompted: record.prompted,
+      authToken,
+      expiresAt,
+    },
+  });
 });
 
 // POST /:id/verify/otp — generate OTP (protected, Extension pushes OTP for display)
@@ -312,7 +356,25 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  const existing = await getVerifyRecord(c.env.KV, userId);
+  const [existing, presented] = await Promise.all([
+    getVerifyRecord(c.env.KV, userId),
+    readPresentedAuth(c.env.KV, userId, getPresentedAuthToken(c)),
+  ]);
+  if (!presented.current) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+
+  // Never write back a record older than the last PIN/pattern rotation (#378), nor rewrite one already
+  // prompted. See docs/architecture.md → PWA 登入驗證機制.
+  if (
+    existing?.prompted === 1 ||
+    passedAgainstStaleVerifyRecord(presented.auth, existing)
+  ) {
+    return c.json({
+      data: { method: existing?.method ?? "none", prompted: 1 },
+    });
+  }
+
   const record: VerifyRecord = existing ?? defaultVerifyRecord();
   record.prompted = 1;
 
@@ -353,7 +415,8 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   const { id: userId } = c.req.valid("param");
 
   const callerId = getAuthenticatedUserId(c);
-  if (!callerId) {
+  const presentedToken = getPresentedAuthToken(c);
+  if (!callerId || !presentedToken) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
@@ -370,7 +433,9 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   const token = generateQrToken();
-  const record: QrTokenRecord = { userId };
+  // Bound to the minting token (#378): redeemable only while `auth:{userId}` still names it.
+  const tokenHash = await hashTokenForQrBinding(presentedToken);
+  const record: QrTokenRecord = { userId, tokenHash };
 
   await putQrTokenRecord(c.env.KV, token, record);
 

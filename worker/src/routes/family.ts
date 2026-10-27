@@ -6,6 +6,8 @@ import {
   type FamilyMember,
   type FamilyRecord,
   type KickedRecord,
+  type AuthRecord,
+  type VerifyRecord,
   normalizeFamilyRecord,
   hasMember,
   findMember,
@@ -37,10 +39,15 @@ import {
   getOrGenerateAuthToken,
   deleteAuthToken,
   getAuthenticatedUserId,
+  readAuthRecord,
+  isQrBoundToCurrentToken,
+  renewAuthToken,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
+  passedAgainstStaleVerifyRecord,
   validateVerification,
+  VERIFICATION_REQUIRED_ERROR,
   verificationErrorResponse,
   verifySecretFormatResponse,
 } from "../services/verification";
@@ -348,6 +355,13 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     return verificationErrorResponse(c, verification.error);
   }
 
+  // Same stale-record refusal as join (#378), still before any write; `auth` is reused by the mint below.
+  // See docs/architecture.md → PWA 登入驗證機制.
+  const auth = await readAuthRecord(c.env.KV, body.userId);
+  if (passedAgainstStaleVerifyRecord(auth, verification.record)) {
+    return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
+  }
+
   if (membership === "orphaned") {
     await deleteMemberFamilyId(c.env.KV, body.userId);
   }
@@ -371,7 +385,7 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   await putMemberFamilyId(c.env.KV, body.userId, familyId);
   await putFamilyRecord(c.env.KV, familyId, record);
 
-  const authToken = await generateAuthToken(c.env.KV, body.userId);
+  const authToken = await generateAuthToken(c.env.KV, body.userId, auth);
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 201);
@@ -455,13 +469,13 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
   const isExistingMember = hasMember(record.members, body.userId);
 
   // --- Verification gate (both existing-member reconnect and new-member join) ---
-  const gateFailure = await passJoinVerificationGate(c, {
+  const gate = await passJoinVerificationGate(c, {
     userId: body.userId,
     qrToken: body.qrToken,
     verifySecret,
   });
-  if (gateFailure) {
-    return gateFailure;
+  if (gate.failure) {
+    return gate.failure;
   }
 
   // Kicked-tombstone gate, AFTER the verification gate, for both branches and QR-bypass joins alike.
@@ -477,7 +491,7 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return jsonError(c, 409, "RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員");
   }
 
-  const step = { familyId, userId: body.userId, displayName, record };
+  const step = { familyId, userId: body.userId, displayName, record, gate };
   return isExistingMember
     ? reconnectExistingMember(c, { ...step, existingFamily })
     : admitNewMember(c, step);
@@ -1158,16 +1172,26 @@ async function writeKickedTombstone(
   }
 }
 
+/** A passed join gate (#378): `knownAuth` is the `auth:{userId}` the QR check read (`undefined` when none);
+ *  `verifyRecord` is what the secret comparison read (`null` after a QR bypass, which compares nothing). */
+interface JoinGatePass {
+  failure: null;
+  knownAuth: AuthRecord | null | undefined;
+  qrBypassed: boolean;
+  verifyRecord: VerifyRecord | null;
+}
+
 /** Inputs shared by the join handler's two post-gate branches. */
 interface JoinStepInput {
   familyId: string;
   userId: string;
   displayName: string;
   record: FamilyRecord;
+  gate: JoinGatePass;
 }
 
-/** Join's verification step: a one-time QR token issued to `userId` (one get + delete) skips the gate,
- *  else `validateVerification`. Returns the gate's error Response, or `null` when passed. */
+/** Join's verification step: a one-time QR token issued to `userId` and still bound to the account's current
+ *  token (#378) skips the gate, else `validateVerification`. `failure` is the gate's error Response. */
 async function passJoinVerificationGate(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -1175,47 +1199,85 @@ async function passJoinVerificationGate(
     qrToken: string | undefined;
     verifySecret: string | undefined;
   },
-) {
+): Promise<
+  { failure: ReturnType<typeof verificationErrorResponse> } | JoinGatePass
+> {
   const { userId, qrToken, verifySecret } = input;
 
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
+  let knownAuth: AuthRecord | null | undefined;
   if (qrToken && typeof qrToken === "string") {
     const qrRecord = await getQrTokenRecord(c.env.KV, qrToken);
     if (qrRecord && qrRecord.userId === userId) {
-      skipVerification = true;
-      // One-time use: delete immediately
-      await deleteQrToken(c.env.KV, qrToken);
+      // Consumed either way: an unbound token is spent too, then falls through to the secret check.
+      const [auth] = await Promise.all([
+        readAuthRecord(c.env.KV, userId),
+        deleteQrToken(c.env.KV, qrToken),
+      ]);
+      knownAuth = auth;
+      skipVerification = await isQrBoundToCurrentToken(
+        qrRecord.tokenHash,
+        auth,
+      );
     }
     // If token invalid/expired/wrong-user, fall through to normal verification
+  }
+  if (skipVerification) {
+    return { failure: null, knownAuth, qrBypassed: true, verifyRecord: null };
   }
 
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
-  if (!skipVerification) {
-    // Lockout charged to the CALLER (IP, IPv6 per /64), never the target; wrong guesses also hit the
-    // charge-on-failure "verify" ceiling. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
-    const verification = await validateVerification(
-      c.env,
-      userId,
-      verifySecret,
-      { callerKey: getCallerIp(c) },
-    );
-    if (!verification.valid) {
-      return verificationErrorResponse(c, verification.error);
-    }
+  // Lockout charged to the CALLER (IP, IPv6 per /64), never the target; wrong guesses also hit the
+  // charge-on-failure "verify" ceiling. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
+  const verification = await validateVerification(c.env, userId, verifySecret, {
+    callerKey: getCallerIp(c),
+  });
+  if (!verification.valid) {
+    return { failure: verificationErrorResponse(c, verification.error) };
   }
-
-  return null;
+  return {
+    failure: null,
+    knownAuth,
+    qrBypassed: false,
+    verifyRecord: verification.record,
+  };
 }
 
-/** Join's existing-member branch: heals the pointer (+ tombstone re-check, may 403) or, when not healing,
- *  may put a changed displayName; then `getOrGenerateAuthToken`. */
+/** Token side of a passed join (#378), run before any write: `auth:{userId}` (read once), plus — after a
+ *  QR bypass — the bound token renewed. `null` ⇒ 403 VERIFICATION_REQUIRED: the bound token is gone, or
+ *  the secret passed against a stale verify record. See docs/architecture.md → PWA 登入驗證機制. */
+async function admitJoinToken(
+  kv: KVNamespace,
+  userId: string,
+  gate: JoinGatePass,
+): Promise<{ auth: AuthRecord | null; renewed: string | null } | null> {
+  const auth =
+    gate.knownAuth === undefined
+      ? await readAuthRecord(kv, userId)
+      : gate.knownAuth;
+  if (gate.qrBypassed) {
+    const renewed = await renewAuthToken(kv, userId, auth);
+    return renewed === null ? null : { auth, renewed };
+  }
+  if (passedAgainstStaleVerifyRecord(auth, gate.verifyRecord)) return null;
+  return { auth, renewed: null };
+}
+
+/** Join's existing-member branch: `admitJoinToken` (may 403), heals the pointer (+ tombstone re-check, may
+ *  403) or, when not healing, may put a changed displayName; then the QR-renewed token, else
+ *  `getOrGenerateAuthToken` — a QR bypass never mints (#378). */
 async function reconnectExistingMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput & { existingFamily: string | null },
 ) {
-  const { familyId, userId, displayName, record, existingFamily } = input;
+  const { familyId, userId, displayName, record, existingFamily, gate } = input;
+
+  const admitted = await admitJoinToken(c.env.KV, userId, gate);
+  if (!admitted) {
+    return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
+  }
 
   // Heal a pointer not naming this family, then re-read the tombstone (mirrored kick pairing); a heal
   // never writes the record back. See docs/architecture.md → 家庭成員的授權與移除.
@@ -1239,18 +1301,20 @@ async function reconnectExistingMember(
     await putFamilyRecord(c.env.KV, familyId, record);
   }
 
-  const authToken = await getOrGenerateAuthToken(c.env.KV, userId);
+  const authToken =
+    admitted.renewed ??
+    (await getOrGenerateAuthToken(c.env.KV, userId, admitted.auth));
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
-/** Join's new-member branch: 409 FAMILY_FULL, else puts `family:{id}` then `member:{uid}`, re-checks the
- *  tombstone (may retract + 403) and mints a fresh token via `generateAuthToken`. */
+/** Join's new-member branch: 409 FAMILY_FULL, then `admitJoinToken` (may 403), puts `family:{id}` then
+ *  `member:{uid}`, re-checks the tombstone (may retract + 403); then the QR-renewed token, else a fresh one. */
 async function admitNewMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput,
 ) {
-  const { familyId, userId, displayName, record } = input;
+  const { familyId, userId, displayName, record, gate } = input;
 
   // --- New member flow: capacity check ---
 
@@ -1258,6 +1322,10 @@ async function admitNewMember(
   // maxMembers limit. Acceptable for 2-person families with low concurrency.
   if (record.members.length >= record.maxMembers) {
     return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
+  }
+  const admitted = await admitJoinToken(c.env.KV, userId, gate);
+  if (!admitted) {
+    return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
   record.members.push({
     userId,
@@ -1276,7 +1344,9 @@ async function admitNewMember(
     return memberRemovedResponse(c);
   }
 
-  const authToken = await generateAuthToken(c.env.KV, userId);
+  const authToken =
+    admitted.renewed ??
+    (await generateAuthToken(c.env.KV, userId, admitted.auth));
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);

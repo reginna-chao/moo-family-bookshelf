@@ -976,9 +976,9 @@ describe("useOnboardingFlow", () => {
         expect(tryAutoRecovery).not.toHaveBeenCalled();
       });
 
-      it("keeps a wrong secret's error inside the prompt (never 'no family')", async () => {
-        // The server still withholds the payload — reading that as an empty
-        // lookup is the exact bug onboardingLookup normalizes away.
+      it("re-asks without failure copy when a sent secret still gets the probe (never 'no family')", async () => {
+        // A stale colo can still withhold after a CORRECT secret (#378) — reading that as
+        // an empty lookup, or as a wrong secret, is what onboardingLookup normalizes away.
         const lookupUser = vi.fn().mockResolvedValue(WITHHELD);
         const { result } = renderFlow(createMockApiClient({ lookupUser }));
 
@@ -992,7 +992,7 @@ describe("useOnboardingFlow", () => {
         expect(result.current.state).toBe("verify-prompt");
         expect(result.current.state).not.toBe("idle");
         expect(result.current.verify.active).toBe(true);
-        expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+        expect(result.current.verify.error).toBe("");
         expect(result.current.verify.submitting).toBe(false);
       });
 

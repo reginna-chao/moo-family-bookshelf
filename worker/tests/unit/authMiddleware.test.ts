@@ -57,6 +57,38 @@ describe("Auth middleware token validation", () => {
     expect(json.error.message).toBe("Invalid or expired token");
   });
 
+  it.each([
+    { label: "a bare Bearer scheme with no token", header: "Bearer" },
+    { label: "a 63-char hex token", header: `Bearer ${"a".repeat(63)}` },
+    { label: "a 65-char hex token", header: `Bearer ${"a".repeat(65)}` },
+    {
+      label: "a valid token followed by junk",
+      header: `Bearer ${"a".repeat(64)} extra`,
+    },
+  ])("should return 401 for $label", async ({ header }) => {
+    // The 64-char token is seeded, so only the header's shape can refuse these.
+    await kv.put(`token:${"a".repeat(64)}`, USER1);
+    const res = await requestWithRawAuth(
+      "GET",
+      `/api/user/${USER1}/books`,
+      header,
+    );
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("UNAUTHORIZED");
+    expect(json.error.message).toBe("Invalid or expired token");
+  });
+
+  it("should admit an exact 64-char lowercase hex token that is in KV", async () => {
+    await kv.put(`token:${"a".repeat(64)}`, USER1);
+    const res = await request(
+      "GET",
+      `/api/user/${USER1}/books`,
+      "a".repeat(64),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("should return 401 when token is valid format but not found in KV", async () => {
     const fakeToken = "a".repeat(64);
     const res = await request("GET", `/api/user/${USER1}/books`, fakeToken);

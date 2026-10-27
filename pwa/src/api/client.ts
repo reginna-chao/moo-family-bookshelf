@@ -47,6 +47,7 @@ import {
 import { sanitizeFamilyBookshelfResponse } from "moo-family-bookshelf-shared/api/bookshelfValidation";
 import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/personalBooksValidation";
 import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { adoptRotatedVerifyToken } from "moo-family-bookshelf-shared/api/verifyTokenRotation";
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
 import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
@@ -414,13 +415,11 @@ export class ApiClient {
     return this.get(`/api/user/${userId}/verify/prompted`);
   }
 
-  /** Set verification method for a user. */
-  async setVerifyMethod(
-    userId: string,
-    body: SetVerifyBody,
-  ): Promise<ApiResponse<{ ok: boolean }>> {
+  /** A new pin / pattern revokes the old token (#378): its replacement is on this client on return. */
+  async setVerifyMethod(userId: string, body: SetVerifyBody) {
     assertHexId(userId, "userId");
-    return this.put(`/api/user/${userId}/verify`, body);
+    const res = await this.put<unknown>(`/api/user/${userId}/verify`, body);
+    return adoptRotatedVerifyToken(res, (token) => this.setAuthToken(token));
   }
 
   /** Mark verification as prompted (requires auth token). */

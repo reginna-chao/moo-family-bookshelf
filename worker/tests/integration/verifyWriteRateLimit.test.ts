@@ -186,14 +186,16 @@ async function seedVerifyMethod(
   await kv.put(kvKeys.verify(userId), JSON.stringify(record));
 }
 
-/** Set a real PIN through the production route, so hash + salt are genuine. */
-async function setPin(userId: string, pin: string): Promise<void> {
+/** Set a real PIN through the production route, so hash + salt are genuine.
+ *  Returns the rotated auth token — a new PIN revokes the seeded one (#378). */
+async function setPin(userId: string, pin: string): Promise<string> {
   await seedAuthToken(userId);
   const res = await devRequest("PUT", `/api/user/${userId}/verify`, {
     body: JSON.stringify({ method: "pin", secret: pin }),
     token: tokenFor(userId),
   });
   expect(res.status).toBe(200);
+  return ((await res.json()) as Json).data.authToken as string;
 }
 
 // --- Counter inspection --------------------------------------------------
@@ -421,6 +423,7 @@ describe("Verify-domain per-userId write ceiling", () => {
       token: AUTH_TOKEN,
     });
     expect(set.status).toBe(200);
+    // `code` sets no secret, so it rotates nothing (#378): AUTH_TOKEN stays valid.
 
     const otp = await prodRequest("POST", `/api/user/${USER_ID}/verify/otp`, {
       body: "{}",
@@ -685,7 +688,7 @@ describe("Verify-domain write ceiling — isolation from the verification gate",
   });
 
   it("leaves the write budget intact when the gate's attempt window is spent by wrong guesses", async () => {
-    await setPin(USER_ID, CORRECT_PIN);
+    const ownerToken = await setPin(USER_ID, CORRECT_PIN);
 
     // A rotating attacker: one never-seen source address per guess, because the
     // per-IP limiter on the sensitive tier would otherwise refuse them first.
@@ -709,16 +712,16 @@ describe("Verify-domain write ceiling — isolation from the verification gate",
     // ...while the owner's write budget was never touched, so their own
     // settings write still goes through and starts the window from zero.
     expect(await writesCharged(USER_ID)).toBeNull();
-    const write = await promptedWrite(AUTH_TOKEN);
+    const write = await promptedWrite(ownerToken);
     expect(write.status).toBe(200);
     expect(await writesCharged(USER_ID)).toBe(1);
   });
 
   it("does not spend the gate's attempt window when the owner writes their settings", async () => {
-    await setPin(USER_ID, CORRECT_PIN);
+    const ownerToken = await setPin(USER_ID, CORRECT_PIN);
     await spendWriteBudget(USER_ID, WRITE_MAX - 1);
 
-    const write = await promptedWrite(AUTH_TOKEN);
+    const write = await promptedWrite(ownerToken);
     expect(write.status).toBe(200);
     expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
 

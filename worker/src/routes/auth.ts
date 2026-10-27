@@ -1,19 +1,24 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { BoolFlag, TOKEN_TTL_SECONDS } from "../kv/schema";
+import { BoolFlag, TOKEN_TTL_SECONDS, type VerifyRecord } from "../kv/schema";
 import { getMemberFamilyId } from "../kv/families";
+import { getVerifyRecord } from "../kv/verify";
 import {
   isValidFamilyId,
   isValidSha256Hex,
   sanitizeVerifySecret,
 } from "../utils/validation";
 import {
-  getOrGenerateAuthToken,
   getAuthenticatedUserId,
+  getPresentedAuthToken,
+  readAuthRecord,
+  renewPresentedAuthToken,
 } from "../middleware/auth";
 import { getCallerIp } from "../middleware/rateLimit";
 import {
   isVerificationConfigured,
+  passedAgainstStaleVerifyRecord,
   validateVerification,
   verificationErrorResponse,
   verifySecretFormatResponse,
@@ -39,6 +44,11 @@ const lookupRoute = createRoute({
     "answers 200 with `requiresVerification: 1` and NO membership data — the " +
     "client should prompt for the secret and retry. Accounts without " +
     "verification always get `requiresVerification: 0` and the full result. " +
+    "The same no-membership `requiresVerification: 1` answer is also returned " +
+    "when the check passed (a supplied `verifySecret` matched, or this colo " +
+    "saw no verification configured, with or without a secret) against a verify record older " +
+    "than the account's last PIN/pattern change (`AuthRecord.secretAt`); the " +
+    "client should prompt for the secret and retry. " +
     "A `verifySecret` that is present but malformed (not a string, or longer " +
     "than 256 characters) is rejected with 400 `INVALID_VERIFY_SECRET`, the " +
     "same as on family create/join.",
@@ -65,6 +75,20 @@ const refreshRoute = createRoute({
 });
 
 // --- Handlers ---
+
+/** Lookup's "verification required" answer: 200 with no membership data, so the client prompts and retries. */
+function verificationRequiredProbe(c: Context<{ Bindings: Env }>) {
+  return c.json(
+    {
+      data: {
+        existingFamilyId: null,
+        memberCount: 0,
+        requiresVerification: BoolFlag.TRUE,
+      },
+    },
+    200,
+  );
+}
 
 // POST /api/auth/lookup — look up family membership by userId (public, no auth required)
 authRoutes.openapi(lookupRoute, async (c) => {
@@ -99,20 +123,12 @@ authRoutes.openapi(lookupRoute, async (c) => {
 
   // Verification gate BEFORE any membership read (familyId is the sync code); exactly ONE verify-record
   // read per request. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
+  let verifyRecord: VerifyRecord | null;
   if (verifySecret === undefined) {
-    if (await isVerificationConfigured(c.env.KV, userId)) {
-      // Informational, not an error: the client uses this to know it must prompt
-      // for the secret and retry. No membership data is revealed.
-      return c.json(
-        {
-          data: {
-            existingFamilyId: null,
-            memberCount: 0,
-            requiresVerification: BoolFlag.TRUE,
-          },
-        },
-        200,
-      );
+    verifyRecord = await getVerifyRecord(c.env.KV, userId);
+    // Informational, not an error: the client prompts for the secret and retries.
+    if (isVerificationConfigured(verifyRecord)) {
+      return verificationRequiredProbe(c);
     }
   } else {
     // A supplied secret is a real attempt; consumeOtp: false because create/join resends the SAME
@@ -126,6 +142,14 @@ authRoutes.openapi(lookupRoute, async (c) => {
     if (!verification.valid) {
       return verificationErrorResponse(c, verification.error);
     }
+    verifyRecord = verification.record;
+  }
+
+  // Passed against a verify record older than the last PIN/pattern rotation (#378): ask for the secret,
+  // disclose nothing. See docs/architecture.md → PWA 登入驗證機制.
+  const auth = await readAuthRecord(c.env.KV, userId);
+  if (passedAgainstStaleVerifyRecord(auth, verifyRecord)) {
+    return verificationRequiredProbe(c);
   }
 
   // Live membership only (pointer → record that still lists the user, `services/membership.ts`); an
@@ -203,7 +227,15 @@ authRoutes.openapi(refreshRoute, async (c) => {
     }
   }
 
-  const newToken = await getOrGenerateAuthToken(c.env.KV, body.userId);
+  // Never hands out a token other than the bearer (#378); a stale colo renewing the OLD token
+  // is an accepted residual — docs/architecture.md → PWA 登入驗證機制.
+  const presentedToken = getPresentedAuthToken(c);
+  const newToken = presentedToken
+    ? await renewPresentedAuthToken(c.env.KV, body.userId, presentedToken)
+    : null;
+  if (!newToken) {
+    return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
+  }
   const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
   return c.json({ data: { token: newToken, expiresAt } }, 200);
