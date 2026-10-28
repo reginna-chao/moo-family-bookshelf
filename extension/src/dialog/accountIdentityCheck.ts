@@ -6,7 +6,7 @@ import {
   type AccountIdentity,
 } from "../content/accountIdentity";
 import { readMePageProfile } from "../content/hashNavigation";
-import { readPageAccountEmail } from "../content/pageAccountCookie";
+import { cookieVetoesUserId } from "../content/pageAccountCookie";
 
 let confirmedUserId: string | null = null;
 // The userId the latest verifyAccountIdentity found to be a DIFFERENT account.
@@ -48,15 +48,6 @@ export async function checkAccountIdentity(
   return verifyAccountIdentity(storedUserId, signal);
 }
 
-/** True when the login cookie names a different account; `null` cookie never vetoes. */
-async function cookieVetoes(storedUserId: string): Promise<boolean> {
-  const cookieEmail = readPageAccountEmail();
-  if (cookieEmail === null) return false;
-  return (
-    (await compareAccountIdentity(cookieEmail, storedUserId)) === "mismatch"
-  );
-}
-
 /**
  * Re-read `#/me` and compare, ignoring the cache. A `#/me` match the login
  * cookie contradicts becomes `unknown`: the cookie can only veto, never
@@ -75,7 +66,7 @@ export async function verifyAccountIdentity(
     const profile = await readMePageProfile(signal);
     identity = await compareAccountIdentity(profile.email, storedUserId);
     // An SPA may keep the old profile on `#/me` while the cookies moved on.
-    if (identity === "match" && (await cookieVetoes(storedUserId))) {
+    if (identity === "match" && (await cookieVetoesUserId(storedUserId))) {
       identity = "unknown";
     }
   } catch {

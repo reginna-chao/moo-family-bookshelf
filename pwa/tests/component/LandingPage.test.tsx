@@ -321,6 +321,25 @@ describe("LandingPage", () => {
       expect(mockOnAuth).not.toHaveBeenCalled();
     });
 
+    it("should show email format error for an email-shaped address longer than 254 characters", async () => {
+      mockDecodeSyncCode.mockReturnValue({
+        familyId: "fam-1",
+      });
+      const tooLong = `${"a".repeat(243)}@example.com`;
+      expect(tooLong).toHaveLength(255);
+
+      render(<LandingPage onAuth={mockOnAuth} />);
+
+      fillInput("同步碼", "moo-fam1-key1");
+      fillInput("讀墨帳號 Email", tooLong);
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByText("Email 格式不正確。")).toBeInTheDocument();
+      });
+      expect(mockOnAuth).not.toHaveBeenCalled();
+    });
+
     it("should clear email error when user types in email field", async () => {
       mockDecodeSyncCode.mockReturnValue({
         familyId: "fam-1",

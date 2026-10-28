@@ -4,14 +4,13 @@ import {
   SyncCodeError,
 } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
+import { isEmailShaped } from "moo-family-bookshelf-shared/account/emailShape";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import { REMEMBER_SYNC_CODE_KEY } from "@/hooks/useAuth";
 import type { UseSyncCodeHostVerdictResult } from "@/hooks/useSyncCodeHostVerdict";
 import { isUnsafeApiHost, UNSAFE_API_HOST_ERROR } from "@/utils/apiHostGuard";
 import type { JoinOrigin, PendingAuth } from "@/hooks/joinState";
 import type { CompleteJoin } from "@/hooks/useLandingCompleteJoin";
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export interface UseLandingSubmitParams {
   syncCodeInput: string;
@@ -89,7 +88,7 @@ export function useLandingSubmit({
       setEmailError("請輸入 Email。");
       return;
     }
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
+    if (!isEmailShaped(trimmedEmail)) {
       setEmailError("Email 格式不正確。");
       return;
     }

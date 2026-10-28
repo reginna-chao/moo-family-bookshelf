@@ -13,6 +13,7 @@ import {
   parsePageAccountEmail,
   readPageAccountEmail,
   cookieConfirmsAccount,
+  cookieVetoesUserId,
 } from "@/content/pageAccountCookie";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import {
@@ -29,7 +30,8 @@ import {
  * when the cookie unambiguously names one; null for everything else", and
  * cookieConfirmsAccount can only CONFIRM the stored user: another account, no
  * usable cookie and a hashing failure are all `false`, and it never rejects.
- * Runs the real deriveUserId; `document.cookie` is jsdom's real cookie jar.
+ * cookieVetoesUserId is its mirror (#368): only a cookie naming ANOTHER account
+ * is `true`; no usable cookie never vetoes. Runs the real deriveUserId; `document.cookie` is jsdom's real cookie jar.
  */
 
 beforeAll(() => {
@@ -309,5 +311,43 @@ describe("cookieConfirmsAccount", () => {
     } finally {
       digest.mockRestore();
     }
+  });
+});
+
+describe("cookieVetoesUserId", () => {
+  let storedUserId: string;
+
+  beforeAll(async () => {
+    storedUserId = await deriveUserId(EMAIL);
+  });
+
+  beforeEach(() => {
+    clearReadmooEmailCookie();
+  });
+
+  afterEach(() => {
+    clearReadmooEmailCookie();
+  });
+
+  it("does not veto when the page has no login cookie", async () => {
+    await expect(cookieVetoesUserId(storedUserId)).resolves.toBe(false);
+  });
+
+  it("does not veto when the login cookie names the stored account", async () => {
+    setReadmooEmailCookie(EMAIL);
+
+    await expect(cookieVetoesUserId(storedUserId)).resolves.toBe(false);
+  });
+
+  it("does not veto the stored account written in another case (deriveUserId normalizes it)", async () => {
+    setReadmooEmailCookie(EMAIL.toUpperCase());
+
+    await expect(cookieVetoesUserId(storedUserId)).resolves.toBe(false);
+  });
+
+  it("vetoes when the login cookie names another account", async () => {
+    setReadmooEmailCookie(OTHER_EMAIL);
+
+    await expect(cookieVetoesUserId(storedUserId)).resolves.toBe(true);
   });
 });

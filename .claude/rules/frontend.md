@@ -31,6 +31,7 @@ extension/src/
 └── api/             # API client (configurable endpoint)
 
 shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pwa/ and worker/
+├── account/        # Email shape rule shared by the Extension scraper / cookie parser and the PWA login form
 ├── api/            # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf / personal-books / verify-method payload validation + issued-credential check (auth token / expiry) + the shared envelope reader + hex-id assertion
 ├── borrow/         # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 ├── config/         # Readmoo host/selector config, report links
@@ -175,7 +176,7 @@ Open Dialog → has family_id in chrome.storage?
 
 The account check (issue #271) is cached per page load (`dialog/accountIdentityCheck.ts`), but the cache serves the Dialog-open check ONLY. Every book sync — the mount auto-sync and the manual sync alike — re-reads `#/me` through `verifyAccountIdentity` right before uploading (issue #277; `dialog/AccountCheckContext.ts` → `recheck`); a non-match uploads nothing and drops the cache. While the status is `unknown` at mount, the auto-sync is skipped altogether. Never compare against `USER_EMAIL_KEY`: it is no longer written (#359) and was never the identity.
 
-The floating button's pending-borrow badge (`content/pendingBorrowBadge.ts`, issue #275) fetches only when Readmoo's `ReadmooNext.email` login cookie (`content/pageAccountCookie.ts`) confirms the stored userId; otherwise it sends no request and clears the badge. The Dialog never lets that cookie CONFIRM the stored user — its account check is `#/me` (docs/architecture.md → 讀墨帳號確認（已加入家庭時）); since issue #277 `verifyAccountIdentity` reads the cookie only as a VETO (a decodable cookie naming another account turns a `#/me` match into `unknown`, so nothing uploads). Its main view still sets the badge through `onPendingBorrowCountChange` (`dialog/App.tsx`), including under `unknown`.
+The floating button's pending-borrow badge (`content/pendingBorrowBadge.ts`, issue #275) fetches only when Readmoo's `ReadmooNext.email` login cookie (`content/pageAccountCookie.ts`) confirms the stored userId; otherwise it sends no request and clears the badge. The Dialog never lets that cookie CONFIRM the stored user — its account check is `#/me` (docs/architecture.md → 讀墨帳號確認（已加入家庭時）); since issue #277 `verifyAccountIdentity` reads the cookie only as a VETO (a decodable cookie naming another account turns a `#/me` match into `unknown`, so nothing uploads). Onboarding's `scrapeProfile` (`dialog/useAutoSetup.ts`) also refuses to mint an identity when the cookie names another account (`cookieVetoesUserId`, issue #368); the cookie still never confirms. Its main view still sets the badge through `onPendingBorrowCountChange` (`dialog/App.tsx`), including under `unknown`.
 
 ### Commands
 

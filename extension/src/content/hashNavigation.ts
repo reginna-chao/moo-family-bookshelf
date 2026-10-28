@@ -49,7 +49,10 @@ export async function navigateAndRun<T>(
 }
 
 export interface MePageProfile {
-  /** null when the profile panel shows no email (logged out, DOM changed, slow page). */
+  /**
+   * null when the profile panel shows no email (logged out, DOM changed, slow page)
+   * or more than one email-shaped node (#368).
+   */
   email: string | null;
   displayName: string;
 }
