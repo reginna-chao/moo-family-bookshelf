@@ -16,12 +16,12 @@ const RETRY_COPY: Record<
   { staticText: string; countdown: (delay: string) => string }
 > = {
   VERIFICATION_LOCKED: {
-    staticText: "驗證錯誤次數過多，請稍後再試。",
-    countdown: (delay) => `驗證錯誤次數過多，請於 ${delay}後再試。`,
+    staticText: "驗證錯誤次數過多，請稍後再試",
+    countdown: (delay) => `驗證錯誤次數過多，請於 ${delay}後再試`,
   },
   RATE_LIMITED: {
-    staticText: "嘗試次數過多，請稍後再試。",
-    countdown: (delay) => `嘗試次數過多，請於 ${delay}後再試。`,
+    staticText: "嘗試次數過多，請稍後再試",
+    countdown: (delay) => `嘗試次數過多，請於 ${delay}後再試`,
   },
 };
 

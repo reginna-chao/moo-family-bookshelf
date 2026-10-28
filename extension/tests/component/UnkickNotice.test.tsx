@@ -256,7 +256,9 @@ describe("UnkickNotice", () => {
         clickUnkick();
       });
 
-      expect(screen.getByRole("alert")).toHaveTextContent("發生未知錯誤");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "解除失敗，請稍後再試",
+      );
     });
   });
 });

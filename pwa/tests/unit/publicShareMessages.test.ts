@@ -16,7 +16,7 @@ import {
  * The wording mirrors `extension/src/dialog/publicShareMessages.ts` except
  * where the two apps genuinely differ: UNAUTHORIZED tells a PWA user to log in
  * again (the Extension tells them to reopen the shelf), and the 429 copy comes
- * from the PWA's own `buildRetryMessage`, which ends in a full stop.
+ * from the PWA's own `buildRetryMessage`.
  *
  * Prototype-chain keys: `error.code` is backend-controlled — it is a bare cast
  * of backend JSON, and BYO self-hosted backends are in the threat model — so the
@@ -51,8 +51,8 @@ describe("publicShelfErrorMessage", () => {
   it.each([
     // [retryAfter, expected] — the wait reaches the user instead of being
     // dropped, and 60s+ flips to the 分/秒 form.
-    [45, "嘗試次數過多，請於 45 秒後再試。"],
-    [90, "嘗試次數過多，請於 1 分 30 秒後再試。"],
+    [45, "嘗試次數過多，請於 45 秒後再試"],
+    [90, "嘗試次數過多，請於 1 分 30 秒後再試"],
   ])(
     "renders the RATE_LIMITED countdown for retryAfter=%i",
     (retryAfter, expected) => {
@@ -76,7 +76,7 @@ describe("publicShelfErrorMessage", () => {
           new ApiError("RATE_LIMITED", "too many requests", retryAfter),
           "關閉失敗",
         ),
-      ).toBe("嘗試次數過多，請稍後再試。");
+      ).toBe("嘗試次數過多，請稍後再試");
     },
   );
 
@@ -150,7 +150,7 @@ describe("publicShelfSaveErrorMessage", () => {
       publicShelfSaveErrorMessage(
         new ApiError("RATE_LIMITED", "too many requests", 90),
       ),
-    ).toBe("嘗試次數過多，請於 1 分 30 秒後再試。（變更尚未儲存）");
+    ).toBe("嘗試次數過多，請於 1 分 30 秒後再試（變更尚未儲存）");
   });
 
   it("uses the 儲存失敗 fallback for an unmapped code", () => {

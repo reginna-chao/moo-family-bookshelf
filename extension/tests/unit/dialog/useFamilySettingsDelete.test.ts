@@ -142,7 +142,7 @@ describe("useFamilySettingsDelete", () => {
 
   it.each<[string, unknown, string]>([
     ["an Error", new Error("Network down"), "Network down"],
-    ["a non-Error value", "boom", "發生未知錯誤"],
+    ["a non-Error value", "boom", "移除帳戶失敗，請稍後再試"],
   ])(
     "shows an error and clears the mark when the request throws %s",
     async (_label, thrown, expected) => {

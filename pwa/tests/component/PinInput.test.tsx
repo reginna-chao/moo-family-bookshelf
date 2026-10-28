@@ -195,8 +195,8 @@ describe("PinInput", () => {
   describe("error announcement", () => {
     // Mirrors the back-off copy LandingPage passes down; the literals are pinned
     // in tests/unit/retryMessage.test.ts.
-    const TICKING_ERROR = "嘗試次數過多，請於 45 秒後再試。";
-    const STABLE_ERROR = "嘗試次數過多，請稍後再試。";
+    const TICKING_ERROR = "嘗試次數過多，請於 45 秒後再試";
+    const STABLE_ERROR = "嘗試次數過多，請稍後再試";
 
     it("announces the stable sentence while showing the ticking one", () => {
       render(

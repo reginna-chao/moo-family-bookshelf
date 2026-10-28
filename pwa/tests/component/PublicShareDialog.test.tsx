@@ -262,7 +262,7 @@ describe("PublicShareDialog · refused writes never advance the UI", () => {
 
       // PRODUCTION-LITERAL PIN (see the copy-pin unit test for the full table).
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "嘗試次數過多，請於 45 秒後再試。",
+        "嘗試次數過多，請於 45 秒後再試",
       );
       expect(
         screen.getByRole("button", { name: "關閉公開分享" }),

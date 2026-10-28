@@ -64,25 +64,25 @@ describe("buildRetryMessage", () => {
   // buildRetryMessage() output, so this suite is the single source of truth.
   it("returns the static lockout copy when no countdown is running", () => {
     expect(buildRetryMessage("VERIFICATION_LOCKED", 0)).toBe(
-      "驗證錯誤次數過多，請稍後再試。",
+      "驗證錯誤次數過多，請稍後再試",
     );
   });
 
   it("returns the static rate-limit copy when no countdown is running", () => {
     expect(buildRetryMessage("RATE_LIMITED", 0)).toBe(
-      "嘗試次數過多，請稍後再試。",
+      "嘗試次數過多，請稍後再試",
     );
   });
 
   it("returns the lockout countdown copy with a minutes-and-seconds delay", () => {
     expect(buildRetryMessage("VERIFICATION_LOCKED", 90)).toBe(
-      "驗證錯誤次數過多，請於 1 分 30 秒後再試。",
+      "驗證錯誤次數過多，請於 1 分 30 秒後再試",
     );
   });
 
   it("returns the rate-limit countdown copy with a seconds-only delay", () => {
     expect(buildRetryMessage("RATE_LIMITED", 30)).toBe(
-      "嘗試次數過多，請於 30 秒後再試。",
+      "嘗試次數過多，請於 30 秒後再試",
     );
   });
 
@@ -119,7 +119,7 @@ describe("buildRetryMessage", () => {
 // The envelope variant for Settings write paths that read `res.error` (they used to
 // show the Worker's English 429 text). See the header → "rateLimitedEnvelopeMessage".
 describe("rateLimitedEnvelopeMessage", () => {
-  const STATIC_COPY = "嘗試次數過多，請稍後再試。";
+  const STATIC_COPY = "嘗試次數過多，請稍後再試";
 
   it.each([
     "OWNER_CANNOT_LEAVE",
@@ -176,12 +176,12 @@ describe("rateLimitedEnvelopeMessage", () => {
   );
 
   it.each<[number, string]>([
-    [1, "嘗試次數過多，請於 1 秒後再試。"],
-    [45, "嘗試次數過多，請於 45 秒後再試。"],
-    [90, "嘗試次數過多，請於 1 分 30 秒後再試。"],
+    [1, "嘗試次數過多，請於 1 秒後再試"],
+    [45, "嘗試次數過多，請於 45 秒後再試"],
+    [90, "嘗試次數過多，請於 1 分 30 秒後再試"],
     // Fractional waits are floored, never rendered as 「90.9 秒」.
-    [90.9, "嘗試次數過多，請於 1 分 30 秒後再試。"],
-    [3600, "嘗試次數過多，請於 60 分 0 秒後再試。"],
+    [90.9, "嘗試次數過多，請於 1 分 30 秒後再試"],
+    [3600, "嘗試次數過多，請於 60 分 0 秒後再試"],
   ])("renders the countdown copy for retryAfter=%s", (retryAfter, expected) => {
     expect(
       rateLimitedEnvelopeMessage({ code: "RATE_LIMITED", retryAfter }),
@@ -212,8 +212,8 @@ describe("buildStaticRetryMessage", () => {
   // The sentence announced to assistive tech: it must never carry a countdown,
   // otherwise a screen reader re-announces it once per second.
   it.each<[RetryErrorCode, string]>([
-    ["VERIFICATION_LOCKED", "驗證錯誤次數過多，請稍後再試。"],
-    ["RATE_LIMITED", "嘗試次數過多，請稍後再試。"],
+    ["VERIFICATION_LOCKED", "驗證錯誤次數過多，請稍後再試"],
+    ["RATE_LIMITED", "嘗試次數過多，請稍後再試"],
   ])("returns the countdown-free copy for %s", (code, expected) => {
     expect(buildStaticRetryMessage(code)).toBe(expected);
   });

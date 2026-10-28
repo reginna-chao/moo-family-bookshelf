@@ -1332,7 +1332,9 @@ describe("FamilySettings", () => {
       fireEvent.click(screen.getByText("確定離開"));
 
       await waitFor(() => {
-        expect(screen.getByText("發生未知錯誤")).toBeInTheDocument();
+        expect(
+          screen.getByText("離開家庭失敗，請稍後再試"),
+        ).toBeInTheDocument();
       });
     });
 
