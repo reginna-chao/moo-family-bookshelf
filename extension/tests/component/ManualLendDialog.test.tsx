@@ -100,6 +100,7 @@ describe("ManualLendDialog", () => {
     expect(screen.queryByText("確認借出")).not.toBeInTheDocument();
     expect(screen.getByText("取消")).toBeDisabled();
     expect(screen.getByText("處理中...")).toBeDisabled();
+    expect(screen.getByLabelText("關閉")).toBeDisabled();
   });
 
   it("does not call onCancel on Escape while confirming", () => {

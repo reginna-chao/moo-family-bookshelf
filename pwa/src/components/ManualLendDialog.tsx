@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { X } from "lucide-react";
 
 export interface ManualLendDialogProps {
   dontRemindChecked: boolean;
@@ -35,9 +36,18 @@ export function ManualLendDialog({
       className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     >
       <div className="bg-white rounded-xl p-5 mx-4 w-full max-w-[340px] shadow-lg">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-          手動借出提醒
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-900">手動借出提醒</h3>
+          <button
+            type="button"
+            aria-label="關閉"
+            onClick={onCancel}
+            disabled={confirming}
+            className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
         <p className="text-xs text-gray-600 leading-relaxed mb-2">
           此操作後將會通知對方已借出，但需要手動方式完成借書流程。

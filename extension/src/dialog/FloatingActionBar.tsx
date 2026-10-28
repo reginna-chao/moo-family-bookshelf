@@ -4,37 +4,50 @@ export interface FloatingActionBarProps {
   selectedCount: number;
   isDirty: boolean;
   isSaving: boolean;
+  isSaved?: boolean;
   onBatchShare: () => void;
   onBatchHide: () => void;
   onCancel: () => void;
   onSave: () => void;
 }
 
+function saveLabelFor(isSaving: boolean, showSaved: boolean): string {
+  if (isSaving) return "儲存中...";
+  if (showSaved) return "已儲存";
+  return "儲存變更";
+}
+
 export function FloatingActionBar({
   selectedCount,
   isDirty,
   isSaving,
+  isSaved = false,
   onBatchShare,
   onBatchHide,
   onCancel,
   onSave,
 }: FloatingActionBarProps) {
   const hasSelection = selectedCount > 0;
-  if (!hasSelection && !isDirty) return null;
+  const showSaveSection = isDirty || isSaving || isSaved;
+  if (!hasSelection && !showSaveSection) return null;
 
-  // The bar only renders while dirty, so it never shows a "saved" label.
-  const saveLabel = isSaving ? "儲存中..." : "儲存變更";
-  const saveDisabled = !isDirty || isSaving;
+  // A save can succeed while toggles made mid-save stay unsaved; never call those saved.
+  const showSaved = isSaved && !isDirty;
+  const saveLabel = saveLabelFor(isSaving, showSaved);
+  const saveDisabled = isSaving || showSaved || !isDirty;
 
   const cancelClass = hasSelection
     ? "moo-button moo-button--ghost moo-button--sm moo-action-bar__cancel moo-action-bar__cancel--pushed"
     : "moo-button moo-button--ghost moo-button--sm moo-action-bar__cancel";
-  const saveClass = hasSelection
+  const saveBaseClass = hasSelection
     ? "moo-button moo-button--sm moo-action-bar__save"
     : "moo-button moo-button--sm moo-action-bar__save moo-action-bar__save--grow";
+  const saveClass = showSaved
+    ? `${saveBaseClass} moo-action-bar__save--saved`
+    : saveBaseClass;
 
   return (
-    <div className="moo-action-bar">
+    <div className="moo-action-bar" role="toolbar" aria-label="批次操作工具列">
       {hasSelection && (
         <>
           <span className="moo-action-bar__count">已選 {selectedCount} 本</span>
@@ -57,7 +70,7 @@ export function FloatingActionBar({
           取消變更
         </button>
       )}
-      {isDirty && (
+      {showSaveSection && (
         <button onClick={onSave} disabled={saveDisabled} className={saveClass}>
           {saveLabel}
         </button>

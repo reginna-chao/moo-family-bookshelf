@@ -29,6 +29,14 @@ function renderBar(state: BarState) {
 }
 
 describe("FloatingActionBar", () => {
+  it("exposes the bar as a toolbar named 批次操作工具列", () => {
+    renderBar({ isDirty: true, isSaving: false, isSaved: false });
+
+    expect(
+      screen.getByRole("toolbar", { name: "批次操作工具列" }),
+    ).toBeInTheDocument();
+  });
+
   describe("save button", () => {
     it("offers 儲存變更, enabled, when a save succeeded but changes are still unsaved", () => {
       const { onSave } = renderBar({

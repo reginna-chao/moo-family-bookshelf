@@ -129,8 +129,10 @@ test.describe("Book Sharing", () => {
     await expect(saveButton).toBeVisible({ timeout: 5_000 });
     await saveButton.click();
 
-    // Wait for save to complete — FloatingActionBar disappears when isDirty resets to false
-    await expect(saveButton).not.toBeVisible({ timeout: 10_000 });
+    // Wait for save to complete — the save button reads 已儲存 for 1.5 s once the PATCH resolves
+    await expect(dialog.getByRole("button", { name: "已儲存" })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Switch to Family Shelf
     await navigateToTab(page, "家庭書櫃");
@@ -198,8 +200,10 @@ test.describe("Book Sharing", () => {
     await expect(saveButton).toBeVisible({ timeout: 5_000 });
     await saveButton.click();
 
-    // Wait for save to complete — FloatingActionBar disappears when isDirty resets
-    await expect(saveButton).not.toBeVisible({ timeout: 10_000 });
+    // Wait for save to complete — the save button reads 已儲存 for 1.5 s once the PATCH resolves
+    await expect(dialog.getByRole("button", { name: "已儲存" })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Now toggle them back off — they now show "開放" text
     const sharedToggles = dialog
@@ -213,8 +217,10 @@ test.describe("Book Sharing", () => {
     await expect(saveButton2).toBeVisible({ timeout: 5_000 });
     await saveButton2.click();
 
-    // Wait for save to complete — FloatingActionBar disappears when isDirty resets
-    await expect(saveButton2).not.toBeVisible({ timeout: 10_000 });
+    // Wait for save to complete — the save button reads 已儲存 for 1.5 s once the PATCH resolves
+    await expect(dialog.getByRole("button", { name: "已儲存" })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Switch to Family Shelf
     await navigateToTab(page, "家庭書櫃");
