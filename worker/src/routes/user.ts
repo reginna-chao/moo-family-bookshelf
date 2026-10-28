@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
+import type { Context, TypedResponse } from "hono";
 import type { Env } from "../utils/env";
 import {
   BoolFlag,
@@ -27,11 +28,19 @@ import {
   deletePublicSnapshot,
 } from "../kv/publicShelves";
 import { readNewBookDefault, deleteNewBookDefault } from "../kv/newBookDefault";
-import { deleteVerifyRecord, deleteOtpRecord } from "../kv/verify";
+import {
+  getVerifyRecord,
+  deleteVerifyRecord,
+  deleteOtpRecord,
+} from "../kv/verify";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
 } from "../services/publicShelf";
+import {
+  enforceCurrentSecret,
+  verifySecretFormatResponse,
+} from "../services/verification";
 import { settleDepartingBorrower } from "../services/borrowIndex";
 import { nextRemovedUnsharedBookIds } from "../services/removedUnsharedBooks";
 import { dissolveFamily } from "../services/familyDissolve";
@@ -41,6 +50,7 @@ import {
   sanitizeCoverUrl,
   sanitizeReadmooUrl,
   sanitizeExpectedLastUpdated,
+  sanitizeVerifySecret,
   isValidFamilyPrefRef,
   BOOK_TITLE_MAX_LENGTH,
   BOOK_AUTHOR_MAX_LENGTH,
@@ -48,10 +58,15 @@ import {
   BOOK_CATEGORY_MAX_LENGTH,
   BOOK_URL_MAX_LENGTH,
 } from "../utils/validation";
-import { getAuthenticatedUserId, deleteAuthToken } from "../middleware/auth";
+import {
+  getAuthenticatedUserId,
+  getPresentedAuthToken,
+  readPresentedAuth,
+  deleteAuthToken,
+} from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
-import { jsonError } from "../utils/errors";
+import { jsonError, type ErrorBody } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 import {
@@ -937,6 +952,36 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   });
 });
 
+/** DELETE /api/user/:id's optional JSON body `{ currentSecret? }` (#396): no body ⇒ `""` (not supplied),
+ *  else the sanitized secret, or the 400 to send. No KV, no charge. */
+async function readDeleteCurrentSecret(
+  c: Context<{ Bindings: Env }>,
+): Promise<string | (Response & TypedResponse<ErrorBody, 400, "json">)> {
+  const text = await c.req.text();
+  if (text === "") return "";
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
+  }
+  if (!isJsonObject(body)) {
+    return jsonError(
+      c,
+      400,
+      "INVALID_PAYLOAD",
+      "Request body must be an object",
+    );
+  }
+
+  const currentSecret = sanitizeVerifySecret(body.currentSecret);
+  if (currentSecret === null) {
+    return verifySecretFormatResponse(c, "currentSecret");
+  }
+  return currentSecret;
+}
+
 // DELETE /api/user/:id — delete user account
 const deleteUserRoute = createRoute({
   method: "delete",
@@ -948,9 +993,12 @@ const deleteUserRoute = createRoute({
   },
   responses: {
     200: jsonRes("User deleted"),
-    400: jsonRes("Invalid user ID"),
+    400: jsonRes(
+      "Invalid user ID, or a malformed body (INVALID_JSON / INVALID_PAYLOAD / INVALID_VERIFY_SECRET)",
+    ),
     401: jsonRes("Unauthorized"),
-    403: jsonRes("Forbidden"),
+    403: jsonRes("Forbidden, or current secret required or wrong"),
+    429: jsonRes("Rate limited"),
   },
 });
 
@@ -973,8 +1021,27 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     );
   }
 
-  // Check family membership
-  const familyId = await getMemberFamilyId(c.env.KV, userId);
+  const currentSecret = await readDeleteCurrentSecret(c);
+  if (currentSecret instanceof Response) return currentSecret;
+
+  // Same bearer-currency rule and step-up as PUT verify (#396), all BEFORE any KV write below, so a
+  // refused request leaves nothing behind. See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+  const [familyId, verifyRecord, presented] = await Promise.all([
+    getMemberFamilyId(c.env.KV, userId),
+    getVerifyRecord(c.env.KV, userId),
+    readPresentedAuth(c.env.KV, userId, getPresentedAuthToken(c)),
+  ]);
+  if (!presented.current) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+  const stepUpResponse = await enforceCurrentSecret(
+    c,
+    userId,
+    verifyRecord,
+    currentSecret,
+    presented.auth,
+  );
+  if (stepUpResponse) return stepUpResponse;
 
   if (familyId) {
     const raw = await getFamilyRecord(c.env.KV, familyId);

@@ -187,7 +187,8 @@ export interface PresentedAuth {
 
 /**
  * Bearer currency (#378), the one rule shared by refresh (`renewPresentedAuthToken`),
- * `PUT /api/user/:id/verify` and `POST /api/user/:id/verify/prompted`: the presented token is current when
+ * `PUT /api/user/:id/verify`, `POST /api/user/:id/verify/prompted` and `DELETE /api/user/:id` (#396):
+ * the presented token is current when
  * `auth:{userId}` names it, or when there is no record at all (TTL gap). A revoked
  * bearer still accepted by a colo that has not seen the delete is NOT current.
  * A missing bearer is never current. One KV read; the record is returned for reuse.

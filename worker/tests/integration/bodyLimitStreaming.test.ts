@@ -29,13 +29,17 @@ type Json = any;
  * ahead of the read (its default high-water mark is one chunk). The old
  * buffering guard pulls all of `TOTAL`.
  *
- * GET / DELETE exemption: a length-less GET or DELETE is passed through
- * WITHOUT touching the body. A stream is pulled once when it is constructed
- * (to fill its one-chunk queue), so "untouched" means `pulled <= CHUNK`.
+ * GET / HEAD exemption: a length-less GET or HEAD is passed through without
+ * reading the body. It is not stream-tested here: undici refuses to build a GET
+ * or HEAD Request that carries a body, so no such request can reach the guard
+ * in-process. DELETE is NOT exempt: since #396 `DELETE /api/user/:id` reads a
+ * JSON body, so a length-less DELETE is counted like a POST (case below).
  *
  * Header branch: a PRESENT Content-Length is still decided from the header
  * alone, for every method — an oversized value is 413 even on GET / DELETE, and
  * a non-numeric one (empty included) is refused fail-closed before any read.
+ * A stream is pulled once when it is constructed (to fill its one-chunk
+ * queue), so "refused before any read" means `pulled <= CHUNK`.
  *
  * Stream requests and `duplex`: undici requires `duplex: "half"` for a stream
  * body, but `worker/tsconfig.json` types only `@cloudflare/workers-types`,
@@ -133,15 +137,16 @@ describe("/api/* body guard — length-less body is counted, not buffered (#361)
     );
   });
 
-  it("passes a length-less DELETE through without reading its body", async () => {
-    // Positive companion: the POST case above, same stream, reads and refuses.
-    // See the header → "GET / DELETE exemption".
+  it("refuses an 8MB streamed DELETE after reading only just past 256KB (#396 made DELETE carry a body)", async () => {
+    // See the header → "GET / HEAD exemption": DELETE is measured, not exempt.
     const counted = countedStream();
 
     const res = await send(buildRequest("DELETE", MEMBER_PATH, counted.stream));
 
-    expect(res.status).not.toBe(413);
-    expect(counted.pulled()).toBeLessThanOrEqual(CHUNK);
+    await expect413(res, "Request body exceeds 256KB limit");
+    expect(counted.pulled()).toBeLessThanOrEqual(
+      DEFAULT_MAX_BODY_SIZE + 2 * CHUNK,
+    );
   });
 });
 

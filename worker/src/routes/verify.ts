@@ -19,6 +19,7 @@ import {
   isValidVerifyMethod,
   isValidPin,
   isValidPattern,
+  sanitizeVerifySecret,
 } from "../utils/validation";
 import {
   generateAuthToken,
@@ -28,7 +29,11 @@ import {
   readPresentedAuth,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
-import { passedAgainstStaleVerifyRecord } from "../services/verification";
+import {
+  enforceCurrentSecret,
+  passedAgainstStaleVerifyRecord,
+  verifySecretFormatResponse,
+} from "../services/verification";
 import { hashSecret } from "../utils/crypto";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
@@ -36,9 +41,28 @@ import { UserIdParam } from "../schemas/common";
 
 export const verifyRoutes = new OpenAPIHono<{ Bindings: Env }>({ defaultHook });
 
-/** Shared per-userId write ceiling for the four verify-domain write handlers. */
+/**
+ * Shared per-userId write ceiling for three verify-domain write handlers — OTP
+ * generation, `POST /verify/prompted` and QR-token minting — charged before any
+ * KV read. Kept apart from the gate's `verify` attempt counter so
+ * wrong-guess throttling and the owner's own settings operations cannot crowd
+ * each other out. See docs/architecture.md → 每帳號寫入上限能擋住什麼.
+ */
 export const VERIFY_WRITE_LIMIT = {
   scope: "verify-write",
+  max: 30,
+  windowSec: 3600,
+} as const;
+
+/**
+ * `PUT /api/user/:id/verify`'s own ceiling (#396), charged only AFTER the format
+ * checks, the current-token check and the current-secret step-up — so on a
+ * PIN / pattern account only someone who knows the secret can spend it (on a
+ * `none` / `code` account, the current-token holder). See docs/architecture.md →
+ * 每帳號寫入上限能擋住什麼.
+ */
+export const VERIFY_SET_LIMIT = {
+  scope: "verify-set",
   max: 30,
   windowSec: 3600,
 } as const;
@@ -112,6 +136,7 @@ const putVerifyRoute = createRoute({
     ),
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
+    403: jsonRes("Current secret required or wrong"),
     429: jsonRes("Rate limited"),
   },
 });
@@ -125,15 +150,13 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "verify-write" ceiling (30/hr, the four verify-domain writes), kept apart from the gate's
-  // "verify" counter. See docs/architecture.md → 每帳號寫入上限能擋住什麼.
-  const rateLimitResponse = await enforcePerUserRateLimit(c, {
-    userId,
-    ...VERIFY_WRITE_LIMIT,
-  });
-  if (rateLimitResponse) return rateLimitResponse;
-
-  let body: { method: string; secret?: string; prompted?: number } | null;
+  // No ceiling charge here: `verify-set` is charged after the step-up below (#396).
+  let body: {
+    method: string;
+    secret?: string;
+    prompted?: number;
+    currentSecret?: unknown;
+  } | null;
   try {
     body = await c.req.json();
   } catch {
@@ -175,6 +198,12 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     }
   }
 
+  // "" = not supplied, null = malformed (the gate's `sanitizeVerifySecret` convention); no KV, no charge.
+  const currentSecret = sanitizeVerifySecret(body.currentSecret);
+  if (currentSecret === null) {
+    return verifySecretFormatResponse(c, "currentSecret");
+  }
+
   // Only the token `auth:{userId}` names may change the secret (#378): a revoked bearer that a stale colo
   // still accepts gets this handler's generic 401. See docs/architecture.md → PWA 登入驗證機制.
   const presentedToken = getPresentedAuthToken(c);
@@ -185,6 +214,24 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   if (!presented.current || presentedToken === null) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
+
+  // A PIN/pattern account must also present its CURRENT secret (#396), checked on `existing` — no re-read.
+  // See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+  const stepUpResponse = await enforceCurrentSecret(
+    c,
+    userId,
+    existing,
+    currentSecret,
+    presented.auth,
+  );
+  if (stepUpResponse) return stepUpResponse;
+
+  // Own ceiling, charged only after the step-up: .claude/rules/backend.md → Route handler invariants.
+  const rateLimitResponse = await enforcePerUserRateLimit(c, {
+    userId,
+    ...VERIFY_SET_LIMIT,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
   let hash: string | null = null;
   let salt: string | null = null;
@@ -259,8 +306,8 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
-  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  // Shared "verify-write" per-userId write ceiling (30/hr across the three verify
+  // write handlers) — rationale on VERIFY_WRITE_LIMIT.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     ...VERIFY_WRITE_LIMIT,
@@ -348,8 +395,8 @@ verifyRoutes.openapi(postVerifyPromptedRoute, async (c) => {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
 
-  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
-  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  // Shared "verify-write" per-userId write ceiling (30/hr across the three verify
+  // write handlers) — rationale on VERIFY_WRITE_LIMIT.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     ...VERIFY_WRITE_LIMIT,
@@ -424,8 +471,8 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
     return jsonError(c, 403, "FORBIDDEN", "只能為自己產生 QR Token");
   }
 
-  // Shared "verify-write" per-userId write ceiling (30/hr across the four verify
-  // write handlers) — see the PUT /{id}/verify handler for rationale.
+  // Shared "verify-write" per-userId write ceiling (30/hr across the three verify
+  // write handlers) — rationale on VERIFY_WRITE_LIMIT.
   const rateLimitResponse = await enforcePerUserRateLimit(c, {
     userId,
     ...VERIFY_WRITE_LIMIT,

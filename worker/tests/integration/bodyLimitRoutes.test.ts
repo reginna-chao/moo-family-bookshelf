@@ -7,6 +7,7 @@ import { BoolFlag, kvKeys, type UserBooksRecord } from "../../src/kv/schema";
 import {
   DEFAULT_MAX_BODY_SIZE,
   PUT_BOOKS_MAX_BODY_SIZE,
+  bodyLimitFor,
 } from "../../src/utils/bodyLimit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +34,11 @@ type Json = any;
  * PATCH companion: positive companion to the #233 regression — the size that
  * PUT now saves is still over the default limit, so a route that did NOT get
  * the 2MB limit (PATCH on the very same path) refuses it.
+ *
+ * DELETE body: `DELETE /api/user/:id` reads an optional `{ currentSecret? }`
+ * body (#396), so the streamed branch must cover DELETE too — it used to skip
+ * it, and a streamed oversized body reached the handler. The filler body has
+ * no `currentSecret`, so a request past the guard would delete the account.
  */
 
 let kv: KVNamespace;
@@ -200,5 +206,23 @@ describe("other /api routes keep the 256KB default", () => {
     const res = await send("PATCH", BOOKS_PATH, body);
 
     await expect413(res, "Request body exceeds 256KB limit");
+  });
+});
+
+describe("DELETE /api/user/:id — body over the default limit (#396)", () => {
+  it("rejects a >256KB body sent without Content-Length with 413 and deletes nothing", async () => {
+    // See the header → "DELETE body".
+    const path = `/api/user/${USER1}`;
+    const limit = bodyLimitFor("DELETE", path).maxBytes;
+    const body = JSON.stringify({ filler: "x".repeat(limit) });
+    expect(Buffer.byteLength(body)).toBeGreaterThan(limit);
+    await kv.put(kvKeys.user(USER1), JSON.stringify({ books: [] }));
+
+    const res = await send("DELETE", path, body);
+
+    await expect413(res, "Request body exceeds 256KB limit");
+    expect(await storedRecord()).not.toBeNull();
+    expect(await kv.get(kvKeys.authToken(token))).toBe(USER1);
+    expect(await kv.get(kvKeys.auth(USER1))).not.toBeNull();
   });
 });

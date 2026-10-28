@@ -107,6 +107,10 @@ import { DEFAULT_PWA_URL } from "../constants";
 /** Proactive refresh buffer: 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
+function jsonInit(method: string, body?: unknown): RequestInit {
+  return { method, body: body != null ? JSON.stringify(body) : undefined };
+}
+
 export class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -190,28 +194,19 @@ export class ApiClient {
   }
 
   private post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "POST",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("POST", body));
   }
 
   private put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "PUT",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("PUT", body));
   }
 
-  private del<T>(path: string): Promise<ApiResponse<T>> {
-    return this.request(path, { method: "DELETE" });
+  private del<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request(path, jsonInit("DELETE", body));
   }
 
   private patch<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    return this.request(path, {
-      method: "PATCH",
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+    return this.request(path, jsonInit("PATCH", body));
   }
 
   /** Unwrap an envelope response or throw an `ApiError` built from `error`. */
@@ -430,8 +425,13 @@ export class ApiClient {
 
   // --- Account ---
 
-  async deleteAccount(userId: string): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.del(`/api/user/${userId}`);
+  /** `currentSecret` is required while the account's method is PIN / pattern (#396). */
+  async deleteAccount(
+    userId: string,
+    currentSecret?: string,
+  ): Promise<ApiResponse<{ ok: boolean }>> {
+    const body = currentSecret === undefined ? undefined : { currentSecret };
+    return this.del(`/api/user/${userId}`, body);
   }
 
   // --- Family Bookshelf ---

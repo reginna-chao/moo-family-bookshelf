@@ -17,6 +17,13 @@ export interface SetVerifyBody {
   method: VerifyMethod;
   secret?: string;
   prompted?: BoolFlag;
+  /** The account's current PIN / serialized pattern; required while the current method is either (#396). */
+  currentSecret?: string;
+}
+
+/** Optional `DELETE /api/user/:id` body; `currentSecret` as in `SetVerifyBody` (#396). */
+export interface DeleteAccountBody {
+  currentSecret?: string;
 }
 
 /** `PUT /api/user/:id/verify` result. A new `pin` / `pattern` / `code` revokes the account's

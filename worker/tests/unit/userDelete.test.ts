@@ -10,9 +10,13 @@ import {
 } from "../../src/kv/schema";
 import { OWNER1, USER1, USER2, NOBODY } from "../helpers/ids";
 import { seedAuthToken } from "../helpers/auth";
+import { hashSecret } from "../../src/utils/crypto";
 
 /** A valid 64-hex id for the "not in any family" solo-user scenario. */
 const SOLO_USER = "5".repeat(64);
+
+/** The PIN seeded on the account whose full teardown is checked. */
+const CURRENT_PIN = "123456";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -271,11 +275,13 @@ describe("DELETE /api/user/:id", () => {
       user2Token,
     );
 
-    // Seed verification settings and a still-pending one-time code (#341).
+    // Seed verification settings and a still-pending one-time code (#341). A PIN account's
+    // DELETE must carry the current PIN (#396), so the record holds a real hash of it.
+    const salt = "b".repeat(32);
     const verifyRecord: VerifyRecord = {
       method: "pin",
-      hash: "a".repeat(64),
-      salt: "b".repeat(32),
+      hash: await hashSecret(salt, CURRENT_PIN),
+      salt,
       prompted: BoolFlag.TRUE,
     };
     const otpRecord: OtpRecord = {
@@ -298,7 +304,7 @@ describe("DELETE /api/user/:id", () => {
     const res = await request(
       "DELETE",
       `/api/user/${USER2}`,
-      undefined,
+      { currentSecret: CURRENT_PIN },
       user2Token,
     );
     expect(res.status).toBe(200);
