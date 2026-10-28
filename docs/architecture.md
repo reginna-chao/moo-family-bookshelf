@@ -98,6 +98,7 @@
 擴充功能的身分（`moo:userId` / `moo:familyId`）存在瀏覽器設定檔裡，不是跟著讀墨帳號走。同一個設定檔換了另一個讀墨帳號登入時，Dialog 不能沿用原本的身分（issue #271）。
 
 - 開啟 Dialog、讀到 familyId 與 userId 後，先導航到 `#/me` 抓 email，算出 `deriveUserId(email)` 與存好的 userId 比對，再回到原頁；比對期間維持「載入中」。邏輯在 `extension/src/dialog/accountIdentityCheck.ts`，純比對在 `extension/src/content/accountIdentity.ts`。
+- **`#/me` 上不只一個像 email 的節點**（issue #368）：抓 email 時只看 `.me-panel` 裡沒有子元素的 `div[style]`，去掉前後空白後，只留長度不超過 254 字元且像 email 的文字，完全相同的合併成一個；剛好一個才採用。零個或不只一個都當作沒抓到 email，也就是「無法確認」：照常進主畫面，但不自動同步（見下方「無法確認」）。抓取邏輯在 `extension/src/content/scraper-profile.ts` 的 `scrapeUserEmail`；email 格式規則與登入 cookie 的解析、PWA 登入頁共用 `shared/src/account/emailShape.ts` 的 `isEmailShaped`。
 - **相同**：進主畫面。結果記在模組層級，只用來省下開啟 Dialog 時的導航：同一次頁面載入重開 Dialog 不再導航；不寫進 storage，重新載入頁面就重新確認。透過引導畫面建立／加入家庭時，沿用上傳書單前重新確認的結果（issue #281）：相同就記為相同；不同就顯示帳號不符畫面（issue #284）；無法確認就照常進主畫面，但不自動同步。
 - **每次同步前都重新確認**（issue #277）：自動同步與手動同步上傳書單前，都會先導航到 `#/me` 重新比對（`verifyAccountIdentity`），不採用模組層級的結果，因為同一個瀏覽器的另一個分頁可能已經換了帳號。比對到不同帳號就切到帳號不符畫面，並丟掉模組層級的結果，下次開啟 Dialog 會重新確認。`#/me` 比對相同後，還會再看讀墨的登入 cookie（`ReadmooNext.email`），以防讀墨的單頁程式把舊帳號的個人資料留在記憶體、`#/me` 仍顯示舊帳號：cookie 解得出 email 且算出的 userId 跟存好的不同時，這次當作「無法確認」、不上傳。cookie 只能擋、不能確認：沒有 cookie 或解不開時，仍只看 `#/me`。開啟 Dialog 時第一次的確認走同一個函式，也會被 cookie 擋成「無法確認」。
 - **兩個入口與模組層級的結果**（`extension/src/dialog/accountIdentityCheck.ts`）：`checkAccountIdentity` 是開啟 Dialog 時的確認，只有它會用模組層級記住的「相同」省下導航；`verifyAccountIdentity` 一律導航、不看快取，每次同步上傳書單前都呼叫它，引導畫面第一次上傳書單也在爬完書單後立刻呼叫它（issue #281）。記住的「相同」以它確認過的 userId 為 key，不可能替另一個存好的使用者擔保；什麼都不寫進 storage。最近一次 `verifyAccountIdentity` 比對到的「不同」也會記住，但只給 `cachedIdentity` 用（引導畫面交給 App 的結果，issue #284），從不用來省略導航。
@@ -123,6 +124,9 @@
 - 顯示「開始使用」按鈕
 - 按下後顯示 Loading 遮罩（半透明背景 + 進度提示）
 - 自動導航到 `#/me` 抓取使用者名稱 + email
+  - 抓不到 email（包括像 email 的節點不只一個，issue #368）時不建立身分，顯示「無法取得帳號信箱，請確認已登入讀墨帳號。」。
+  - 讀墨的登入 cookie（`ReadmooNext.email`）解得出 email，且它算出的 userId 與 `#/me` 的 email 算出的不同時，同樣不建立身分，顯示「讀墨頁面顯示的帳號與目前登入的帳號不同，請重新整理頁面後再試。」（issue #368，`extension/src/dialog/useAutoSetup.ts` 的 `scrapeProfile`，否決判斷是 `pageAccountCookie.ts` 的 `cookieVetoesUserId`）。沒有 cookie 或解不開時照常只看 `#/me`。
+  - 已加入家庭時的帳號確認不變：cookie 仍只能否決 `#/me` 的「相同」，不能確認（issue #277，見〈讀墨帳號確認（已加入家庭時）〉）。
 - 查詢 API 是否已有既有資料
 - 若無：提供兩個選項「建立新家庭」/「加入家庭（輸入同步碼）」
 - 完成後自動導航到書櫃頁面同步書單，再返回原始頁面

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./account/*": "./src/account/*",
     "./api/*": "./src/api/*",
     "./borrow/*": "./src/borrow/*",
     "./config/*": "./src/config/*",

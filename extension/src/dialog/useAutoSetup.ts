@@ -3,6 +3,8 @@ import browser from "webextension-polyfill";
 import { scrapeBooks, formatScrapeProgress } from "../content/scraper";
 import { navigateAndRun, readMePageProfile } from "../content/hashNavigation";
 import { resetScrapeWarnings } from "../content/readmoo-dom";
+import { cookieVetoesUserId } from "../content/pageAccountCookie";
+import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { ApiClient } from "../api/client";
 import { uploadOnboardingBooks } from "./onboardingBooksUpload";
 import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
@@ -71,6 +73,15 @@ export function useAutoSetup(): UseAutoSetupReturn {
 
         if (!result.email) {
           setErrorMessage("無法取得帳號信箱，請確認已登入讀墨帳號。");
+          setPhase("error");
+          return null;
+        }
+
+        // Never mint an identity from a #/me email the login cookie contradicts (#368).
+        if (await cookieVetoesUserId(await deriveUserId(result.email))) {
+          setErrorMessage(
+            "讀墨頁面顯示的帳號與目前登入的帳號不同，請重新整理頁面後再試。",
+          );
           setPhase("error");
           return null;
         }

@@ -1,6 +1,7 @@
-// The page's Readmoo account, read from Readmoo's login cookie (issue #275). The badge confirms
-// with it; the Dialog's pre-sync check (dialog/accountIdentityCheck.ts) may only VETO with it.
+// The page's Readmoo account, read from Readmoo's login cookie (issue #275). The badge confirms with
+// it; the Dialog's pre-sync check and the onboarding profile scrape may only VETO with it (#277, #368).
 
+import { isEmailShaped } from "moo-family-bookshelf-shared/account/emailShape";
 import { compareAccountIdentity } from "./accountIdentity";
 
 /**
@@ -9,10 +10,6 @@ import { compareAccountIdentity } from "./accountIdentity";
  * next.readmoo.com (docs/architecture.md → 讀墨帳號確認（已加入家庭時）).
  */
 export const READMOO_EMAIL_COOKIE = "ReadmooNext.email";
-
-/** RFC 5321's 256-octet path minus its `<>`; anything longer is not an email. */
-const MAX_EMAIL_LENGTH = 254;
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Every value `document.cookie` lists under `name` (one per cookie path). */
 function cookieValues(cookieString: string, name: string): string[] {
@@ -35,8 +32,7 @@ function decodeBase64Utf8(encoded: string): string {
 function decodeEmail(raw: string): string | null {
   try {
     const email = decodeBase64Utf8(decodeURIComponent(raw)).trim();
-    if (email.length > MAX_EMAIL_LENGTH) return null;
-    return EMAIL_SHAPE.test(email) ? email : null;
+    return isEmailShaped(email) ? email : null;
   } catch {
     return null;
   }
@@ -81,4 +77,20 @@ export async function cookieConfirmsAccount(
   } catch {
     return false;
   }
+}
+
+/**
+ * True only when the login cookie names a DIFFERENT account than the one
+ * `storedUserId` was derived from; no usable cookie never vetoes. The cookie
+ * can only VETO here, never confirm (issues #277 / #368). Rejects when hashing
+ * fails — callers catch.
+ */
+export async function cookieVetoesUserId(
+  storedUserId: string,
+): Promise<boolean> {
+  const cookieEmail = readPageAccountEmail();
+  if (cookieEmail === null) return false;
+  return (
+    (await compareAccountIdentity(cookieEmail, storedUserId)) === "mismatch"
+  );
 }

@@ -80,6 +80,10 @@ import {
   BOOKS_TOO_LARGE_MESSAGE,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
+import {
+  setReadmooEmailCookie,
+  clearReadmooEmailCookie,
+} from "../helpers/readmooEmailCookie";
 
 /** Return the value written to LAST_SYNC_AT_KEY across all storage.set calls, or undefined. */
 function lastSyncWrittenValue(): unknown {
@@ -185,6 +189,36 @@ describe("useAutoSetup", () => {
     expect(profileResult).toBeNull();
     expect(result.current.phase).toBe("error");
     expect(result.current.errorMessage).toContain("無法取得帳號信箱");
+  });
+
+  describe("scrapeProfile — login cookie veto (#368)", () => {
+    afterEach(() => {
+      clearReadmooEmailCookie();
+    });
+
+    it("returns null and stores nothing when the login cookie names another account", async () => {
+      setReadmooEmailCookie("someone-else@example.com");
+      const { result } = renderHook(() => useAutoSetup());
+
+      let profileResult: { email: string; displayName: string } | null = null;
+      const promise = act(async () => {
+        profileResult = await result.current.scrapeProfile();
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+
+      expect(profileResult).toBeNull();
+      expect(result.current.phase).toBe("error");
+      expect(result.current.errorMessage).toBe(
+        "讀墨頁面顯示的帳號與目前登入的帳號不同，請重新整理頁面後再試。",
+      );
+      const writes = vi
+        .mocked(chrome.storage.local.set)
+        .mock.calls.map(([items]) => items as Record<string, unknown>);
+      for (const items of writes) {
+        expect(items).not.toHaveProperty(DISPLAY_NAME_KEY);
+      }
+    });
   });
 
   it("reset returns to idle phase", async () => {

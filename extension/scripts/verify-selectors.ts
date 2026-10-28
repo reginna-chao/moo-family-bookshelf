@@ -13,6 +13,10 @@ import {
   READMOO_SELECTORS,
   readmooAppUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
+import {
+  EMAIL_SHAPE,
+  MAX_EMAIL_LENGTH,
+} from "moo-family-bookshelf-shared/account/emailShape";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_OUTPUT = resolve(
@@ -287,22 +291,32 @@ async function captureLibraryHtml(page: Page): Promise<string> {
     .join("\n\n")}`;
 }
 
-/** Replicate scraper.ts's email heuristic against the live profile panel. */
+/** Replicate scrapeUserEmail's rule (exactly one email-shaped leaf, #368) on the live profile panel. */
 async function checkEmailHeuristic(page: Page): Promise<void> {
-  const emailFound = await page.evaluate((panelSelector) => {
-    const panel = document.querySelector(panelSelector);
-    if (!panel) return null;
-    const candidates = panel.querySelectorAll<HTMLElement>("div[style]");
-    for (const el of candidates) {
-      if (el.childElementCount > 0) continue;
-      const text = el.textContent?.trim() ?? "";
-      if (text.includes("@") && text.includes(".")) return text;
-    }
-    return null;
-  }, READMOO_SELECTORS.mePanel);
+  const emailFound = await page.evaluate(
+    ({ panelSelector, shapeSource, maxLength }) => {
+      const panel = document.querySelector(panelSelector);
+      if (!panel) return null;
+      // Runs in the page, so isEmailShaped is rebuilt from its serialized parts.
+      const shape = new RegExp(shapeSource);
+      const emails = new Set<string>();
+      for (const el of panel.querySelectorAll<HTMLElement>("div[style]")) {
+        if (el.childElementCount > 0) continue;
+        const text = el.textContent?.trim() ?? "";
+        if (text.length <= maxLength && shape.test(text)) emails.add(text);
+      }
+      const [email] = emails;
+      return emails.size === 1 && email !== undefined ? email : null;
+    },
+    {
+      panelSelector: READMOO_SELECTORS.mePanel,
+      shapeSource: EMAIL_SHAPE.source,
+      maxLength: MAX_EMAIL_LENGTH,
+    },
+  );
 
   console.log(
-    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — div[style] 含 @ 和 .${
+    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — 像 email 的葉節點 div[style] 剛好一個${
       emailFound ? ` → "${emailFound}"` : ""
     }`,
   );
