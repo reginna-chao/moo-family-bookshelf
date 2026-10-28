@@ -11,9 +11,10 @@ import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
  * Stale `verify:` read on the #396 step-up, whatever the record's shape.
  *
  * A colo whose `auth:{userId}` is current (`secretAt` = the latest PIN
- * rotation) but whose `verify:{userId}` read is stale — absent, or an old
- * `none` / `code` record with `secretUpdatedAt` older than `secretAt` — has
- * not seen the owner's PIN. A current-token holder without the PIN must not
+ * rotation) but whose `verify:{userId}` read is stale — absent, an old
+ * `none` / `code` record with `secretUpdatedAt` older than `secretAt`, or the
+ * unstamped `none` record `defaultVerifyRecord()` writes (no
+ * `secretUpdatedAt` at all) — has not seen the owner's PIN. A current-token holder without the PIN must not
  * get through it: `PUT /api/user/:id/verify { method: "none" }` and
  * `DELETE /api/user/:id` with no `currentSecret` both answer
  * `403 VERIFICATION_REQUIRED` and write nothing (no guess counter, no
@@ -23,8 +24,9 @@ import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
  * set a PIN through the real PUT (writes `auth:.secretAt`, rotates the
  * token), then delete or overwrite `verify:` while `auth:` stays as written.
  *
- * Control: a PIN account that switched to `none` WITH its PIN holds a record
- * at least as new as `secretAt`, so a later PUT needs no `currentSecret`.
+ * Controls: a PIN account that switched to `none` WITH its PIN holds a record
+ * at least as new as `secretAt`, so a later PUT — or a body-less DELETE —
+ * needs no `currentSecret` even though `auth:.secretAt` is set.
  *
  * Requests run without DEV_MODE (binding stubs keep the per-IP tier off KV);
  * PIN setup goes through DEV_MODE.
@@ -69,23 +71,35 @@ async function setPin(): Promise<string> {
   return ((await res.json()) as Json).data.authToken as string;
 }
 
-/** Replace `verify:` with what a lagging colo would read: nothing, or an older `none` / `code` record. */
-async function stageStaleRead(
-  shape: "absent" | "none" | "code",
-): Promise<void> {
+const STALE_SHAPES = ["absent", "none", "code", "none-unstamped"] as const;
+type StaleShape = (typeof STALE_SHAPES)[number];
+
+/**
+ * Replace `verify:` with what a lagging colo would read: nothing, an older `none` / `code`
+ * record, or the unstamped `none` that `defaultVerifyRecord()` writes (no `secretUpdatedAt`).
+ */
+async function stageStaleRead(shape: StaleShape): Promise<void> {
   const auth = (await kv.get(kvKeys.auth(USER_ID), "json")) as Json;
   expect(typeof auth.secretAt).toBe("number");
   if (shape === "absent") {
     await kv.delete(kvKeys.verify(USER_ID));
     return;
   }
-  const old: VerifyRecord = {
-    method: shape,
+  // Same field set as `defaultVerifyRecord()` in src/routes/verify.ts: no `secretUpdatedAt`.
+  const unstamped: VerifyRecord = {
+    method: "none",
     hash: null,
     salt: null,
     prompted: 0,
-    secretUpdatedAt: auth.secretAt - 60_000,
   };
+  const old: VerifyRecord =
+    shape === "none-unstamped"
+      ? unstamped
+      : {
+          ...unstamped,
+          method: shape,
+          secretUpdatedAt: auth.secretAt - 60_000,
+        };
   await kv.put(kvKeys.verify(USER_ID), JSON.stringify(old));
 }
 
@@ -104,8 +118,6 @@ function accountState(token: string): Promise<(string | null)[]> {
 async function errorCode(res: Response): Promise<string> {
   return ((await res.json()) as Json).error.code as string;
 }
-
-const STALE_SHAPES = ["absent", "none", "code"] as const;
 
 beforeEach(() => {
   kv = createMockKV();
@@ -180,4 +192,31 @@ describe("DELETE /api/user/:id — stale verify read after a PIN rotation", () =
       expect(await kv.get(kvKeys.user(USER_ID))).not.toBeNull();
     },
   );
+
+  it("still deletes an account that switched PIN ⇒ none with its PIN, without currentSecret", async () => {
+    const token = await setPin();
+    vi.setSystemTime(SET_AT + 1000);
+    const off = await putVerify({ method: "none", currentSecret: PIN }, token);
+    expect(off.status).toBe(200);
+    // Not stale only because the record is newer: `secretAt` must still be set.
+    const auth = (await kv.get(kvKeys.auth(USER_ID), "json")) as Json;
+    expect(typeof auth.secretAt).toBe("number");
+    const record = (await kv.get(
+      kvKeys.verify(USER_ID),
+      "json",
+    )) as VerifyRecord;
+    expect(record.method).toBe("none");
+    expect(record.secretUpdatedAt).toBeGreaterThanOrEqual(auth.secretAt);
+
+    const res = await request(
+      `/api/user/${USER_ID}`,
+      "DELETE",
+      token,
+      undefined,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await kv.get(kvKeys.verify(USER_ID))).toBeNull();
+    expect(await kv.get(kvKeys.auth(USER_ID))).toBeNull();
+  });
 });
