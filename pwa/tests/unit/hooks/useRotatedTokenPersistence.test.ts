@@ -58,6 +58,22 @@ describe("useRotatedTokenPersistence", () => {
     });
   });
 
+  /** #364: the rotated token's expiry is not passed up, so the old token's must not survive it. */
+  it("drops the replaced token's expiry, leaving the next renewal check to learn the new one", () => {
+    const withExpiry: AuthState = {
+      ...SESSION_A,
+      expiresAt: 1_900_000_000_000,
+    };
+    const { persist, login } = renderPersistence(withExpiry, withExpiry);
+
+    persist(ROTATED_TOKEN);
+
+    expect(login).toHaveBeenCalledTimes(1);
+    const written = login.mock.calls[0][0] as AuthState;
+    expect(written).toEqual({ ...SESSION_A, authToken: ROTATED_TOKEN });
+    expect(written).not.toHaveProperty("expiresAt");
+  });
+
   it("treats a session object carrying a newer token as the same live session", () => {
     // A 401 refresh swaps the token in state; the session is still the one that rendered.
     const { persist, login } = renderPersistence(SESSION_A, {

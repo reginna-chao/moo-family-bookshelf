@@ -25,6 +25,11 @@ import {
  * (#399). Pages, the family-data provider, InstallPrompt and VersionWarning are stubbed out; the
  * SettingsPage stub exposes `onLogout` as a button so a test can end the session mid-save.
  *
+ * Proactive renewal (#364): the seeded session has no `tokenExpiresAt`, so App sends one
+ * `POST /api/auth/refresh` on mount. The router answers it the way the Worker does — the SAME token
+ * it was sent, with a 90-day expiry — so the session keeps `OLD_TOKEN` and the save still carries
+ * `Bearer ${OLD_TOKEN}`. A rotated token's expiry is not passed up, so rotation clears the key.
+ *
  * Late callback (#258): the persist callback is bound to the session that rendered it. A save that
  * answers after the user logged out must not write the rotated token back — that would recreate the
  * stored session (USER_ID_KEY included) and log the user back in on the next load. The positive
@@ -71,6 +76,10 @@ const ROTATED_TOKEN = "0123456789abcdef".repeat(4);
 const TOKEN_KEY = namespacedKey(USER_ID, "authToken");
 const VERIFY_PATH = `/api/user/${USER_ID}/verify`;
 const PROMPTED_PATH = `${VERIFY_PATH}/prompted`;
+const REFRESH_PATH = "/api/auth/refresh";
+const EXPIRY_KEY = namespacedKey(USER_ID, "tokenExpiresAt");
+/** Expiry the refresh route grants. See the header → "Proactive renewal". */
+const RENEWED_EXPIRES_AT = Date.now() + 90 * 86_400_000;
 
 interface SentRequest {
   method: string;
@@ -102,6 +111,11 @@ function installFetchRouter() {
     if (key === `GET ${PROMPTED_PATH}`) return json({ data: { prompted: 0 } });
     if (key === `PUT ${VERIFY_PATH}`) return json(await answerPut());
     if (key === `POST ${PROMPTED_PATH}`) return json({ data: { ok: true } });
+    if (key === `POST ${REFRESH_PATH}`) {
+      return json({
+        data: { token: OLD_TOKEN, expiresAt: RENEWED_EXPIRES_AT },
+      });
+    }
     throw new Error(`unexpected request ${key}`);
   });
 }
@@ -169,6 +183,40 @@ describe("App verify-method token rotation", () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBe(ROTATED_TOKEN);
     expect(localStorage.getItem(USER_ID_KEY)).toBe(USER_ID);
     expect(screen.getByRole("button", { name: "設定" })).toBeInTheDocument();
+  });
+
+  it("renews a stored session that has no expiry exactly once on mount (#364)", async () => {
+    expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
+
+    await renderPromptOpen();
+
+    const refreshes = mockFetch.mock.calls.filter(
+      ([url, init]) =>
+        routeKey(url as string, (init as RequestInit).method ?? "GET") ===
+        `POST ${REFRESH_PATH}`,
+    );
+    expect(refreshes).toHaveLength(1);
+    expect(sent.get(`POST ${REFRESH_PATH}`)?.authorization).toBe(
+      `Bearer ${OLD_TOKEN}`,
+    );
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(OLD_TOKEN);
+    expect(localStorage.getItem(EXPIRY_KEY)).toBe(String(RENEWED_EXPIRES_AT));
+  });
+
+  it("drops the stored expiry once a rotated token replaces the session's token (#364)", async () => {
+    await renderPromptOpen();
+    // Positive companion: the mount renewal stored an expiry for the old token.
+    expect(localStorage.getItem(EXPIRY_KEY)).toBe(String(RENEWED_EXPIRES_AT));
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("隨機驗證碼"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("設定登入驗證")).not.toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(ROTATED_TOKEN);
+    expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
   });
 
   it("keeps the stored token when the save issues none", async () => {

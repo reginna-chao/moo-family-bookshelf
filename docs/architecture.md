@@ -812,7 +812,7 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 #### 背景自動復原的防護
 
-背景自動復原指 401 時的 token refresher（`pwa/src/App.tsx` 的 `acquireNewToken`）在背景帶 `recovery: 1` 重新加入家庭。要不要送出由 `pwa/src/hooks/recoveryJoinGate.ts` 判斷：429 冷卻中、使用者自己的離開／刪除帳號請求仍在進行、或工作階段已結束時都不送。
+背景自動復原指 401 時的 token refresher（`pwa/src/hooks/useRecoveryJoin.ts` 回傳、`pwa/src/App.tsx` 命名為 `acquireNewToken` 的函式）在背景帶 `recovery: 1` 重新加入家庭。要不要送出由 `pwa/src/hooks/recoveryJoinGate.ts` 判斷：429 冷卻中、使用者自己的離開／刪除帳號請求仍在進行、或工作階段已結束時都不送。
 
 - **429 冷卻**（`pwa/src/utils/recoveryCooldown.ts`，對應 Extension `extension/src/api/recoveryCooldown.ts` 的冷卻函式；Extension 存在 `browser.storage.local`，PWA 只在瀏覽器執行，等價的儲存是 `localStorage`）：
   - key `moo:recoveryCooldownUntil` 是全域的、不分使用者：它節流的是 Worker 的 per-IP 敏感端點額度（每分鐘 3 次），同一台裝置上所有帳號共用這份額度。
@@ -828,6 +828,23 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
   - 每次存取都像 `recoveryCooldown.ts` 一樣包住：讀不到當作「沒有標記」（一般加入），寫入被拒只失去這道保護。讀—改—寫跨分頁不是原子操作，刻意不上鎖：遺失一次更新最多少一個標記（變成一般加入），不會把人鎖在外面。
 - **加入失敗的說明文案**（`pwa/src/utils/joinErrorMessages.ts`）：這些失敗必須向使用者說明原因，不能把人丟回一個什麼都沒說的登入表單。背景復原（`acquireNewToken`）與登入頁的手動加入（`completeJoin`）兩條路徑都會碰到，所以共用同一份文案，措辭不會分歧。
 - **Extension 的「自己的離開請求進行中」標記**（`extension/src/storage/selfDeparture.ts`，#263）：本機的 familyId 要等「離開家庭」／「刪除帳號」的回應回來才清除，伺服器卻可能先撤銷 token，這段期間別的請求拿到 401 時，背景加入（`extension/src/api/auth-refresh.ts` 的 `attemptJoinRecovery`）就會把使用者加回正在離開的家庭。`extension/src/dialog/useFamilySettingsLeave.ts`／`useFamilySettingsDelete.ts` 透過 `runGuardedDeparture` 送出請求，請求結束前持有標記，`doRefreshToken` 在標記有效時跳過加入。標記直接讀寫 `browser.storage.local`，絕不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息），所以擴充功能的每個 context（包括每個分頁的 Dialog）都看得到。值是到期時間（epoch ms）而不是旗標，與 PWA 相同：請求途中 context 結束，最多擋住復原 `SELF_DEPARTURE_TTL_MS`（60 秒）。失敗時往不擋住使用者的方向吞掉：寫入被拒只失去這道保護、不影響離開本身；讀不到時視為「沒有在離開」，復原照常運作。
+
+#### PWA 主動續期
+
+token 有效 90 天（`worker/src/kv/schema.ts` 的 `TOKEN_TTL_SECONDS`）。#364 之前 PWA 只在收到 401 時走背景自動復原，設有登入驗證的帳號在那條路上會被驗證閘門擋下、只能登出重新驗證；所以 PWA 改成在 token 到期前先用 `POST /api/auth/refresh` 延長它（`pwa/src/hooks/useProactiveTokenRefresh.ts`）。這個端點只延長送出的那顆 token 的期限，回傳的 `token` 就是送出的那顆，不需要驗證密鑰。
+
+- **觸發時機**：工作階段開始時（有 auth 的 mount，或換成另一個 userId／familyId／伺服器位址），以及 `visibilitychange` 變成 `visible` 時檢查一次；兩者都要求當下 `document.visibilityState === "visible"`，分頁還原或背景啟動時延到第一次切回前景。沒有計時器，背景分頁不送任何請求。
+- **門檻 30 天**（`PROACTIVE_REFRESH_THRESHOLD_MS`）：剩不到 30 天才送。PWA 只在使用者打開或切回時檢查，門檻要大到「隔幾週才開一次」也來得及續期。
+- **沒有到期時間就續一次**：到期時間存在 `namespacedKey(userId, "tokenExpiresAt")`（`pwa/src/hooks/authStorage.ts`），讀到缺少或格式不對都當作沒有。#364 之前存下的工作階段全都沒有這個值，跳過等於這次修正對既有使用者無效，所以直接送一次 refresh，從回應取得到期時間。背景自動復原與登入頁的加入成功時存下回應的 `expiresAt`；PIN／圖形變更換 token（#378）時 `useRotatedTokenPersistence` 會刪掉這個值（新 token 的到期時間沒有往上傳），代價是換完後下次檢查多送一次 refresh。
+- **401 不先試 refresh**：refresh 需要有效的 Bearer，401 代表 token 已經失效，先試只會多一個必敗的請求；401 照舊直接走背景自動復原，它就是續期沒趕上時的退路。
+- **不送的情況**：沒有 token（交給 `useAutoAcquireToken`）、使用者自己的離開／刪除帳號請求進行中（`isSelfDepartureActive`）、工作階段已結束（`isLiveSession`，`localStorage` 拋錯當作已結束）。刻意不看 429 冷卻：refresh 不在 per-IP 敏感額度裡，冷卻只該擋加入。同一個分頁進行中的 refresh 不會再送第二次；換工作階段時這個進行中標記會被清掉，新工作階段的檢查不會被舊請求擋住。
+- **臨時 client，沒有 refresher**：比照背景自動復原另建 `new ApiClient(current.apiHost)` 並設上目前的 token，不用工作階段的 client。這個 client 沒掛 `tokenRefresher`，refresh 的 401 不可能觸發背景加入、花掉加入額度；`refreshAuthToken` 本身也以 `isRetry = true` 送出，作為第二道保險。
+- **失敗什麼都不改**：401、429、5xx、網路錯誤、`INVALID_RESPONSE`，以及建立 client 或檢查 userId 時拋出的例外，都保留工作階段、不登出、不加入、不清 token，也不改到期時間。下一個一般請求若收到 401 會走既有的背景自動復原，下次切回前景會再試一次。
+- **只在同一顆 token 上寫入**：回應回來時，工作階段必須仍是送出時那一個（#258），而且目前的 token 仍是送出的那顆；途中 PIN／圖形變更或背景復原已經換了 token 時，舊回應不得蓋掉新 token。這兩項比的是本分頁記憶體裡的工作階段（`localStorage` 只看 userId），所以寫入前還要確認 `localStorage` 裡存的 userId／familyId／伺服器位址／token 仍與送出時相同（`authStorage.ts` 的 `persistedSessionMatches`，讀取拋錯當作不同）：另一個分頁換了 PIN／圖形（#378 會換 token）、換了家庭或伺服器位址時，較早送出的 refresh 回應不會把那些較新的值蓋回舊的。寫入時先刪掉舊的 `expiresAt`，回應的到期時間格式正確才寫回，不沿用舊值。
+- **effect 只依賴工作階段身分**：依賴是 userId、familyId、伺服器位址（加上參照不變的 `authRef` 與 `login`），不含 token 與到期時間。伺服器若回傳仍不足 30 天的期限（自架伺服器、裝置時間偏差），依賴它們會讓「續期 → `login` → effect 重跑 → 再續期」變成無限迴圈；現在同一個工作階段只在切回前景時重查。
+- **與 Extension 刻意分歧的三點**（`extension/src/dialog/useTokenRefresh.ts` 與 `extension/src/api/client.ts` 的 `proactiveRefresh`）：門檻 30 天對 5 分鐘（Extension 在 Dialog 開著時有計時器）；沒有到期時間時 PWA 續一次、Extension 跳過；refresh 失敗時 PWA 什麼都不做，Extension 清掉 token、走分段復原加入（PWA 的 401 路徑已經在做同一件事，主動續期失敗不該再花加入額度）。列在 `.claude/rules/frontend.md` → Extension ↔ PWA twins。
+- **已接受的殘餘風險**：手機時間被調到未來時，每次打開或切回都會判定快到期而送一次 refresh。次數受使用者操作次數限制，不會自己重複；多個分頁同時續期最多多送一次，伺服器端的續期本身可重複執行。
+- **成本**：活躍使用者約每 60 天一次 refresh；既有工作階段多一次；每次換 PIN／圖形多一次；沒有輪詢。
 
 #### 登入頁的加入流程
 
@@ -1115,8 +1132,9 @@ interface PublicShelfSnapshot {
 - **個人書單只轉換 `BoolFlag`，絕不丟書**（`personalBooksValidation.ts`）：自架 Worker 若回傳 `isShared: true`，`true === BoolFlag.TRUE` 不成立，這個值卻會經合併原樣 PUT 回伺服器，正是 `BoolFlag` 慣例要防的跨平台錯誤。所以每個 plain object 元素的 `isShared` 只有剛好是 `1` 才是 `BoolFlag.TRUE`，其他值（`true`、`"1"`、`2`、缺少）都當作 `BoolFlag.FALSE`——與 Worker 自己的 `toBoolFlag`（`worker/src/routes/user.ts`）相同，也符合預設不開放，不開放的書不可能因此變成開放；`isArchived` 只保留 `BoolFlag` 的兩個值，其他值直接省略鍵（缺少讀成未封存，`mergeBooks` 的 `?? existing?.isArchived ?? BoolFlag.FALSE`）。這一層絕不丟棄、不重排元素，也不碰 `bookId`：下一次整份 PUT 會以用戶端的書單取代伺服器上的，在這裡丟掉的書會從伺服器被刪掉。不是 plain object 的元素原樣通過（文字層的 `sanitizeList` 照舊處理）；`data` 不是物件或 `books` 不是陣列時整份原樣通過，交給文字層與 `loadSavedBooks`。元素以展開保留其餘欄位，與成員清單的重建相反，因為整份 PUT 會把不認得的書欄位送回伺服器，固定的欄位清單會把它們刪掉。`data` 的其他欄位（`removedUnsharedBookIds`、`familyShelfPrefs`、`newBookDefaultShared` 等）原樣通過。
 - **驗證方式只認四個值，其他一律變成錯誤信封**（`verifyValidation.ts`）：`data` 必須是 plain object，`method` 必須剛好是 `"pin"`、`"pattern"`、`"code"`、`"none"` 其中之一（以 `Set` 查詢，不用物件字面值，`"__proto__"` 不會被當成方法）。通過時重建成只有 `{ method }` 的新物件，其他欄位（例如舊版伺服器還帶著的 `prompted`）到不了呼叫端。其他情況不像清單那樣降為空值，而是換成一個全新的 `INVALID_RESPONSE` 錯誤信封（沒有 `data`），呼叫端的 `res.data?.method` 因此讀到缺少：PWA 登入在加入前的查詢（`useLandingSubmit.ts`、`useQrJoin.ts`）把它當作 `"none"`，直接送出加入、由伺服器決定，而不是進入一個沒有輸入框也沒有取消鍵的驗證畫面；QR 加入被拒後的重查（`useLandingCompleteJoin.ts`）同樣不開驗證畫面，回到登入表單（目前不顯示錯誤文字）。Extension 的 `useVerificationPrompt.ts` 把缺少的方法當成既有的 `methodError`，`VerificationSettings.tsx` 的方法流程（`extension/src/dialog/useVerifyMethodFlow.ts`）讀成 `"none"`，顯示「不設定驗證」；兩端的目前密鑰確認（`extension/src/dialog/stepUp.ts`、`pwa/src/hooks/stepUp.ts`）只讀 `data?.method`，錯誤信封讀成 `null`。帶 `error` 的信封只保留原本的 `error` 物件，旁邊的 `data` 一律丟掉：這個端點的七個呼叫端都先讀 `data`、不先看 `error`，伺服器若在錯誤旁邊附上 `data`，放行就等於讓沒檢查過的方法進到呼叫端。`data` 為 `undefined`／`null` 的信封照舊原樣通過（`data: null` 下游本來就讀成 `"none"`）。每次回應最多一行警告，不記錄值。這一層之後不再跑文字層：唯一的欄位是字串字面值聯集。
 - **token 與到期時間只認一種形狀，不對就當作沒收到**（`issuedCredentials.ts`）：token（建立／加入家庭回應的 `authToken`、`/api/auth/refresh` 回應的 `token`）必須是 64 字元的小寫十六進位字串，官方 Worker 從第一版起只發這種（`worker/src/middleware/auth.ts` 的 `generateAuthToken`）；`expiresAt` 必須是大於 0 的有限數字。只檢查真假值時，`"soon"` 這種到期時間會讓 `proactiveRefresh` 的比較變成 `NaN`、永遠不提前更新，非字串的 token 也會被存起來。不符的鍵直接拿掉，不新增錯誤信封、不拋錯，下游走的都是「伺服器沒發 token」的既有路徑：
-  - 建立／加入家庭（兩端 client 的 `createFamily` 與 Extension 的 `joinFamily` 先跑家庭資料的文字層再檢查，即 `sanitizeIssuedFamilyGroup`，兩者處理的欄位不重疊；PWA 的 `joinFamily` 宣告的回應只有 `ok`／`authToken`／`expiresAt`，只跑 `sanitizeIssuedCredentials`）：Extension 的 `onboardingFlow.ts` 與 `useReauth.ts` 不存 token、不設進 client；PWA 的背景復原（`App.tsx` 的 `acquireNewToken`）回傳 `null` 並保留工作階段（Invariant 2）；登入頁的加入（`useLandingCompleteJoin.ts`）存下沒有 token 的工作階段，再由 `App.tsx` 的自動補 token 流程重新取得。
+  - 建立／加入家庭（兩端 client 的 `createFamily` 與 Extension 的 `joinFamily` 先跑家庭資料的文字層再檢查，即 `sanitizeIssuedFamilyGroup`，兩者處理的欄位不重疊；PWA 的 `joinFamily` 宣告的回應只有 `ok`／`authToken`／`expiresAt`，只跑 `sanitizeIssuedCredentials`）：Extension 的 `onboardingFlow.ts` 與 `useReauth.ts` 不存 token、不設進 client；PWA 的背景復原（`useRecoveryJoin.ts`，即 `App.tsx` 的 `acquireNewToken`）回傳 `null` 並保留工作階段（Invariant 2）；登入頁的加入（`useLandingCompleteJoin.ts`）存下沒有 token 的工作階段，再由 `App.tsx` 的自動補 token 流程重新取得。
   - Extension 的 refresh 與背景復原加入（`auth-refresh.ts`，不經 client 的 `joinFamily`，直接用 `isAuthToken`／`isExpiresAt`）：壞 token 等同 refresh 失敗，走既有的分段復原；復原加入也拿到壞 token 時視為暫時失敗，家庭資料保留。
+  - PWA 的 refresh（`pwa/src/api/client.ts` 的 `refreshAuthToken`，直接用 `isAuthToken`／`isExpiresAt`）：壞 token 不同於上面「拿掉鍵」的做法，換成一個全新的 `INVALID_RESPONSE` 錯誤信封（沒有 `data`），主動續期把它當成一般失敗，工作階段原樣保留（見〈PWA 主動續期〉）；`expiresAt` 不合格時從 `data` 拿掉，等同沒給，下次檢查會再續一次。帶 `error` 的信封只保留原本的 `error` 物件傳回。
   - 到期時間不合格時與缺少相同，`TOKEN_EXPIRES_AT_KEY` 不寫入（既有行為：舊的值也不會被清掉）；`proactiveRefresh` 把缺少讀成「沒有到期資訊，在收到 401 前都當作有效」。
   - 每次回應最多一行 `[issuedCredentials]` 警告，只在鍵「有送但格式不對」時輸出（缺少不算），不記錄值。
 - 借閱的 `status` 不驗證：未知狀態由兩端的渲染處處理（Extension `BorrowRequestCard.tsx` 的 `STATUS_META.get(...) ?? UNKNOWN_STATUS`、PWA `BorrowCard.tsx` 中 `getStatusStyle` 的 `default:`），對它做的比較（`Set.has`、`===`）對任意值都安全。

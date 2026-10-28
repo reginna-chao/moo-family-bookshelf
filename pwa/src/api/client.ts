@@ -13,6 +13,8 @@ import {
   sanitizePublicShelfResultText,
 } from "moo-family-bookshelf-shared/api/entityText";
 import {
+  isAuthToken,
+  isExpiresAt,
   sanitizeIssuedCredentials,
   sanitizeIssuedFamilyGroup,
 } from "moo-family-bookshelf-shared/api/issuedCredentials";
@@ -49,10 +51,10 @@ import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/p
 import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
 import { adoptRotatedVerifyToken } from "moo-family-bookshelf-shared/api/verifyTokenRotation";
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
-import { readEnvelope } from "moo-family-bookshelf-shared/api/readEnvelope";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
 import { fetchPublicShelf } from "./publicShelfFetch";
+import { ApiTransport } from "./transport";
 import { fetchVersion } from "./versionFetch";
 
 /**
@@ -110,11 +112,7 @@ function jsonInit(method: string, body?: unknown): RequestInit {
 
 export class ApiClient {
   private baseUrl: string;
-  private authToken: string | null = null;
-  private tokenRefresher: (() => Promise<string | null>) | null = null;
-  private refreshing: Promise<string | null> | null = null;
-  /** In-flight GET request deduplication map: URL -> Promise */
-  private inflightGets = new Map<string, Promise<ApiResponse<unknown>>>();
+  private transport = new ApiTransport(() => this.baseUrl);
 
   constructor(apiUrl?: string) {
     this.baseUrl = validateEndpointUrl(apiUrl || DEFAULT_API_ENDPOINT);
@@ -122,7 +120,7 @@ export class ApiClient {
 
   /** Register a callback that re-acquires a token on 401. */
   setTokenRefresher(fn: () => Promise<string | null>): void {
-    this.tokenRefresher = fn;
+    this.transport.setTokenRefresher(fn);
   }
 
   setEndpoint(url: string): void {
@@ -134,7 +132,7 @@ export class ApiClient {
   }
 
   setAuthToken(token: string | null): void {
-    this.authToken = token;
+    this.transport.setAuthToken(token);
   }
 
   /** Check server API version. Returns null on network/parse errors. */
@@ -178,6 +176,32 @@ export class ApiClient {
       body.verifySecret = opts.verifySecret;
     }
     return this.post("/api/auth/lookup", body);
+  }
+
+  /** Extend the current token's lifetime. `isRetry` so a 401 never reaches the token refresher; a
+   *  bad token is `INVALID_RESPONSE`, a bad expiry is dropped (docs/architecture.md → PWA 主動續期). */
+  async refreshAuthToken(
+    userId: string,
+    familyId: string,
+  ): Promise<ApiResponse<{ token: string; expiresAt?: number }>> {
+    assertHexId(userId, "userId");
+    const res = await this.request<{ token?: unknown; expiresAt?: unknown }>(
+      "/api/auth/refresh",
+      { method: "POST", body: JSON.stringify({ userId, familyId }) },
+      true,
+    );
+    if (res.error) return { error: res.error };
+    const token = res.data?.token;
+    if (!isAuthToken(token)) {
+      return {
+        error: {
+          code: "INVALID_RESPONSE",
+          message: "refresh response carried no usable token",
+        },
+      };
+    }
+    const expiresAt = res.data?.expiresAt;
+    return { data: { token, ...(isExpiresAt(expiresAt) && { expiresAt }) } };
   }
 
   // --- Personal Settings ---
@@ -491,84 +515,11 @@ export class ApiClient {
 
   // --- Internal ---
 
-  private async request<T>(
+  private request<T>(
     path: string,
     init?: RequestInit,
     isRetry = false,
   ): Promise<ApiResponse<T>> {
-    const method = init?.method?.toUpperCase() ?? "GET";
-    const url = `${this.baseUrl}${path}`;
-
-    // Deduplicate concurrent GET requests to the same URL
-    if (method === "GET" && !isRetry) {
-      const existing = this.inflightGets.get(url);
-      if (existing) {
-        return existing as Promise<ApiResponse<T>>;
-      }
-      const promise = this.doRequest<T>(url, init, isRetry);
-      this.inflightGets.set(url, promise as Promise<ApiResponse<unknown>>);
-      try {
-        return await promise;
-      } finally {
-        this.inflightGets.delete(url);
-      }
-    }
-
-    return this.doRequest<T>(url, init, isRetry);
-  }
-
-  private async doRequest<T>(
-    url: string,
-    init?: RequestInit,
-    isRetry = false,
-  ): Promise<ApiResponse<T>> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...(init?.headers as Record<string, string>),
-    };
-
-    if (this.authToken) {
-      headers["Authorization"] = `Bearer ${this.authToken}`;
-    }
-
-    try {
-      const response = await fetch(url, { ...init, headers });
-      const json = await readEnvelope<T>(response);
-
-      // On 401, try to refresh token once
-      if (response.status === 401 && !isRetry && this.tokenRefresher) {
-        // Clear stale dedup promises — token is about to change
-        this.inflightGets.clear();
-        // Deduplicate concurrent refresh calls (F3: prevents double-join)
-        if (!this.refreshing) {
-          this.refreshing = this.tokenRefresher().finally(() => {
-            this.refreshing = null;
-          });
-        }
-        const newToken = await this.refreshing;
-        if (newToken) {
-          this.authToken = newToken;
-          return this.doRequest(url, init, true);
-        }
-      }
-
-      if (!response.ok) {
-        return {
-          error: json.error ?? {
-            code: "UNKNOWN_ERROR",
-            message: `HTTP ${response.status}`,
-          },
-        };
-      }
-
-      return json;
-    } catch (err) {
-      return {
-        error: {
-          code: "NETWORK_ERROR",
-          message: err instanceof Error ? err.message : "Network error",
-        },
-      };
-    }
+    return this.transport.request<T>(path, init, isRetry);
   }
 }

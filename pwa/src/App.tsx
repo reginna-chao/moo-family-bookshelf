@@ -7,14 +7,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "./hooks/useAuth";
-import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
-import { ApiClient } from "./api/client";
-import {
-  isLiveSession,
-  useSessionApiClient,
-} from "./hooks/useSessionApiClient";
-import { recoveryJoinBlocked } from "./hooks/recoveryJoinGate";
+import type { ApiClient } from "./api/client";
+import { useSessionApiClient } from "./hooks/useSessionApiClient";
 import { useAutoAcquireToken } from "./hooks/useAutoAcquireToken";
+import { useProactiveTokenRefresh } from "./hooks/useProactiveTokenRefresh";
+import { useRecoveryJoin } from "./hooks/useRecoveryJoin";
 import { useRotatedTokenPersistence } from "./hooks/useRotatedTokenPersistence";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
@@ -28,17 +25,7 @@ import { VerifySetupPrompt } from "./components/VerifySetupPrompt";
 import { FamilyDataProvider, useFamilyData } from "./hooks/useFamilyData";
 import { VersionWarning } from "./components/VersionWarning";
 import { getAppEnv } from "./utils/appEnv";
-import {
-  JOIN_BLOCKED_MESSAGES,
-  REVERIFY_LOGOUT_MESSAGE,
-  VERIFICATION_ERROR_CODES,
-} from "./utils/joinErrorMessages";
-import {
-  clearRecoveryCooldown,
-  setRecoveryCooldown,
-} from "./utils/recoveryCooldown";
-import { markReauthPending } from "./utils/reauthPending";
-import { rememberSyncCodeForRelogin } from "./utils/reloginSyncCode";
+import { clearRecoveryCooldown } from "./utils/recoveryCooldown";
 
 type Page = "family-shelf" | "personal-shelf" | "borrow" | "settings";
 
@@ -136,58 +123,17 @@ function AuthenticatedApp() {
     prevAuthRef.current = auth;
   }, [auth, navigate]);
 
-  // Re-join family to get a fresh token, used both on init and on 401 refresh
+  // The live session for callbacks that outlive a render (recovery join, renewal, token rotation).
   const authRef = useRef(auth);
   authRef.current = auth;
 
-  const acquireNewToken = useCallback(async (): Promise<string | null> => {
-    const current = authRef.current;
-    if (!current) return null;
-    // Skip on a 429 cooldown, while this user's own leave / delete is in flight
-    // (#263), or once the session has ended — see `recoveryJoinBlocked`.
-    if (recoveryJoinBlocked(authRef.current, current)) return null;
-
-    const tempClient = new ApiClient(current.apiHost);
-    // Refresh endpoint is protected — include current token for authentication
-    tempClient.setAuthToken(current.authToken ?? null);
-    // `recovery` lets the server refuse a non-member (409 RECOVERY_NOT_MEMBER).
-    const res = await tempClient.joinFamily(current.familyId, current.userId, {
-      recovery: BoolFlag.TRUE,
-    });
-    // Logged out or switched session mid-join (#258): drop the stale result.
-    if (!isLiveSession(authRef.current, current)) return null;
-    if (res.error) {
-      const { code, retryAfter } = res.error;
-      // A blocked code is terminal, so the logout is earned (Map `.get`: the
-      // code is backend-controlled). Same split as `extension/src/api/auth-refresh.ts`.
-      const blockedMessage = JOIN_BLOCKED_MESSAGES.get(code);
-      if (blockedMessage !== undefined) {
-        setLandingError(blockedMessage);
-        logout();
-        return null;
-      }
-      if (VERIFICATION_ERROR_CODES.has(code)) {
-        setLandingError(REVERIFY_LOGOUT_MESSAGE);
-        rememberSyncCodeForRelogin(current);
-        logout();
-        // After logout (an await first reopens #258); lands before any re-login (#266).
-        await markReauthPending(current);
-        return null;
-      }
-      // Any other failure (shared-NAT 429, dropped connection, unknown code) KEEPS
-      // the session (Invariant 2); only the quota failure earns a cooldown.
-      if (code === "RATE_LIMITED") {
-        setRecoveryCooldown(retryAfter);
-      }
-      return null;
-    }
-    if (res.data?.authToken) {
-      clearRecoveryCooldown();
-      login({ ...current, authToken: res.data.authToken });
-      return res.data.authToken;
-    }
-    return null;
-  }, [login, logout]);
+  const acquireNewToken = useRecoveryJoin({
+    authRef,
+    login,
+    logout,
+    setLandingError,
+  });
+  useProactiveTokenRefresh({ auth, authRef, login });
 
   // Same client across a token swap, new one per session (#256) — see the hook.
   const apiClient = useSessionApiClient(auth, acquireNewToken);
