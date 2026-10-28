@@ -68,7 +68,9 @@ export function useLeaveFamily({
         settleLeave,
       );
     } catch (err) {
-      setLeaveError(err instanceof Error ? err.message : "離開失敗");
+      setLeaveError(
+        err instanceof Error ? err.message : "離開家庭失敗，請稍後再試",
+      );
       setLeaveState("idle");
     }
   }

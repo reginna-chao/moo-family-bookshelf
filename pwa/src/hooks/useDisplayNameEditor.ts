@@ -65,7 +65,7 @@ export function useDisplayNameEditor({
         // 429 shows the localized back-off copy instead of server English.
         setNameError(
           rateLimitedEnvelopeMessage(res.error) ??
-            safeErrorText(res.error.message, "更新失敗，請稍後再試"),
+            safeErrorText(res.error.message, "儲存失敗，請稍後再試"),
         );
         setNameSaving(false);
         return;
@@ -76,7 +76,7 @@ export function useDisplayNameEditor({
       updateMemberDisplayName(userId, trimmed);
       void loadMembers();
     } catch (err) {
-      setNameError(err instanceof Error ? err.message : "更新失敗");
+      setNameError(err instanceof Error ? err.message : "儲存失敗，請稍後再試");
     } finally {
       setNameSaving(false);
     }

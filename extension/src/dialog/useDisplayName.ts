@@ -129,7 +129,9 @@ export function useDisplayName(
       timeoutRef.current = setTimeout(() => setNameSaveState("idle"), 1500);
       return true;
     } catch (err) {
-      setNameSaveError(err instanceof Error ? err.message : "儲存失敗");
+      setNameSaveError(
+        err instanceof Error ? err.message : "儲存失敗，請稍後再試",
+      );
       setNameSaveState("error");
       return false;
     } finally {

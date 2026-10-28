@@ -3,8 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { ErrorAlert } from "@/components/ErrorAlert";
 
-const MESSAGE = "驗證錯誤次數過多，請於 1 分 30 秒後再試。";
-const ANNOUNCEMENT = "驗證錯誤次數過多，請稍後再試。";
+const MESSAGE = "驗證錯誤次數過多，請於 1 分 30 秒後再試";
+const ANNOUNCEMENT = "驗證錯誤次數過多，請稍後再試";
 
 describe("ErrorAlert", () => {
   describe("nothing to show", () => {

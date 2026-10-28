@@ -195,7 +195,7 @@ describe("UnkickNotice", () => {
       clickUnkick();
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent("操作失敗");
+    expect(screen.getByRole("alert")).toHaveTextContent("解除失敗，請稍後再試");
   });
 
   it("dismisses without calling the API when 關閉 is pressed", () => {

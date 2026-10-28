@@ -104,7 +104,9 @@ export function useDeleteAccount({
       );
       if (refused.error) await settleDeleteError(refused.error, asked);
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "移除失敗");
+      setDeleteError(
+        err instanceof Error ? err.message : "移除帳戶失敗，請稍後再試",
+      );
       setDeleteState("idle");
     }
   }

@@ -131,12 +131,12 @@ describe("useLeaveFamily", () => {
     await leave(hook);
 
     // Static variant (no retryAfter) — pinned in tests/unit/retryMessage.test.ts.
-    expect(hook.result.current.leaveError).toBe("嘗試次數過多，請稍後再試。");
+    expect(hook.result.current.leaveError).toBe("嘗試次數過多，請稍後再試");
   });
 
   it.each<[string, unknown, string]>([
     ["an Error", new Error("Network down"), "Network down"],
-    ["a non-Error value", "boom", "離開失敗"],
+    ["a non-Error value", "boom", "離開家庭失敗，請稍後再試"],
   ])(
     "shows an error and clears the mark when the request throws %s",
     async (_label, thrown, expected) => {

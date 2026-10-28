@@ -51,7 +51,7 @@ export function UnkickNotice({
       }
       setState("cleared");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "操作失敗");
+      setError(err instanceof Error ? err.message : "解除失敗，請稍後再試");
       setState("idle");
     }
   }
