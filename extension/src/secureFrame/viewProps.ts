@@ -19,6 +19,8 @@ export interface ViewProps {
     ariaLabel: string;
     /** Extra classes appended to the input's own (e.g. room for a reveal button). */
     className?: string;
+    /** Seq of the last `change` the host applied; 0 before it has applied any. */
+    appliedSeq: number;
   };
   "credential-text": { text: string; testId: string; className?: string };
   "qr-image": { dataUrl: string; alt: string; size: number };
@@ -34,6 +36,10 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+export function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 function isBoolean(value: unknown): value is boolean {
@@ -67,7 +73,9 @@ function isSyncCodeInputProps(value: unknown): boolean {
     isString(value.placeholder) &&
     isString(value.ariaLabel) &&
     isOptionalString(value.className) &&
-    isOptionalBoolean(value.autoFocus)
+    isOptionalBoolean(value.autoFocus) &&
+    isSafeInteger(value.appliedSeq) &&
+    value.appliedSeq >= 0
   );
 }
 

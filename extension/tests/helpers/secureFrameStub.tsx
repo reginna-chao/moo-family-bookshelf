@@ -72,7 +72,7 @@ export function SecureFrameStub<V extends ViewName>({
         onSubmit?.(message.secret);
         return;
       case "change":
-        onChange?.(message.value);
+        onChange?.(message.value, message.seq);
         return;
       case "paste":
         onPaste?.();

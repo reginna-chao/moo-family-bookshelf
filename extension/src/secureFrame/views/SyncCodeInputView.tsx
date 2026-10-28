@@ -3,34 +3,29 @@ import type { ViewComponentProps } from "../protocol";
 import { useFocusOnFirstProps } from "./SecretEntryView";
 
 const BASE_CLASS = "moo-form-input moo-form-input--block";
-// Bounds the not-yet-echoed history when a host never echoes the value back.
-const MAX_PENDING = 50;
 
-/** The field owns its text; a host `value` (prefill, clear) is adopted unless it is the last
- *  reported value or an older report not yet caught up past, so a late echo never eats typing. */
-function useAdoptedText(value: string) {
+/** The field owns its text; each report gets a rising seq. A host `value` is adopted only once
+ *  `appliedSeq` has caught up with the last seq sent, so a late echo never eats typing (#422). */
+function useAdoptedText(value: string, appliedSeq: number) {
   const [text, setText] = useState(value);
-  const lastKnownRef = useRef(value);
-  const pendingRef = useRef<string[]>([]);
+  const textRef = useRef(value);
+  const sentSeqRef = useRef(0);
   const [adoptCount, setAdoptCount] = useState(0);
 
   useEffect(() => {
-    const pending = pendingRef.current;
-    if (pending.length > 0 && value === pending[pending.length - 1]) {
-      pendingRef.current = [];
-      return;
-    }
-    if (value === lastKnownRef.current || pending.includes(value)) return;
-    lastKnownRef.current = value;
-    pendingRef.current = [];
+    if (appliedSeq < sentSeqRef.current) return;
+    if (value === textRef.current) return;
+    textRef.current = value;
     setText(value);
     setAdoptCount((count) => count + 1);
-  }, [value]);
+  }, [value, appliedSeq]);
 
-  const report = (next: string) => {
-    lastKnownRef.current = next;
-    pendingRef.current = [...pendingRef.current, next].slice(-MAX_PENDING);
+  /** Records a typed value and returns the seq to send with its `change`. */
+  const report = (next: string): number => {
+    sentSeqRef.current += 1;
+    textRef.current = next;
     setText(next);
+    return sentSeqRef.current;
   };
 
   return { text, report, adoptCount };
@@ -42,7 +37,10 @@ export function SyncCodeInputView({
   emit,
 }: ViewComponentProps<"sync-code-input">) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const { text, report, adoptCount } = useAdoptedText(props.value);
+  const { text, report, adoptCount } = useAdoptedText(
+    props.value,
+    props.appliedSeq,
+  );
 
   useFocusOnFirstProps(props.autoFocus, () => inputRef.current?.focus());
 
@@ -68,8 +66,10 @@ export function SyncCodeInputView({
         aria-label={props.ariaLabel}
         value={text}
         onChange={(event) => {
-          report(event.target.value);
-          emit({ type: "change", value: event.target.value });
+          const next = event.target.value;
+          // Bump the seq before emitting: a synchronous host may re-render before emit returns.
+          const seq = report(next);
+          emit({ type: "change", value: next, seq });
         }}
         onPaste={() => emit({ type: "paste" })}
         onBlur={() => emit({ type: "blur" })}

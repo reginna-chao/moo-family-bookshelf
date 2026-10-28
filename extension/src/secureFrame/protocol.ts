@@ -4,6 +4,7 @@ import browser from "webextension-polyfill";
 import { isAllowedParentOrigin } from "./allowedOrigins";
 import {
   isRecord,
+  isSafeInteger,
   isString,
   isViewName,
   isViewProps,
@@ -45,7 +46,7 @@ export type FrameToHostMessage =
   | { type: "ready" }
   | { type: "height"; px: number }
   | { type: "submit"; secret: string }
-  | { type: "change"; value: string }
+  | { type: "change"; value: string; seq: number }
   | { type: "paste" }
   | { type: "blur" };
 
@@ -91,7 +92,7 @@ export function isFrameToHostMessage(
     case "submit":
       return isString(data.secret);
     case "change":
-      return isString(data.value);
+      return isString(data.value) && isSafeInteger(data.seq) && data.seq > 0;
     default:
       return false;
   }

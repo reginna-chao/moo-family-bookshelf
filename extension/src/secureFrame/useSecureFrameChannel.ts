@@ -10,7 +10,7 @@ import {
 
 export interface FrameHandlers {
   onSubmit?: (secret: string) => void;
-  onChange?: (value: string) => void;
+  onChange?: (value: string, seq: number) => void;
   onPaste?: () => void;
   onBlur?: () => void;
 }
@@ -44,7 +44,7 @@ function dispatchToHandlers(
       handlers.onSubmit?.(message.secret);
       return;
     case "change":
-      handlers.onChange?.(message.value);
+      handlers.onChange?.(message.value, message.seq);
       return;
     case "paste":
       handlers.onPaste?.();
