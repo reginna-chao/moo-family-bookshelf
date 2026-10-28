@@ -22,8 +22,9 @@ type Json = any;
  *
  * Both guard branches are driven: by default `app.request` with a string body
  * sends NO Content-Length header (undici's Request does not add one), so the
- * guard buffers the body; `withContentLength` sets the header explicitly to the
- * real byte length, which takes the header branch.
+ * guard reads the body as a stream and counts its bytes against the limit
+ * (streamed branch, #361); `withContentLength` sets the header explicitly to
+ * the real byte length, which takes the header branch.
  *
  * Realistic book: `realisticBook` is shaped like what the Extension scrapes —
  * CJK title / author / category (3 bytes per char in UTF-8) and full-length
@@ -35,7 +36,7 @@ type Json = any;
  * the 2MB limit (PATCH on the very same path) refuses it.
  *
  * DELETE body: `DELETE /api/user/:id` reads an optional `{ currentSecret? }`
- * body (#396), so the buffered branch must cover DELETE too — it used to skip
+ * body (#396), so the streamed branch must cover DELETE too — it used to skip
  * it, and a streamed oversized body reached the handler. The filler body has
  * no `currentSecret`, so a request past the guard would delete the account.
  */
@@ -115,7 +116,7 @@ beforeEach(async () => {
 
 describe("PUT /api/user/:id/books — large shelf (#233)", () => {
   it.each([
-    ["without Content-Length (buffered branch)", false],
+    ["without Content-Length (streamed branch)", false],
     ["with Content-Length (header branch)", true],
   ])(
     "saves a shelf whose body exceeds 256KB %s",
@@ -143,7 +144,7 @@ describe("PUT /api/user/:id/books — large shelf (#233)", () => {
     },
   );
 
-  it("rejects a books body over 2MB with 413 (buffered branch)", async () => {
+  it("rejects a books body over 2MB with 413 (streamed branch)", async () => {
     const body = booksBody(6000);
     expect(Buffer.byteLength(body)).toBeGreaterThan(PUT_BOOKS_MAX_BODY_SIZE);
 
@@ -182,9 +183,9 @@ describe("other /api routes keep the 256KB default", () => {
   }
 
   it.each([
-    ["PATCH books, buffered branch", "PATCH", BOOKS_PATH, "changes", false],
+    ["PATCH books, streamed branch", "PATCH", BOOKS_PATH, "changes", false],
     ["PATCH books, header branch", "PATCH", BOOKS_PATH, "changes", true],
-    ["PUT family-prefs, buffered branch", "PUT", PREFS_PATH, "hidden", false],
+    ["PUT family-prefs, streamed branch", "PUT", PREFS_PATH, "hidden", false],
     ["PUT family-prefs, header branch", "PUT", PREFS_PATH, "hidden", true],
   ])(
     "rejects a >256KB body with the 256KB 413 (%s)",
