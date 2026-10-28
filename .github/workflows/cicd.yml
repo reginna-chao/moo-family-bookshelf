@@ -313,11 +313,11 @@ jobs:
 
       - name: Typecheck E2E tests
         working-directory: extension
-        run: npx tsc --noEmit --project tests/e2e/tsconfig.json
+        run: pnpm exec tsc --noEmit --project tests/e2e/tsconfig.json
 
       - name: Install Playwright browsers
         working-directory: extension
-        run: npx playwright install chromium --with-deps
+        run: pnpm exec playwright install chromium --with-deps
 
       - name: Run E2E tests
         working-directory: extension
@@ -368,11 +368,11 @@ jobs:
 
       - name: Typecheck E2E tests
         working-directory: pwa
-        run: npx tsc --noEmit --project tests/e2e/tsconfig.json
+        run: pnpm exec tsc --noEmit --project tests/e2e/tsconfig.json
 
       - name: Install Playwright browsers
         working-directory: pwa
-        run: npx playwright install chromium --with-deps
+        run: pnpm exec playwright install chromium --with-deps
 
       - name: Run PWA E2E tests
         working-directory: pwa
@@ -576,8 +576,10 @@ jobs:
       - name: Build PWA (Dev)
         run: pnpm --filter moo-family-bookshelf-pwa build:dev
 
+      # Runs the worker's lockfile-pinned wrangler from the repo root on purpose: pages deploy
+      # reads the cwd. See worker/tests/unit/ciSuccessGate.test.ts header → "NPX-FREE CLI CALLS".
       - name: Deploy to Cloudflare Pages (Dev)
-        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf-dev
+        run: worker/node_modules/.bin/wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf-dev
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -670,7 +672,7 @@ jobs:
         run: pnpm --filter moo-family-bookshelf-pwa build
 
       - name: Deploy to Cloudflare Pages (Prod)
-        run: npx wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf --branch=main
+        run: worker/node_modules/.bin/wrangler pages deploy pwa/dist --project-name=moo-family-bookshelf --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -835,10 +837,13 @@ jobs:
       #    suppresses that one (correct) error while keeping every other check.
       #    The amo variant is linted WITHOUT --self-hosted so AMO-hosting
       #    problems (including an accidental update_url) still fail the job.
+      #    `pnpm exec` runs the lockfile-pinned bin and never downloads one,
+      #    unlike `npx` from the repo root (which fetched the latest release).
       - name: web-ext lint (both variants)
+        working-directory: extension
         run: |
-          npx web-ext lint --source-dir=extension/dist-firefox-amo
-          npx web-ext lint --source-dir=extension/dist-firefox-direct --self-hosted
+          pnpm exec web-ext lint --source-dir=dist-firefox-amo
+          pnpm exec web-ext lint --source-dir=dist-firefox-direct --self-hosted
 
       # 3. Package the AMO-listed variant into a zip for the Release.
       - name: Package AMO zip
@@ -846,16 +851,17 @@ jobs:
 
       # 4. Generate the self-distribution update manifest (updates.json).
       - name: Generate updates.json
-        run: cd extension && npx tsx scripts/build-updates-json.ts --out "$GITHUB_WORKSPACE/updates.json"
+        run: cd extension && pnpm exec tsx scripts/build-updates-json.ts --out "$GITHUB_WORKSPACE/updates.json"
 
       # 5. Sign the direct-install variant on the unlisted channel — this DOES
       #    return a downloadable signed .xpi. Exactly one .xpi is expected; the
       #    rename step fails loudly otherwise.
       - name: Sign direct-install (unlisted)
+        working-directory: extension
         run: >-
-          npx web-ext sign
-          --source-dir=extension/dist-firefox-direct
-          --artifacts-dir=extension/web-ext-artifacts-direct
+          pnpm exec web-ext sign
+          --source-dir=dist-firefox-direct
+          --artifacts-dir=web-ext-artifacts-direct
           --channel=unlisted
           --no-input
         env:
@@ -934,10 +940,11 @@ jobs:
         id: amo-listed
         continue-on-error: true
         shell: bash
+        working-directory: extension
         run: |
-          npx web-ext sign \
-            --source-dir=extension/dist-firefox-amo \
-            --artifacts-dir=extension/web-ext-artifacts-amo \
+          pnpm exec web-ext sign \
+            --source-dir=dist-firefox-amo \
+            --artifacts-dir=web-ext-artifacts-amo \
             --channel=listed \
             --no-input 2>&1 | tee "$RUNNER_TEMP/amo-listed.log"
         env:
