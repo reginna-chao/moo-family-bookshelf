@@ -82,14 +82,71 @@ describe("scrapeUserEmail", () => {
     expect(scrapeUserEmail()).toBe("actual@email.com");
   });
 
-  it("returns first matching email when multiple candidates exist", () => {
+  it("returns null when two different email-shaped candidates exist", () => {
     document.body.innerHTML = `
       <div class="me-panel">
         <div style="color: gray;">first@example.com</div>
         <div style="color: gray;">second@example.com</div>
       </div>
     `;
-    expect(scrapeUserEmail()).toBe("first@example.com");
+    expect(scrapeUserEmail()).toBeNull();
+  });
+
+  it("returns null when a decoy email-shaped text precedes the account email (#368)", () => {
+    document.body.innerHTML = `
+      <div class="me-panel">
+        <div style="color: gray;">客服信箱：service@readmoo.com</div>
+        <div style="color: gray;">test@example.com</div>
+      </div>
+    `;
+    expect(scrapeUserEmail()).toBeNull();
+  });
+
+  it("returns the email when the same email appears in two leaf divs", () => {
+    document.body.innerHTML = `
+      <div class="me-panel">
+        <div style="color: gray;">test@example.com</div>
+        <div style="font-size: 12px;">test@example.com</div>
+      </div>
+    `;
+    expect(scrapeUserEmail()).toBe("test@example.com");
+  });
+
+  it("ignores a leaf div that contains @ but is not email-shaped", () => {
+    document.body.innerHTML = `
+      <div class="me-panel">
+        <div style="color: gray;">@readmoo_tw</div>
+        <div style="color: gray;">test@example.com</div>
+      </div>
+    `;
+    expect(scrapeUserEmail()).toBe("test@example.com");
+  });
+
+  describe("with an email-shaped text longer than 254 characters", () => {
+    const TOO_LONG = `${"a".repeat(243)}@example.com`;
+
+    it("is built at exactly 255 characters", () => {
+      expect(TOO_LONG).toHaveLength(255);
+    });
+
+    it("returns null when it is the only candidate", () => {
+      document.body.innerHTML = `
+        <div class="me-panel">
+          <div style="color: gray;">${TOO_LONG}</div>
+        </div>
+      `;
+      expect(scrapeUserEmail()).toBeNull();
+    });
+
+    it("ignores it next to one real email", () => {
+      document.body.innerHTML = `
+        <div class="me-panel">
+          <div style="color: gray;">${TOO_LONG}</div>
+          <div style="color: gray;">test@example.com</div>
+        </div>
+      `;
+      expect(scrapeUserEmail()).toBe("test@example.com");
+    });
   });
 
   it("trims whitespace from email text", () => {

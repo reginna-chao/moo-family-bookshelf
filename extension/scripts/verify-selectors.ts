@@ -10,6 +10,10 @@ import {
   READMOO_SELECTORS,
 } from "moo-family-bookshelf-shared/config/readmoo";
 import {
+  EMAIL_SHAPE,
+  MAX_EMAIL_LENGTH,
+} from "moo-family-bookshelf-shared/account/emailShape";
+import {
   buildSpecs,
   type CheckResult,
   type SelectorKey,
@@ -106,28 +110,36 @@ async function captureLibraryHtml(page: Page): Promise<string> {
     .join("\n\n")}`;
 }
 
-/** Replicate scraper.ts's email heuristic against the live profile panel. */
+/** Replicate scrapeUserEmail's rule (exactly one email-shaped leaf, #368) on the live profile panel. */
 async function checkEmailHeuristic(
   page: Page,
   selectors: SelectorMap,
 ): Promise<void> {
   const emailFound = await page.evaluate(
-    ([panelSelector, leafSelector]) => {
+    ({ panelSelector, leafSelector, shapeSource, maxLength }) => {
       const panel = document.querySelector(panelSelector);
       if (!panel) return null;
-      const candidates = panel.querySelectorAll<HTMLElement>(leafSelector);
-      for (const el of candidates) {
+      // Runs in the page, so isEmailShaped is rebuilt from its serialized parts.
+      const shape = new RegExp(shapeSource);
+      const emails = new Set<string>();
+      for (const el of panel.querySelectorAll<HTMLElement>(leafSelector)) {
         if (el.childElementCount > 0) continue;
         const text = el.textContent?.trim() ?? "";
-        if (text.includes("@") && text.includes(".")) return text;
+        if (text.length <= maxLength && shape.test(text)) emails.add(text);
       }
-      return null;
+      const [email] = emails;
+      return emails.size === 1 && email !== undefined ? email : null;
     },
-    [selectors.mePanel, selectors.profileStyledLeaf] as const,
+    {
+      panelSelector: selectors.mePanel,
+      leafSelector: selectors.profileStyledLeaf,
+      shapeSource: EMAIL_SHAPE.source,
+      maxLength: MAX_EMAIL_LENGTH,
+    },
   );
 
   console.log(
-    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — ${selectors.profileStyledLeaf} 含 @ 和 .${
+    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — 像 email 的葉節點 ${selectors.profileStyledLeaf} 剛好一個${
       emailFound ? ` → "${emailFound}"` : ""
     }`,
   );
