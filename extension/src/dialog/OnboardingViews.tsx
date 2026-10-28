@@ -1,4 +1,5 @@
 import React from "react";
+import { SyncCodeTextFrame } from "../secureFrame/frames";
 
 const ERROR_MESSAGE_ID = "onboarding-error-view-message";
 
@@ -56,12 +57,10 @@ export function CreatedView({
         將以下同步碼分享給家人，他們可以用此代碼加入你的公開書櫃。
       </p>
       <div className="moo-onboarding-view__code-box">
-        <span
-          data-testid="sync-code"
-          className="moo-onboarding-view__code-text"
-        >
-          {generatedSyncCode}
-        </span>
+        <SyncCodeTextFrame
+          syncCode={generatedSyncCode}
+          textClassName="moo-onboarding-view__code-text"
+        />
       </div>
       <button onClick={onCopy} className={copyClass}>
         {copied ? "已複製" : "複製同步碼"}

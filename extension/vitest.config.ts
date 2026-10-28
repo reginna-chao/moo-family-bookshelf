@@ -40,7 +40,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.d.ts", "src/**/index.ts"],
+      // secureFrame/main.tsx is the iframe entry script: it runs only in a real extension page.
+      exclude: ["src/**/*.d.ts", "src/**/index.ts", "src/secureFrame/main.tsx"],
       thresholds: {
         lines: 70,
         branches: 70,

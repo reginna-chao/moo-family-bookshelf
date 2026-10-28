@@ -1,3 +1,4 @@
+import { SyncCodeTextFrame } from "../secureFrame/frames";
 import { InviteQrCode } from "./InviteQrCode";
 
 export interface FamilySettingsSyncCodeBlockProps {
@@ -24,9 +25,19 @@ export function FamilySettingsSyncCodeBlock({
     <div className="moo-settings__block">
       <div className="moo-settings__group-label">家庭同步碼</div>
       <div className="moo-settings__sync-code-box">
-        <span data-testid="sync-code" className="moo-settings__sync-code-text">
-          {syncCode ?? "載入中..."}
-        </span>
+        {syncCode === null ? (
+          <span
+            data-testid="sync-code"
+            className="moo-settings__sync-code-text"
+          >
+            載入中...
+          </span>
+        ) : (
+          <SyncCodeTextFrame
+            syncCode={syncCode}
+            textClassName="moo-settings__sync-code-text"
+          />
+        )}
       </div>
       <div className="moo-settings__copy-row">
         <button

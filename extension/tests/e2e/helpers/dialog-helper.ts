@@ -1,11 +1,68 @@
 /** E2E helpers for the Content-Script-injected Dialog: entry button, dialog container, backdrop (the
  *  selectors below) and the React mount point `#moo-family-bookshelf-root`. */
 
-import { type Page, type Locator, expect } from "@playwright/test";
+import {
+  type Page,
+  type Locator,
+  type FrameLocator,
+  expect,
+} from "@playwright/test";
 
 const BUTTON_SELECTOR = "#moo-family-bookshelf-btn";
 const DIALOG_SELECTOR = "#moo-family-bookshelf-dialog";
 const BACKDROP_SELECTOR = "#moo-family-bookshelf-backdrop";
+
+/**
+ * The secure frame's document (#363): `SECURE_FRAME_PATH` in `src/secureFrame/protocol.ts`, which
+ * cannot be imported here — it loads `webextension-polyfill`, which throws outside an extension context.
+ */
+export const SECURE_FRAME_URL = /secure-frame\.html/;
+const SECURE_FRAME_SELECTOR = "iframe[src*='secure-frame.html']";
+
+/**
+ * Each secure frame's `title`, mirroring the presets in `src/secureFrame/frames.tsx` (not importable,
+ * same reason as `SECURE_FRAME_URL`). `syncCode` is shared by the join field and the code on display,
+ * which never appear on the same screen.
+ */
+export const SECURE_FRAME_TITLES = {
+  syncCode: "家庭同步碼",
+  pin: "PIN 輸入",
+  pattern: "圖形驗證",
+  otp: "驗證碼",
+  qr: "QR Code",
+} as const;
+
+export type SecureFrameTitle =
+  (typeof SECURE_FRAME_TITLES)[keyof typeof SECURE_FRAME_TITLES];
+
+/**
+ * The extension-origin iframe titled `title` inside the Dialog (#363): PIN / pattern entry, the
+ * sync-code field and text, the OTP and the QR images render there, a separate frame to Playwright.
+ * Picking by title keeps the locator strict when several frames are open at once (Settings shows the
+ * sync-code text and the invite QR Code). Open copy only: in the real closed `dist/` no locator
+ * reaches the iframe element — use `page.frame({ url: SECURE_FRAME_URL })` there
+ * (`.claude/rules/test.md` → E2E tooling).
+ */
+export function secureFrame(
+  dialog: Locator,
+  title: SecureFrameTitle,
+): FrameLocator {
+  return dialog.frameLocator(`${SECURE_FRAME_SELECTOR}[title='${title}']`);
+}
+
+/** The sync code on display (CreatedView, Settings) inside its secure frame. */
+export function syncCodeText(dialog: Locator): Locator {
+  return secureFrame(dialog, SECURE_FRAME_TITLES.syncCode).locator(
+    "[data-testid='sync-code']",
+  );
+}
+
+/** The join-family sync-code field (IdleView, RecoveryJoinView) inside its secure frame. */
+export function syncCodeInput(dialog: Locator): Locator {
+  return secureFrame(dialog, SECURE_FRAME_TITLES.syncCode).locator(
+    'input[placeholder="輸入家庭同步碼"]',
+  );
+}
 
 /**
  * Wait for the mock page to finish loading and Content Script to inject.
@@ -153,7 +210,7 @@ export async function clickCreateFamily(page: Page): Promise<void> {
  */
 export async function joinFamily(page: Page, syncCode: string): Promise<void> {
   const dialog = page.locator(DIALOG_SELECTOR);
-  await dialog.locator('input[placeholder="輸入家庭同步碼"]').fill(syncCode);
+  await syncCodeInput(dialog).fill(syncCode);
   await dialog.locator("button", { hasText: "加入家庭公開書櫃" }).click();
 }
 
@@ -162,9 +219,9 @@ export async function joinFamily(page: Page, syncCode: string): Promise<void> {
  */
 export async function getSyncCode(page: Page): Promise<string> {
   const dialog = page.locator(DIALOG_SELECTOR);
-  // Sync code is displayed in a span marked with data-testid="sync-code".
-  // It is masked by default; click the reveal button to show the real code.
-  const codeEl = dialog.locator("[data-testid='sync-code']");
+  // The code is a data-testid="sync-code" span inside its secure frame (#363); a masked code is
+  // revealed through the eye button, which stays in the Shadow Root.
+  const codeEl = syncCodeText(dialog);
   try {
     await codeEl.waitFor({ state: "visible", timeout: 15_000 });
   } catch (e) {
@@ -201,9 +258,9 @@ export async function clickContinue(page: Page): Promise<void> {
  */
 export async function getSyncCodeFromSettings(page: Page): Promise<string> {
   const dialog = page.locator(DIALOG_SELECTOR);
-  // The sync code in settings is in a span marked with data-testid="sync-code".
-  // It is masked by default; click the reveal button to show the real code.
-  const codeEl = dialog.locator("[data-testid='sync-code']");
+  // Only the loaded code is framed: the 載入中... placeholder stays a Shadow Root span, so waiting
+  // inside the frame also waits the load out.
+  const codeEl = syncCodeText(dialog);
   await codeEl.waitFor({ state: "visible", timeout: 10_000 });
   await revealSyncCode(dialog);
   return (await codeEl.textContent())?.trim() ?? "";

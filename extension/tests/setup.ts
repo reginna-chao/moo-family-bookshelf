@@ -113,3 +113,9 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 // A valid `runtime.id` makes the polyfill return `browser` verbatim (no re-wrap); same spies as `chrome`.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).browser = extensionApiMock;
+
+// jsdom never loads secure-frame.html: render the view inline (see SecureFrameStub's JSDoc).
+vi.mock("../src/secureFrame/SecureFrame", async () => {
+  const { SecureFrameStub } = await import("./helpers/secureFrameStub");
+  return { SecureFrame: SecureFrameStub };
+});

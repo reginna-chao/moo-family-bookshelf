@@ -31,6 +31,9 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, "src/dialog/index.html"),
         background: resolve(__dirname, "src/background/index.ts"),
+        // At the project root so the artifact lands at dist/secure-frame.html (html entries keep
+        // their source-relative path), matching the manifest's web_accessible_resources entry.
+        "secure-frame": resolve(__dirname, "secure-frame.html"),
       },
       output: {
         entryFileNames: "[name].js",

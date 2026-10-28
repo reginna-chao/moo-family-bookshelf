@@ -2757,7 +2757,9 @@
   gap: 8px;
 }
 
+/* Also the loading text in the box; with a code it renders inside the secure frame. */
 .moo-settings__sync-code-text {
+  display: block;
   flex: 1;
   word-break: break-all;
   font-size: 13px;
@@ -3465,14 +3467,11 @@
   margin-bottom: 6px;
 }
 
-/* No selection: dragging (or copying) a selection holding the data-URL QR
-   would serialise it into the page's dragstart text/html (#362). */
+/* The QR image itself sits in the secure frame (.moo-secure-frame__qr). */
 .moo-qr-link__box {
   display: flex;
   justify-content: center;
   padding: 8px 0;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 /* CTA text pill layered over the blurred placeholder. */
@@ -3585,13 +3584,11 @@
   padding: 12px;
 }
 
-/* No selection: same reason as .moo-qr-link__box. */
+/* Same as .moo-qr-link__box: the image sits in the secure frame. */
 .moo-invite-qr__box {
   display: flex;
   justify-content: center;
   padding: 8px 0;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .moo-invite-qr__hint {
@@ -3706,7 +3703,9 @@
   gap: 8px;
 }
 
+/* Rendered inside the secure frame, where no flex box blockifies it. */
 .moo-onboarding-view__code-text {
+  display: block;
   flex: 1;
   word-break: break-all;
   font-size: 13px;
@@ -3986,7 +3985,10 @@
   margin-bottom: 8px;
 }
 
+/* Rendered inside the secure frame, outside .moo-verify__otp-display's centring. */
 .moo-verify__otp-code {
+  display: block;
+  text-align: center;
   font-size: 24px;
   font-weight: 700;
   font-family: monospace;
@@ -4076,6 +4078,18 @@
 
 /* ── PatternLock ──────────────────────────────────────────────────────── */
 
+/* 16px after the widget's last element (確認, its error or 重新設定). Padding, not a
+   trailing margin, so the secure frame's height report (useReportHeight) counts it. */
+.moo-pattern-lock {
+  padding-bottom: 16px;
+}
+
+/* 確認 spans the widget (.moo-button--block) at the PIN submit's 44px height. */
+.moo-pattern-lock__confirm {
+  padding: 0 20px;
+  height: 44px;
+}
+
 /* touch-action:none keeps drag gestures from scrolling the page mid-draw. */
 .moo-pattern-lock__svg {
   touch-action: none;
@@ -4134,10 +4148,8 @@
 }
 
 /* Fixed 44px height + horizontal-only padding keep the submit aligned with the
-   200px PIN field in its row; solid primary look comes from .moo-button.
-   PatternLock's 確認 reuses the same metrics so both widgets' buttons match. */
-.moo-pin-input__submit,
-.moo-pattern-lock__confirm {
+   200px PIN field in its row; solid primary look comes from .moo-button. */
+.moo-pin-input__submit {
   padding: 0 20px;
   height: 44px;
 }
@@ -4290,4 +4302,54 @@
    heading's own top margin collapses over it. */
 .moo-sync-host-note--reauth {
   margin-bottom: 12px;
+}
+
+/* ── Secure frame (extension-origin iframe, src/secureFrame/) ─────────── */
+/* Host side (only the height is inline). Same color-scheme as the frame document,
+   or Chrome paints an opaque backdrop behind the transparent frame. */
+.moo-secure-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+}
+
+/* Host side: a frame whose content keeps 4px of room on each side (.moo-secure-frame__field)
+   spills that room past its box, so the field lines up as before and its focus ring shows. */
+.moo-secure-frame--bleed {
+  margin: -4px;
+  width: calc(100% + 8px);
+}
+
+/* Frame side: room for the input's focus ring, which the frame edge would otherwise cut. */
+.moo-secure-frame__field {
+  padding: 4px;
+}
+
+.moo-secure-frame__field > .moo-form-input {
+  display: block;
+}
+
+/* Replaces the iframe after it was reloaded or navigated away. */
+.moo-secure-frame__tampered {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--moo-danger-alt);
+}
+
+/* Frame side: the pattern view's focus target, focused by script only. */
+.moo-secure-frame__focus:focus {
+  outline: none;
+}
+
+/* Frame side: the QR image can neither be selected nor dragged out. */
+.moo-secure-frame__qr {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.moo-secure-frame__qr img {
+  display: block;
+  margin: 0 auto;
 }

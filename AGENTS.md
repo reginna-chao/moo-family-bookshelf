@@ -49,6 +49,7 @@ moo-family-bookshelf/
 │   │   │   ├── FamilyShelf.tsx      # Aggregated family bookshelf
 │   │   │   └── FamilySettings.tsx   # Sync code, members, leave family
 │   │   ├── settings/            # Extension settings (custom API endpoint, etc.)
+│   │   ├── secureFrame/         # Extension-origin iframe (secure-frame.html) hosting the secret-entry / credential screens; MessageChannel + nonce protocol
 │   │   ├── content/             # Content Script (scrape book list + inject Dialog)
 │   │   ├── background/         # Service Worker
 │   │   └── api/                # API client (configurable endpoint)

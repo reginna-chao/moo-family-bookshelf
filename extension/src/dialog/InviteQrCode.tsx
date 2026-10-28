@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { buildInviteUrl } from "../constants";
+import { QrImageFrame } from "../secureFrame/frames";
+
+const INVITE_QR_SIZE = 200;
 
 interface InviteQrCodeProps {
   syncCode: string;
@@ -21,7 +24,7 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
       try {
         const QRCode = await import("qrcode");
         const dataUrl = await QRCode.default.toDataURL(inviteUrl, {
-          width: 200,
+          width: INVITE_QR_SIZE,
           margin: 2,
         });
         if (!cancelled) {
@@ -55,13 +58,10 @@ export function InviteQrCode({ syncCode }: InviteQrCodeProps) {
 
       {!loading && !error && qrDataUrl && (
         <div className="moo-invite-qr__box">
-          <img
-            src={qrDataUrl}
+          <QrImageFrame
+            dataUrl={qrDataUrl}
             alt="掃描此 QR Code 邀請家人加入書櫃"
-            width={200}
-            height={200}
-            // Not draggable for the same reason as the login QR in QrCodeLink.tsx.
-            draggable={false}
+            size={INVITE_QR_SIZE}
           />
         </div>
       )}

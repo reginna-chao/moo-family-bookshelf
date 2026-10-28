@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
-import { PinInput } from "./PinInput";
-import { PatternLock } from "./PatternLock";
+import { OtpCodeFrame, PatternFrame, PinFrame } from "../secureFrame/frames";
 import { CurrentSecretStep } from "./CurrentSecretStep";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { useVerifyMethodFlow } from "./useVerifyMethodFlow";
@@ -149,7 +148,7 @@ export function VerificationSettings({
 
       {/* PIN setup */}
       {showSetup && selectedMethod === "pin" && (
-        <PinInput
+        <PinFrame
           mode="setup"
           onComplete={(pin) => void handleSave("pin", pin, currentSecret)}
           error={stepError}
@@ -158,7 +157,7 @@ export function VerificationSettings({
 
       {/* Pattern setup */}
       {showSetup && selectedMethod === "pattern" && (
-        <PatternLock
+        <PatternFrame
           mode="setup"
           onComplete={(p) => void handleSave("pattern", p, currentSecret)}
           error={stepError}
@@ -188,7 +187,7 @@ export function VerificationSettings({
         <div className="moo-verify__otp">
           {otpCode ? (
             <div className="moo-verify__otp-display">
-              <div className="moo-verify__otp-code">{otpCode}</div>
+              <OtpCodeFrame code={otpCode} />
               <div className="moo-verify__otp-countdown">
                 {otpCountdown > 0 ? `${otpCountdown} 秒後過期` : "已過期"}
               </div>
