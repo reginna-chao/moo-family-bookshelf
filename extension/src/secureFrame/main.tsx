@@ -7,7 +7,8 @@ import cssText from "../dialog/styles.css?raw";
 import { EXT_ORIGIN, acceptHello, type ViewName } from "./protocol";
 import { FrameApp } from "./FrameApp";
 
-// styles.css pins font and colour on `:host`, which does not exist in a plain document.
+// styles.css declares its variables on `:host, :root` (so `var(--moo-text)` resolves here) but sets
+// font / line-height on `:host` only, which a plain document lacks: restate them on body.
 const BASE_CSS = `html, body { margin: 0; background: transparent; }
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: var(--moo-text); line-height: normal; }`;
 

@@ -15,8 +15,8 @@ export interface FrameHandlers {
   onBlur?: () => void;
 }
 
-/** No `ready` this long after the first load: the frame never got the hello (e.g. it was
- *  navigated away before that load), so it is dropped like a reloaded one. One timer, no polling. */
+/** No `ready` this long after the frame is mounted (its first load may fire unobserved, or never):
+ *  it never got the hello, so it is dropped like a reloaded one. One timer, no polling. */
 export const READY_TIMEOUT_MS = 10_000;
 
 // Display views never take focus; entry views only when the host asks (`autoFocus`).
@@ -112,6 +112,8 @@ export function useSecureFrameChannel<V extends ViewName>({
       portRef.current = null;
       setTampered(true);
     };
+    // Runs from mount, not from the first `load`: a load missed by the listener still ends in the notice.
+    readyTimerRef.current = setTimeout(dropFrame, READY_TIMEOUT_MS);
     const handleMessage = (event: MessageEvent) => {
       const message: unknown = event.data;
       if (!isFrameToHostMessage(message)) return;
@@ -141,7 +143,6 @@ export function useSecureFrameChannel<V extends ViewName>({
         dropFrame();
         return;
       }
-      readyTimerRef.current = setTimeout(dropFrame, READY_TIMEOUT_MS);
       const target = iframe.contentWindow;
       if (!target) return;
       const channel = new MessageChannel();

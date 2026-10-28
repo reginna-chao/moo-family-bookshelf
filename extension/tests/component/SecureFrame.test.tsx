@@ -494,6 +494,30 @@ describe("SecureFrame", () => {
     expect(READY_TIMEOUT_MS).toBe(10_000);
   });
 
+  it("drops the frame when `load` never fires and no `ready` arrives within the timeout", () => {
+    vi.useFakeTimers();
+    render(
+      <SecureFrame
+        view="pin"
+        props={{ mode: "verify" }}
+        title="PIN 輸入"
+        placeholderHeight={1}
+      />,
+    );
+    // No fireLoad: the load event fired before the listener attached, or never fired at all.
+    const hello = spyHello();
+
+    act(() => {
+      vi.advanceTimersByTime(READY_TIMEOUT_MS);
+    });
+
+    expect(screen.queryByTitle("PIN 輸入")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(TAMPERED_TEXT);
+    expect(screen.getByRole("alert")).toHaveClass("moo-secure-frame__tampered");
+    expect(hello).not.toHaveBeenCalled();
+    expect(FakeChannel.created).toHaveLength(0);
+  });
+
   it("keeps the frame when `ready` arrives in time", () => {
     vi.useFakeTimers();
     render(
