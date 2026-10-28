@@ -3,7 +3,10 @@ import type { Page } from "@playwright/test";
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
 import { checkLendFlow } from "../../scripts/verify-selectors-flows";
 import { SITES } from "../../scripts/verify-selectors-page";
-import { buildSpecs } from "../../scripts/verify-selectors-specs";
+import {
+  buildSpecs,
+  type SelectorSpec,
+} from "../../scripts/verify-selectors-specs";
 
 /**
  * Regression for the manual live selector check (`pnpm e2e:verify:selectors`): a Playwright step
@@ -64,6 +67,74 @@ describe("checkLendFlow", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining(
         "流程中斷：locator.hover: Timeout 30000ms exceeded.",
+      ),
+    );
+  });
+
+  it("reports the flow broken instead of dropping a lend row that no stage checks", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const orphan: SelectorSpec = {
+      selector: READMOO_SELECTORS.title,
+      description: "孤兒列",
+      required: true,
+      appliesTo: "both",
+      keys: ["title"],
+    };
+    const specs = [...buildSpecs().LEND_FLOW_SELECTORS, orphan];
+    const { page } = fakePage(new Error("hover must not be reached"));
+
+    const results = await checkLendFlow(
+      page,
+      SITES[0],
+      READMOO_SELECTORS,
+      specs,
+    );
+
+    expect(results).toHaveLength(specs.length);
+    expect(
+      results.every((r) => !r.found && r.skippedReason === undefined),
+    ).toBe(true);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "流程中斷：借出清單有 1 列沒有被任何階段檢查：孤兒列",
+      ),
+    );
+  });
+
+  it("still names the orphan lend row when another row lands in two stages", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    // Detail + host stages: one extra staged row offsets the orphan in a count-only check.
+    const dup: SelectorSpec = {
+      selector: `${READMOO_SELECTORS.lendIcon} ${READMOO_SELECTORS.lendButtonHost}`,
+      description: "重複列",
+      required: false,
+      appliesTo: "both",
+      keys: ["lendIcon", "lendButtonHost"],
+    };
+    const orphan: SelectorSpec = {
+      selector: READMOO_SELECTORS.title,
+      description: "孤兒列",
+      required: true,
+      appliesTo: "both",
+      keys: ["title"],
+    };
+    const specs = [...buildSpecs().LEND_FLOW_SELECTORS, dup, orphan];
+    const { page } = fakePage(new Error("hover must not be reached"));
+
+    const results = await checkLendFlow(
+      page,
+      SITES[0],
+      READMOO_SELECTORS,
+      specs,
+    );
+
+    expect(results).toHaveLength(specs.length);
+    expect(
+      results.every((r) => !r.found && r.skippedReason === undefined),
+    ).toBe(true);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "流程中斷：借出清單有 1 列沒有被任何階段檢查：孤兒列",
       ),
     );
   });

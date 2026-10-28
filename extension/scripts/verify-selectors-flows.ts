@@ -160,8 +160,27 @@ interface LendStages {
   leftover: SelectorSpec[];
 }
 
+/** Throw unless every lend row sits in exactly one stage; `runFlow` then reports the flow ❌. */
+function assertEveryLendSpecStaged(
+  specs: readonly SelectorSpec[],
+  stages: LendStages,
+): void {
+  // Guards against a new lend row that no stage checks (it would vanish from the report).
+  const staged = Object.values(stages).flat();
+  const orphans = specs.filter((spec) => !staged.includes(spec));
+  if (orphans.length > 0) {
+    const names = orphans.map((spec) => spec.description).join("、");
+    throw new Error(
+      `借出清單有 ${orphans.length} 列沒有被任何階段檢查：${names}`,
+    );
+  }
+  if (staged.length !== specs.length) {
+    throw new Error("借出清單有列同時被多個階段檢查");
+  }
+}
+
 function splitLendSpecs(specs: readonly SelectorSpec[]): LendStages {
-  return {
+  const stages: LendStages = {
     card: specsWith(
       specs,
       "libraryItem",
@@ -176,6 +195,8 @@ function splitLendSpecs(specs: readonly SelectorSpec[]): LendStages {
     member: specsWith(specs, "lendMemberName", "lendMemberAvatar"),
     leftover: specsWith(specs, "anyDialogClose"),
   };
+  assertEveryLendSpecStaged(specs, stages);
+  return stages;
 }
 
 /** Dispatch a click on the card's 「⋯」 button, as `openBookDetailModal` does; false when absent. */

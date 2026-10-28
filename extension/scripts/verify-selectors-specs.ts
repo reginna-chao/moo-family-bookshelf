@@ -297,7 +297,7 @@ function lendFlowSpecs(s: SelectorMap): SelectorSpec[] {
     },
     {
       selector: `${s.bookDetailModal} ${s.lendButtonHost}`,
-      description: "「借出」按鈕（圖示外層可點擊的元素）",
+      description: "「借出」按鈕（圖示外層可點擊的元素）（以 closest 評估）",
       required: true,
       appliesTo: "both",
       keys: ["lendButtonHost"],
