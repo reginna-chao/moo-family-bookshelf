@@ -11,7 +11,10 @@ export function scrapeUserEmail(): string | null {
   // Email is a leaf div (no child elements) shaped like an email. More than one distinct
   // candidate means we cannot tell which is the account's (#368), so none is returned.
   const emails = new Set<string>();
-  for (const el of panel.querySelectorAll<HTMLElement>("div[style]")) {
+  const candidates = panel.querySelectorAll<HTMLElement>(
+    READMOO_SELECTORS.profileStyledLeaf,
+  );
+  for (const el of candidates) {
     if (el.childElementCount > 0) continue;
     const text = el.textContent?.trim() ?? "";
     if (isEmailShaped(text)) emails.add(text);
@@ -25,7 +28,7 @@ export function scrapeDisplayName(): string | null {
   const panel = document.querySelector(READMOO_SELECTORS.mePanel);
   if (!panel) return null;
   const nameEl = panel.querySelector<HTMLElement>(
-    "div[style*='font-size: 16px']",
+    READMOO_SELECTORS.profileDisplayName,
   );
   return nameEl?.textContent?.trim() || null;
 }

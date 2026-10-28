@@ -56,7 +56,7 @@
 - **觸發方式**：頁面載入時自動注入入口按鈕，使用者點擊後開啟 Dialog
 - **爬取內容**：書名、作者、ISBN、封面圖片 URL、讀墨連結、書籍 ID
 - **注意**：僅爬取公開可見的書單資訊，不涉及帳號憑證
-- **讀墨網址**：讀墨把書櫃前端搬到新主機並加上路徑前綴（新站 `https://next.readmoo.com/read/#/library`，注意 `/read`），舊站 `https://read.readmoo.com/#/library` 仍在線，兩者都必須支援。讀墨主機、hash 路由與書櫃 DOM selector 只定義在 `shared/src/config/readmoo.ts`，任何地方都不得另行寫死
+- **讀墨網址**：讀墨把書櫃前端搬到新主機並加上路徑前綴（新站 `https://next.readmoo.com/read/#/library`，注意 `/read`），舊站 `https://read.readmoo.com/#/library` 仍在線，兩者都必須支援。讀墨主機與 hash 路由只定義在 `shared/src/config/readmoo.ts`；書櫃、個人資料、篩選、搜尋、借出、頁面載入用到的 DOM selector 只定義在 `shared/src/config/readmooSelectors.ts`（由 `readmoo.ts` 轉出）。任何地方都不得另行寫死
 
 ### 2.2 Dialog UI (React)
 
@@ -1177,7 +1177,7 @@ interface PublicShelfSnapshot {
 
 ## 十三、建置與驗證腳本（extension/scripts）
 
-`extension/scripts/` 是在 Node（`tsx`）下執行的建置與驗證腳本，由 `extension/tsconfig.scripts.json` 納入 `pnpm typecheck`。腳本的程式碼註解最多兩行，較長的設計理由集中在本節，註解以「`docs/architecture.md → <小節名稱>`」指回這裡。E2E 專用的兩支腳本（`build-e2e.ts`、`verify-selectors.ts`）的規則寫在 `.claude/rules/test.md` → E2E tooling (extension/scripts)。版本號的同步見〈九、版本管理〉的「版本同步機制」。
+`extension/scripts/` 是在 Node（`tsx`）下執行的建置與驗證腳本，由 `extension/tsconfig.scripts.json` 納入 `pnpm typecheck`。腳本的程式碼註解最多兩行，較長的設計理由集中在本節，註解以「`docs/architecture.md → <小節名稱>`」指回這裡。E2E 專用的腳本（`build-e2e.ts`，以及 `verify-selectors.ts` 和它拆出的 `verify-selectors-specs.ts`、`verify-selectors-page.ts`、`verify-selectors-flows.ts`）的規則寫在 `.claude/rules/test.md` → E2E tooling (extension/scripts)。版本號的同步見〈九、版本管理〉的「版本同步機制」。
 
 ### Chrome 建置檢查（verify-build.ts）
 
@@ -1353,7 +1353,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **找書靠讀墨自己的搜尋**：讀墨書櫃是無限捲動，要借出的書可能根本不在目前渲染的 DOM 裡。`readmoo-search.ts` 操作讀墨內建的搜尋視窗，用書名把書櫃篩到目標書，再重新蓋上 fiber id，以 `bookId` 精確比對卡片。嚴格模式：就算搜尋只回一張卡，也要求 `data-moo-book-id` 完全相符，不以書名退而求其次（產品決定）。輸入框是 React 受控元件，所以用原生的 value setter 設值再送出 `input` 事件，直接指定 `input.value` 會被 React 忽略。
 - **還原使用者原本的搜尋**：`previousQuery` 讓呼叫端在整個流程結束後把書櫃還原成使用者原本的搜尋狀態（有關鍵字就重新套用，沒有就送出空查詢清掉篩選）。**時機**：成功路徑上不能在中途還原——還原會重新渲染書櫃、讓這張卡片的節點脫離 DOM，而之後開啟詳情視窗的點擊必須打在仍掛著的卡片上；呼叫端只在整個流程結束後還原。搜尋成功之後的任何失敗則由這裡負責還原，使用者不會被留在篩選過的書櫃；**順序**：先關掉殘留的視窗再還原（`clickLendButton` 可能已經開了詳情視窗，還原會重新渲染書櫃，仍開著的視窗會疊在上面）。還原是盡力而為，絕不蓋掉原本要重新拋出的錯誤。
 - **書櫃網址跟著目前的主機**：每次呼叫才解析（不是模組常數），新舊兩個主機都讓使用者留在原本的網站，兩者的路徑前綴不同（`/read/#/library` 與 `/#/library`）。
-- 每個函式都沒有狀態，可以各自測試；逾時可以注入，失敗一律拋出 `ReadmooLendError`。`readmoo-dom.ts` 是兩者共用的底層，`readmoo-lend.ts` 再匯出其中的 DOM 基本函式，打破 `readmoo-lend` ↔ `readmoo-search` 的模組循環。
+- 每個函式都沒有狀態，可以各自測試；逾時可以注入，失敗一律拋出 `ReadmooLendError`。`readmoo-dom.ts` 是兩者共用的底層，`readmoo-lend.ts` 再匯出其中的 DOM 基本函式，打破 `readmoo-lend` ↔ `readmoo-search` 的模組循環。借出對話框的成員讀取與點選、關閉對話框的函式和預設逾時（`READMOO_LEND_DEFAULTS`）放在 `readmoo-lend-dialog.ts`，由 `readmoo-lend.ts` 轉出，呼叫端一律從 `readmoo-lend.ts` 引入；`readmoo-lend-dialog.ts` 不得引入 `readmoo-lend.ts`，以免形成循環。
 
 ---
 

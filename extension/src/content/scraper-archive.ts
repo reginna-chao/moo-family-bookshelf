@@ -47,7 +47,7 @@ function findFilterButton(): HTMLElement | null {
     READMOO_SELECTORS.topNavBtn,
   );
   for (const btn of btns) {
-    if (btn.querySelector("i.mo-filter")) return btn;
+    if (btn.querySelector(READMOO_SELECTORS.filterIcon)) return btn;
   }
   return null;
 }
@@ -115,11 +115,11 @@ export async function scrapeArchivedBooks(
     filterBtn.click();
 
     // Step 2: Wait for filter modal
-    const modal = await waitForElement(".filter-modal.modal.show", 3000);
+    const modal = await waitForElement(READMOO_SELECTORS.filterModalOpen, 3000);
     if (!modal) return failedScrape();
 
     // Step 3: Click "已封存書籍" option
-    if (!clickElement('[data-key="archive"][data-value="true"]')) {
+    if (!clickElement(READMOO_SELECTORS.archiveFilterOption)) {
       return failedScrape();
     }
 
@@ -127,7 +127,7 @@ export async function scrapeArchivedBooks(
     await wait(300);
 
     // Step 4: Click "確定" button
-    if (!clickElement(".filter-modal .modal-footer .btn-primary")) {
+    if (!clickElement(READMOO_SELECTORS.filterConfirm)) {
       return failedScrape();
     }
 
@@ -147,13 +147,13 @@ export async function scrapeArchivedBooks(
       if (clearBtn) {
         clearBtn.click();
         const clearModal = await waitForElement(
-          ".filter-modal.modal.show",
+          READMOO_SELECTORS.filterModalOpen,
           3000,
         );
         if (clearModal) {
-          clickElement(".filter-modal .modal-footer .btn-outline-primary");
+          clickElement(READMOO_SELECTORS.filterClear);
           await wait(300);
-          clickElement(".filter-modal .modal-footer .btn-primary");
+          clickElement(READMOO_SELECTORS.filterConfirm);
           await waitForLibraryReload(10000);
         } else {
           window.location.hash = "#/library";

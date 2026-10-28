@@ -1,9 +1,13 @@
 /** Readmoo SPA page-ready detection: the page has loaded once #full-page-spinner gains `hide`. */
 
+import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
+
 export const PAGE_READY_TIMEOUT_MS = 5000;
 
-const SPINNER_ID = "full-page-spinner";
-const HIDE_CLASS = "hide";
+/** True once the spinner carries Readmoo's `hide` class. */
+function isSpinnerHidden(spinner: Element): boolean {
+  return spinner.matches(READMOO_SELECTORS.pageSpinnerHidden);
+}
 
 /**
  * Wait for Readmoo page to finish loading by detecting #full-page-spinner's hide class.
@@ -15,10 +19,10 @@ export function waitForPageReady(signal?: AbortSignal): Promise<void> {
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
 
-  const spinner = document.getElementById(SPINNER_ID);
+  const spinner = document.querySelector(READMOO_SELECTORS.pageSpinner);
 
   // Spinner already hidden — page is ready
-  if (spinner?.classList.contains(HIDE_CLASS)) {
+  if (spinner && isSpinnerHidden(spinner)) {
     return Promise.resolve();
   }
 
@@ -74,7 +78,7 @@ function watchSpinnerClass(
   observers: MutationObserver[],
 ): void {
   const observer = new MutationObserver(() => {
-    if (spinner.classList.contains(HIDE_CLASS)) onReady();
+    if (isSpinnerHidden(spinner)) onReady();
   });
   observer.observe(spinner, { attributes: true, attributeFilter: ["class"] });
   observers.push(observer);
@@ -86,13 +90,13 @@ function watchForSpinnerAppearance(
   observers: MutationObserver[],
 ): void {
   const bodyObserver = new MutationObserver(() => {
-    const spinner = document.getElementById(SPINNER_ID);
+    const spinner = document.querySelector(READMOO_SELECTORS.pageSpinner);
     if (!spinner) return;
 
     // Stop watching for appearance
     bodyObserver.disconnect();
 
-    if (spinner.classList.contains(HIDE_CLASS)) {
+    if (isSpinnerHidden(spinner)) {
       onReady();
       return;
     }

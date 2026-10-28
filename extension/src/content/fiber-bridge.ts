@@ -65,8 +65,6 @@ const ATTR_LIST_TOTAL = "data-moo-list-total";
 /** On `<html>`: every book id Readmoo holds for the account, comma-joined; removed when unreadable.
  *  Must equal `ATTR_LIBRARY_IDS` in `fiber-data.ts`. */
 const ATTR_LIBRARY_IDS = "data-moo-library-ids";
-/** Parent row of the library cards — the host lookup start when no card renders. */
-const LIBRARY_ROW_SELECTOR = ".books .row";
 /** Upper bound on `return` hops (the host sits ~8 above a card, ~4 above the row). */
 const MAX_HOST_DEPTH = 40;
 /** Host lists whose union is the account's whole library (lent-out books may sit only in the last). */
@@ -111,7 +109,7 @@ function findLibraryHostProps(start: Element): HostProps | null {
 function readLibraryHostProps(): HostProps | null {
   const start =
     document.querySelector(READMOO_SELECTORS.libraryItem) ??
-    document.querySelector(LIBRARY_ROW_SELECTOR);
+    document.querySelector(READMOO_SELECTORS.libraryRow);
   return start ? findLibraryHostProps(start) : null;
 }
 

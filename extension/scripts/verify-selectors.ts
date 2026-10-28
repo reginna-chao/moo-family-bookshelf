@@ -1,22 +1,37 @@
-/** Check the scraper's selectors against live Readmoo (new + legacy site); `--update-mock` regenerates the fixture.
- *  Usage, exit code, sanitizing, guard cards: .claude/rules/test.md → E2E tooling (extension/scripts). */
+/** Check Readmoo's selectors and filter / search / lend flows on the live new + legacy site; `--update-mock`
+ *  regenerates the fixture. Usage, exit code, `--break`: .claude/rules/test.md → E2E tooling (extension/scripts). */
 
-import { chromium, type Locator, type Page } from "@playwright/test";
+import { chromium, type Page } from "@playwright/test";
 import { writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
-  LIBRARY_HASH,
-  ME_HASH,
-  READMOO_HOST_LEGACY,
-  READMOO_HOST_NEXT,
+  PROFILE_DISPLAY_NAME_STYLE,
   READMOO_SELECTORS,
-  readmooAppUrl,
 } from "moo-family-bookshelf-shared/config/readmoo";
 import {
   EMAIL_SHAPE,
   MAX_EMAIL_LENGTH,
 } from "moo-family-bookshelf-shared/account/emailShape";
+import {
+  buildSpecs,
+  type CheckResult,
+  type SelectorKey,
+  type SelectorMap,
+  type SelectorSpecs,
+} from "./verify-selectors-specs";
+import {
+  NAV_OPTIONS,
+  SITES,
+  checkSelectors,
+  waitForLibrary,
+  type Site,
+} from "./verify-selectors-page";
+import {
+  checkArchiveFlow,
+  checkLendFlow,
+  checkSearchFlow,
+} from "./verify-selectors-flows";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_OUTPUT = resolve(
@@ -28,128 +43,12 @@ const MOCK_OUTPUT = resolve(
   "mock-readmoo.html",
 );
 
-type SiteId = "next" | "legacy";
-
-interface Site {
-  id: SiteId;
-  label: string;
-  libraryUrl: string;
-  meUrl: string;
-  /** Only the primary site decides the process exit code. */
-  primary: boolean;
-}
-
-const SITES: readonly Site[] = [
-  {
-    id: "next",
-    label: `新站 ${READMOO_HOST_NEXT}`,
-    libraryUrl: readmooAppUrl(READMOO_HOST_NEXT, LIBRARY_HASH),
-    meUrl: readmooAppUrl(READMOO_HOST_NEXT, ME_HASH),
-    primary: true,
-  },
-  {
-    id: "legacy",
-    label: `舊站 ${READMOO_HOST_LEGACY}`,
-    libraryUrl: readmooAppUrl(READMOO_HOST_LEGACY, LIBRARY_HASH),
-    meUrl: readmooAppUrl(READMOO_HOST_LEGACY, ME_HASH),
-    primary: false,
-  },
-];
-
-interface SelectorSpec {
-  selector: string;
-  description: string;
-  required: boolean;
-  /** "both" = expected on every site; otherwise only on the named one. */
-  appliesTo: SiteId | "both";
-}
-
 const ITEM = READMOO_SELECTORS.libraryItem;
 
-// Library + #/me selectors checked pass/fail, grouped by page. Not checked: readmoo-lend.ts's
-// detailTrigger* selectors; borrowedBadge is only counted during capture.
-const LIBRARY_SELECTORS: readonly SelectorSpec[] = [
-  {
-    selector: ITEM,
-    description: "書籍容器",
-    required: true,
-    appliesTo: "both",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.title}`,
-    description: "書名（title 屬性）",
-    required: true,
-    appliesTo: "both",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.coverImg}`,
-    description: "封面圖片",
-    required: true,
-    appliesTo: "both",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.overlay}`,
-    description: "hover 後的操作區（新站）",
-    required: true,
-    appliesTo: "next",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.overlayLegacy}`,
-    description: "hover 後的操作區（舊站 fallback）",
-    required: true,
-    appliesTo: "legacy",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.readerLink}`,
-    description: "閱讀連結（含 bookId，新站）",
-    required: true,
-    appliesTo: "next",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.readerLinkLegacy}`,
-    description: "閱讀連結（含 bookId，舊站 fallback）",
-    required: true,
-    appliesTo: "legacy",
-  },
-  {
-    selector: `${ITEM} ${READMOO_SELECTORS.privacyId}`,
-    description: "fallback bookId",
-    required: false,
-    appliesTo: "both",
-  },
-  {
-    selector: READMOO_SELECTORS.topNavBtn,
-    description: "頂部導覽列按鈕",
-    required: false,
-    appliesTo: "both",
-  },
-];
-
-const ME_SELECTORS: readonly SelectorSpec[] = [
-  {
-    selector: READMOO_SELECTORS.mePanel,
-    description: "個人資料面板",
-    required: true,
-    appliesTo: "both",
-  },
-  {
-    selector: `${READMOO_SELECTORS.mePanel} div[style*='font-size: 16px']`,
-    description: "顯示名稱",
-    required: true,
-    appliesTo: "both",
-  },
-];
-
-interface CheckResult {
-  siteId: SiteId;
-  selector: string;
-  description: string;
-  /** Required *on this site* (spec.required narrowed by applicability). */
-  required: boolean;
-  applicable: boolean;
-  found: boolean;
-  count: number;
-  sample?: string;
+/** The selector map and check lists of one run; `--break` swaps one selector in both. */
+interface RunInput {
+  selectors: SelectorMap;
+  specs: SelectorSpecs;
 }
 
 interface SiteReport {
@@ -161,104 +60,24 @@ interface SiteReport {
   meHtml: string;
 }
 
-/** How to preview a matched element in the console. */
-type SampleMode = "attr" | "text";
+const BREAK_FLAG = "--break=";
 
-/** Pick a representative sample for the matched element. */
-async function readSample(
-  locator: Locator,
-  selector: string,
-  mode: SampleMode,
-): Promise<string | undefined> {
-  if (mode === "text") {
-    return (await locator.textContent())?.trim() || undefined;
-  }
-  if (selector.includes("[title]")) {
-    return (await locator.getAttribute("title")) ?? undefined;
-  }
-  if (selector.includes("[src]")) {
-    return (await locator.getAttribute("src")) ?? undefined;
-  }
-  if (selector.includes("[href]")) {
-    return (await locator.getAttribute("href")) ?? undefined;
-  }
-  if (selector.includes("[id^=")) {
-    return (await locator.getAttribute("id")) ?? undefined;
-  }
-  return undefined;
+function isSelectorKey(key: string): key is SelectorKey {
+  return Object.prototype.hasOwnProperty.call(READMOO_SELECTORS, key);
 }
 
-function resultIcon(r: CheckResult): string {
-  if (!r.applicable) return r.found ? "ℹ️" : "➖";
-  if (r.found) return "✅";
-  return r.required ? "❌" : "⚠️";
-}
-
-async function checkSelectors(
-  page: Page,
-  specs: readonly SelectorSpec[],
-  site: Site,
-  sampleMode: SampleMode,
-): Promise<CheckResult[]> {
-  const results: CheckResult[] = [];
-  for (const spec of specs) {
-    const applicable = spec.appliesTo === "both" || spec.appliesTo === site.id;
-    const count = await page.locator(spec.selector).count();
-    const found = count > 0;
-    const sample = found
-      ? await readSample(
-          page.locator(spec.selector).first(),
-          spec.selector,
-          sampleMode,
-        )
-      : undefined;
-
-    const result: CheckResult = {
-      siteId: site.id,
-      selector: spec.selector,
-      description: spec.description,
-      required: spec.required && applicable,
-      applicable,
-      found,
-      count,
-      sample,
-    };
-    results.push(result);
-
-    const countStr = found ? `(${count} 個)` : "";
-    const sampleStr = sample ? ` → ${sample}` : "";
-    console.log(
-      `  ${resultIcon(result)} ${spec.selector} — ${spec.description} ${countStr}${sampleStr}`,
-    );
-  }
-  return results;
-}
-
-/** Wait for the library grid; the primary site also allows a 5-min manual login, the legacy site
- *  gives up quickly so a logged-out legacy account cannot stall (or fail) the run. */
-async function waitForLibrary(page: Page, site: Site): Promise<boolean> {
-  const libraryItem = page.locator(ITEM).first();
-  const quick = await libraryItem
-    .waitFor({ state: "visible", timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (quick) return true;
-
-  if (!site.primary) {
-    console.log(
-      `\n⚠️  ${site.label}：未偵測到書籍（可能未登入或無書），略過檢查。`,
-    );
-    return false;
-  }
-
+/** The selectors to check: `READMOO_SELECTORS`, or (dev-only `--break=<key>`) an in-memory copy with
+ *  that key replaced so the run proves the breakage is reported; null for an unknown key. */
+function selectorsForRun(argv: readonly string[]): SelectorMap | null {
+  const flag = argv.find((arg) => arg.startsWith(BREAK_FLAG));
+  if (!flag) return READMOO_SELECTORS;
+  const key = flag.slice(BREAK_FLAG.length);
+  if (!isSelectorKey(key)) return null;
+  const broken = `.moo-verify-break-${key}`;
   console.log(
-    "\n⚠️  未偵測到書籍。請在 Chrome 中登入讀墨，登入後會自動繼續...",
+    `🧪 --break：${key} 改成 ${broken}（只在這次執行的記憶體中，不改任何檔案）\n`,
   );
-  console.log(`   （登入後請導航到書櫃頁面：${site.libraryUrl}）\n`);
-  return libraryItem
-    .waitFor({ state: "visible", timeout: 300_000 }) // 5 min to log in
-    .then(() => true)
-    .catch(() => false);
+  return { ...READMOO_SELECTORS, [key]: broken };
 }
 
 /** Capture up to 5 hovered `.library-item` fragments plus the nav bar. */
@@ -292,15 +111,18 @@ async function captureLibraryHtml(page: Page): Promise<string> {
 }
 
 /** Replicate scrapeUserEmail's rule (exactly one email-shaped leaf, #368) on the live profile panel. */
-async function checkEmailHeuristic(page: Page): Promise<void> {
+async function checkEmailHeuristic(
+  page: Page,
+  selectors: SelectorMap,
+): Promise<void> {
   const emailFound = await page.evaluate(
-    ({ panelSelector, shapeSource, maxLength }) => {
+    ({ panelSelector, leafSelector, shapeSource, maxLength }) => {
       const panel = document.querySelector(panelSelector);
       if (!panel) return null;
       // Runs in the page, so isEmailShaped is rebuilt from its serialized parts.
       const shape = new RegExp(shapeSource);
       const emails = new Set<string>();
-      for (const el of panel.querySelectorAll<HTMLElement>("div[style]")) {
+      for (const el of panel.querySelectorAll<HTMLElement>(leafSelector)) {
         if (el.childElementCount > 0) continue;
         const text = el.textContent?.trim() ?? "";
         if (text.length <= maxLength && shape.test(text)) emails.add(text);
@@ -309,14 +131,15 @@ async function checkEmailHeuristic(page: Page): Promise<void> {
       return emails.size === 1 && email !== undefined ? email : null;
     },
     {
-      panelSelector: READMOO_SELECTORS.mePanel,
+      panelSelector: selectors.mePanel,
+      leafSelector: selectors.profileStyledLeaf,
       shapeSource: EMAIL_SHAPE.source,
       maxLength: MAX_EMAIL_LENGTH,
     },
   );
 
   console.log(
-    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — 像 email 的葉節點 div[style] 剛好一個${
+    `  ${emailFound ? "✅" : "❌"} Email 偵測邏輯 — 像 email 的葉節點 ${selectors.profileStyledLeaf} 剛好一個${
       emailFound ? ` → "${emailFound}"` : ""
     }`,
   );
@@ -325,13 +148,11 @@ async function checkEmailHeuristic(page: Page): Promise<void> {
 async function checkLibraryPage(
   page: Page,
   site: Site,
+  run: RunInput,
   captureHtml: boolean,
 ): Promise<{ reachable: boolean; results: CheckResult[]; html: string }> {
   console.log(`\n📖 [${site.label}] 正在載入書櫃頁面 ${site.libraryUrl} ...`);
-  await page.goto(site.libraryUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
+  await page.goto(site.libraryUrl, NAV_OPTIONS);
 
   const reachable = await waitForLibrary(page, site);
   if (!reachable) return { reachable, results: [], html: "" };
@@ -344,21 +165,51 @@ async function checkLibraryPage(
   }
 
   console.log(`\n--- [${site.label}] 書櫃頁面選擇器 ---\n`);
-  const results = await checkSelectors(page, LIBRARY_SELECTORS, site, "attr");
+  const results = await checkSelectors(
+    page,
+    run.specs.LIBRARY_SELECTORS,
+    site,
+    "attr",
+  );
   const html = captureHtml ? await captureLibraryHtml(page) : "";
   return { reachable, results, html };
+}
+
+/** The interactive filter → search → lend checks; each one reloads the library when done. */
+async function checkFlows(
+  page: Page,
+  site: Site,
+  { selectors, specs }: RunInput,
+): Promise<CheckResult[]> {
+  const archive = await checkArchiveFlow(
+    page,
+    site,
+    selectors,
+    specs.ARCHIVE_FLOW_SELECTORS,
+  );
+  const search = await checkSearchFlow(
+    page,
+    site,
+    selectors,
+    specs.SEARCH_FLOW_SELECTORS,
+  );
+  const lend = await checkLendFlow(
+    page,
+    site,
+    selectors,
+    specs.LEND_FLOW_SELECTORS,
+  );
+  return [...archive, ...search, ...lend];
 }
 
 async function checkMePage(
   page: Page,
   site: Site,
+  run: RunInput,
   captureHtml: boolean,
 ): Promise<{ results: CheckResult[]; html: string }> {
   console.log(`\n📋 [${site.label}] 正在載入個人頁面 ${site.meUrl} ...`);
-  await page.goto(site.meUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
+  await page.goto(site.meUrl, NAV_OPTIONS);
   await page
     .locator(READMOO_SELECTORS.mePanel)
     .waitFor({ state: "visible", timeout: 10_000 })
@@ -367,8 +218,13 @@ async function checkMePage(
     });
 
   console.log(`\n--- [${site.label}] 個人頁面選擇器 ---\n`);
-  const results = await checkSelectors(page, ME_SELECTORS, site, "text");
-  await checkEmailHeuristic(page);
+  const results = await checkSelectors(
+    page,
+    run.specs.ME_SELECTORS,
+    site,
+    "text",
+  );
+  await checkEmailHeuristic(page, run.selectors);
 
   const mePanel = page.locator(READMOO_SELECTORS.mePanel);
   const html =
@@ -381,11 +237,12 @@ async function checkMePage(
 async function runSite(
   page: Page,
   site: Site,
+  run: RunInput,
   captureHtml: boolean,
 ): Promise<SiteReport> {
   console.log(`\n${"=".repeat(50)}\n=== ${site.label} ===\n${"=".repeat(50)}`);
 
-  const library = await checkLibraryPage(page, site, captureHtml);
+  const library = await checkLibraryPage(page, site, run, captureHtml);
   if (!library.reachable) {
     return {
       site,
@@ -396,18 +253,22 @@ async function runSite(
     };
   }
 
-  const me = await checkMePage(page, site, captureHtml);
+  const flows = await checkFlows(page, site, run);
+  const me = await checkMePage(page, site, run, captureHtml);
   return {
     site,
     reachable: true,
-    results: [...library.results, ...me.results],
+    results: [...library.results, ...flows, ...me.results],
     libraryHtml: library.html,
     meHtml: me.html,
   };
 }
 
+/** Required checks that ran and failed; a check that could not run (`skippedReason`) is never one. */
 function failuresOf(report: SiteReport): CheckResult[] {
-  return report.results.filter((r) => r.required && !r.found);
+  return report.results.filter(
+    (r) => r.required && !r.found && r.skippedReason === undefined,
+  );
 }
 
 function printSiteSummary(report: SiteReport): void {
@@ -421,7 +282,8 @@ function printSiteSummary(report: SiteReport): void {
 
   const failed = failuresOf(report);
   const warnings = report.results.filter(
-    (r) => r.applicable && !r.required && !r.found,
+    (r) =>
+      r.applicable && !r.required && !r.found && r.skippedReason === undefined,
   );
 
   if (failed.length === 0) {
@@ -438,6 +300,19 @@ function printSiteSummary(report: SiteReport): void {
     for (const w of warnings) {
       console.log(`   - ${w.selector} (${w.description})`);
     }
+  }
+  printSkipped(report);
+}
+
+/** List the checks that could not run, with the reason; they never affect the exit code or the mock. */
+function printSkipped(report: SiteReport): void {
+  const skipped = report.results.filter(
+    (r) => r.applicable && r.skippedReason !== undefined,
+  );
+  if (skipped.length === 0) return;
+  console.log(`ℹ️  ${skipped.length} 個檢查無法執行：`);
+  for (const s of skipped) {
+    console.log(`   - ${s.selector} (${s.description})：${s.skippedReason}`);
   }
 }
 
@@ -475,15 +350,39 @@ function printFinalSummary(reports: readonly SiteReport[]): number {
   }
 
   if (exitCode !== 0) {
-    console.log("\n   → 需要更新 scraper.ts / readmoo-lend.ts 和 mock HTML");
+    console.log(
+      "\n   → 需要更新 shared/src/config/readmooSelectors.ts 和 mock HTML",
+    );
   }
   return exitCode;
 }
 
-async function main() {
-  const updateMock = process.argv.includes("--update-mock");
+/** Read the command line; null (exit 2) for an unknown `--break` key. A `--break` run never writes the mock. */
+function parseArgs(
+  argv: readonly string[],
+): { run: RunInput; updateMock: boolean } | null {
+  const selectors = selectorsForRun(argv);
+  if (!selectors) {
+    console.error(
+      `❌ --break 的 key 不存在。可用的 key：\n   ${Object.keys(READMOO_SELECTORS).join("\n   ")}`,
+    );
+    return null;
+  }
+  const breaking = selectors !== READMOO_SELECTORS;
+  const wantsMock = argv.includes("--update-mock");
+  if (breaking && wantsMock) {
+    console.log("⚠️  使用 --break 時不會產生 mock，已忽略 --update-mock。\n");
+  }
+  const run = { selectors, specs: buildSpecs(selectors) };
+  return { run, updateMock: wantsMock && !breaking };
+}
 
+async function main(): Promise<number> {
   console.log("=== Readmoo 選擇器驗證工具（新站 + 舊站）===\n");
+
+  const args = parseArgs(process.argv);
+  if (!args) return 2;
+  const { run, updateMock } = args;
 
   // Use a dedicated profile directory — avoids locking issues with your main Chrome
   // First run: you'll need to log into Readmoo manually. Cookie persists for future runs.
@@ -511,7 +410,7 @@ async function main() {
   try {
     for (const site of SITES) {
       // Mock HTML is only ever generated from the primary (new) site.
-      reports.push(await runSite(page, site, updateMock && site.primary));
+      reports.push(await runSite(page, site, run, updateMock && site.primary));
     }
 
     for (const report of reports) {
@@ -533,7 +432,7 @@ function writeMockHtml(reports: readonly SiteReport[]): void {
   const primary = reports.find((r) => r.site.primary);
   if (!primary || !primary.reachable || failuresOf(primary).length > 0) {
     console.log(
-      "\n⚠️  新站選擇器未全數通過，跳過 mock 產生。請先更新 scraper.ts。",
+      "\n⚠️  新站選擇器未全數通過，跳過 mock 產生。請先更新 shared/src/config/readmooSelectors.ts。",
     );
     return;
   }
@@ -710,6 +609,19 @@ function reportResidualIds(mockHtml: string): void {
   );
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** The display-name element and its text, built from the same style string as `profileDisplayName`
+ *  (any whitespace after the colon, as before). */
+const DISPLAY_NAME_PATTERN = new RegExp(
+  "(" +
+    escapeRegExp(PROFILE_DISPLAY_NAME_STYLE).replace(": ", ":\\s*") +
+    "[^>]*>)\\s*[^<]+",
+  "i",
+);
+
 function generateMockHtml(libraryHtml: string, meHtml: string): string {
   // Sanitize: replace real user data with mock data
   const sanitizedLibrary = sanitizeLibraryHtml(libraryHtml);
@@ -717,10 +629,7 @@ function generateMockHtml(libraryHtml: string, meHtml: string): string {
   // cover art — run it through the same image sanitizer before scrubbing text.
   const sanitizedMe = sanitizeLibraryImages(meHtml)
     .replace(/[\w.-]+@[\w.-]+\.\w+/g, "test-user@readmoo.com")
-    .replace(
-      /(font-size:\s*16px[^>]*>)\s*[^<]+/i,
-      "$1\n      測試使用者\n    ",
-    );
+    .replace(DISPLAY_NAME_PATTERN, "$1\n      測試使用者\n    ");
 
   return `<!DOCTYPE html>
 <html lang="zh-TW">
