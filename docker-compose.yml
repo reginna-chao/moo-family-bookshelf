@@ -1,24 +1,53 @@
 services:
   extension:
+    image: moo-family-bookshelf-extension-dev
     build:
       context: .
       target: extension-dev
     volumes:
       # Source code mount (hot reload)
       - ./extension/src:/app/extension/src
+      - ./shared/src:/app/shared/src
       # Build output → host, so Chrome can load it
       - ./extension/dist:/app/extension/dist
     environment:
       - NODE_ENV=development
+      # The browser runs on the host, so `localhost`, not `worker:8787`.
+      - VITE_EXTENSION_API_ENDPOINT=http://localhost:8787
+      - VITE_EXTENSION_PWA_URL=https://localhost:5173
 
   worker:
+    image: moo-family-bookshelf-worker-dev
     build:
       context: .
       target: worker-dev
+    # The Worker's localhost CORS allow-list needs DEV_MODE=1, which on the host
+    # comes from the gitignored worker/.dev.vars; the container has none.
+    command: ["pnpm", "dev", "--var", "DEV_MODE:1"]
     ports:
       # Wrangler dev server
       - "8787:8787"
     volumes:
       - ./worker/src:/app/worker/src
+      # The Worker imports shared/ directly, so mount it too (hot reload)
+      - ./shared/src:/app/shared/src
     environment:
       - NODE_ENV=development
+
+  pwa:
+    image: moo-family-bookshelf-pwa-dev
+    build:
+      context: .
+      target: pwa-dev
+    ports:
+      # Vite dev server (HTTPS, self-signed certificate)
+      - "5173:5173"
+    volumes:
+      # Source code mount (hot reload)
+      - ./pwa/src:/app/pwa/src
+      - ./shared/src:/app/shared/src
+    environment:
+      - NODE_ENV=development
+      # Host `localhost`, as the browser runs on the host; absolute because the
+      # `/api` Vite proxy targets the container's own localhost.
+      - VITE_PWA_API_ENDPOINT=http://localhost:8787

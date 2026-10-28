@@ -36,6 +36,7 @@ jobs:
       worker: ${{ steps.filter.outputs.worker }}
       site: ${{ steps.filter.outputs.site }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      docker: ${{ steps.filter.outputs.docker }}
 
     steps:
       # Every `actions/checkout` in this workflow opts out of credential
@@ -63,12 +64,22 @@ jobs:
               - 'shared/**'
               - 'pnpm-lock.yaml'
               - 'package.json'
+              # The workspace definition decides what `pnpm install` links.
+              - 'pnpm-workspace.yaml'
+              # The root .env.* files are read through `envDir: ..`; .env.production
+              # is baked into the release build, so a typo there must fail a PR, not the tag.
+              - '.env.*'
               - '.github/workflows/cicd.yml'
             pwa:
               - 'pwa/**'
               - 'shared/**'
               - 'pnpm-lock.yaml'
               - 'package.json'
+              # The workspace definition decides what `pnpm install` links.
+              - 'pnpm-workspace.yaml'
+              # The root .env.* files are read through `envDir: ..`; .env.production
+              # is baked into the release build, so a typo there must fail a PR, not the tag.
+              - '.env.*'
               - '.github/workflows/cicd.yml'
             worker:
               - 'worker/**'
@@ -77,6 +88,9 @@ jobs:
               # floor — without these the guard never runs on a lockfile-only bump.
               - 'pnpm-lock.yaml'
               - 'package.json'
+              # The workspace definition decides what `pnpm install` links. No `.env.*`
+              # here: the Worker never reads the root env files.
+              - 'pnpm-workspace.yaml'
               # worker/tests/unit/cleanKvScript.test.ts guards scripts/clean-kv.mjs,
               # which lives outside every package — without this the guard never
               # runs on the very change class it exists to catch.
@@ -100,6 +114,19 @@ jobs:
               # docs-only push must not redeploy an unchanged Worker nor run E2E.
               - 'AGENTS.md'
               # ciSuccessGate.test.ts requires every filter to name the workflow itself.
+              - '.github/workflows/cicd.yml'
+            # The Docker dev environment (Dockerfile / docker-compose.yml) installs
+            # the whole workspace, so any manifest or lockfile change can break the
+            # image without touching a Docker file. Gates the `docker` job, and also
+            # worker-check (see its `if:`) for the Dockerfile version assertion.
+            docker:
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - '.dockerignore'
+              - 'package.json'
+              - '*/package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
               - '.github/workflows/cicd.yml'
 
   # ── CI ──────────────────────────────────────────────
@@ -153,6 +180,11 @@ jobs:
       - name: Build
         run: pnpm --filter moo-family-bookshelf-extension build
 
+  # The `docker` clause: worker/tests/unit/nodeEngineFloor.test.ts asserts the
+  # Dockerfile's pnpm / Node versions against the root package.json, so a
+  # Dockerfile-only PR must reach this job. Deliberately NOT via the `worker`
+  # filter: that output also gates deploy-worker-dev, and a Dockerfile-only
+  # merge must not redeploy an unchanged Worker (same reasoning as `workflows`).
   worker-check:
     name: Worker — Lint, Typecheck, Test, Build
     needs: changes
@@ -160,6 +192,7 @@ jobs:
       ${{ !cancelled() &&
       (needs.changes.outputs.worker == 'true' ||
       needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.docker == 'true' ||
       startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     defaults:
@@ -355,6 +388,94 @@ jobs:
           path: pwa/playwright-report/
           retention-days: 7
 
+  # Prettier over the WHOLE repo — docs, workflows and config files included,
+  # which no package path filter covers. That is why it has no `needs` / `if:`
+  # and runs on every push and PR: before this job, formatting was enforced only
+  # by the local lint-staged pre-commit hook, which `git commit --no-verify`
+  # skips.
+  format:
+    name: Format — Prettier
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prettier check
+        run: pnpm format:check
+
+  # Known high/critical advisories in PRODUCTION dependencies. No path filter on
+  # purpose: a new advisory is published without any file in this repo changing,
+  # so a filtered job would never re-run on it — every push and PR checks again.
+  # `--prod` deliberately excludes dev-only dependencies: wrangler / miniflare
+  # and other build tooling pull in high advisories that never ship to a user,
+  # and gating every PR on those would block unrelated work indefinitely.
+  # No `pnpm install`: `pnpm audit` reads only the lockfile. For the same reason
+  # setup-node carries no `cache: pnpm` — with nothing installed the pnpm store
+  # does not exist and the cache step would error.
+  audit:
+    name: Audit — production dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: pnpm audit (production, high and above)
+        run: pnpm audit --prod --audit-level=high
+
+  # The Docker dev environment (Dockerfile + docker-compose.yml) exists so the
+  # project can still be started years from now; this job keeps it buildable.
+  # `docker compose build` validates the compose file and all three Dockerfile
+  # targets, then each package is built INSIDE its image. That uses `docker run`
+  # on the built image, never `docker compose run`: the compose services
+  # bind-mount host source and dist, which would hide a dependency that is
+  # missing inside the image. ubuntu-latest ships docker compose v2, so no setup
+  # action is needed.
+  docker:
+    name: Docker — dev environment builds
+    needs: changes
+    if: >-
+      ${{ !cancelled() &&
+      (needs.changes.outputs.docker == 'true' ||
+      startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Build extension inside its image
+        run: docker run --rm moo-family-bookshelf-extension-dev pnpm build
+
+      - name: Build PWA inside its image
+        run: docker run --rm moo-family-bookshelf-pwa-dev pnpm build
+
+      - name: Build Worker inside its image
+        run: docker run --rm moo-family-bookshelf-worker-dev pnpm build
+
   # ── CI gate ─────────────────────────────────────────
   # Single aggregate status for branch protection. Always runs; passes when
   # every CI job either succeeded or was path-filtered (skipped), and fails
@@ -367,14 +488,25 @@ jobs:
   # run and the gate would still pass.
   ci-success:
     name: CI Success
-    needs: [changes, extension-check, worker-check, pwa-check, e2e, pwa-e2e]
+    needs:
+      [
+        changes,
+        extension-check,
+        worker-check,
+        pwa-check,
+        e2e,
+        pwa-e2e,
+        format,
+        audit,
+        docker,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Verify no CI job failed
         run: |
-          results="${{ needs.changes.result }} ${{ needs.extension-check.result }} ${{ needs.worker-check.result }} ${{ needs.pwa-check.result }} ${{ needs.e2e.result }} ${{ needs.pwa-e2e.result }}"
+          results="${{ needs.changes.result }} ${{ needs.extension-check.result }} ${{ needs.worker-check.result }} ${{ needs.pwa-check.result }} ${{ needs.e2e.result }} ${{ needs.pwa-e2e.result }} ${{ needs.format.result }} ${{ needs.audit.result }} ${{ needs.docker.result }}"
           echo "CI job results: $results"
           for r in $results; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
@@ -792,14 +924,28 @@ jobs:
       #    release — every artifact that matters (the self-dist .xpi, updates.json
       #    and release assets) was already produced and uploaded by the
       #    hard-failing steps above.
+      #    A failure must still be VISIBLE: continue-on-error alone turns the run
+      #    green with nothing to say the submission never happened. The output is
+      #    tee'd to a log, and the next step prints a `::warning::` plus the log
+      #    tail when this step's outcome is failure. `shell: bash` is explicit
+      #    because GitHub then runs `bash -eo pipefail`, so the `tee` cannot mask
+      #    web-ext's exit code (the default shell has no pipefail).
       - name: Sign & submit to AMO (listed)
+        id: amo-listed
         continue-on-error: true
-        run: >-
-          npx web-ext sign
-          --source-dir=extension/dist-firefox-amo
-          --artifacts-dir=extension/web-ext-artifacts-amo
-          --channel=listed
-          --no-input
+        shell: bash
+        run: |
+          npx web-ext sign \
+            --source-dir=extension/dist-firefox-amo \
+            --artifacts-dir=extension/web-ext-artifacts-amo \
+            --channel=listed \
+            --no-input 2>&1 | tee "$RUNNER_TEMP/amo-listed.log"
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+
+      - name: Warn on AMO listed submission failure
+        if: ${{ steps.amo-listed.outcome == 'failure' }}
+        run: |
+          echo "::warning::AMO listed submission failed (non-blocking); the self-dist .xpi and release assets were already uploaded. Log tail follows."
+          tail -n 40 "$RUNNER_TEMP/amo-listed.log"
