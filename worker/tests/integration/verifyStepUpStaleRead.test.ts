@@ -74,7 +74,10 @@ async function setPin(): Promise<string> {
 const STALE_SHAPES = ["absent", "none", "code", "none-unstamped"] as const;
 type StaleShape = (typeof STALE_SHAPES)[number];
 
-/** Replace `verify:` with what a lagging colo would read: nothing, or an older `none` / `code` record. */
+/**
+ * Replace `verify:` with what a lagging colo would read: nothing, an older `none` / `code`
+ * record, or the unstamped `none` that `defaultVerifyRecord()` writes (no `secretUpdatedAt`).
+ */
 async function stageStaleRead(shape: StaleShape): Promise<void> {
   const auth = (await kv.get(kvKeys.auth(USER_ID), "json")) as Json;
   expect(typeof auth.secretAt).toBe("number");
