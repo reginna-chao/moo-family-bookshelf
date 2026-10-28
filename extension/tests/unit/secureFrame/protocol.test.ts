@@ -34,6 +34,7 @@ const SYNC_INPUT_PROPS = {
   masked: true,
   placeholder: "輸入家庭同步碼",
   ariaLabel: "家庭同步碼",
+  appliedSeq: 0,
 };
 const TEXT_PROPS = { text: "moo-abc", testId: "sync-code" };
 const QR_PROPS = {
@@ -81,6 +82,7 @@ describe("isPropsMessage", () => {
       "sync-code-input",
       { ...SYNC_INPUT_PROPS, className: "x", autoFocus: false },
     ],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: 7 }],
     ["credential-text", TEXT_PROPS],
     ["credential-text", { ...TEXT_PROPS, className: "moo-x" }],
     ["qr-image", QR_PROPS],
@@ -126,6 +128,11 @@ describe("isPropsMessage", () => {
     ["sync-code-input", { ...SYNC_INPUT_PROPS, ariaLabel: undefined }],
     ["sync-code-input", { ...SYNC_INPUT_PROPS, className: 1 }],
     ["sync-code-input", { ...SYNC_INPUT_PROPS, autoFocus: "yes" }],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: undefined }],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: -1 }],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: 1.5 }],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: Number.NaN }],
+    ["sync-code-input", { ...SYNC_INPUT_PROPS, appliedSeq: "1" }],
     ["credential-text", { text: 1, testId: "sync-code" }],
     ["credential-text", { text: "x" }],
     ["credential-text", { ...TEXT_PROPS, className: false }],
@@ -192,7 +199,8 @@ describe("isFrameToHostMessage", () => {
     { type: "height", px: 48 },
     { type: "submit", secret: "123456" },
     { type: "submit", secret: "" },
-    { type: "change", value: "moo-abc" },
+    { type: "change", value: "moo-abc", seq: 1 },
+    { type: "change", value: "", seq: Number.MAX_SAFE_INTEGER },
   ])("accepts %j", (message) => {
     expect(isFrameToHostMessage(message)).toBe(true);
   });
@@ -213,6 +221,15 @@ describe("isFrameToHostMessage", () => {
     { type: "submit", secret: 123456 },
     { type: "change" },
     { type: "change", value: null },
+    { type: "change", value: null, seq: 1 },
+    { type: "change", value: "moo-abc" },
+    { type: "change", value: "moo-abc", seq: 0 },
+    { type: "change", value: "moo-abc", seq: -1 },
+    { type: "change", value: "moo-abc", seq: 1.5 },
+    { type: "change", value: "moo-abc", seq: Number.NaN },
+    { type: "change", value: "moo-abc", seq: Number.POSITIVE_INFINITY },
+    { type: "change", value: "moo-abc", seq: Number.MAX_SAFE_INTEGER + 1 },
+    { type: "change", value: "moo-abc", seq: "1" },
   ])("rejects %j", (message) => {
     expect(isFrameToHostMessage(message)).toBe(false);
   });

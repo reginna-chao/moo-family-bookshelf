@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SecureFrame } from "@/secureFrame/SecureFrame";
@@ -29,6 +29,13 @@ import { READY_TIMEOUT_MS } from "@/secureFrame/useSecureFrameChannel";
  * port and replaces the iframe with 「畫面被干擾，請關閉後重新開啟」. The timeout cases run on
  * vi's fake clock and therefore use no RTL waiter (`.claude/rules/test.md` → Fake timers exclude
  * RTL waiters); `afterEach` swaps the real clock back.
+ *
+ * Seq echo (#422): `SyncCodeInputFrame` keeps `appliedSeq` and the host its `value`; one `change`
+ * sets both in the same port message, so React must answer with ONE props message carrying the new
+ * value AND its seq. Split across two renders, one message pairs a value with the wrong seq; "old
+ * value, new seq" makes the field adopt the old text and wipe the typing. The test posts the change
+ * in a sync `act`, then flushes with an async `act` so a deferred update surfaces as an extra props
+ * message.
  */
 
 vi.unmock("../../src/secureFrame/SecureFrame");
@@ -224,6 +231,7 @@ describe("SecureFrame", () => {
           masked: false,
           placeholder: "p",
           ariaLabel: "a",
+          appliedSeq: 0,
         }}
         title="t"
         placeholderHeight={1}
@@ -376,6 +384,7 @@ describe("SecureFrame", () => {
           masked: true,
           placeholder: "p",
           ariaLabel: "a",
+          appliedSeq: 0,
         }}
         title="t"
         placeholderHeight={1}
@@ -390,7 +399,7 @@ describe("SecureFrame", () => {
     fromFrame({ type: "ready" });
 
     fromFrame({ type: "submit", secret: "123456" });
-    fromFrame({ type: "change", value: "moo-abc" });
+    fromFrame({ type: "change", value: "moo-abc", seq: 1 });
     fromFrame({ type: "paste" });
     fromFrame({ type: "blur" });
     fromFrame({ type: "submit", secret: 123456 });
@@ -401,9 +410,41 @@ describe("SecureFrame", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith("123456");
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith("moo-abc");
+    expect(onChange).toHaveBeenCalledWith("moo-abc", 1);
     expect(onPaste).toHaveBeenCalledTimes(1);
     expect(onBlur).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a `change` without a valid seq and still routes the next valid one", () => {
+    const onChange = vi.fn();
+    render(
+      <SecureFrame
+        view="sync-code-input"
+        props={{
+          value: "",
+          disabled: false,
+          masked: false,
+          placeholder: "p",
+          ariaLabel: "a",
+          appliedSeq: 0,
+        }}
+        title="t"
+        placeholderHeight={1}
+        onChange={onChange}
+      />,
+    );
+    spyHello();
+    fireLoad();
+    fromFrame({ type: "ready" });
+
+    fromFrame({ type: "change", value: "moo-a" });
+    fromFrame({ type: "change", value: "moo-a", seq: 0 });
+    fromFrame({ type: "change", value: "moo-a", seq: "1" });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fromFrame({ type: "change", value: "moo-ab", seq: 2 });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("moo-ab", 2);
   });
 
   it("uses the latest callbacks after a re-render", () => {
@@ -710,5 +751,67 @@ describe("secure-frame presets (frames.tsx)", () => {
       "moo-secure-frame",
       "moo-secure-frame--bleed",
     );
+  });
+});
+
+/** A controlled host: holds the field's value in state and feeds it back, as the Onboarding views do. */
+function ControlledSyncCodeInput() {
+  const [value, setValue] = useState("");
+  return (
+    <SyncCodeInputFrame
+      value={value}
+      disabled={false}
+      masked={false}
+      inputClassName="x"
+      onChange={setValue}
+      onPaste={() => {}}
+      onBlur={() => {}}
+    />
+  );
+}
+
+describe("SyncCodeInputFrame seq echo (#422)", () => {
+  beforeEach(() => {
+    FakeChannel.created = [];
+    vi.stubGlobal("MessageChannel", FakeChannel);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("starts the props at appliedSeq 0", () => {
+    render(<ControlledSyncCodeInput />);
+    spyHello();
+    fireLoad();
+    fromFrame({ type: "ready" });
+
+    expect(propsMessages()).toEqual([
+      {
+        type: "props",
+        view: "sync-code-input",
+        props: expect.objectContaining({ value: "", appliedSeq: 0 }),
+      },
+    ]);
+  });
+
+  it("answers a change with exactly one props message carrying both the new value and its seq", async () => {
+    render(<ControlledSyncCodeInput />);
+    spyHello();
+    fireLoad();
+    fromFrame({ type: "ready" });
+    expect(propsMessages()).toHaveLength(1);
+
+    fromFrame({ type: "change", value: "moo-a", seq: 1 });
+    // Flush anything deferred past the port message (a microtask, a late render).
+    await act(async () => {});
+
+    expect(propsMessages()).toHaveLength(2);
+    expect(propsMessages()[1]).toEqual({
+      type: "props",
+      view: "sync-code-input",
+      props: expect.objectContaining({ value: "moo-a", appliedSeq: 1 }),
+    });
   });
 });

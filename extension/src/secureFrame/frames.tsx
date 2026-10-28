@@ -1,5 +1,6 @@
 /** One preset per secret-bearing element of the Dialog, so each frame's title, view and
  *  placeholder height are defined once. Every Dialog call site goes through these. */
+import { useState } from "react";
 import type { PinInputProps } from "../dialog/PinInput";
 import type { PatternLockProps } from "../dialog/PatternLock";
 import { SecureFrame } from "./SecureFrame";
@@ -54,8 +55,11 @@ export function SyncCodeInputFrame({
   disabled,
   masked,
   inputClassName,
+  onChange,
   ...handlers
 }: SyncCodeInputFrameProps) {
+  // Echoed back in the props so the field can tell a stale echo from a host value (#422).
+  const [appliedSeq, setAppliedSeq] = useState(0);
   return (
     <SecureFrame
       view="sync-code-input"
@@ -67,9 +71,14 @@ export function SyncCodeInputFrame({
         placeholder: "輸入家庭同步碼",
         ariaLabel: SYNC_CODE_TITLE,
         className: inputClassName,
+        appliedSeq,
       }}
       placeholderHeight={SYNC_CODE_INPUT_HEIGHT}
       className="moo-secure-frame--bleed"
+      onChange={(next, seq) => {
+        setAppliedSeq(seq);
+        onChange(next);
+      }}
       {...handlers}
     />
   );

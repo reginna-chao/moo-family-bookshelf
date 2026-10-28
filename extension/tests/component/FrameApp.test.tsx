@@ -188,6 +188,7 @@ describe("FrameApp", () => {
       masked: false,
       placeholder: "輸入家庭同步碼",
       ariaLabel: "家庭同步碼",
+      appliedSeq: 0,
     });
     const input = await screen.findByRole("textbox", { name: "家庭同步碼" });
 
@@ -198,7 +199,7 @@ describe("FrameApp", () => {
     await waitFor(() =>
       expect(hostInbox).toEqual([
         { type: "ready" },
-        { type: "change", value: "moo-abc" },
+        { type: "change", value: "moo-abc", seq: 1 },
         { type: "paste" },
         { type: "blur" },
       ]),
