@@ -48,11 +48,12 @@ describe("ManualLendDialog", () => {
     expect(screen.getByText("確認借出")).toBeInTheDocument();
   });
 
-  it("exposes a dialog role with aria-modal", () => {
+  it("exposes a dialog role with aria-modal and a close button", () => {
     renderDialog();
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAttribute("aria-label", "手動借出提醒");
+    expect(screen.getByLabelText("關閉")).toBeInTheDocument();
   });
 
   it("calls onDontRemindChange(true) when the checkbox is checked", () => {
@@ -80,19 +81,26 @@ describe("ManualLendDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("calls onCancel when the close (X) button is clicked", () => {
+    const { onCancel } = renderDialog();
+    fireEvent.click(screen.getByLabelText("關閉"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("calls onCancel when Escape is pressed", () => {
     const { onCancel } = renderDialog();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("disables both buttons and shows 處理中... when confirming", () => {
+  it("disables all buttons and shows 處理中... when confirming", () => {
     renderDialog({ confirming: true });
 
     expect(screen.getByText("處理中...")).toBeInTheDocument();
     expect(screen.queryByText("確認借出")).not.toBeInTheDocument();
     expect(screen.getByText("取消")).toBeDisabled();
     expect(screen.getByText("處理中...")).toBeDisabled();
+    expect(screen.getByLabelText("關閉")).toBeDisabled();
   });
 
   it("does not call onCancel on Escape while confirming", () => {

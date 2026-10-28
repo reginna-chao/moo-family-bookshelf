@@ -8,6 +8,7 @@ import { useSearch } from "./useSearch";
 import { useLoadMore } from "./useLoadMore";
 import { useBookSync } from "./useBookSync";
 import { FloatingActionBar } from "./FloatingActionBar";
+import { PersonalShelfArchiveTabs } from "./PersonalShelfArchiveTabs";
 import { CategoryFilter, filterByCategory } from "./CategoryDropdown";
 import { usePersonalBooks } from "./usePersonalBooks";
 import { PublicShareDialog } from "./PublicShareDialog";
@@ -31,12 +32,6 @@ function toolButtonClass(isMobile: boolean, extra = ""): string {
     ? "moo-button moo-button--outline moo-shelf__tool-btn moo-shelf__tool-btn--icon"
     : "moo-button moo-button--outline moo-shelf__tool-btn";
   return extra ? `${base} ${extra}` : base;
-}
-
-function archiveTabClass(active: boolean): string {
-  return active
-    ? "moo-shelf__archive-tab moo-shelf__archive-tab--active"
-    : "moo-shelf__archive-tab";
 }
 
 export function PersonalShelf({
@@ -290,24 +285,12 @@ export function PersonalShelf({
       />
 
       {syncArchived === BoolFlag.TRUE && (
-        <div role="tablist" className="moo-shelf__archive-tabs">
-          <button
-            role="tab"
-            aria-selected={archiveView === "active"}
-            onClick={() => handleArchiveViewChange("active")}
-            className={archiveTabClass(archiveView === "active")}
-          >
-            未封存 ({activeBooks.length})
-          </button>
-          <button
-            role="tab"
-            aria-selected={archiveView === "archived"}
-            onClick={() => handleArchiveViewChange("archived")}
-            className={archiveTabClass(archiveView === "archived")}
-          >
-            封存 ({archivedBooks.length})
-          </button>
-        </div>
+        <PersonalShelfArchiveTabs
+          archiveView={archiveView}
+          activeCount={activeBooks.length}
+          archivedCount={archivedBooks.length}
+          onSelectView={handleArchiveViewChange}
+        />
       )}
 
       {currentViewBooks.length > 0 && (
@@ -381,6 +364,7 @@ export function PersonalShelf({
         selectedCount={selectedIds.size}
         isDirty={isDirty}
         isSaving={status === "saving"}
+        isSaved={status === "saved"}
         onBatchShare={handleBatchShare}
         onBatchHide={handleBatchHide}
         onCancel={handleCancel}

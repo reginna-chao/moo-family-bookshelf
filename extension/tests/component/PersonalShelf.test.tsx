@@ -249,6 +249,11 @@ async function waitForBooksLoaded() {
   });
 }
 
+// Tripwire: a case that installs fake timers can never leak them into the next case.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("PersonalShelf", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -833,7 +838,8 @@ describe("PersonalShelf", () => {
       // Click save
       fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
 
-      // After successful save, isDirty should be false — floating bar disappears
+      // After a successful save the button first reads 已儲存, then the bar collapses 1.5 s later;
+      // either way 儲存變更 / 取消變更 are gone.
       await waitFor(() => {
         expect(
           screen.queryByRole("button", { name: "儲存變更" }),
@@ -842,6 +848,41 @@ describe("PersonalShelf", () => {
           screen.queryByRole("button", { name: "取消變更" }),
         ).not.toBeInTheDocument();
       });
+    });
+
+    it("shows a disabled 已儲存 after a successful save, then hides the bar 1.5 s later (#387)", async () => {
+      let resolvePatch!: (v: { data: { ok: true; applied: number } }) => void;
+      const mockPatch = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          resolvePatch = resolve;
+        }),
+      );
+      const apiClient = serverClient({ patchPersonalBooks: mockPatch });
+      render(<PersonalShelf userId="user-abc123" apiClient={apiClient} />);
+      // Real timers for the load (waitFor); fake ones only from here on — no RTL waiters below.
+      await waitForBooksLoaded();
+
+      fireEvent.click(screen.getAllByRole("checkbox")[0]);
+      fireEvent.click(screen.getByRole("button", { name: "設為開放" }));
+
+      vi.useFakeTimers();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+        resolvePatch({ data: { ok: true, applied: 1 } });
+      });
+
+      expect(mockPatch).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "已儲存" })).toBeDisabled();
+      expect(
+        screen.getByRole("toolbar", { name: "批次操作工具列" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+      expect(screen.queryByText("已儲存")).not.toBeInTheDocument();
     });
 
     it("sends server-authoritative displayName from context, not chrome.storage.local", async () => {

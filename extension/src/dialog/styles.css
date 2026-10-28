@@ -2144,6 +2144,13 @@
   color: var(--moo-text-faint);
 }
 
+/* 已儲存: success tint, opaque (overrides the shared .moo-button:disabled dim). */
+.moo-action-bar__save--saved:disabled {
+  background: var(--moo-success-bg);
+  color: var(--moo-success);
+  opacity: 1;
+}
+
 /* ── BorrowTab ────────────────────────────────────────────────────────── */
 
 .moo-borrow-tab__heading {
