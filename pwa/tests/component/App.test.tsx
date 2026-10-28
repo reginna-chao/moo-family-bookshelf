@@ -65,6 +65,12 @@ import {
  * unguarded resend 401s too, and the recovery join that 401 triggers needs re-verification;
  * ApiClient is mocked here, so the resend stub runs the registered refresher itself, mirroring
  * `doRequest`'s 401 branch (refresher → null → the 401 envelope comes back).
+ *
+ * Proactive renewal (#364): every seeded session here has no stored `expiresAt`, so App's
+ * `useProactiveTokenRefresh` sends one `refreshAuthToken` on mount. The shared mock answers
+ * REFRESH_FAILED by default — a failed renewal changes nothing — so the other cases never see a
+ * `login` they did not plan for; the "proactive token renewal" cases opt into a success. The hook's
+ * own rules are covered in tests/unit/hooks/useProactiveTokenRefresh.test.ts.
  */
 
 // Mock useAuth hook
@@ -98,6 +104,10 @@ const mockJoinFamily = vi
   .fn()
   .mockResolvedValue({ data: { authToken: "new-token" } });
 
+// Fails by default, so no case sees an unplanned `login`. See the header → "Proactive renewal".
+const REFRESH_FAILED = { error: { code: "REFRESH_FAILED", message: "stub" } };
+const mockRefreshAuthToken = vi.fn().mockResolvedValue(REFRESH_FAILED);
+
 // Mock API client using class syntax to ensure proper prototype chain
 vi.mock("@/api/client", () => {
   class MockApiClient {
@@ -106,6 +116,7 @@ vi.mock("@/api/client", () => {
     getEndpoint = vi.fn().mockReturnValue("https://api.example.com");
     setEndpoint = vi.fn();
     joinFamily = mockJoinFamily;
+    refreshAuthToken = mockRefreshAuthToken;
     getVerifyMethod = vi.fn().mockResolvedValue({ data: { method: "none" } });
     // Already prompted keeps the signed-in VerifySetupPrompt overlay out of the way.
     getVerifyPrompted = vi.fn().mockResolvedValue({ data: { prompted: 1 } });
@@ -199,6 +210,7 @@ import {
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
   USER_ID_KEY,
+  namespacedKey,
 } from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
 import {
@@ -251,6 +263,7 @@ describe("App", () => {
     personalShelfClients.length = 0;
     vi.clearAllMocks();
     mockJoinFamily.mockResolvedValue({ data: { authToken: "new-token" } });
+    mockRefreshAuthToken.mockResolvedValue(REFRESH_FAILED);
     // Production logout() / forceLogout() drop the stored session; registered per test so no
     // implementation leaks between tests. See the header → "Session mirror".
     mockLogout.mockImplementation(() => setMockSession(null));
@@ -490,6 +503,92 @@ describe("App", () => {
 
     expect(screen.getByTestId("landing-page")).toBeInTheDocument();
     expect(held.setAuthToken).not.toHaveBeenCalledWith(null);
+  });
+
+  describe("proactive token renewal (#364)", () => {
+    const SESSION = {
+      userId:
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      familyId: "fam-001",
+      authToken: "token-123",
+    };
+    const RENEWED_TOKEN = "f".repeat(64);
+    const RENEWED_EXPIRES_AT = Date.now() + 90 * 86_400_000;
+    const FAMILY_KEY = namespacedKey(SESSION.userId, "familyId");
+    const TOKEN_KEY = namespacedKey(SESSION.userId, "authToken");
+
+    afterEach(() => {
+      localStorage.removeItem(FAMILY_KEY);
+      localStorage.removeItem(TOKEN_KEY);
+    });
+
+    it("renews a session with no stored expiry exactly once on mount, on the same ApiClient", async () => {
+      window.location.hash = "#personal-shelf";
+      setMockSession({ ...SESSION });
+      // The renewal is adopted only while storage still holds this session (cross-tab guard).
+      localStorage.setItem(FAMILY_KEY, SESSION.familyId);
+      localStorage.setItem(TOKEN_KEY, SESSION.authToken);
+      mockLogin.mockImplementation((next: Record<string, unknown>) => {
+        setMockSession(next);
+      });
+      mockRefreshAuthToken.mockResolvedValue({
+        data: { token: RENEWED_TOKEN, expiresAt: RENEWED_EXPIRES_AT },
+      });
+
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<App />);
+      });
+      const before = personalShelfClients.at(-1) as {
+        setAuthToken: ReturnType<typeof vi.fn>;
+      };
+
+      expect(mockRefreshAuthToken).toHaveBeenCalledTimes(1);
+      expect(mockRefreshAuthToken).toHaveBeenCalledWith(
+        SESSION.userId,
+        SESSION.familyId,
+      );
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+      expect(mockLogin).toHaveBeenCalledTimes(1);
+      expect(mockLogin).toHaveBeenCalledWith({
+        ...SESSION,
+        authToken: RENEWED_TOKEN,
+        expiresAt: RENEWED_EXPIRES_AT,
+      });
+
+      await act(async () => {
+        view.rerender(<App />);
+      });
+      // The renewed token moved onto the pages' client; no new client, no reload (#256).
+      expect(personalShelfClients.at(-1)).toBe(before);
+      expect(before.setAuthToken).toHaveBeenLastCalledWith(RENEWED_TOKEN);
+      expect(mockRefreshAuthToken).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends no renewal when the stored token has more than 30 days left", async () => {
+      setMockSession({ ...SESSION, expiresAt: RENEWED_EXPIRES_AT });
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(mockRefreshAuthToken).not.toHaveBeenCalled();
+      expect(mockLogin).not.toHaveBeenCalled();
+    });
+
+    it("keeps the session and sends no join when the renewal fails", async () => {
+      setMockSession({ ...SESSION });
+
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(mockRefreshAuthToken).toHaveBeenCalledTimes(1);
+      expect(mockJoinFamily).not.toHaveBeenCalled();
+      expect(mockLogin).not.toHaveBeenCalled();
+      expect(mockLogout).not.toHaveBeenCalled();
+      expect(screen.getByTestId("family-shelf-page")).toBeInTheDocument();
+    });
   });
 
   describe("acquireNewToken join failures", () => {

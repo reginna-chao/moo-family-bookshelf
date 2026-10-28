@@ -452,6 +452,72 @@ describe("ApiClient verification methods", () => {
     });
   });
 
+  /** A PIN / pattern account confirms the delete with its current secret (#396); others send no body. */
+  describe("deleteAccount", () => {
+    it("should send DELETE /api/user/:id with the current secret as a JSON body", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      const result = await client.deleteAccount(USER_1, "123456");
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`https://api.example.com/api/user/${USER_1}`);
+      expect(init.method).toBe("DELETE");
+      expect(JSON.parse(init.body)).toStrictEqual({ currentSecret: "123456" });
+      expect(result.data).toEqual({ ok: true });
+    });
+
+    it("should send no body when no current secret is given", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.deleteAccount(USER_1);
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`https://api.example.com/api/user/${USER_1}`);
+      expect(init.method).toBe("DELETE");
+      expect(init.body).toBeUndefined();
+    });
+
+    it("should pass a VERIFICATION_FAILED envelope through to the caller", async () => {
+      const envelope = {
+        error: { code: "VERIFICATION_FAILED", message: "Verification failed" },
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse(envelope, 403));
+
+      const result = await client.deleteAccount(USER_1, "000000");
+
+      expect(result.error?.code).toBe("VERIFICATION_FAILED");
+    });
+
+    it("should reject invalid userId before sending anything", async () => {
+      await expect(client.deleteAccount("bad", "123456")).rejects.toThrow(
+        "Invalid userId",
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setVerifyMethod with currentSecret", () => {
+    it("should send currentSecret and prompted beside the new method", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ data: { method: "code" } }),
+      );
+
+      await client.setVerifyMethod(USER_1, {
+        method: "code",
+        currentSecret: "0,1,2,5",
+        prompted: 1,
+      });
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).toStrictEqual({
+        method: "code",
+        currentSecret: "0,1,2,5",
+        prompted: 1,
+      });
+    });
+  });
+
   describe("joinFamily with verifySecret", () => {
     it("should include verifySecret in request body when provided via opts", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));

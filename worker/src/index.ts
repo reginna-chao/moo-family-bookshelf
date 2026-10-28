@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
@@ -91,16 +92,16 @@ app.use("/api/*", async (c, next) => {
   const tooLarge = () =>
     jsonError(c, 413, "PAYLOAD_TOO_LARGE", payloadTooLargeMessage(limit));
   const contentLength = c.req.header("Content-Length");
-  if (contentLength) {
-    const size = parseInt(contentLength, 10);
-    if (!Number.isNaN(size) && size > limit.maxBytes) return tooLarge();
-  } else if (c.req.method !== "GET" && c.req.method !== "DELETE") {
-    // No Content-Length: read body to verify size.
-    // Cloudflare edge enforces its own body limit (~100MB) as a backstop.
-    const buf = await c.req.raw.clone().arrayBuffer();
-    if (buf.byteLength > limit.maxBytes) return tooLarge();
+  if (contentLength !== undefined) {
+    // A present but non-numeric Content-Length (empty included) is refused fail-closed.
+    if (!/^\d+$/.test(contentLength)) return tooLarge();
+    if (parseInt(contentLength, 10) > limit.maxBytes) return tooLarge();
+    return next();
   }
-  await next();
+  if (c.req.method === "GET" || c.req.method === "HEAD") return next();
+  // No length (DELETE /api/user/:id's body included, #396): hono/body-limit counts it as it
+  // streams and stops at the limit instead of buffering (#361). GET / HEAD carry no body.
+  return bodyLimit({ maxSize: limit.maxBytes, onError: tooLarge })(c, next);
 });
 
 // Per-request KV operation logging (middleware/kvOpCounting.ts) — must stay
@@ -116,9 +117,9 @@ app.use("/api/*", authMiddleware);
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 
-/** Bump only on a breaking API change (docs/architecture.md → 何時遞增 API_VERSION). 2 = the verification
- *  gate on the public identity endpoints: docs/architecture.md → `API_VERSION = 2`：公開身分端點加上驗證閘門. */
-const API_VERSION = 2;
+/** Bump only on a breaking API change (docs/architecture.md → 何時遞增 API_VERSION, row 變更認證機制). 3 = PUT verify /
+ *  DELETE user require the current PIN/pattern (#396): docs/architecture.md → `API_VERSION = 3`：改驗證設定與刪除帳號要先確認目前的密鑰. */
+const API_VERSION = 3;
 const SERVER_VERSION = "0.1.0";
 
 app.get("/api/version", (c) =>

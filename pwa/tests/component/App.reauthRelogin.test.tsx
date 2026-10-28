@@ -69,6 +69,10 @@ vi.mock("@/api/client", () => {
     getEndpoint = vi.fn().mockReturnValue("https://api.example.com");
     setEndpoint = vi.fn();
     joinFamily = mockJoinFamily;
+    // The re-login's session has no stored expiry, so App renews once (#364); a failure changes nothing.
+    refreshAuthToken = vi.fn().mockResolvedValue({
+      error: { code: "REFRESH_FAILED", message: "stub" },
+    });
     getVerifyMethod = mockGetVerifyMethod;
     getVerifyPrompted = mockGetVerifyPrompted;
     setVerifyMethod = vi.fn().mockResolvedValue({ data: { ok: true } });

@@ -8,6 +8,10 @@ import { USER_ID_KEY, namespacedKey } from "@/hooks/useAuth";
 export const PWA_URL = "https://localhost:5913";
 export const API_URL = "http://localhost:8913";
 
+/** Token the mocked `/api/auth/refresh` returns: it must pass the client's 64-char lowercase hex
+ *  check, which the seeded `"test-auth-token-abc"` would fail (then every foreground would retry). */
+export const E2E_RENEWED_TOKEN = "e2e0".repeat(16);
+
 export interface TestAuthState {
   userId: string;
   familyId: string;
@@ -92,6 +96,20 @@ export async function mockDefaultApiRoutes(
           createdAt: "2025-01-01T00:00:00Z",
           authToken: auth.authToken ?? "mock-token",
           expiresAt: Date.now() + 86_400_000,
+        },
+      }),
+    });
+  });
+
+  // Proactive renewal (#364): a seeded session has no stored expiry, so the PWA renews once on load.
+  await page.route("**/api/auth/refresh", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          token: E2E_RENEWED_TOKEN,
+          expiresAt: Date.now() + 90 * 86_400_000,
         },
       }),
     });

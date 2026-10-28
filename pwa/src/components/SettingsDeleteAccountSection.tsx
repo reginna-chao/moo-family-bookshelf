@@ -1,4 +1,6 @@
+import { requiresCurrentSecret } from "moo-family-bookshelf-shared/api/verifyValidation";
 import type { ApiClient } from "@/api/client";
+import { CurrentSecretStep } from "@/components/CurrentSecretStep";
 import { useDeleteAccount } from "@/hooks/useDeleteAccount";
 
 interface SettingsDeleteAccountSectionProps {
@@ -18,8 +20,16 @@ export function SettingsDeleteAccountSection({
     setDeleteState,
     deleteError,
     setDeleteError,
+    requiredMethod,
+    secretError,
+    startConfirming,
     handleDeleteAccount,
   } = useDeleteAccount({ userId, apiClient, onForceLogout });
+  // A PIN / pattern account confirms with its current secret: the entry's own 確認 submits (#396).
+  const secretMethod =
+    requiredMethod !== null && requiresCurrentSecret(requiredMethod)
+      ? requiredMethod
+      : null;
 
   return (
     <section className="mb-6 mt-4">
@@ -30,7 +40,7 @@ export function SettingsDeleteAccountSection({
       )}
       {deleteState === "idle" && (
         <button
-          onClick={() => setDeleteState("confirming")}
+          onClick={() => void startConfirming()}
           className="w-full rounded-lg border border-red-300 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
         >
           移除帳戶
@@ -48,13 +58,25 @@ export function SettingsDeleteAccountSection({
               <li>下次登入時將重新設定</li>
             </ul>
           </div>
+          {secretMethod !== null && (
+            <div className="mb-3">
+              <CurrentSecretStep
+                method={secretMethod}
+                purpose="delete"
+                onComplete={(secret) => void handleDeleteAccount(secret)}
+                error={secretError}
+              />
+            </div>
+          )}
           <div className="flex gap-2">
-            <button
-              onClick={() => void handleDeleteAccount()}
-              className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
-            >
-              確定移除
-            </button>
+            {secretMethod === null && (
+              <button
+                onClick={() => void handleDeleteAccount()}
+                className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+              >
+                確定移除
+              </button>
+            )}
             <button
               onClick={() => {
                 setDeleteState("idle");

@@ -16,7 +16,7 @@
  * five `skipped` results and exited 0 — a vacuously green required check with
  * zero lint, typecheck, test or E2E jobs having run.
  *
- * WHAT ELSE THIS FILE PINS. Three properties beyond the gate's `needs` list,
+ * WHAT ELSE THIS FILE PINS. Five properties beyond the gate's `needs` list,
  * each closing another route to a quietly green — or quietly over-permissioned
  * — pipeline:
  *
@@ -52,13 +52,30 @@
  *      restate `contents:` or its checkout runs with no repository read at
  *      all — which only passes today because this repository is public.
  *
+ *   4. SPECIFIC FILTER GLOBS. Property 2 proves a filter is spelled
+ *      consistently; it says nothing about WHICH files trigger it. A glob
+ *      dropped from a filter skips that package's checks on exactly the PR
+ *      that needed them, and the gate reads the `skipped` as a pass. The
+ *      globs pinned here each guard a change class no package directory
+ *      covers — the workspace definition, the root `.env.*` files, the Docker
+ *      files — plus the one non-filter wiring that rides on them:
+ *      `worker-check`'s job-level `if:` accepting the `docker` output.
+ *
+ *   5. AMO-LISTED FAILURE VISIBILITY. The listed submission is deliberately
+ *      non-blocking (`continue-on-error: true`), which on its own turns a
+ *      failed submission into a green run with nothing to say it happened.
+ *      A follow-up step keyed on that step's `outcome` prints a `::warning::`
+ *      and the log tail. The wiring is four independent spellings — the
+ *      step `id`, the follow-up's `steps.<id>.outcome`, the `tee` log path,
+ *      the `tail` log path — and an explicit `shell: bash`, all pinned.
+ *
  * HOW IT AVOIDS PASSING VACUOUSLY. The scan is parsed out of the file by
  * regex, so a drifted pattern (or a moved file) could match nothing and make
  * every "is in the gate" assertion trivially true over an empty job list.
  * Three things stop that: the path is resolved relative to THIS file (absent
  * the mutation-check seam below) and its existence is asserted, every helper
  * throws when its anchor is missing instead of returning an empty result, and
- * the positive companions pin what the scan must find — the six CI jobs plus
+ * the positive companions pin what the scan must find — the nine CI jobs plus
  * two CD jobs, the change-filter names, a checkout step in each CI job, and
  * the `continue-on-error` token whose absence from the gate block is asserted
  * elsewhere in the file.
@@ -96,8 +113,9 @@
  *    anchor is gone.
  *  - `keyBlock` returns the body of `<key>:` indented by `indent` spaces, up to
  *    the first non-blank line indented no further than the key itself. A
- *    trailing `|` (block scalar, as in `filters: |`) is tolerated so the same
- *    helper reads those too. It returns `null` when the key is absent — callers
+ *    trailing block-scalar indicator (`|` as in `filters: |`, `>-` as in a
+ *    job's multi-line `if: >-`, with an optional `-` / `+` chomping mark) is
+ *    tolerated so the same helper reads those too. It returns `null` when the key is absent — callers
  *    decide how loudly that matters, since "the block does not exist" IS the
  *    finding for some of them.
  *  - `outputBindings` parses the `changes` job's `outputs:` block WHOLE — key,
@@ -133,9 +151,10 @@
  *    so at least these names must be present; adding a package is legitimate,
  *    and the three-way set equality is what then forces it to be spelled
  *    consistently in all three places.
- *  - `EXPECTED_CHECKOUT_COUNT` (13) — how many `actions/checkout` steps the
- *    scan must find: one in each of the six CI jobs, plus one in each of the
- *    seven CD jobs (deploy-worker-dev, deploy-pwa-dev, deploy-pages,
+ *  - `EXPECTED_CHECKOUT_COUNT` (16) — how many `actions/checkout` steps the
+ *    scan must find: one in each of the nine CI jobs (changes,
+ *    extension-check, worker-check, pwa-check, e2e, pwa-e2e, format, audit,
+ *    docker), plus one in each of the seven CD jobs (deploy-worker-dev, deploy-pwa-dev, deploy-pages,
  *    deploy-worker-prod, deploy-pwa-prod, release-extension,
  *    release-extension-firefox). A drifted step regex matching nothing would
  *    otherwise satisfy "every checkout opts out" over an empty list (both
@@ -215,6 +234,40 @@
  *    needs the credential to outlive the checkout. EVERY checkout of the job is
  *    checked, not just the first: a second checkout without the opt-out
  *    re-persists the token.
+ *
+ * FILTER GLOBS, in detail (property 4). Containment, never equality, so a
+ * legitimately added glob stays green.
+ *  - `pnpm-workspace.yaml` decides which packages `pnpm install` links, so it
+ *    is in every package filter that installs: `extension`, `pwa`, `worker`.
+ *  - `.env.*` only in `extension` and `pwa`: both Vite configs read the root
+ *    env files (`envDir: ..`), and `.env.production` is baked into the release
+ *    build — a typo there must fail a PR, not the tag. The Worker never reads
+ *    them.
+ *  - `docker` lists the Docker files plus the manifests and lockfile, because
+ *    the image installs the whole workspace and a manifest-only change can
+ *    break it without touching a Docker file.
+ *  - `worker-check`'s JOB-level `if:` (four-space indent, `if: >-`) must accept
+ *    `needs.changes.outputs.docker`: `nodeEngineFloor.test.ts` asserts the
+ *    Dockerfile's pnpm and Node versions, and lives in that job. The route is
+ *    deliberately NOT the `worker` filter — that output also gates
+ *    `deploy-worker-dev`, and a Dockerfile-only merge must not redeploy an
+ *    unchanged Worker. Drop the clause and the Dockerfile assertions never
+ *    run on the one PR that can break them.
+ *
+ * AMO-LISTED VISIBILITY, in detail (property 5).
+ *  - `continue-on-error: true` stays: the listed submission runs after every
+ *    artifact is uploaded, and an AMO review hiccup must not fail the release.
+ *    It is also the positive companion of the gate's negative assertion.
+ *  - `shell: bash` is load-bearing. GitHub runs an EXPLICIT `bash` as
+ *    `bash --noprofile --norc -eo pipefail`; the default shell has no
+ *    `pipefail`. The step pipes web-ext into `tee`, so without pipefail the
+ *    pipeline's status is `tee`'s (always 0), the outcome is never `failure`,
+ *    and the warning step can never fire — silently.
+ *  - The follow-up must sit AFTER the submission step (a step can only read
+ *    the outcome of one that already ran) and key on its `id`; a typo in
+ *    either spelling makes `steps.<id>.outcome` the empty string, and the
+ *    warning step skips forever. The `tee` target and the `tail` source must
+ *    name the same `amo-listed.log`.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -303,13 +356,14 @@ function jobBlock(workflow: string, jobId: string): string {
   return next ? rest.slice(0, next.index) : rest;
 }
 
-// The body of `<key>:` at `indent` spaces (block scalars tolerated); `null` when the key is absent.
+// The body of `<key>:` at `indent` spaces (`|` / `>-` block scalars tolerated); `null` when absent.
 // See the header → "THE SCAN HELPERS".
 function keyBlock(source: string, indent: number, key: string): string | null {
   const pad = " ".repeat(indent);
-  const start = new RegExp(`^${pad}${key}:[ \\t]*\\|?[ \\t]*$`, "m").exec(
-    source,
-  );
+  const start = new RegExp(
+    `^${pad}${key}:[ \\t]*(?:[|>][-+]?)?[ \\t]*$`,
+    "m",
+  ).exec(source);
   if (!start) {
     return null;
   }
@@ -520,6 +574,36 @@ function checkoutSteps(source: string): string[] {
   });
 }
 
+/** Every step slice of one job block, in file order; throws when the job has none. */
+function jobSteps(block: string, jobId: string): string[] {
+  const starts = [...block.matchAll(/^ {6}- .*$/gm)];
+  if (starts.length === 0) {
+    throw new Error(`Job \`${jobId}\` has no 6-space \`- \` steps to scan.`);
+  }
+  return starts.map((start) => {
+    const rest = block.slice((start.index ?? 0) + start[0].length);
+    const next = /^ {6}- /m.exec(rest);
+    return start[0] + (next ? rest.slice(0, next.index) : rest);
+  });
+}
+
+/** Index of the ONE step named `name`; throws when it is absent or duplicated. */
+function stepIndexNamed(steps: string[], name: string): number {
+  const header = `      - name: ${name}`;
+  const hits = steps
+    .map((step, index) =>
+      step.split("\n")[0].trimEnd() === header ? index : -1,
+    )
+    .filter((index) => index >= 0);
+  if (hits.length !== 1) {
+    throw new Error(
+      `Expected exactly one step named \`${name}\`, found ${hits.length} — ` +
+        `the step this guard reads was renamed or duplicated.`,
+    );
+  }
+  return hits[0];
+}
+
 // --- Derived values ---
 
 const JOB_IDS = jobIds(WORKFLOW);
@@ -562,16 +646,47 @@ const EXPECTED_CI_JOB_IDS = [
   "pwa-check",
   "e2e",
   "pwa-e2e",
+  "format",
+  "audit",
+  "docker",
 ];
 const EXPECTED_CD_JOB_IDS = ["deploy-worker-dev", "release-extension"];
 
 // Companion to the three-way set equality (three EMPTY sets compare equal); containment.
 // See the header → "THE POSITIVE COMPANIONS".
-const EXPECTED_FILTER_NAMES = ["extension", "pwa", "worker"];
+const EXPECTED_FILTER_NAMES = ["extension", "pwa", "worker", "docker"];
 
-// A floor on `actions/checkout` steps: one per CI job (6) plus one per CD job (7).
+// A floor on `actions/checkout` steps: one per CI job (9) plus one per CD job (7).
 // See the header → "THE POSITIVE COMPANIONS".
-const EXPECTED_CHECKOUT_COUNT = 13;
+const EXPECTED_CHECKOUT_COUNT = 16;
+
+// Globs each filter must contain (containment); each guards a change class no package dir covers.
+// See the header → "FILTER GLOBS, in detail".
+const EXPECTED_FILTER_GLOBS: ReadonlyArray<[string, readonly string[]]> = [
+  ["extension", ["pnpm-workspace.yaml", ".env.*"]],
+  ["pwa", ["pnpm-workspace.yaml", ".env.*"]],
+  ["worker", ["pnpm-workspace.yaml"]],
+  [
+    "docker",
+    [
+      "Dockerfile",
+      "docker-compose.yml",
+      ".dockerignore",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+    ],
+  ],
+];
+
+/** The job whose tests include the Dockerfile version assertions (nodeEngineFloor.test.ts). */
+const WORKER_CHECK_JOB_ID = "worker-check";
+
+/** The job holding the non-blocking AMO-listed submission and its failure warning. */
+const FIREFOX_RELEASE_JOB_ID = "release-extension-firefox";
+const AMO_LISTED_STEP_NAME = "Sign & submit to AMO (listed)";
+const AMO_LISTED_STEP_ID = "amo-listed";
+const AMO_LISTED_LOG = "amo-listed.log";
 
 // The checkout jobs that override the token scope today — companion to "restate contents:".
 // See the header → "THE POSITIVE COMPANIONS".
@@ -803,4 +918,88 @@ describe("workflow token permissions", () => {
       }
     },
   );
+});
+
+describe("changes job path filter globs", () => {
+  it.each(EXPECTED_FILTER_GLOBS)(
+    "lists the expected globs in the %s filter",
+    (filterName, globs) => {
+      // A dropped glob skips that package's checks on the very PR that needed them.
+      // See the header → "FILTER GLOBS, in detail".
+      const actual = PATH_FILTERS.get(filterName);
+      expect(
+        actual,
+        `No \`${filterName}\` filter in the \`${CHANGES_JOB_ID}\` job.`,
+      ).toBeDefined();
+      for (const glob of globs) {
+        expect(
+          actual,
+          `\`${filterName}\` filter must list '${glob}'`,
+        ).toContain(glob);
+      }
+    },
+  );
+
+  it("lets the docker filter trigger worker-check via its job-level if:", () => {
+    // nodeEngineFloor.test.ts's Dockerfile checks must run on a Dockerfile-only PR, but not via
+    // `worker` (it also gates deploy-worker-dev). See the header → "FILTER GLOBS, in detail".
+    const condition = keyBlock(
+      jobBlock(WORKFLOW, WORKER_CHECK_JOB_ID),
+      4,
+      "if",
+    );
+    expect(
+      condition,
+      `\`${WORKER_CHECK_JOB_ID}\` has no job-level \`if:\` block to read.`,
+    ).not.toBeNull();
+    expect(condition).toMatch(
+      new RegExp(
+        `needs\\.${CHANGES_JOB_ID}\\.outputs\\.docker[ \\t]*==[ \\t]*'true'`,
+      ),
+    );
+  });
+});
+
+describe("AMO listed submission warning", () => {
+  it("keeps the listed submission non-blocking, under bash, behind a step id", () => {
+    // `shell: bash` gives `-eo pipefail`; without it `tee` masks web-ext's exit code and the
+    // outcome is never `failure`. See the header → "AMO-LISTED VISIBILITY, in detail".
+    const steps = jobSteps(
+      jobBlock(WORKFLOW, FIREFOX_RELEASE_JOB_ID),
+      FIREFOX_RELEASE_JOB_ID,
+    );
+    const step = steps[stepIndexNamed(steps, AMO_LISTED_STEP_NAME)];
+    expect(step).toMatch(
+      new RegExp(`^ {8}id:[ \\t]*${AMO_LISTED_STEP_ID}[ \\t]*$`, "m"),
+    );
+    expect(step).toMatch(/^ {8}shell:[ \t]*bash[ \t]*$/m);
+    expect(step).toMatch(/^ {8}continue-on-error:[ \t]*true[ \t]*$/m);
+    expect(step).toMatch(/\|[ \t]*tee[ \t]+\S*amo-listed\.log/);
+  });
+
+  it("follows it with a warning step keyed on its failure outcome", () => {
+    // A step keyed on `steps.<id>.outcome` must run AFTER that step, or it reads "".
+    // See the header → "AMO-LISTED VISIBILITY, in detail".
+    const steps = jobSteps(
+      jobBlock(WORKFLOW, FIREFOX_RELEASE_JOB_ID),
+      FIREFOX_RELEASE_JOB_ID,
+    );
+    const listedIndex = stepIndexNamed(steps, AMO_LISTED_STEP_NAME);
+    const outcomeIf = new RegExp(
+      `^ {8}if:.*steps\\.${AMO_LISTED_STEP_ID}\\.outcome[ \\t]*==[ \\t]*'failure'`,
+      "m",
+    );
+    const warnIndex = steps.findIndex((step) => outcomeIf.test(step));
+    expect(
+      warnIndex,
+      `No step in \`${FIREFOX_RELEASE_JOB_ID}\` has an \`if:\` on ` +
+        `\`steps.${AMO_LISTED_STEP_ID}.outcome == 'failure'\` — a failed ` +
+        `listed submission would leave a green run and no trace.`,
+    ).toBeGreaterThanOrEqual(0);
+    expect(warnIndex).toBeGreaterThan(listedIndex);
+    const warnStep = steps[warnIndex];
+    expect(warnStep).toContain("::warning::");
+    expect(warnStep).toContain(AMO_LISTED_LOG);
+    expect(warnStep).toMatch(/\btail\b.*amo-listed\.log/);
+  });
 });

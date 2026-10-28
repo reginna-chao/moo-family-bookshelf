@@ -24,18 +24,20 @@ import {
 /**
  * Per-userId write ceiling on the verify-domain write handlers.
  *
- * The four AUTHENTICATED write handlers — PUT /api/user/:id/verify,
- * POST /api/user/:id/verify/otp, POST /api/user/:id/verify/prompted and
- * POST /api/user/:id/qr-token — share ONE per-userId counter, so a single
- * account cannot drain the Worker's daily KV write quota by rotating source
- * addresses. The public GET /api/user/:id/verify is deliberately NOT limited.
+ * The three AUTHENTICATED write handlers — POST /api/user/:id/verify/otp,
+ * POST /api/user/:id/verify/prompted and POST /api/user/:id/qr-token — share
+ * ONE per-userId counter, so a single account cannot drain the Worker's daily
+ * KV write quota by rotating source addresses. The public
+ * GET /api/user/:id/verify is deliberately NOT limited. PUT /api/user/:id/verify
+ * left this scope in #396: it has its own `verify-set` ceiling, charged only
+ * after its step-up (`verifySetRateLimit.test.ts`).
  *
  * Everything here runs WITHOUT DEV_MODE, which every verify suite sets:
  * DEV_MODE short-circuits `enforcePerUserRateLimit`, so the ceiling would never
  * fire. Setup that must not spend the live budget goes through the DEV_MODE
  * helper (`devRequest`) on purpose.
  *
- * Ceiling constants: `VERIFY_WRITE_LIMIT` is the very options object the four
+ * Ceiling constants: `VERIFY_WRITE_LIMIT` is the very options object the three
  * `enforcePerUserRateLimit` call sites in `src/routes/verify.ts` spread,
  * imported rather than copied — so the boundary cases (last write admitted,
  * next one refused) track any change to the ceiling instead of silently
@@ -54,7 +56,7 @@ import {
  * stay on KV by design; the bindings only keep the per-IP layer out of the KV
  * assertions.
  *
- * One table (`WRITE_ENDPOINTS`) drives all four authenticated write endpoints
+ * One table (`WRITE_ENDPOINTS`) drives all three authenticated write endpoints
  * that share the ceiling: that is what proves the limit is a property of the
  * SCOPE, not of a single handler.
  *
@@ -282,18 +284,9 @@ interface WriteEndpoint {
   foreignTokenStatus: number;
 }
 
-/** The four authenticated write endpoints sharing the ceiling: one table proves
+/** The three authenticated write endpoints sharing the ceiling: one table proves
  *  the limit belongs to the SCOPE, not to a single handler. */
 const WRITE_ENDPOINTS: WriteEndpoint[] = [
-  {
-    label: "PUT verify",
-    call: (token) =>
-      prodRequest("PUT", `/api/user/${USER_ID}/verify`, {
-        body: JSON.stringify({ method: "none" }),
-        token,
-      }),
-    foreignTokenStatus: 401,
-  },
   {
     label: "POST verify/otp",
     // The handler refuses with 400 unless the account is on the `code` method;
@@ -412,18 +405,11 @@ describe("Verify-domain per-userId write ceiling", () => {
     expect(await writesCharged(USER_ID)).toBe(1);
   });
 
-  it("counts PUT verify, OTP, prompted and qr-token against ONE shared window", async () => {
+  it("counts OTP, prompted and qr-token against ONE shared window", async () => {
     await seedAuthToken(USER_ID);
+    // The OTP handler's own precondition: the account is on the `code` method.
+    await seedVerifyMethod(USER_ID, "code");
     await spendWriteBudget(USER_ID, WRITE_MAX - WRITE_ENDPOINTS.length);
-
-    // PUT verify goes first on purpose: switching the account to the `code`
-    // method is also the precondition the OTP handler needs.
-    const set = await prodRequest("PUT", `/api/user/${USER_ID}/verify`, {
-      body: JSON.stringify({ method: "code" }),
-      token: AUTH_TOKEN,
-    });
-    expect(set.status).toBe(200);
-    // `code` sets no secret, so it rotates nothing (#378): AUTH_TOKEN stays valid.
 
     const otp = await prodRequest("POST", `/api/user/${USER_ID}/verify/otp`, {
       body: "{}",
@@ -440,7 +426,7 @@ describe("Verify-domain per-userId write ceiling", () => {
     });
     expect(qr.status).toBe(200);
 
-    // Four different handlers, one counter.
+    // Three different handlers, one counter.
     expect(await writesCharged(USER_ID)).toBe(WRITE_MAX);
     expect(await writeCounterKeys()).toHaveLength(1);
 

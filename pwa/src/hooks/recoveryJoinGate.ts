@@ -4,8 +4,8 @@ import { getActiveRecoveryCooldown } from "@/utils/recoveryCooldown";
 import { isSelfDepartureActive } from "@/utils/selfDeparture";
 
 /**
- * True when the PWA's silent recovery join (`acquireNewToken` in
- * `pwa/src/App.tsx`) must NOT be sent for session `current`:
+ * True when the PWA's silent recovery join (`useRecoveryJoin` in
+ * `pwa/src/hooks/useRecoveryJoin.ts`) must NOT be sent for session `current`:
  *  - a 429 cooldown is active — every 401 retries through the refresher and the
  *    join spends the worker's per-IP 3/min tier (LandingPage joins bypass this);
  *  - this user's own leave / delete-account request is in flight in any tab

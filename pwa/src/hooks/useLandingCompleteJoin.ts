@@ -159,6 +159,7 @@ export function useLandingCompleteJoin({
         familyId,
         apiHost,
         authToken: joinRes.data?.authToken,
+        expiresAt: joinRes.data?.expiresAt,
       });
     } catch {
       setGeneralError("處理失敗，請重試。");

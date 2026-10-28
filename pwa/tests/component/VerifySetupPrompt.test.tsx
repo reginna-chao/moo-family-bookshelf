@@ -16,7 +16,8 @@ import { ApiClient } from "@/api/client";
  *
  * Prompt visibility (#343): whether the overlay opens is read from the owner-only
  * `getVerifyPrompted` (`GET /api/user/:id/verify/prompted`), never from the public
- * `getVerifyMethod`, which no longer carries `prompted`. Only an explicit `prompted: BoolFlag.FALSE`
+ * `getVerifyMethod`, which no longer carries `prompted` and since #396 only picks the first step
+ * (VerifySetupPrompt.stepUp.test.tsx) — a PIN answer never opens the overlay on its own. Only an explicit `prompted: BoolFlag.FALSE`
  * opens it; an error envelope (an older self-hosted server answers the new route with 404
  * `NOT_FOUND`), a missing or wrongly typed field, and a rejected request all render nothing, so the
  * user is never blocked. The "loading" and "done" steps BOTH render null, so a "renders nothing"
@@ -55,7 +56,7 @@ const USER_ID = "a".repeat(64);
 function createMockClient(overrides: Record<string, unknown> = {}) {
   return {
     getVerifyPrompted: vi.fn().mockResolvedValue({ data: { prompted: 0 } }),
-    // Present only so a test can assert the public GET is no longer used for visibility.
+    // `none` keeps the old choose flow; the PIN / pattern first step is in VerifySetupPrompt.stepUp.test.tsx.
     getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none" } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
     markVerifyPrompted: vi.fn().mockResolvedValue({ data: { ok: true } }),
@@ -104,13 +105,18 @@ describe("VerifySetupPrompt", () => {
   });
 
   it("should decide visibility from the owner-only prompted endpoint, not the public verify GET", async () => {
-    const client = createMockClient();
+    const client = createMockClient({
+      getVerifyPrompted: vi.fn().mockResolvedValue({ data: { prompted: 1 } }),
+      getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "pin" } }),
+    });
 
-    await renderSettled(client);
+    const { container } = await renderSettled(client);
 
     expect(client.getVerifyPrompted).toHaveBeenCalledTimes(1);
     expect(client.getVerifyPrompted).toHaveBeenCalledWith(USER_ID);
-    expect(client.getVerifyMethod).not.toHaveBeenCalled();
+    // Read once, for the first step only; a PIN account already prompted still sees nothing.
+    expect(client.getVerifyMethod).toHaveBeenCalledTimes(1);
+    expect(container.innerHTML).toBe("");
   });
 
   // Each case would show the overlay if visibility were "not explicitly prompted" instead of "explicitly unprompted".
@@ -153,7 +159,8 @@ describe("VerifySetupPrompt", () => {
   });
 
   // #342: the hint used to claim the verification is phone-only, but an Extension re-login needs it too.
-  it("should tell the user the verification also guards Extension re-login and where to reset it", async () => {
+  // #396: resetting now needs the current secret, so the old 「從擴充功能的「設定」改成新的」 advice is gone.
+  it("should tell the user the verification also guards Extension re-login and what a change needs", async () => {
     const client = createMockClient();
 
     render(
@@ -165,7 +172,13 @@ describe("VerifySetupPrompt", () => {
     );
 
     const tip = await screen.findByText(/擴充功能需要重新登入時/);
-    expect(tip).toHaveTextContent("從擴充功能的「設定」改成新的");
+    // Production literal in VerifySetupViews.tsx (`ChooseMethodView`); word-for-word the Extension's tip.
+    expect(tip.textContent).toBe(
+      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的 PIN 碼或圖形；忘記的話，自架伺服器請找管理者協助。",
+    );
+    expect(
+      screen.queryByText(/從擴充功能的「設定」改成新的/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
   });
 
