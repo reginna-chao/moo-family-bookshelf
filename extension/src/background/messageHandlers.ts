@@ -3,8 +3,6 @@
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
-import { readFamilyId } from "../storage/familyId";
-import { showSyncErrorBadge, clearSyncErrorBadge } from "./badge";
 import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
@@ -24,12 +22,8 @@ const SYNCED_KEYS = [FAMILY_ID_KEY] as const;
  * would turn those runtime guards into dead code.
  */
 export type BackgroundMessage =
-  | { type: "GET_FAMILY_ID" }
   | { type: "SET_FAMILY_ID"; familyId: string }
   | { type: "CLEAR_FAMILY_ID" }
-  | { type: "SET_SYNC_ERROR_BADGE" }
-  | { type: "CLEAR_SYNC_ERROR_BADGE" }
-  | { type: "GET_API_ENDPOINT" }
   | { type: "SET_API_ENDPOINT"; apiEndpoint: string | null };
 
 /** Message type discriminant union (the `type` field of every message). */
@@ -50,10 +44,6 @@ export type MessageHandlerMap = {
 export type MessageHandler = (
   message: BackgroundMessage,
 ) => Promise<unknown> | unknown;
-
-async function handleGetFamilyId(): Promise<unknown> {
-  return { familyId: await readFamilyId() };
-}
 
 async function handleSetFamilyId(
   message: Extract<BackgroundMessage, { type: "SET_FAMILY_ID" }>,
@@ -89,21 +79,6 @@ async function handleClearFamilyId(): Promise<unknown> {
   return { ok: true };
 }
 
-function handleSetSyncErrorBadge(): unknown {
-  showSyncErrorBadge();
-  return { ok: true };
-}
-
-function handleClearSyncErrorBadge(): unknown {
-  clearSyncErrorBadge();
-  return { ok: true };
-}
-
-async function handleGetApiEndpoint(): Promise<unknown> {
-  const result = await browser.storage.local.get([API_ENDPOINT_KEY]);
-  return { apiEndpoint: result[API_ENDPOINT_KEY] ?? null };
-}
-
 async function handleSetApiEndpoint(
   message: Extract<BackgroundMessage, { type: "SET_API_ENDPOINT" }>,
 ): Promise<unknown> {
@@ -135,11 +110,7 @@ async function handleSetApiEndpoint(
 
 /** Dispatch map: message type → handler. */
 export const messageHandlers: MessageHandlerMap = {
-  GET_FAMILY_ID: handleGetFamilyId,
   SET_FAMILY_ID: handleSetFamilyId,
   CLEAR_FAMILY_ID: handleClearFamilyId,
-  SET_SYNC_ERROR_BADGE: handleSetSyncErrorBadge,
-  CLEAR_SYNC_ERROR_BADGE: handleClearSyncErrorBadge,
-  GET_API_ENDPOINT: handleGetApiEndpoint,
   SET_API_ENDPOINT: handleSetApiEndpoint,
 };

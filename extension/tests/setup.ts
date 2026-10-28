@@ -91,10 +91,6 @@ const extensionApiMock = {
     query: vi.fn().mockResolvedValue([]),
     sendMessage: vi.fn(),
   },
-  action: {
-    setBadgeText: vi.fn(),
-    setBadgeBackgroundColor: vi.fn(),
-  },
 };
 
 /** jsdom lacks `window.matchMedia`: a desktop stub (every query `matches: false`) for useMediaQuery /

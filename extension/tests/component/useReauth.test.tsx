@@ -37,7 +37,7 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * VERIFICATION_REQUIRED and handed over to this prompt; the re-join then came back 403
  * MEMBER_REMOVED even though the PIN was CORRECT, and the prompt re-offered the same input — the user
  * looped on "right secret → error" for the tombstone's whole life (6h). The teardown ends that loop
- * and must be byte-identical to the silent path's (both go through `clearFamilyStorageAndBroadcast`,
+ * and must be byte-identical to the silent path's (both go through `clearFamilyStorage`,
  * pinned in tests/unit/api/auth-refresh.test.ts); the family's API endpoint dies with the membership,
  * since a client left pointing at the ex-family's server would send the next create/join there.
  *
@@ -53,12 +53,12 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * ex-family's custom @host — the value the NEXT boot restores, which a later join with a plain
  * (no-@host) sync code never overwrites — and the new family's traffic goes to the old family's
  * server. In that case a family-gone join short-circuits runReauthJoin before its cooldown remove, so
- * the FIRST storage.local.remove is the `[FAMILY_ID_KEY]` clear inside clearFamilyStorageAndBroadcast,
- * which the rejection aborts before its own endpoint reset and FAMILY_REMOVED broadcast.
+ * the FIRST storage.local.remove is the `[FAMILY_ID_KEY]` clear inside clearFamilyStorage, which the
+ * rejection aborts before its own endpoint reset.
  * `mockRejectedValueOnce` fails only that call; later removes resolve through the shared setup mock.
  * Exactly two clears, in order (the failed familyId one, then the recovery reset), distinguish the
- * catch-block reset from the one inside clearFamilyStorageAndBroadcast — before the fix there was only
- * ever call #1.
+ * catch-block reset from the one inside clearFamilyStorage — before the fix there was only ever
+ * call #1.
  */
 
 function seedStorage(
@@ -389,11 +389,8 @@ describe("useReauth", () => {
         expect(chrome.storage.sync.remove).toHaveBeenCalledWith([
           FAMILY_ID_KEY,
         ]);
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-          type: "FAMILY_REMOVED",
-        });
         // The family's endpoint dies with the membership, identical to the silent path (both use
-        // clearFamilyStorageAndBroadcast, pinned in tests/unit/api/auth-refresh.test.ts).
+        // clearFamilyStorage, pinned in tests/unit/api/auth-refresh.test.ts).
         expect(chrome.storage.local.remove).toHaveBeenCalledWith(
           expect.arrayContaining([
             API_ENDPOINT_KEY,
@@ -467,7 +464,7 @@ describe("useReauth", () => {
     it("resets the endpoint choice and finishes the handover even when the storage clear rejects", async () => {
       seedStorage();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      // The FIRST storage.local.remove here is clearFamilyStorageAndBroadcast's `[FAMILY_ID_KEY]` clear;
+      // The FIRST storage.local.remove here is clearFamilyStorage's `[FAMILY_ID_KEY]` clear;
       // fail only that call. See the file header, "Storage-clear rejection".
       vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
         new Error("Extension context invalidated"),
@@ -495,13 +492,8 @@ describe("useReauth", () => {
       // gone there is nothing left to type.
       expect(result.current.active).toBe(false);
 
-      // The teardown really was partial — the aborted clear never reached its
-      // broadcast, so nothing downstream of it re-ran on its own.
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
-        type: "FAMILY_REMOVED",
-      });
-      // ...which is why the catch re-runs the endpoint reset: otherwise the ex-family's @host survives
-      // into the next boot. See the file header, "Storage-clear rejection".
+      // The aborted clear never reached its own endpoint reset, so the catch re-runs it: otherwise the
+      // ex-family's @host survives into the next boot. See the file header, "Storage-clear rejection".
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
         expect.arrayContaining([
           API_ENDPOINT_KEY,
@@ -555,9 +547,6 @@ describe("useReauth", () => {
           FAMILY_ID_KEY,
         ]);
         expect(chrome.storage.sync.remove).not.toHaveBeenCalled();
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
-          type: "FAMILY_REMOVED",
-        });
         expect(apiClient.onFamilyRemoved).not.toHaveBeenCalled();
         // The endpoint survives too — the retry the user is about to make has to
         // reach the SAME server, so an over-eager reset would break it.

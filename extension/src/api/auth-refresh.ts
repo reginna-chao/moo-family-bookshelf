@@ -153,7 +153,7 @@ export interface RefreshOutcome {
  *                          and do NOT prompt verification (429 fires before the
  *                          server's verification gate).
  *  - verification codes  → prompt re-verification via onReauthRequired, keep data.
- *  - family-gone codes   → clear local family data + FAMILY_REMOVED.
+ *  - family-gone codes   → clear local family data.
  *  - anything else        → leave data intact so a later request can retry.
  *
  * The recovery join is quota-sensitive (the worker rate-limits it per-IP on the
@@ -266,8 +266,8 @@ export async function doRefreshToken(
 }
 
 /**
- * Clear local + synced family data, drop this device's family-scoped API
- * endpoint choice, and broadcast FAMILY_REMOVED.
+ * Clear local + synced family data, then drop this device's family-scoped API
+ * endpoint choice.
  *
  * Exported for the dialog's re-verification flow (`dialog/useReauth.ts`), whose
  * own join can be refused with a family-gone code after the silent recovery was
@@ -291,7 +291,7 @@ export async function doRefreshToken(
  * Deliberately does NOT invoke `onFamilyRemoved` — reacting in the UI is the
  * caller's business, and the two callers do it at different moments.
  */
-export async function clearFamilyStorageAndBroadcast(): Promise<void> {
+export async function clearFamilyStorage(): Promise<void> {
   await browser.storage.local.remove([FAMILY_ID_KEY]);
   try {
     await browser.storage.sync.remove([FAMILY_ID_KEY]);
@@ -299,11 +299,6 @@ export async function clearFamilyStorageAndBroadcast(): Promise<void> {
     // sync storage may not be available in all contexts
   }
   await resetFamilyEndpointChoice();
-  void Promise.resolve(
-    browser.runtime.sendMessage({ type: "FAMILY_REMOVED" }),
-  ).catch(() => {
-    // Message may fail if no listener is active
-  });
 }
 
 /** Clear the family data, then hand the refresh caller its notification. */
@@ -311,7 +306,7 @@ async function clearFamilyAndNotify(
   deps: RefreshDeps,
   errorCode: string,
 ): Promise<void> {
-  await clearFamilyStorageAndBroadcast();
+  await clearFamilyStorage();
   deps.onFamilyRemoved?.({ errorCode });
 }
 

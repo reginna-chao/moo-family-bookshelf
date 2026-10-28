@@ -5,6 +5,7 @@ import browser from "webextension-polyfill";
 import {
   messageHandlers,
   type BackgroundMessage,
+  type BackgroundMessageType,
   type MessageHandler,
 } from "./messageHandlers";
 import { purgeStoredEmail } from "./purgeStoredEmail";
@@ -18,15 +19,20 @@ browser.runtime.onInstalled.addListener(() => {
   // upgraded device is inert. See docs/architecture.md → 背景 Service Worker 與訊息.
 });
 
-/** Messages from the content script / dialog: a known type returns a Promise of the response (the
- *  polyfill's async reply, no `sendResponse`); an unknown type returns `undefined`. */
+/** Dispatches only an object whose string `type` is an own key of `messageHandlers` (a Promise of the
+ *  response, no `sendResponse`); anything else returns `undefined`. */
 browser.runtime.onMessage.addListener(
   (message: unknown): Promise<unknown> | undefined => {
-    const msg = message as BackgroundMessage;
+    if (typeof message !== "object" || message === null) return undefined;
+    const type = (message as { type?: unknown }).type;
+    // Own keys only: a prototype name ("toString", "__proto__") must never reach a handler.
+    if (typeof type !== "string" || !Object.hasOwn(messageHandlers, type))
+      return undefined;
     // One localized cast to the union-accepting MessageHandler: the key already picked the
     // variant's handler, so runtime dispatch is correct.
-    const handler = messageHandlers[msg.type] as MessageHandler | undefined;
-    if (!handler) return undefined;
-    return Promise.resolve(handler(msg));
+    const handler = messageHandlers[
+      type as BackgroundMessageType
+    ] as MessageHandler;
+    return Promise.resolve(handler(message as BackgroundMessage));
   },
 );

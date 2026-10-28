@@ -3,7 +3,7 @@
 
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
-import { clearFamilyStorageAndBroadcast } from "../api/auth-refresh";
+import { clearFamilyStorage } from "../api/auth-refresh";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag, type ApiClient } from "../api/client";
 import {
@@ -74,7 +74,7 @@ async function tearDownGoneFamily(
   errorCode: string,
 ): Promise<void> {
   try {
-    await clearFamilyStorageAndBroadcast();
+    await clearFamilyStorage();
   } catch (err) {
     // Can reject (unguarded storage.local.remove); swallowed so a storage failure never strands
     // the latch, which would mute every later 401 this session.
