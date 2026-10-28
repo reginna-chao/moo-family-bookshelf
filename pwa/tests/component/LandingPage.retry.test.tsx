@@ -37,6 +37,10 @@ import {
  * to the real event loop, so Web Crypto hashing and the mocked API calls settle without advancing
  * the countdown clock. flushUntil polls between flushes because RTL's `waitFor` is not usable here:
  * it does not detect Vitest fake timers, so its own polling timer would never fire.
+ * flushUntil's bound is real wall-clock time (`vi.getRealSystemTime()`; `Date.now()` is faked),
+ * not an attempt count: one async tick yields only a single real event-loop turn, while the login's
+ * Web Crypto hashing completes on Node's threadpool, so under CI load a fixed count of turns can
+ * run out before the hash resolves (#410). The fake clock is never advanced while polling.
  */
 
 // Only decodeSyncCode is stubbed; parseSyncCodeApiHost stays real for the @host note.
@@ -86,11 +90,12 @@ async function flush(times = 5) {
   }
 }
 
-/** Poll `check` between flushes until it stops throwing (RTL's `waitFor` cannot see fake timers).
+/** Poll `check` between flushes until it passes or `timeoutMs` of REAL time elapse.
  *  See the header → "Flushing under fake timers". */
-async function flushUntil(check: () => void, attempts = 40) {
+async function flushUntil(check: () => void, timeoutMs = 5_000) {
+  const deadline = vi.getRealSystemTime() + timeoutMs;
   let lastError: unknown = new Error("flushUntil: check never ran");
-  for (let i = 0; i < attempts; i++) {
+  do {
     await flush(1);
     try {
       check();
@@ -98,7 +103,7 @@ async function flushUntil(check: () => void, attempts = 40) {
     } catch (err) {
       lastError = err;
     }
-  }
+  } while (vi.getRealSystemTime() < deadline);
   throw lastError;
 }
 
