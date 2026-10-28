@@ -3,6 +3,7 @@ import { isExpiresAt } from "moo-family-bookshelf-shared/api/issuedCredentials";
 import { ApiClient } from "@/api/client";
 import { isSelfDepartureActive } from "@/utils/selfDeparture";
 import type { AuthState } from "./useAuth";
+import { persistedSessionMatches } from "./authStorage";
 import { isLiveSession } from "./useSessionApiClient";
 
 /** Renew once less than this is left on the token (the Worker issues 90 days). */
@@ -51,7 +52,8 @@ async function requestRefresh(
 }
 
 /** Store the renewed token only while `current` is still the session AND still holds the token
- *  that was sent: a token swapped mid-flight (pin change, recovery join) must not be overwritten. */
+ *  that was sent: a token swapped mid-flight (pin change, recovery join) must not be overwritten.
+ *  The persisted session must match too, so another tab's newer token / family / host survives. */
 function adoptRefreshed(
   authRef: RefObject<AuthState | null>,
   current: AuthState,
@@ -61,6 +63,7 @@ function adoptRefreshed(
   const live = authRef.current;
   if (live === null || sessionEnded(live, current)) return;
   if (live.authToken !== current.authToken) return;
+  if (!persistedSessionMatches(current)) return;
   const next: AuthState = { ...live, authToken: refreshed.token };
   delete next.expiresAt;
   if (isExpiresAt(refreshed.expiresAt)) next.expiresAt = refreshed.expiresAt;

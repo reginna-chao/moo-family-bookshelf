@@ -34,6 +34,8 @@ import { beginSelfDeparture } from "@/utils/selfDeparture";
  *    and the next foreground check tries again.
  *  - The renewed token is written only while the session is still live AND still holds the token
  *    that was sent; the written session carries the response's expiry, or no `expiresAt` key.
+ *  - ...and only while localStorage still holds that same session (`persistedSessionMatches`):
+ *    another tab of the same account may have stored a newer token, family or server meanwhile.
  *  - One request in flight per tab; the effect depends on the session identity only, so a renewal
  *    that still grants less than 30 days renews once per check instead of looping.
  *
@@ -613,6 +615,78 @@ describe("useProactiveTokenRefresh", () => {
 
       expect(onLogin).not.toHaveBeenCalled();
       expect(storedToken()).toBe(OLD_TOKEN);
+    });
+  });
+
+  describe("cross-tab guard", () => {
+    const SELF_HOST = "https://self.example.com";
+    const OTHER_HOST = "https://other.example.com";
+    const OTHER_FAMILY = "fam-other-tab";
+
+    /** Seed, mount, then let `otherTab` write localStorage directly while the refresh is pending. */
+    async function answerAfterOtherTab(otherTab: () => void) {
+      const pending = deferredReply();
+      queuedReplies = [pending.reply];
+      seedSession({ apiHost: SELF_HOST });
+      const app = await renderApp();
+      expect(refreshCount()).toBe(1);
+
+      otherTab();
+      await act(async () => {
+        pending.release(renewedBody());
+      });
+      await flush();
+      return app;
+    }
+
+    it("drops the response when another tab stored a newer token meanwhile", async () => {
+      // A PIN / pattern change in another tab rotates the stored token (#378); this tab never sees it.
+      const { result, onLogin, unmount } = await answerAfterOtherTab(() =>
+        localStorage.setItem(namespacedKey(USER_A, "authToken"), SWAPPED_TOKEN),
+      );
+
+      expect(onLogin).not.toHaveBeenCalled();
+      expect(result.current.auth?.authToken).toBe(OLD_TOKEN);
+      expect(storedToken()).toBe(SWAPPED_TOKEN);
+      expect(storedExpiry()).toBeNull();
+      unmount();
+    });
+
+    it("does not write the old family or server back after another tab switched both", async () => {
+      const { onLogin, unmount } = await answerAfterOtherTab(() => {
+        localStorage.setItem(namespacedKey(USER_A, "familyId"), OTHER_FAMILY);
+        localStorage.setItem(namespacedKey(USER_A, "apiHost"), OTHER_HOST);
+      });
+
+      expect(onLogin).not.toHaveBeenCalled();
+      expect(localStorage.getItem(namespacedKey(USER_A, "familyId"))).toBe(
+        OTHER_FAMILY,
+      );
+      expect(localStorage.getItem(namespacedKey(USER_A, "apiHost"))).toBe(
+        OTHER_HOST,
+      );
+      expect(storedToken()).toBe(OLD_TOKEN);
+      expect(storedExpiry()).toBeNull();
+      unmount();
+    });
+
+    it("stores the renewed token and expiry when nothing changed in storage meanwhile", async () => {
+      // Positive companion of the two cases above: same pending window, no other-tab write.
+      const { result, onLogin, unmount } = await answerAfterOtherTab(() => {});
+
+      const expected: AuthState = {
+        userId: USER_A,
+        familyId: FAMILY,
+        apiHost: SELF_HOST,
+        authToken: NEW_TOKEN,
+        expiresAt: RENEWED_EXPIRES_AT,
+      };
+      expect(onLogin).toHaveBeenCalledTimes(1);
+      expect(onLogin).toHaveBeenCalledWith(expected);
+      expect(result.current.auth).toEqual(expected);
+      expect(storedToken()).toBe(NEW_TOKEN);
+      expect(storedExpiry()).toBe(String(RENEWED_EXPIRES_AT));
+      unmount();
     });
   });
 

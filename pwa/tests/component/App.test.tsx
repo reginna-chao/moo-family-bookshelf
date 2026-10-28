@@ -210,6 +210,7 @@ import {
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
   USER_ID_KEY,
+  namespacedKey,
 } from "@/hooks/useAuth";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
 import {
@@ -513,10 +514,20 @@ describe("App", () => {
     };
     const RENEWED_TOKEN = "f".repeat(64);
     const RENEWED_EXPIRES_AT = Date.now() + 90 * 86_400_000;
+    const FAMILY_KEY = namespacedKey(SESSION.userId, "familyId");
+    const TOKEN_KEY = namespacedKey(SESSION.userId, "authToken");
+
+    afterEach(() => {
+      localStorage.removeItem(FAMILY_KEY);
+      localStorage.removeItem(TOKEN_KEY);
+    });
 
     it("renews a session with no stored expiry exactly once on mount, on the same ApiClient", async () => {
       window.location.hash = "#personal-shelf";
       setMockSession({ ...SESSION });
+      // The renewal is adopted only while storage still holds this session (cross-tab guard).
+      localStorage.setItem(FAMILY_KEY, SESSION.familyId);
+      localStorage.setItem(TOKEN_KEY, SESSION.authToken);
       mockLogin.mockImplementation((next: Record<string, unknown>) => {
         setMockSession(next);
       });

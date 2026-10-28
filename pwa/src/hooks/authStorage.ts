@@ -90,6 +90,25 @@ export function loadFromStorage(): AuthState | null {
   };
 }
 
+/** True only while localStorage still holds exactly `session` (userId, familyId, apiHost, authToken);
+ *  a read that throws is false. Why: docs/architecture.md → PWA 主動續期. */
+export function persistedSessionMatches(session: AuthState): boolean {
+  try {
+    const { userId } = session;
+    if (localStorage.getItem(USER_ID_KEY) !== userId) return false;
+    const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
+    const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
+    const authToken = localStorage.getItem(namespacedKey(userId, "authToken"));
+    return (
+      familyId === session.familyId &&
+      (apiHost || undefined) === session.apiHost &&
+      (authToken || undefined) === session.authToken
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Build a remembered sync code from current localStorage, if remember is enabled. */
 export function buildRememberedSyncCode(): string {
   const remember = localStorage.getItem(REMEMBER_SYNC_CODE_KEY) !== "0";

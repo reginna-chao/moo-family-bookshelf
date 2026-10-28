@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import {
   clearSessionForInvite,
   loadFromStorage,
+  persistedSessionMatches,
   saveToStorage,
 } from "@/hooks/authStorage";
 import {
@@ -194,5 +195,25 @@ describe("authStorage token expiry", () => {
 
     expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
     expect(localStorage.getItem(namespacedKey(USER, "authToken"))).toBeNull();
+  });
+
+  describe("persistedSessionMatches", () => {
+    it("reports no match when reading localStorage throws", () => {
+      saveToStorage(SESSION);
+      // Positive companion: the same stored session matches while reads succeed.
+      expect(persistedSessionMatches(SESSION)).toBe(true);
+
+      const getItem = vi
+        .spyOn(Storage.prototype, "getItem")
+        .mockImplementation(() => {
+          throw new DOMException("denied", "SecurityError");
+        });
+      try {
+        expect(persistedSessionMatches(SESSION)).toBe(false);
+        expect(getItem).toHaveBeenCalled();
+      } finally {
+        getItem.mockRestore();
+      }
+    });
   });
 });
