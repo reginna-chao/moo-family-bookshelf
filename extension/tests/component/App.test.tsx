@@ -28,13 +28,13 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * Browser mocks: production reads via promise-based `browser.runtime.sendMessage(msg)` and
  * `browser.storage.{local,sync}.get(keys)` (webextension-polyfill); the mocks resolve the
  * response/result Promise keyed by message type / storage key — there is no Chrome callback argument.
- * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT the
- * `GET_FAMILY_ID` message, so familyId is seeded into BOTH storage areas, and the storage mocks are
+ * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT a
+ * background message, so familyId is seeded into BOTH storage areas, and the storage mocks are
  * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY])` each
  * get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
  * reads it with a DIRECT `readStoredApiEndpoint()` and no longer sends GET_API_ENDPOINT (unreliable
- * on Firefox's sleeping background event page; the handler is covered in
- * tests/unit/background.test.ts).
+ * on Firefox's sleeping background event page). The background no longer answers that message at
+ * all (#366); the boot test still asserts it is never sent, as a regression guard.
  *
  * Styling contract: jsdom does not apply stylesheet rules, so wherever styling moved from inline
  * styles to classes in styles.css, the class itself is the observable contract — `.moo-tab--active`
@@ -138,16 +138,13 @@ function setupChromeMessages(options: {
   userId?: string | null;
   authToken?: string | null;
   /** Accepted API endpoint, seeded into storage.local: boot reads it directly via
-   *  `readStoredApiEndpoint()`, never GET_API_ENDPOINT. See the file header, "Browser mocks". */
+   *  `readStoredApiEndpoint()`, never via the background. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
     (message: unknown) => {
       const msg = message as { type: string };
-      if (msg.type === "GET_FAMILY_ID") {
-        return Promise.resolve({ familyId: options.familyId ?? null });
-      }
       if (msg.type === "CLEAR_FAMILY_ID") {
         return Promise.resolve(undefined);
       }
@@ -549,7 +546,7 @@ describe("App", () => {
       restore();
     });
 
-    /** The live-client half of the endpoint restore; the storage half runs in clearFamilyStorageAndBroadcast
+    /** The live-client half of the endpoint restore; the storage half runs in clearFamilyStorage
      *  (auth-refresh.test.ts), which calling the callback directly deliberately skips. */
     it("puts the live client back on the official default endpoint", async () => {
       const { instances, restore } = await captureApiClients();

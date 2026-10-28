@@ -27,7 +27,7 @@ import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "@/constants";
  * silently suppressing it.
  *
  * readStoredApiEndpoint: the dialog boots on this value. App reads it DIRECTLY
- * (dialog/App.tsx) — the GET_API_ENDPOINT round-trip has the same Firefox
+ * (dialog/App.tsx) — the background round-trip has the same Firefox
  * failure mode as the write, where a sleeping background page would silently
  * boot a member who accepted a custom endpoint onto the official default
  * instead.

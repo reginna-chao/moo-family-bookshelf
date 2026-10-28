@@ -3,7 +3,6 @@ import browser, { type Runtime } from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import {
   FAMILY_ID_KEY,
-  USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
@@ -49,7 +48,7 @@ import {
  */
 
 type MessageListener = (
-  message: Record<string, unknown>,
+  message: unknown,
   sender: Runtime.MessageSender,
 ) => Promise<unknown> | undefined;
 
@@ -66,9 +65,7 @@ function refusalMessageFor(raw: string): string {
   throw new Error(`Expected validateEndpointUrl to refuse ${raw}`);
 }
 
-function sendMessage(
-  message: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+function sendMessage(message: unknown): Promise<Record<string, unknown>> {
   return Promise.resolve(
     listener(message, {} as Runtime.MessageSender),
   ) as Promise<Record<string, unknown>>;
@@ -134,79 +131,6 @@ describe("background service worker", () => {
     });
   });
 
-  describe("GET_FAMILY_ID", () => {
-    it("bootstraps familyId from sync when the device has never onboarded (no local userId)", async () => {
-      // readFamilyId is now LOCAL-FIRST: sync is only a bootstrap hint consulted
-      // when local has no userId (never onboarded). Local is ALWAYS read first.
-      vi.mocked(browser.storage.local.get).mockResolvedValue({});
-      vi.mocked(browser.storage.sync.get).mockResolvedValue({
-        [FAMILY_ID_KEY]: "fam-from-sync",
-      });
-
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: "fam-from-sync" });
-      // Local is consulted first (local-first authority); only its ABSENCE of a
-      // userId lets the sync bootstrap run.
-      expect(browser.storage.local.get).toHaveBeenCalled();
-    });
-
-    it("returns null (never resurrects sync) when an onboarded device has userId but no local familyId", async () => {
-      // The zombie-familyId guard: onboarded (local userId) + no local familyId
-      // must NOT be resurrected from a stale sync remnant.
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [USER_ID_KEY]: "u1",
-      });
-      vi.mocked(browser.storage.sync.get).mockResolvedValue({
-        [FAMILY_ID_KEY]: "fam-zombie",
-      });
-
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: null });
-    });
-
-    it("falls back to local storage when sync has no familyId", async () => {
-      vi.mocked(browser.storage.sync.get).mockResolvedValue({});
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_ID_KEY]: "fam-from-local",
-      });
-
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: "fam-from-local" });
-    });
-
-    it("returns null when neither sync nor local has familyId", async () => {
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: null });
-    });
-
-    it("falls back to local and returns its value when sync.get rejects (Firefox)", async () => {
-      vi.mocked(browser.storage.sync.get).mockRejectedValue(
-        new Error("sync unavailable"),
-      );
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [FAMILY_ID_KEY]: "fam-from-local",
-      });
-
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: "fam-from-local" });
-    });
-
-    it("returns null when sync.get rejects and local is also empty", async () => {
-      vi.mocked(browser.storage.sync.get).mockRejectedValue(
-        new Error("sync unavailable"),
-      );
-
-      const response = await sendMessage({ type: "GET_FAMILY_ID" });
-
-      expect(response).toEqual({ familyId: null });
-    });
-  });
-
   describe("CLEAR_FAMILY_ID", () => {
     it("removes synced keys from sync and synced keys+authToken from local", async () => {
       const response = await sendMessage({ type: "CLEAR_FAMILY_ID" });
@@ -247,19 +171,6 @@ describe("background service worker", () => {
       ]);
       // A sync rejection must not propagate; handler still resolves ok.
       expect(response).toEqual({ ok: true });
-    });
-  });
-
-  describe("GET_API_ENDPOINT", () => {
-    it("reads apiEndpoint from local storage only", async () => {
-      vi.mocked(browser.storage.local.get).mockResolvedValue({
-        [API_ENDPOINT_KEY]: "https://custom.workers.dev",
-      });
-
-      const response = await sendMessage({ type: "GET_API_ENDPOINT" });
-
-      expect(response).toEqual({ apiEndpoint: "https://custom.workers.dev" });
-      expect(browser.storage.sync.get).not.toHaveBeenCalled();
     });
   });
 
@@ -373,35 +284,94 @@ describe("background service worker", () => {
   });
 
   describe("unhandled message types", () => {
-    // Dialog-local preferences (auto-sync interval, 同步封存書, floating-button size,
-    // shelf sort) moved to direct storage.local access; the background no longer answers.
-    it.each([
-      { type: "GET_AUTO_SYNC_INTERVAL" },
-      { type: "SET_AUTO_SYNC_INTERVAL", interval: "never" },
-      { type: "GET_SYNC_ARCHIVED" },
-      { type: "SET_SYNC_ARCHIVED", syncArchived: 1 },
-      { type: "GET_FLOATING_ICON_SIZE" },
-      { type: "SET_FLOATING_ICON_SIZE", size: "large" },
-      { type: "GET_BOOK_SORT", shelf: "family" },
-      { type: "SET_BOOK_SORT", shelf: "personal", sort: "title-asc" },
-      { type: "NOT_A_REAL_MESSAGE" },
-    ])("returns undefined for $type without touching storage", (message) => {
-      const response = listener(message, {} as Runtime.MessageSender);
+    // Retired types (moved to direct storage.local access, or removed with no sender, #366),
+    // non-object messages and prototype-chain names are all ignored by the listener.
+    it.each<{ name: string; message: unknown }>([
+      {
+        name: "GET_AUTO_SYNC_INTERVAL",
+        message: { type: "GET_AUTO_SYNC_INTERVAL" },
+      },
+      {
+        name: "SET_AUTO_SYNC_INTERVAL",
+        message: { type: "SET_AUTO_SYNC_INTERVAL", interval: "never" },
+      },
+      { name: "GET_SYNC_ARCHIVED", message: { type: "GET_SYNC_ARCHIVED" } },
+      {
+        name: "SET_SYNC_ARCHIVED",
+        message: { type: "SET_SYNC_ARCHIVED", syncArchived: 1 },
+      },
+      {
+        name: "GET_FLOATING_ICON_SIZE",
+        message: { type: "GET_FLOATING_ICON_SIZE" },
+      },
+      {
+        name: "SET_FLOATING_ICON_SIZE",
+        message: { type: "SET_FLOATING_ICON_SIZE", size: "large" },
+      },
+      {
+        name: "GET_BOOK_SORT",
+        message: { type: "GET_BOOK_SORT", shelf: "family" },
+      },
+      {
+        name: "SET_BOOK_SORT",
+        message: {
+          type: "SET_BOOK_SORT",
+          shelf: "personal",
+          sort: "title-asc",
+        },
+      },
+      { name: "NOT_A_REAL_MESSAGE", message: { type: "NOT_A_REAL_MESSAGE" } },
+      { name: "GET_FAMILY_ID (removed)", message: { type: "GET_FAMILY_ID" } },
+      {
+        name: "GET_API_ENDPOINT (removed)",
+        message: { type: "GET_API_ENDPOINT" },
+      },
+      {
+        name: "SET_SYNC_ERROR_BADGE (removed)",
+        message: { type: "SET_SYNC_ERROR_BADGE" },
+      },
+      {
+        name: "CLEAR_SYNC_ERROR_BADGE (removed)",
+        message: { type: "CLEAR_SYNC_ERROR_BADGE" },
+      },
+      { name: "a null message", message: null },
+      { name: "an undefined message", message: undefined },
+      { name: "a string message", message: "SET_FAMILY_ID" },
+      { name: "a number message", message: 42 },
+      { name: "an object with no type", message: {} },
+      { name: "a non-string type", message: { type: 42 } },
+      { name: "the prototype name toString", message: { type: "toString" } },
+      { name: "the prototype name __proto__", message: { type: "__proto__" } },
+      {
+        name: "the prototype name constructor",
+        message: { type: "constructor" },
+      },
+    ])(
+      "returns undefined for $name without throwing or touching storage",
+      ({ message }) => {
+        let response: unknown = "not called";
+        expect(() => {
+          response = listener(message, {} as Runtime.MessageSender);
+        }).not.toThrow();
 
-      expect(response).toBeUndefined();
-      expect(browser.storage.local.get).not.toHaveBeenCalled();
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-    });
+        expect(response).toBeUndefined();
+        expect(browser.storage.local.get).not.toHaveBeenCalled();
+        expect(browser.storage.local.set).not.toHaveBeenCalled();
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+        expect(browser.storage.sync.set).not.toHaveBeenCalled();
+        expect(browser.storage.sync.remove).not.toHaveBeenCalled();
+      },
+    );
 
-    it("still answers a known message type (positive companion)", async () => {
+    it("still answers a registered message type (positive companion)", async () => {
       const response = listener(
-        { type: "GET_API_ENDPOINT" },
+        { type: "SET_API_ENDPOINT", apiEndpoint: null },
         {} as Runtime.MessageSender,
       );
 
       expect(response).toBeInstanceOf(Promise);
-      await expect(response).resolves.toBeDefined();
-      expect(browser.storage.local.get).toHaveBeenCalled();
+      await expect(response).resolves.toEqual({ ok: 1 });
+      expect(browser.storage.local.remove).toHaveBeenCalled();
     });
   });
 
@@ -425,40 +395,6 @@ describe("background service worker", () => {
       } finally {
         logSpy.mockRestore();
       }
-    });
-  });
-
-  describe("sync error badge messages", () => {
-    it("SET_SYNC_ERROR_BADGE sets badge text to '!'", async () => {
-      await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
-
-      expect(browser.action.setBadgeText).toHaveBeenCalledWith({ text: "!" });
-    });
-
-    it("SET_SYNC_ERROR_BADGE sets red background color", async () => {
-      await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
-
-      expect(browser.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
-        color: "#EF4444",
-      });
-    });
-
-    it("SET_SYNC_ERROR_BADGE responds ok: true", async () => {
-      const response = await sendMessage({ type: "SET_SYNC_ERROR_BADGE" });
-
-      expect(response).toEqual({ ok: true });
-    });
-
-    it("CLEAR_SYNC_ERROR_BADGE sets badge text to empty string", async () => {
-      await sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
-
-      expect(browser.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
-    });
-
-    it("CLEAR_SYNC_ERROR_BADGE responds ok: true", async () => {
-      const response = await sendMessage({ type: "CLEAR_SYNC_ERROR_BADGE" });
-
-      expect(response).toEqual({ ok: true });
     });
   });
 });

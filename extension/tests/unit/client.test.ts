@@ -1690,7 +1690,7 @@ describe("ApiClient", () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
-    it("does not propagate a rejected FAMILY_REMOVED sendMessage when recovery fails", async () => {
+    it("does not propagate a rejected SET_API_ENDPOINT sendMessage when recovery fails", async () => {
       const fetchMock = vi
         .fn()
         // Original request → 401
@@ -1737,8 +1737,8 @@ describe("ApiClient", () => {
         },
       );
 
-      // webextension-polyfill rejects with no listener / an invalidated context;
-      // the recovery-failure path must still resolve cleanly.
+      // The polyfill rejects with no listener / an invalidated context; this fails the
+      // endpoint reset's SET_API_ENDPOINT, and the recovery-failure path must still resolve.
       vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
         new Error(
           "Could not establish connection. Receiving end does not exist.",
@@ -1750,9 +1750,12 @@ describe("ApiClient", () => {
       // The rejected sendMessage must not propagate out of the refresh flow:
       // the original request still resolves to its 401 error envelope.
       expect(result.error?.code).toBe("UNAUTHORIZED");
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "FAMILY_REMOVED",
-      });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: null,
+        }),
+      );
     });
 
     it("clears token then family data on REFRESH_FAILED when recovery fails", async () => {

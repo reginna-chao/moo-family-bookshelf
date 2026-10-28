@@ -81,7 +81,7 @@ export function App({
     onSuccess: handleReauthSuccess,
   });
 
-  // Listen for FAMILY_REMOVED from ApiClient when token refresh fails
+  // React to ApiClient's onFamilyRemoved callback when token refresh fails
   // (e.g., KV data lost after wrangler dev restart, or user removed from family)
   useEffect(() => {
     const client = apiClientRef.current;
@@ -89,7 +89,7 @@ export function App({
       bootSupersededRef.current = true;
       client.setAuthToken(null);
       // Endpoint is family-scoped, as in handleLeaveFamily (storage half ran in
-      // clearFamilyStorageAndBroadcast); the old server must not get the next join.
+      // clearFamilyStorage); the old server must not get the next join.
       client.setEndpoint(DEFAULT_API_ENDPOINT);
       setFamilyId(null);
       setUserId(null);
