@@ -1,4 +1,5 @@
 import React from "react";
+import { SyncCodeInputFrame } from "../secureFrame/frames";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 // Type-only: keeps the runtime module graph a single edge (OnboardingViews →
 // IdleView) despite onboardingFlowTypes' type dependency on OnboardingViews.
@@ -50,16 +51,14 @@ export function IdleView({
       </button>
       <div className="moo-onboarding-view__divider">或</div>
       <div className="moo-onboarding-view__input-wrap">
-        <input
-          type="text"
-          autoComplete="off"
-          placeholder="輸入家庭同步碼"
+        <SyncCodeInputFrame
           value={syncCodeInput}
-          onChange={(e) => onSetSyncCodeInput(e.target.value)}
+          disabled={isProcessing}
+          masked={false}
+          inputClassName="moo-onboarding-view__input"
+          onChange={onSetSyncCodeInput}
           onPaste={hostVerdict.settleOnNextChange}
           onBlur={hostVerdict.settleNow}
-          disabled={isProcessing}
-          className="moo-form-input moo-form-input--block moo-onboarding-view__input"
         />
       </div>
       <SyncCodeHostNote result={hostVerdict.result} />

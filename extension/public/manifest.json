@@ -35,7 +35,8 @@
         "chunks/*",
         "content-dialog.js",
         "content-sync.js",
-        "fiber-bridge.js"
+        "fiber-bridge.js",
+        "secure-frame.html"
       ],
       "matches": [
         "https://next.readmoo.com/*",

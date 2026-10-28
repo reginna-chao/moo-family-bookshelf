@@ -1,7 +1,6 @@
 import { currentSecretPrompt } from "moo-family-bookshelf-shared/verifyInput/messages";
 import type { VerifyMethod } from "../api/types";
-import { PatternLock } from "./PatternLock";
-import { PinInput } from "./PinInput";
+import { PatternFrame, PinFrame } from "../secureFrame/frames";
 
 export interface CurrentSecretStepProps {
   /** The account's current method; only `pin` / `pattern` reach this step. */
@@ -27,14 +26,14 @@ export function CurrentSecretStep({
         {currentSecretPrompt(method, purpose)}
       </div>
       {method === "pattern" ? (
-        <PatternLock
+        <PatternFrame
           mode="verify"
           onComplete={onComplete}
           error={error}
           disabled={disabled}
         />
       ) : (
-        <PinInput
+        <PinFrame
           mode="verify"
           onComplete={onComplete}
           error={error}

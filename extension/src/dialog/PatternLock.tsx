@@ -139,7 +139,7 @@ export function PatternLock({
         : "再次繪製圖形確認";
 
   return (
-    <div className="moo-secret-entry">
+    <div className="moo-secret-entry moo-pattern-lock">
       {/* Only the interactive cluster dims: the error line below is the sole explanation of a
           rate-limit lock, so it stays at full opacity for the whole wait. */}
       <div
@@ -217,7 +217,7 @@ export function PatternLock({
           type="button"
           onClick={handleConfirm}
           disabled={disabled || !isPatternComplete(selected)}
-          className="moo-button moo-pattern-lock__confirm"
+          className="moo-button moo-button--block moo-pattern-lock__confirm"
         >
           確認
         </button>

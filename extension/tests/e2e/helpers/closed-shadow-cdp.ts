@@ -80,6 +80,8 @@ function findHost(node: CdpNode, hostId: string): CdpNode | null {
  * script, so the isolation spec can use it as the truth it compares the main world against.
  * The document is re-fetched on every call (node ids go stale after React re-renders) and each call's
  * remote objects are released before it returns. `dispose()` detaches the CDP session.
+ * It reaches the Shadow Root only: the secure frame (#363) is a separate document `querySelector`
+ * cannot enter — take that one with `page.frames()` by URL (`.claude/rules/test.md` → E2E tooling).
  */
 export async function createClosedShadowDriver(
   page: Page,

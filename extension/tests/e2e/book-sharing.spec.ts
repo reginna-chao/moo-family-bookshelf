@@ -15,6 +15,7 @@ import {
   clickContinue,
   navigateToTab,
   waitForPageReady,
+  syncCodeText,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY } from "../../src/constants";
@@ -51,9 +52,7 @@ async function setupFamily(
 
   // Wait for sync code to appear (or dump dialog HTML on failure)
   try {
-    await dialog
-      .locator("[data-testid='sync-code']")
-      .waitFor({ state: "visible", timeout: 30_000 });
+    await syncCodeText(dialog).waitFor({ state: "visible", timeout: 30_000 });
   } catch (e) {
     const html = await dialog.innerHTML().catch(() => "(unreadable)");
     throw new Error(

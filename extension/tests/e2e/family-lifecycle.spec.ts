@@ -20,6 +20,8 @@ import {
   leaveFamily,
   getDialogText,
   waitForPageReady,
+  syncCodeText,
+  syncCodeInput,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
 import { API_ENDPOINT_KEY } from "../../src/constants";
@@ -81,7 +83,7 @@ test.describe("Family Lifecycle", () => {
     await clickCreateFamily(page1);
 
     // Wait for family creation — sync code should appear
-    const syncCodeEl = dialog1.locator("[data-testid='sync-code']");
+    const syncCodeEl = syncCodeText(dialog1);
     await syncCodeEl.waitFor({ state: "visible", timeout: 15_000 });
     const syncCode = await getSyncCode(page1);
     expect(syncCode).toBeTruthy();
@@ -159,9 +161,10 @@ test.describe("Family Lifecycle", () => {
 
       // Wait for idle state (join input visible)
       const dialog2 = page2.locator("#moo-family-bookshelf-dialog");
-      await dialog2
-        .locator('input[placeholder="輸入家庭同步碼"]')
-        .waitFor({ state: "visible", timeout: 15_000 });
+      await syncCodeInput(dialog2).waitFor({
+        state: "visible",
+        timeout: 15_000,
+      });
 
       // Join family with sync code from user 1
       await joinFamily(page2, syncCode);
@@ -277,9 +280,7 @@ test.describe("Family Lifecycle", () => {
     await clickCreateFamily(page);
 
     // Wait for sync code to appear, then continue
-    await dialog
-      .locator("[data-testid='sync-code']")
-      .waitFor({ state: "visible", timeout: 15_000 });
+    await syncCodeText(dialog).waitFor({ state: "visible", timeout: 15_000 });
     await clickContinue(page);
     await waitForMainView(page);
 

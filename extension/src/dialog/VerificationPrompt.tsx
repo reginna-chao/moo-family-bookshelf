@@ -1,8 +1,7 @@
 import React from "react";
 import { Loader2 } from "lucide-react";
 import type { VerifyMethod } from "../api/types";
-import { PinInput } from "./PinInput";
-import { PatternLock } from "./PatternLock";
+import { PatternFrame, PinFrame } from "../secureFrame/frames";
 import {
   rateLimitedMessage,
   verificationLockedMessage,
@@ -117,7 +116,7 @@ function renderChallenge({
   const inputDisabled = submitting || countdownSeconds !== null;
   if (method === "pin") {
     return renderWidgetChallenge(
-      <PinInput
+      <PinFrame
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}
@@ -128,7 +127,7 @@ function renderChallenge({
   }
   if (method === "pattern") {
     return renderWidgetChallenge(
-      <PatternLock
+      <PatternFrame
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}

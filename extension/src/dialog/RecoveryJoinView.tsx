@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { SyncCodeInputFrame } from "../secureFrame/frames";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 import { useSyncCodeHostVerdict } from "./useSyncCodeHostVerdict";
 
@@ -40,17 +41,14 @@ export function RecoveryJoinView({
         請輸入家庭同步碼以重新加入家庭。
       </p>
       <div className="moo-recovery-join__field">
-        <input
-          type={showInput ? "text" : "password"}
-          autoComplete="off"
-          placeholder="輸入家庭同步碼"
-          aria-label="家庭同步碼"
+        <SyncCodeInputFrame
           value={syncCodeInput}
-          onChange={(e) => onSetSyncCodeInput(e.target.value)}
+          disabled={isProcessing}
+          masked={!showInput}
+          inputClassName="moo-recovery-join__input"
+          onChange={onSetSyncCodeInput}
           onPaste={hostVerdict.settleOnNextChange}
           onBlur={hostVerdict.settleNow}
-          disabled={isProcessing}
-          className="moo-form-input moo-form-input--block moo-recovery-join__input"
         />
         <button
           type="button"
