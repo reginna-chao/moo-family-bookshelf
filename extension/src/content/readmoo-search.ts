@@ -17,10 +17,10 @@ export const READMOO_SEARCH_DEFAULTS = {
   bookCardPollIntervalMs: 200,
 } as const;
 
-const SEARCH_MODAL_SELECTOR = ".search-modal";
-const SEARCH_INPUT_SELECTOR = ".search-modal input.form-control";
-const SEARCH_SUBMIT_SELECTOR = "button[type='submit']";
-const SEARCH_ICON_SELECTOR = "i.mo-search";
+const SEARCH_MODAL_SELECTOR = READMOO_SELECTORS.searchModal;
+const SEARCH_INPUT_SELECTOR = READMOO_SELECTORS.searchInput;
+const SEARCH_SUBMIT_SELECTOR = READMOO_SELECTORS.searchSubmit;
+const SEARCH_ICON_SELECTOR = READMOO_SELECTORS.searchIcon;
 const SEARCH_BUTTON_SELECTOR = READMOO_SELECTORS.topNavBtn;
 
 export interface SearchModalRefs {

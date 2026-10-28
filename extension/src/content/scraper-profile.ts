@@ -8,7 +8,9 @@ export function scrapeUserEmail(): string | null {
   if (!panel) return null;
 
   // Email is a leaf div (no child elements) containing "@".
-  const candidates = panel.querySelectorAll<HTMLElement>("div[style]");
+  const candidates = panel.querySelectorAll<HTMLElement>(
+    READMOO_SELECTORS.profileStyledLeaf,
+  );
   for (const el of candidates) {
     if (el.childElementCount > 0) continue;
     const text = el.textContent?.trim() ?? "";
@@ -24,7 +26,7 @@ export function scrapeDisplayName(): string | null {
   const panel = document.querySelector(READMOO_SELECTORS.mePanel);
   if (!panel) return null;
   const nameEl = panel.querySelector<HTMLElement>(
-    "div[style*='font-size: 16px']",
+    READMOO_SELECTORS.profileDisplayName,
   );
   return nameEl?.textContent?.trim() || null;
 }
