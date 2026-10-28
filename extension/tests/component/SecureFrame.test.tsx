@@ -24,7 +24,8 @@ import { READY_TIMEOUT_MS } from "@/secureFrame/useSecureFrameChannel";
  * record what was posted and whether they were closed: the frame side of the conversation is
  * played by posting on `port2`, and what the host sent is read from `port1.sent`.
  *
- * Tamper rules: a second `load`, or no `ready` within `READY_TIMEOUT_MS` of the first, closes the
+ * Tamper rules: a second `load`, or no `ready` within `READY_TIMEOUT_MS` of mounting (the first
+ * `load` may fire unobserved or never — see "drops the frame when `load` never fires"), closes the
  * port and replaces the iframe with 「畫面被干擾，請關閉後重新開啟」. The timeout cases run on
  * vi's fake clock and therefore use no RTL waiter (`.claude/rules/test.md` → Fake timers exclude
  * RTL waiters); `afterEach` swaps the real clock back.
