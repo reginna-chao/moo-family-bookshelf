@@ -36,3 +36,17 @@ export function getReportLinks(opts: {
     },
   ];
 }
+
+/** The forgot-secret recovery request: the feedback form, prefilled with the recovery topic. */
+export function getVerifyRecoveryLink({
+  appVersion,
+}: {
+  appVersion: string;
+}): string {
+  const params = new URLSearchParams({
+    platform: "googleform",
+    topic: "recovery",
+    v: appVersion,
+  });
+  return `${FEEDBACK_PAGE}?${params.toString()}`;
+}

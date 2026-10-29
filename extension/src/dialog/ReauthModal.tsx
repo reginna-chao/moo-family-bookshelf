@@ -3,6 +3,7 @@
 
 import type { ApiClient } from "../api/client";
 import { classifyAdoptedEndpoint } from "./adoptedEndpoint";
+import { ForgotSecretHint } from "./ForgotSecretHint";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 import { VerificationPrompt } from "./VerificationPrompt";
 import type { UseVerificationPromptResult } from "./useVerificationPrompt";
@@ -39,6 +40,7 @@ export function ReauthModal({ apiClient, reauth }: ReauthModalProps) {
           onSubmit={(secret) => void reauth.submit(secret)}
           onCancel={reauth.cancel}
         />
+        <ForgotSecretHint apiClient={apiClient} />
       </div>
     </div>
   );

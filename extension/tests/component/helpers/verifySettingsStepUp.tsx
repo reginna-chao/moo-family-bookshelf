@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { VerificationSettings } from "@/dialog/VerificationSettings";
 
 /**
@@ -21,6 +22,7 @@ export async function renderVerifySettings(
     getVerifyMethod,
     setVerifyMethod,
     generateOtp: vi.fn(),
+    getEndpoint: vi.fn(() => DEFAULT_API_ENDPOINT),
   } as unknown as ApiClient;
   await act(async () => {
     render(<VerificationSettings userId="user-1" apiClient={api} />);

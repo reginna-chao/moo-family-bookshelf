@@ -64,7 +64,7 @@ export function ChooseMethodView({
       </p>
       <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-5 leading-relaxed">
         提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的
-        PIN 碼或圖形；忘記的話，自架伺服器請找管理者協助。
+        PIN 碼或圖形。
       </p>
       <div className="space-y-3">
         <button

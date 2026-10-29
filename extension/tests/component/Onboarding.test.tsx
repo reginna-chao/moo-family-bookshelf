@@ -1626,6 +1626,66 @@ describe("Onboarding", () => {
     });
   });
 
+  /** The forgot-secret hint under the challenge: recovery-form link on the official endpoint, admin line
+   *  (no link) on a self-hosted one. Copy pinned as literals, as in ForgotSecretHint.test.tsx. */
+  describe("forgot-secret hint on the verification challenge", () => {
+    const LINK_LABEL = "填寫救援申請";
+    const SELF_HOSTED_LINE = "忘記的話，請找伺服器管理者協助。";
+
+    /** Start onboarding on `endpoint`; the lookup inside handleStart raises the challenge. */
+    async function reachChallenge(endpoint?: string) {
+      const mockApi = createMockApiClient(
+        {
+          lookupUser: vi.fn().mockResolvedValue({
+            data: {
+              existingFamilyId: null,
+              memberCount: 0,
+              requiresVerification: BoolFlag.TRUE,
+            },
+          }),
+        },
+        endpoint,
+      );
+      renderOnboarding({ apiClient: mockApi });
+      // Positive companion for the link assertions below: no hint before the challenge.
+      expect(screen.queryByText(/沒辦法完成驗證/)).not.toBeInTheDocument();
+      expect(screen.queryByText(SELF_HOSTED_LINE)).not.toBeInTheDocument();
+
+      await clickStartAndWait();
+
+      await waitFor(() => {
+        expect(screen.getByText("需要驗證")).toBeInTheDocument();
+      });
+    }
+
+    it("links to the recovery form on the official endpoint", async () => {
+      await reachChallenge(DEFAULT_API_ENDPOINT);
+
+      const link = screen.getByRole("link", { name: LINK_LABEL });
+      expect(link).toHaveAttribute(
+        "href",
+        `https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=googleform&topic=recovery&v=${__APP_VERSION__}`,
+      );
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link.closest("p")?.textContent).toBe(
+        `沒辦法完成驗證？${LINK_LABEL}`,
+      );
+      expect(screen.queryByText(SELF_HOSTED_LINE)).not.toBeInTheDocument();
+    });
+
+    it("points a self-hosted user at the admin, with no link", async () => {
+      await reachChallenge("https://test.workers.dev");
+
+      expect(screen.getByText(SELF_HOSTED_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: LINK_LABEL }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(new RegExp(LINK_LABEL)),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   /** The container's own note names the ADOPTED server above every step; silent on the official default,
    *  withheld in `verify-prompt`. See the file header, "Container disclosure". */
   describe("onboarding container endpoint disclosure", () => {

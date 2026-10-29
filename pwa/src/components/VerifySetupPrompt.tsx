@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
-import { requiresCurrentSecret } from "moo-family-bookshelf-shared/api/verifyValidation";
+import { useState, useCallback } from "react";
 import { ApiClient, type VerifyMethod } from "@/api/client";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { ForgotSecretHint } from "@/components/ForgotSecretHint";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 import { CurrentSecretStep } from "@/components/CurrentSecretStep";
@@ -11,7 +11,8 @@ import {
   KeepOrChangeView,
 } from "@/components/VerifySetupViews";
 import { useVerifyMethodSave } from "@/hooks/useVerifyMethodSave";
-import { readVerifyMethod, recoverStepUp } from "@/hooks/stepUp";
+import { recoverStepUp } from "@/hooks/stepUp";
+import { useVerifySetupEntry, type Step } from "@/hooks/useVerifySetupEntry";
 
 interface VerifySetupPromptProps {
   userId: string;
@@ -20,16 +21,6 @@ interface VerifySetupPromptProps {
   /** Gets the token a new pin / pattern rotated (#378); the caller persists it. */
   onTokenRotated?: (authToken: string) => void;
 }
-
-type Step =
-  | "loading"
-  | "keep-or-change"
-  | "current-secret"
-  | "choose"
-  | "setup-pin"
-  | "setup-pattern"
-  | "confirm-skip"
-  | "done";
 
 export function VerifySetupPrompt({
   userId,
@@ -47,30 +38,7 @@ export function VerifySetupPrompt({
     onTokenRotated,
   });
 
-  useEffect(() => {
-    void Promise.all([
-      apiClient.getVerifyPrompted(userId),
-      readVerifyMethod(apiClient, userId),
-    ])
-      .then(([res, method]) => {
-        // Show only on an explicit "not yet prompted"; an error envelope (e.g. an old server's 404) skips it
-        if (res.data?.prompted !== BoolFlag.FALSE) {
-          setStep("done");
-          return;
-        }
-        // A failed method read counts as "none": the server still asks for the secret if it must.
-        if (method !== null && requiresCurrentSecret(method)) {
-          setStepUpMethod(method);
-          setStep("keep-or-change");
-          return;
-        }
-        setStep("choose");
-      })
-      .catch(() => {
-        // On error, skip prompt to avoid blocking the user
-        setStep("done");
-      });
-  }, [userId, apiClient]);
+  useVerifySetupEntry({ apiClient, userId, setStep, setStepUpMethod });
 
   /** A refused save; `asked` is the method whose current secret was sent (null: none was). */
   const settleSaveFailure = useCallback(
@@ -190,6 +158,14 @@ export function VerifySetupPrompt({
             onConfirm={() => void submit("none")}
             onBack={() => setStep("choose")}
             saving={saving}
+          />
+        )}
+
+        {(step === "keep-or-change" ||
+          step === "current-secret" ||
+          step === "choose") && (
+          <ForgotSecretHint
+            official={apiClient.getEndpoint() === DEFAULT_API_ENDPOINT}
           />
         )}
       </div>

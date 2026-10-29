@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ApiClient, VerifyMethod } from "@/api/client";
 import { VerifySetupPrompt } from "@/components/VerifySetupPrompt";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
 
 // Shared by the VerifySetupPrompt step-up suites (#396); see each export's JSDoc.
 
@@ -21,6 +22,7 @@ export function createPromptClient(
     getVerifyMethod: vi.fn().mockResolvedValue({ data: { method } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { method } }),
     markVerifyPrompted: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    getEndpoint: vi.fn(() => DEFAULT_API_ENDPOINT),
     ...overrides,
   };
   return client as typeof client & ApiClient;

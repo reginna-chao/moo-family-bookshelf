@@ -4304,6 +4304,41 @@
   margin-bottom: 12px;
 }
 
+/* ── ForgotSecretHint ─────────────────────────────────────────────────── */
+
+/* Small grey line beside a verification step (same size and colour as
+   .moo-verify__tip, but standalone: it also sits on the re-auth modal and the
+   onboarding challenge, outside any .moo-verify block). */
+.moo-forgot-secret-hint {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--moo-text-muted);
+}
+
+.moo-forgot-secret-hint a {
+  margin-left: 4px;
+  color: var(--moo-primary);
+  text-decoration: underline;
+}
+
+/* The onboarding challenge's panel (.moo-onboarding-view) owns a 24px gutter
+   the hint sits outside of, so the hint supplies its own. */
+.moo-onboarding > .moo-forgot-secret-hint {
+  margin: 0 24px 24px 24px;
+}
+
+/* On phones the `margin-block: auto` above would push the hint to the bottom;
+   keep it under the panel and let the hint take the trailing auto margin instead. */
+@media screen and (max-width: 767px) {
+  .moo-onboarding > .moo-onboarding-view:has(+ .moo-forgot-secret-hint) {
+    margin-bottom: 0;
+  }
+  .moo-onboarding > .moo-forgot-secret-hint {
+    margin-bottom: auto;
+  }
+}
+
 /* ── Secure frame (extension-origin iframe, src/secureFrame/) ─────────── */
 /* Host side (only the height is inline). Same color-scheme as the frame document,
    or Chrome paints an opaque backdrop behind the transparent frame. */

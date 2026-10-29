@@ -35,6 +35,7 @@ moo-family-bookshelf/
 │   │   ├── invite/             # Invite message templates
 │   │   ├── personal/           # Personal-shelf save strategy (PUT vs PATCH) + full-PUT conflict rebase + save-error copy
 │   │   ├── publicShelf/        # Public-shelf local-vs-server divergence rule
+│   │   ├── recovery/           # Forgot-secret hint copy (question / link label / self-hosted fallback)
 │   │   ├── safeUrl/            # Readmoo cover / book URL render-time filters (return `String(url)`)
 │   │   ├── unkick/             # Member-removal copy (remove confirm / un-kick notice / refused rejoin) + rejoin-wait hours
 │   │   └── verifyInput/        # PIN / pattern secret-entry rules (lengths, min dots, digit strip, wire serialization) + mismatch / counter copy

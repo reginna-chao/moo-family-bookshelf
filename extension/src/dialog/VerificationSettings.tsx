@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
 import { OtpCodeFrame, PatternFrame, PinFrame } from "../secureFrame/frames";
 import { CurrentSecretStep } from "./CurrentSecretStep";
-import { rateLimitedEnvelopeMessage } from "./verificationMessages";
+import { ForgotSecretHint } from "./ForgotSecretHint";
+import { useOtpCode } from "./useOtpCode";
 import { useVerifyMethodFlow } from "./useVerifyMethodFlow";
 
 export interface VerificationSettingsProps {
@@ -33,70 +32,18 @@ export function VerificationSettings({
   const { showSetup, showNoneWarning, askingSecret, currentSecret } = flow;
   const { clearSavedTimer, setSaveState, setSaveError, handleSave } = flow;
 
-  // OTP state
-  const [otpCode, setOtpCode] = useState<string | null>(null);
-  const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
-  const [otpCountdown, setOtpCountdown] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // OTP countdown timer
-  useEffect(() => {
-    if (!otpExpiresAt) return;
-    function tick() {
-      const remaining = Math.max(
-        0,
-        Math.floor(((otpExpiresAt ?? 0) - Date.now()) / 1000),
-      );
-      setOtpCountdown(remaining);
-      if (remaining <= 0) {
-        setOtpCode(null);
-        setOtpExpiresAt(null);
-        if (timerRef.current) clearInterval(timerRef.current);
-      }
-    }
-    tick();
-    timerRef.current = setInterval(tick, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [otpExpiresAt]);
+  const { otpCode, otpCountdown, resetOtp, handleGenerateOtp } = useOtpCode({
+    userId,
+    apiClient,
+    clearSavedTimer,
+    setSaveState,
+    setSaveError,
+  });
 
   const handleMethodSelect = (method: VerifyMethod) => {
-    setOtpCode(null);
-    setOtpExpiresAt(null);
+    resetOtp();
     flow.handleMethodSelect(method);
   };
-
-  const handleGenerateOtp = useCallback(async () => {
-    // A new OTP generation supersedes any pending saved→idle reset: the stale
-    // timer would dismiss this handler's own failure banner mid-flight.
-    clearSavedTimer();
-
-    setSaveState("idle");
-    setSaveError("");
-    const result = await apiClient.generateOtp(userId);
-    // Bare-cast envelope: a non-string code crashes render, a non-finite expiry breaks the countdown,
-    // so either fails the generation. See docs/architecture.md → 驗證碼的產生.
-    const code: unknown = result.data?.code;
-    const expiresAt: unknown = result.data?.expiresAt;
-    if (
-      typeof code !== "string" ||
-      code.length === 0 ||
-      typeof expiresAt !== "number" ||
-      !Number.isFinite(expiresAt)
-    ) {
-      setSaveState("error");
-      // A real 429 (verify-write ceiling) gets the shared back-off copy; there may be no error at
-      // all, since this branch also catches a success envelope with malformed fields.
-      setSaveError(
-        (result.error ? rateLimitedEnvelopeMessage(result.error) : null) ??
-          safeErrorText(result.error?.message, "驗證碼產生失敗，請重試"),
-      );
-      return;
-    }
-    setOtpCode(code);
-    setOtpExpiresAt(expiresAt);
-  }, [userId, apiClient, clearSavedTimer, setSaveState, setSaveError]);
 
   if (flow.loading) {
     return <div className="moo-verify__loading">載入中...</div>;
@@ -112,8 +59,9 @@ export function VerificationSettings({
       </div>
       <div className="moo-verify__tip">
         提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的
-        PIN 碼或圖形；忘記的話，自架伺服器請找管理者協助。
+        PIN 碼或圖形。
       </div>
+      <ForgotSecretHint apiClient={apiClient} />
 
       {/* Method selection buttons */}
       <div className="moo-verify__methods">
