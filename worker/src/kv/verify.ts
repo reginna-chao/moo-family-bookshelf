@@ -1,5 +1,5 @@
-/** Thin data access (#163) for `verify:{userId}`, `otp:{userId}`, `qr:{token}` — route handlers only;
- *  the verification gate keeps its own KV calls. See docs/architecture.md → 2.5 Cloudflare KV Store. */
+/** Thin data access (#163) for `verify:{userId}`, `otp:{userId}`, `qr:{token}` — route handlers, plus the
+ *  hash upgrade's put; the gate keeps its own KV calls. See docs/architecture.md → 2.5 Cloudflare KV Store. */
 import {
   kvKeys,
   OTP_TTL_SECONDS,

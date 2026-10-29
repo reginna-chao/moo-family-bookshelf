@@ -1,9 +1,10 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
-import type { Env } from "../utils/env";
+import { type Env, getVerifyPepper } from "../utils/env";
 import {
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
   TOKEN_TTL_SECONDS,
+  VERIFY_HASH_VERSION_PEPPER,
   type VerifyRecord,
   type OtpRecord,
   type QrTokenRecord,
@@ -34,7 +35,11 @@ import {
   passedAgainstStaleVerifyRecord,
   verifySecretFormatResponse,
 } from "../services/verification";
-import { hashSecret } from "../utils/crypto";
+import {
+  hashSecret,
+  hashSecretWithPepper,
+  pepperFingerprint,
+} from "../utils/crypto";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
@@ -74,6 +79,29 @@ function generateSalt(): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** The hash fields of a new verify record; `version` / `pepperId` only on a v2 (pepper-keyed) hash. */
+type HashedSecret = Pick<
+  VerifyRecord,
+  "hash" | "salt" | "version" | "pepperId"
+>;
+
+/** Hash a new PIN/pattern under a fresh salt: v2 (HMAC) when a pepper is configured, else exactly the v1
+ *  shape with no `version` / `pepperId` — see `VerifyRecord.version`. */
+async function hashNewSecret(
+  pepper: string | null,
+  secret: string,
+): Promise<HashedSecret> {
+  const salt = generateSalt();
+  if (pepper === null) {
+    return { hash: await hashSecret(salt, secret), salt };
+  }
+  const [hash, pepperId] = await Promise.all([
+    hashSecretWithPepper(pepper, salt, secret),
+    pepperFingerprint(pepper),
+  ]);
+  return { hash, salt, version: VERIFY_HASH_VERSION_PEPPER, pepperId };
 }
 
 /** Generate a 6-digit OTP code. */
@@ -138,6 +166,9 @@ const putVerifyRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Current secret required or wrong"),
     429: jsonRes("Rate limited"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -233,18 +264,14 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
-  let hash: string | null = null;
-  let salt: string | null = null;
-
+  let hashed: HashedSecret = { hash: null, salt: null };
   if ((method === "pin" || method === "pattern") && body.secret) {
-    salt = generateSalt();
-    hash = await hashSecret(salt, body.secret);
+    hashed = await hashNewSecret(getVerifyPepper(c.env), body.secret);
   }
 
   const record: VerifyRecord = {
     method,
-    hash,
-    salt,
+    ...hashed,
     prompted: body.prompted === 1 ? 1 : (existing?.prompted ?? 0),
     // Voids failure streaks begun before this change (`isFailStreakVoid`), so a reset PIN/pattern
     // is not locked out by the old secret's lockout.

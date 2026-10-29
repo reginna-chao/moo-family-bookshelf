@@ -421,9 +421,12 @@ export interface QrTokenRecord {
 /** Verification method for PWA login. */
 export type VerifyMethod = "pin" | "pattern" | "code" | "none";
 
+/** `VerifyRecord.version` of a pepper-keyed hash: HMAC-SHA256(VERIFY_PEPPER, salt + secret). */
+export const VERIFY_HASH_VERSION_PEPPER = 2;
+
 export interface VerifyRecord {
   method: VerifyMethod;
-  /** SHA-256(salt + secret). null when method is 'code' or 'none'. */
+  /** Hex hash of salt + secret, scheme per `version`. null when method is 'code' or 'none'. */
   hash: string | null;
   /** Random hex salt for hashing. null when method is 'code' or 'none'. */
   salt: string | null;
@@ -432,6 +435,15 @@ export interface VerifyRecord {
   /** Epoch ms of the last secret/method change (only `PUT /:id/verify` advances it); older failure streaks are
    *  void. OPTIONAL, absent ⇒ stays locked: .claude/rules/backend.md → Service, middleware and KV invariants. */
   secretUpdatedAt?: number;
+  /**
+   * Hash scheme of `hash`. OPTIONAL (added after release): absent or 1 =
+   * SHA-256(salt + secret) (`hashSecret`); {@link VERIFY_HASH_VERSION_PEPPER} (2)
+   * = HMAC-SHA256(pepper, salt + secret) (`hashSecretWithPepper`). Any other
+   * value is refused by the gate with 503 VERIFY_UNAVAILABLE.
+   */
+  version?: number;
+  /** v2 only: `pepperFingerprint` of the pepper that produced `hash`. OPTIONAL (added after release). */
+  pepperId?: string;
 }
 
 /**
