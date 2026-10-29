@@ -115,3 +115,5 @@ simple = { limit = 3, period = 60 }
 # DEV_MODE is NOT set in production.
 # For local dev, create .dev.vars with DEV_MODE=1 to enable localhost CORS.
 # See: https://developers.cloudflare.com/workers/configuration/environment-variables/
+# VERIFY_PEPPER (PIN / pattern hash key) is a secret: `wrangler secret put VERIFY_PEPPER`
+# (add `--env production` for the production Worker). Never put it in this file. See DEPLOY.md.

@@ -76,7 +76,43 @@ pnpm deploy
 https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 ```
 
-### 7. 設定 Extension / PWA 使用自訂端點
+### 7. 設定 PIN 雜湊的 pepper（建議）
+
+PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜湊只是一次 SHA-256（v1），備份檔或 KV 內容外流後，因為 PIN 的組合數少，可以離線逐一猜出來。設定 `VERIFY_PEPPER` 這個 Worker secret 之後，新設定的 PIN 或圖形改用以 pepper 為金鑰的 HMAC-SHA256（v2，紀錄裡帶 `version: 2`）；舊紀錄會在本人下一次通過驗證時（建立家庭、加入家庭，或帶 PIN 的登入查詢）自動升級，使用者不用做任何事。不設定的話，一切維持原樣。
+
+1. 產生 pepper。**一定要隨機產生，不要自己想一串字**：每筆 v2 紀錄都帶著 pepper 的指紋（`pepperId`），會跟著 `verify:` 進入每日備份，好記的字串可以拿字典去對指紋猜出來。
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. 在 `worker/` 目錄把它寫進正式 Worker。`pnpm deploy` 部署的是 `--env production`，secret 也要帶同一個參數：
+
+   ```bash
+   pnpm exec wrangler secret put VERIFY_PEPPER --env production
+   ```
+
+   少了 `--env production`，secret 會寫到 dev Worker（`wrangler.toml` 頂層），正式站根本沒拿到；而且沒有 pepper 時伺服器照舊運作，這個錯誤不會有任何症狀。dev Worker 也要用的話，另外執行一次不帶 `--env` 的同一行指令。
+
+3. 驗收正式站：
+   - `pnpm exec wrangler secret list --env production` 的輸出要有 `VERIFY_PEPPER`。
+   - 用一個測試帳號在擴充功能設定 PIN，再讀它的驗證紀錄，要看到 `"version":2` 與 `pepperId`（userId 的算法見「使用者忘記登入驗證時」第 1 步）：
+
+     ```bash
+     pnpm exec wrangler kv key get "verify:<測試帳號的 userId>" --namespace-id <正式 namespace ID> --remote
+     ```
+
+4. 本機開發：在 `worker/.dev.vars` 加一行 `VERIFY_PEPPER=<另一把隨機值>`（範例見 `.dev.vars.example`），不要用正式的那一把。
+
+設定之後要知道的事：
+
+- **把 pepper 存進密碼管理器**，和備份分開保存，不要放進 KV、R2 或 GitHub（見「KV 每日備份與還原演練」→ 啟用步驟）。
+- **遺失的後果**：已升級（`version: 2`）的帳號在 PIN／圖形登入、改驗證設定、刪除帳號時，都會收到 503 `VERIFY_UNAVAILABLE`（「伺服器的驗證設定不完整，請聯絡管理者」），直到把同一把 pepper 設回去為止。使用者自己沒有辦法解決；真的找不回來，只能逐一照「使用者忘記登入驗證時」改寫成臨時 PIN。
+- **不支援更換 pepper**：換成新的一把，等於弄丟舊的那一把。
+- **啟用之前的備份還是 v1**：已經存在 R2 的封存檔裡的 `verify:` 紀錄不會回頭升級，在保留期內仍然可以離線猜；要等本人換過 PIN／圖形，舊備份裡的雜湊才會失效。
+- **設錯的症狀**：已升級的帳號登入一律回 503，Workers Logs 出現 `VERIFY_PEPPER_MISMATCH`（設成了另一把）或 `VERIFY_PEPPER_MISSING`（Worker 上沒有 pepper）。這兩行是 `console.error`，關閉 invocation log 不會把它們藏起來（見「不記錄請求網址（invocation log）」），而且不含任何 userId 或同步碼。
+
+### 8. 設定 Extension / PWA 使用自訂端點
 
 自訂 API 端點不會顯示在一般使用者介面中，需透過開發者工具手動設定。
 
@@ -256,7 +292,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key get "verify:<上一步的 userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`，其中的 `secretUpdatedAt` 取自你這台電腦的時間。先確認本機時鐘正確：它要比對方最後一次換密鑰的時間晚，否則臨時 PIN 登入會一直被要求重新驗證。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡：
+3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`，其中的 `secretUpdatedAt` 取自你這台電腦的時間。先確認本機時鐘正確：它要比對方最後一次換密鑰的時間晚，否則臨時 PIN 登入會一直被要求重新驗證。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡。這行產生的是舊格式（v1）的紀錄，伺服器設了 pepper 也照樣能用，他用臨時 PIN 登入後會自動升級，你不必自己算 HMAC：
 
    ```bash
    node -e "const c=require('crypto');const pin=process.argv[1];const salt=c.randomBytes(16).toString('hex');const hash=c.createHash('sha256').update(salt+pin).digest('hex');require('fs').writeFileSync('temp-verify.json',JSON.stringify({method:'pin',hash,salt,prompted:0,secretUpdatedAt:Date.now()}))" "246813"
@@ -281,6 +317,8 @@ cd worker
 pnpm install
 pnpm deploy
 ```
+
+設了 `VERIFY_PEPPER` 之後，如果回退到不認得 pepper 的舊版 Worker，已升級（`version: 2`）的帳號輸入正確的 PIN 也會被當成打錯，要再更新回新版才會恢復。回退期間這些「打錯」照樣計數：同一來源 5 次就鎖 15 分鐘，換回新版後被鎖的人最多還要再等 15 分鐘；第三方也能在這段期間用錯誤的 PIN 把該帳號每小時 10 次的猜測上限用完，讓本人暫時進不來。
 
 ## KV 每日備份與還原演練
 
@@ -377,6 +415,8 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 | 維運紀錄、每月 dry-run 提醒、每月 GraphQL 執行結果與儀表板 CPU 檢查                                            | 管理者                       |
 
 表中的「第 8 節」指計畫第 8 節，也就是下方步驟 5 的 CPU 判定。
+
+設了 `VERIFY_PEPPER`（「步驟」第 7 步）的話，它也是備份的一部分：沒有同一把 pepper，還原回來的已升級驗證紀錄無法使用。把它存進密碼管理器，不要放進 KV、R2 或 GitHub，備份檔與 pepper 分開保存才有保護效果。
 
 #### 步驟 1：開通 R2（管理者）
 
@@ -501,7 +541,7 @@ pnpm exec wrangler secret put HEALTHCHECKS_CAPACITY_UUID --config wrangler.backu
 | `KV_BACKUP_R2_API_TOKEN` | 讓 Wrangler 以 `wrangler r2 object get --remote` 下載備份的 Cloudflare API token（不是 S3 Access Key） |
 | `KV_RESTORE_API_TOKEN`   | 能列舉、批次讀取與批次寫入還原目標 namespace 的 KV API token                                           |
 
-兩個 token 都不放進備份 Worker 或 GitHub Secrets，演練結束後撤銷。封存檔是明文，含每個 userId，也含 `verify:` 的 PIN 雜湊（PIN 的組合數少，雜湊外流等於可以離線猜），所以 `KV_BACKUP_R2_API_TOKEN` 要盡量收窄：只給讀取權限、只限這一個備份 bucket、設短期有效，用完就撤銷。建立後先跑一次 dry-run，確認 Wrangler 用這個 token 下載得到備份。`KV_RESTORE_API_TOKEN` 同樣只在演練期間存在。
+兩個 token 都不放進備份 Worker 或 GitHub Secrets，演練結束後撤銷。封存檔是明文，含每個 userId，也含 `verify:` 的 PIN 雜湊：舊格式（v1）的紀錄外流後可以離線猜（PIN 的組合數少），已升級的 v2 紀錄要同時拿到 pepper 才猜得了。所以 `KV_BACKUP_R2_API_TOKEN` 要盡量收窄：只給讀取權限、只限這一個備份 bucket、設短期有效，用完就撤銷。建立後先跑一次 dry-run，確認 Wrangler 用這個 token 下載得到備份。`KV_RESTORE_API_TOKEN` 同樣只在演練期間存在。
 
 以下在 repo 根目錄執行，換成實際的 manifest 路徑與目標 ID。`--backup` 要給 manifest 的 key，不能直接給 `latest.json`，先讀出它的 `manifestKey`。先 dry-run：
 
@@ -525,7 +565,7 @@ CLI 的行為：
 
 `--max-writes` 是本次操作的上限，不是帳號今天剩下的寫入額度；Free 方案全帳號每天只有 1,000 次 KV 寫入，正式 API 也在用同一份額度。
 
-**還原驗收**：用一個受存取保護的隔離 Worker 接上還原目標，維持正式的驗證與安全設定，不要把真實資料放進 `DEV_MODE=1` 的服務。確認家庭成員判定仍然成立：`GET /api/family/:id/members` 與 `GET /api/family/:id/bookshelf` 都能正常回應家庭成員。這兩個請求需要 `member:` 指向與家庭紀錄一致，是 `member:` 寫回格式的實際檢驗。演練結束後清掉隔離服務與資料，撤銷臨時 token。
+**還原驗收**：用一個受存取保護的隔離 Worker 接上還原目標，維持正式的驗證與安全設定，不要把真實資料放進 `DEV_MODE=1` 的服務。正式站設了 `VERIFY_PEPPER` 的話，接上還原目標的 Worker 必須用同一把 pepper，否則已升級的帳號一律回 503 `VERIFY_UNAVAILABLE`。確認家庭成員判定仍然成立：`GET /api/family/:id/members` 與 `GET /api/family/:id/bookshelf` 都能正常回應家庭成員。這兩個請求需要 `member:` 指向與家庭紀錄一致，是 `member:` 寫回格式的實際檢驗。演練結束後清掉隔離服務與資料，撤銷臨時 token。
 
 **切換正式 binding 前的檢查**：還原是某個時間點的複本，備份之後使用者做過的隱私操作都會被倒回去。切換是管理者另行決定的手動步驟，切換前要逐項核對：
 

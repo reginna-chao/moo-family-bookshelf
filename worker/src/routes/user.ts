@@ -999,6 +999,9 @@ const deleteUserRoute = createRoute({
     401: jsonRes("Unauthorized"),
     403: jsonRes("Forbidden, or current secret required or wrong"),
     429: jsonRes("Rate limited"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 

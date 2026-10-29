@@ -1,7 +1,8 @@
 import type { Context, TypedResponse } from "hono";
-import { type Env, isDevMode } from "../utils/env";
+import { type Env, getVerifyPepper, isDevMode } from "../utils/env";
 import {
   kvKeys,
+  VERIFY_HASH_VERSION_PEPPER,
   VERIFY_MAX_FAILURES,
   VERIFY_LOCKOUT_MS,
   VERIFY_FAIL_TTL_SECONDS,
@@ -20,7 +21,13 @@ import {
   type PerUserRateLimitVerdict,
 } from "../middleware/rateLimit";
 import { jsonError, type ErrorBody } from "../utils/errors";
-import { hashSecret, timingSafeEqual } from "../utils/crypto";
+import { putVerifyRecord } from "../kv/verify";
+import {
+  hashSecret,
+  hashSecretWithPepper,
+  pepperFingerprint,
+  timingSafeEqual,
+} from "../utils/crypto";
 
 /** True while the CALLER is locked out (caller-scoped `verifyfail:{userId}:{callerKey}`, never the target
  *  account). Narrows `lockedUntil` to a number so callers derive the back-off without a null check. */
@@ -51,6 +58,13 @@ export type VerificationError =
       code: "VERIFICATION_REQUIRED" | "VERIFICATION_FAILED";
       message: string;
       status: 403;
+    }
+  | {
+      /** A pin/pattern record this Worker cannot check: v2 with the pepper missing or different, or an
+       *  unknown hash version. Nothing is charged or written; the operator must restore the pepper. */
+      code: "VERIFY_UNAVAILABLE";
+      message: string;
+      status: 503;
     };
 
 /** Outcome of a verification check; a pass carries the `verify:{userId}` record it was decided on. */
@@ -63,6 +77,13 @@ export const VERIFICATION_REQUIRED_ERROR: VerificationError = {
   code: "VERIFICATION_REQUIRED",
   message: "此帳號需要驗證才能登入",
   status: 403,
+};
+
+/** The 503 for a record whose hash scheme this Worker cannot check (see {@link unverifiableHashReason}). */
+const VERIFY_UNAVAILABLE_ERROR: VerificationError = {
+  code: "VERIFY_UNAVAILABLE",
+  message: "伺服器的驗證設定不完整，請聯絡管理者",
+  status: 503,
 };
 
 /**
@@ -95,7 +116,7 @@ export function passedAgainstStaleVerifyRecord(
 export function verificationErrorResponse(
   c: Context<{ Bindings: Env }>,
   error: VerificationError,
-): Response & TypedResponse<ErrorBody, 403 | 429, "json"> {
+): Response & TypedResponse<ErrorBody, 403 | 429 | 503, "json"> {
   const retryAfter = error.status === 429 ? error.retryAfter : undefined;
   return jsonError(c, error.status, error.code, error.message, { retryAfter });
 }
@@ -147,6 +168,39 @@ export function isVerificationConfigured(record: VerifyRecord | null): boolean {
   return record !== null && record.method !== "none";
 }
 
+/** Fail-closed hash-scheme check for a pin/pattern record: the log event naming why this Worker cannot check
+ *  it (⇒ 503 VERIFY_UNAVAILABLE), or `null` when it can. v1 (absent / 1) always can. */
+async function unverifiableHashReason(
+  record: VerifyRecord,
+  pepper: string | null,
+): Promise<string | null> {
+  if (record.method !== "pin" && record.method !== "pattern") return null;
+  if (record.version === undefined || record.version === 1) return null;
+  if (record.version !== VERIFY_HASH_VERSION_PEPPER) {
+    return "VERIFY_HASH_VERSION_UNSUPPORTED";
+  }
+  if (pepper === null) return "VERIFY_PEPPER_MISSING";
+  if (record.pepperId !== (await pepperFingerprint(pepper))) {
+    return "VERIFY_PEPPER_MISMATCH";
+  }
+  return null;
+}
+
+/** Hash `secret` under the record's scheme: v2 ⇒ HMAC with the pepper, else v1 SHA-256. Only reached after
+ *  {@link unverifiableHashReason} returned `null`, so a v2 record always has its pepper here. */
+async function hashForRecord(
+  record: VerifyRecord,
+  salt: string,
+  secret: string,
+  pepper: string | null,
+): Promise<string> {
+  if (record.version !== VERIFY_HASH_VERSION_PEPPER) {
+    return hashSecret(salt, secret);
+  }
+  if (pepper === null) throw new Error("VERIFY_PEPPER_MISSING");
+  return hashSecretWithPepper(pepper, salt, secret);
+}
+
 /** Compare a secret with the verify record; `null` = corrupted pin/pattern (no hash/salt) ⇒ "not configured".
  *  `consumeOtp` decides whether a `code` match deletes the OTP; read-only checks pass `false`. */
 async function matchesSecret(
@@ -154,11 +208,16 @@ async function matchesSecret(
   userId: string,
   record: VerifyRecord,
   secret: string,
-  consumeOtp: boolean,
+  opts: { consumeOtp: boolean; pepper: string | null },
 ): Promise<boolean | null> {
   if (record.method === "pin" || record.method === "pattern") {
     if (!record.hash || !record.salt) return null;
-    const inputHash = await hashSecret(record.salt, secret);
+    const inputHash = await hashForRecord(
+      record,
+      record.salt,
+      secret,
+      opts.pepper,
+    );
     return timingSafeEqual(inputHash, record.hash);
   }
 
@@ -172,7 +231,7 @@ async function matchesSecret(
     ) {
       // Delete OTP after successful use (one-time), unless the caller asked to
       // leave it intact for the follow-up request that actually spends it.
-      if (consumeOtp) {
+      if (opts.consumeOtp) {
         await kv.delete(kvKeys.otp(userId));
       }
       return true;
@@ -329,9 +388,11 @@ async function chargeWrongGuess(
  *
  * | Situation                       | Result                    | KV writes           |
  * | ------------------------------- | ------------------------- | ------------------- |
- * | nothing configured / corrupted  | valid                     | none                |
+ * | nothing configured              | valid                     | none                |
  * | locked caller                   | 429 VERIFICATION_LOCKED   | none                |
+ * | unverifiable hash scheme³       | 503 VERIFY_UNAVAILABLE    | none                |
  * | no secret supplied              | 403 VERIFICATION_REQUIRED | none                |
+ * | corrupted record (no hash/salt) | valid                     | none                |
  * | correct secret                  | valid                     | delete failKey¹     |
  * | wrong secret, ceiling available | 403 VERIFICATION_FAILED   | ceiling + failKey   |
  * | wrong secret, ceiling spent     | 429 RATE_LIMITED          | failKey only²       |
@@ -339,6 +400,14 @@ async function chargeWrongGuess(
  * ¹ only when this caller has a failure record (or a void leftover) to clear.
  * ² the spent counter is not written again — a refused attempt must not extend
  *   the window.
+ * ³ a pin/pattern record of v2 with no pepper configured or a different one
+ *   (`pepperId` mismatch), or of an unknown `version` — with or without a
+ *   secret; logs `VERIFY_PEPPER_MISSING` / `VERIFY_PEPPER_MISMATCH` /
+ *   `VERIFY_HASH_VERSION_UNSUPPORTED` (no identifiers) and charges nothing.
+ *   It never falls through to the corrupted-record pass.
+ *
+ * A correct v1 secret is NOT upgraded here: the create / join / lookup handlers
+ * call {@link upgradeVerifyRecordHash} after their stale-record check.
  *
  * Under `DEV_MODE=1` the ceiling is skipped, exactly like every other limiter
  * (per-IP and per-userId), leaving lockout as the only brake.
@@ -411,6 +480,15 @@ export async function validateVerification(
     };
   }
 
+  // Fail closed, secret or not, BEFORE the corrupted-record pass: comparing under the wrong scheme would
+  // charge the owner's correct secret as a wrong guess. Log carries no identifiers (#357).
+  const pepper = getVerifyPepper(env);
+  const unverifiable = await unverifiableHashReason(record, pepper);
+  if (unverifiable !== null) {
+    console.error(unverifiable);
+    return { valid: false, error: VERIFY_UNAVAILABLE_ERROR };
+  }
+
   // No secret: no attempt, nothing charged, no KV write — a void leftover stays inert until its
   // TTL or the next request overwrites / clears it.
   if (!secret || typeof secret !== "string") {
@@ -419,13 +497,10 @@ export async function validateVerification(
 
   // Compare FIRST: the target-keyed ceiling must never refuse a correct secret, or any third party
   // could lock the owner out (Inv-6). See docs/architecture.md → 安全措施.
-  const matched = await matchesSecret(
-    kv,
-    userId,
-    record,
-    secret,
-    opts.consumeOtp ?? true,
-  );
+  const matched = await matchesSecret(kv, userId, record, secret, {
+    consumeOtp: opts.consumeOtp ?? true,
+    pepper,
+  });
 
   // Corrupted record — treat as no verification
   if (matched === null) {
@@ -493,7 +568,8 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  * - Otherwise the login gate itself decides, with the caller's IP as the lockout
  *   key and the handler's record — byte-identical responses (`403
  *   VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429 VERIFICATION_LOCKED` /
- *   `RATE_LIMITED` + `retryAfter`). A correct secret always passes and charges
+ *   `RATE_LIMITED` + `retryAfter`, `503 VERIFY_UNAVAILABLE`). A step-up never
+ *   upgrades a v1 hash (the caller rewrites or deletes the record next). A correct secret always passes and charges
  *   nothing (Invariant 6); the lockout key is shared with PWA login on purpose.
  *
  * See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
@@ -504,7 +580,9 @@ export async function enforceCurrentSecret(
   record: VerifyRecord | null,
   currentSecret: string | undefined,
   presentedAuth: AuthRecord | null,
-): Promise<(Response & TypedResponse<ErrorBody, 403 | 429, "json">) | null> {
+): Promise<
+  (Response & TypedResponse<ErrorBody, 403 | 429 | 503, "json">) | null
+> {
   if (passedAgainstStaleVerifyRecord(presentedAuth, record)) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
@@ -521,4 +599,51 @@ export async function enforceCurrentSecret(
     return verificationErrorResponse(c, verification.error);
   }
   return null;
+}
+
+/**
+ * Rewrite a v1 pin/pattern record as v2 (HMAC with the pepper) once its secret
+ * has just been proven correct. Called ONLY by the create / join / lookup
+ * handlers, after the gate passed AND `passedAgainstStaleVerifyRecord` returned
+ * false — the gate itself never writes `verify:{userId}`. `record` is the one
+ * the gate compared; `secret` is that same correct secret.
+ *
+ * A no-op unless the record is pin/pattern, v1 (`version` absent or 1), carries
+ * a hash and salt, and a pepper is configured. The SAME salt is reused, and
+ * `method`, `prompted` and `secretUpdatedAt` are copied unchanged: advancing
+ * `secretUpdatedAt` would void live lockouts, and the stale-record check keys
+ * on it.
+ *
+ * Fail-open: any error (KV allows one write per second per key) is logged
+ * without identifiers and swallowed — a correct secret never fails because the
+ * upgrade did. Races with the other `verify:` writers are accepted residuals:
+ * docs/architecture.md → PWA 登入驗證機制 → 安全措施.
+ */
+export async function upgradeVerifyRecordHash(
+  env: Env,
+  userId: string,
+  record: VerifyRecord,
+  secret: string,
+): Promise<void> {
+  if (record.method !== "pin" && record.method !== "pattern") return;
+  if (record.version !== undefined && record.version !== 1) return;
+  if (!record.hash || !record.salt) return;
+  const pepper = getVerifyPepper(env);
+  if (pepper === null) return;
+
+  try {
+    const [hash, pepperId] = await Promise.all([
+      hashSecretWithPepper(pepper, record.salt, secret),
+      pepperFingerprint(pepper),
+    ]);
+    await putVerifyRecord(env.KV, userId, {
+      ...record,
+      hash,
+      version: VERIFY_HASH_VERSION_PEPPER,
+      pepperId,
+    });
+  } catch {
+    // Event name only: a KV error message may echo the key, which carries the userId (#357).
+    console.error("VERIFY_HASH_UPGRADE_FAILED");
+  }
 }

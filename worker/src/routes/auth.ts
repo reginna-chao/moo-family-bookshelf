@@ -19,6 +19,7 @@ import { getCallerIp } from "../middleware/rateLimit";
 import {
   isVerificationConfigured,
   passedAgainstStaleVerifyRecord,
+  upgradeVerifyRecordHash,
   validateVerification,
   verificationErrorResponse,
   verifySecretFormatResponse,
@@ -59,6 +60,9 @@ const lookupRoute = createRoute({
     400: jsonRes("Invalid input"),
     403: jsonRes("Verification failed"),
     429: jsonRes("Verification locked or attempt ceiling reached"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -150,6 +154,10 @@ authRoutes.openapi(lookupRoute, async (c) => {
   const auth = await readAuthRecord(c.env.KV, userId);
   if (passedAgainstStaleVerifyRecord(auth, verifyRecord)) {
     return verificationRequiredProbe(c);
+  }
+  // v1 → v2 hash upgrade, only after a real secret check (the probe above compares none); fail-open.
+  if (verifyRecord && verifySecret !== undefined) {
+    await upgradeVerifyRecordHash(c.env, userId, verifyRecord, verifySecret);
   }
 
   // Live membership only (pointer → record that still lists the user, `services/membership.ts`); an

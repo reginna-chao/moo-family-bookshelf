@@ -15,6 +15,9 @@ export interface Env {
   DEV_MODE?: string;
   /** Auto-injected by Cloudflare with the Worker's script name. Undefined in local wrangler dev. */
   CF_WORKER?: string;
+  /** Server-side key for PIN / pattern hashes (verify record v2). A Worker secret (`wrangler secret put`,
+   *  or `.dev.vars` locally), never in wrangler.toml. Read through {@link getVerifyPepper}. */
+  VERIFY_PEPPER?: string;
 
   // Native Rate Limiting bindings, OPTIONAL: an older self-hosted wrangler.toml lacks them and rateLimit.ts
   // falls back to KV. `RateLimit` is ambient (@cloudflare/workers-types >= 4.20241230, tsconfig `types`).
@@ -27,6 +30,16 @@ export interface Env {
   RATE_LIMIT_10_PER_MIN?: RateLimit;
   /** 3 req/min: per-IP sensitive tier, both buckets (onboarding + lookup). */
   RATE_LIMIT_3_PER_MIN?: RateLimit;
+}
+
+/**
+ * The configured `VERIFY_PEPPER`, trimmed; `null` when unset or blank. A
+ * `null` pepper keeps PIN / pattern hashing on v1 (`hashSecret`), so a Worker
+ * without the secret behaves exactly as before it existed.
+ */
+export function getVerifyPepper(env: Env): string | null {
+  const pepper = env.VERIFY_PEPPER?.trim();
+  return pepper ? pepper : null;
 }
 
 /** Production Worker names — DEV_MODE is forcibly ignored for these. Self-hosters deploying under a

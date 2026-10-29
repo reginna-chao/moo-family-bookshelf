@@ -3,3 +3,6 @@
 
 # Enable localhost CORS for development
 DEV_MODE=1
+
+# Optional: server-side key for PIN / pattern hashes; generate with `openssl rand -hex 32`
+# VERIFY_PEPPER=

@@ -46,6 +46,7 @@ import {
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
   passedAgainstStaleVerifyRecord,
+  upgradeVerifyRecordHash,
   validateVerification,
   VERIFICATION_REQUIRED_ERROR,
   verificationErrorResponse,
@@ -110,6 +111,9 @@ const createFamilyRoute = createRoute({
     403: jsonRes("Verification required or failed"),
     409: jsonRes("User already in a family"),
     429: jsonRes("Verification locked or attempt ceiling reached"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -141,6 +145,9 @@ const joinFamilyRoute = createRoute({
       "Already in a family, family full, or recovery join by a non-member",
     ),
     429: jsonRes("Rate limit exceeded"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -360,6 +367,15 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   const auth = await readAuthRecord(c.env.KV, body.userId);
   if (passedAgainstStaleVerifyRecord(auth, verification.record)) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
+  }
+  // v1 → v2 hash upgrade (no-op unless a pin/pattern secret just matched); fail-open, never blocks create.
+  if (verification.record && verifySecret !== undefined) {
+    await upgradeVerifyRecordHash(
+      c.env,
+      body.userId,
+      verification.record,
+      verifySecret,
+    );
   }
 
   if (membership === "orphaned") {
@@ -1173,12 +1189,13 @@ async function writeKickedTombstone(
 }
 
 /** A passed join gate (#378): `knownAuth` is the `auth:{userId}` the QR check read (`undefined` when none);
- *  `verifyRecord` is what the secret comparison read (`null` after a QR bypass, which compares nothing). */
+ *  `verifyRecord` / `verifiedSecret` are what the comparison used (`null` / `undefined` after a QR bypass). */
 interface JoinGatePass {
   failure: null;
   knownAuth: AuthRecord | null | undefined;
   qrBypassed: boolean;
   verifyRecord: VerifyRecord | null;
+  verifiedSecret: string | undefined;
 }
 
 /** Inputs shared by the join handler's two post-gate branches. */
@@ -1224,7 +1241,13 @@ async function passJoinVerificationGate(
     // If token invalid/expired/wrong-user, fall through to normal verification
   }
   if (skipVerification) {
-    return { failure: null, knownAuth, qrBypassed: true, verifyRecord: null };
+    return {
+      failure: null,
+      knownAuth,
+      qrBypassed: true,
+      verifyRecord: null,
+      verifiedSecret: undefined,
+    };
   }
 
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
@@ -1242,26 +1265,36 @@ async function passJoinVerificationGate(
     knownAuth,
     qrBypassed: false,
     verifyRecord: verification.record,
+    verifiedSecret: verifySecret,
   };
 }
 
-/** Token side of a passed join (#378), run before any write: `auth:{userId}` (read once), plus — after a
- *  QR bypass — the bound token renewed. `null` ⇒ 403 VERIFICATION_REQUIRED: the bound token is gone, or
- *  the secret passed against a stale verify record. See docs/architecture.md → PWA 登入驗證機制. */
+/** Token side of a passed join (#378): `auth:{userId}` (read once), plus — after a QR bypass — the bound
+ *  token renewed. `null` ⇒ 403 VERIFICATION_REQUIRED: the bound token is gone, or the secret passed
+ *  against a stale verify record; a fresh secret pass also upgrades a v1 hash (`upgradeVerifyRecordHash`,
+ *  fail-open). See docs/architecture.md → PWA 登入驗證機制. */
 async function admitJoinToken(
-  kv: KVNamespace,
+  env: Env,
   userId: string,
   gate: JoinGatePass,
 ): Promise<{ auth: AuthRecord | null; renewed: string | null } | null> {
   const auth =
     gate.knownAuth === undefined
-      ? await readAuthRecord(kv, userId)
+      ? await readAuthRecord(env.KV, userId)
       : gate.knownAuth;
   if (gate.qrBypassed) {
-    const renewed = await renewAuthToken(kv, userId, auth);
+    const renewed = await renewAuthToken(env.KV, userId, auth);
     return renewed === null ? null : { auth, renewed };
   }
   if (passedAgainstStaleVerifyRecord(auth, gate.verifyRecord)) return null;
+  if (gate.verifyRecord && gate.verifiedSecret !== undefined) {
+    await upgradeVerifyRecordHash(
+      env,
+      userId,
+      gate.verifyRecord,
+      gate.verifiedSecret,
+    );
+  }
   return { auth, renewed: null };
 }
 
@@ -1274,7 +1307,7 @@ async function reconnectExistingMember(
 ) {
   const { familyId, userId, displayName, record, existingFamily, gate } = input;
 
-  const admitted = await admitJoinToken(c.env.KV, userId, gate);
+  const admitted = await admitJoinToken(c.env, userId, gate);
   if (!admitted) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
@@ -1323,7 +1356,7 @@ async function admitNewMember(
   if (record.members.length >= record.maxMembers) {
     return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
   }
-  const admitted = await admitJoinToken(c.env.KV, userId, gate);
+  const admitted = await admitJoinToken(c.env, userId, gate);
   if (!admitted) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
