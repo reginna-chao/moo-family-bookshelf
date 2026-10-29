@@ -6,4 +6,6 @@ DEV_MODE=1
 
 # Optional: server-side key for PIN / pattern hashes; generate with `openssl rand -hex 32`
 # (PowerShell has no openssl — use: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+# Unset = v1 hashes, everything still works. Only local PIN records written WITH a pepper
+# answer 503 VERIFY_UNAVAILABLE once it is removed or changed: delete that verify: record and set the PIN again.
 # VERIFY_PEPPER=
