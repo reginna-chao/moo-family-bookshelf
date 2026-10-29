@@ -120,7 +120,8 @@ export const kvKeys = {
   member: (userId: string) => `member:${userId}`,
   kicked: (familyId: string, userId: string) => `kicked:${familyId}:${userId}`,
   auth: (userId: string) => `auth:${userId}`,
-  authToken: (token: string) => `token:${token}`,
+  // `tokenHash` = `hashAuthToken(token)`; a pre-#425 key's tail is the plaintext token (read-only fallback).
+  authToken: (tokenHash: string) => `token:${tokenHash}`,
   verify: (userId: string) => `verify:${userId}`,
   verifyFail: (userId: string, callerKey: string) =>
     `verifyfail:${userId}:${callerKey}`,
@@ -393,17 +394,48 @@ export const MAX_FAMILY_PREF_ENTRIES = 3000;
  */
 export const MAX_FAMILY_PREF_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
 
-export interface AuthRecord {
-  token: string;
+/** Value of `token:{hash}` (#425), where hash = `hashAuthToken(token)`; the token itself is never stored. */
+export interface AuthTokenRecord {
+  userId: string;
+  /** ISO time of the mint (or of a legacy token's migration); the absolute cap counts from here. */
   createdAt: string;
+  /** Epoch ms matching this put's `expirationTtl`; refresh skips the write when its target is within an hour. */
+  expiresAt: number;
+}
+
+/** One device's token in `auth:{userId}`: `hash` is its `token:{hash}` key tail, `createdAt` the same as there. */
+export interface AuthTokenEntry {
+  hash: string;
+  createdAt: string;
+}
+
+/** `auth:{userId}` as stored (#425): the account's tokens, at most `MAX_AUTH_TOKENS_PER_USER`. */
+export interface StoredAuthRecord {
+  tokens: AuthTokenEntry[];
   /** Epoch ms of the `verify:{userId}.secretUpdatedAt` the PIN/pattern rotation was written for (#378); a join
    *  that passed against an older verify record is refused. OPTIONAL: absent until such a rotation; later
-   *  mints carry the replaced record's value forward (`generateAuthToken`). */
+   *  mints carry the previous record's value forward (`mintAuthToken`). */
   secretAt?: number;
 }
 
-/** Token TTL: 90 days in seconds. Shared by auth middleware and routes. */
+/** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `middleware/auth.ts`). */
+export interface AuthRecord extends StoredAuthRecord {
+  /** The plaintext token of a pre-#425 record (`{ token, createdAt, secretAt? }`); in memory only — never
+   *  written back (`putAuthRecord` rebuilds its value). Migrated by the next mint or refresh, deleted by a revoke. */
+  legacyToken?: string;
+}
+
+/** Token TTL: 90 days in seconds — the sliding lifetime of `token:{hash}`, renewed by refresh. */
 export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
+
+/** Absolute token age cap: 180 days from `createdAt` (`code` accounts exempt). */
+export const TOKEN_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+
+/** Tokens one account may hold at once (one per device); the next mint evicts dead, then oldest, entries. */
+export const MAX_AUTH_TOKENS_PER_USER = 5;
+
+/** Refresh writes nothing when its target expiry is within this of the stored `expiresAt` (1 hour). */
+export const TOKEN_RENEW_SKIP_WINDOW_MS = 60 * 60 * 1000;
 
 /** OTP TTL: 5 minutes in seconds. */
 export const OTP_TTL_SECONDS = 5 * 60;
@@ -413,8 +445,9 @@ export const QR_TOKEN_TTL_SECONDS = 5 * 60;
 
 export interface QrTokenRecord {
   userId: string;
-  /** Hex SHA-256 of the auth token that minted it (`hashTokenForQrBinding`, #378). OPTIONAL (added after
-   *  release): absent ⇒ never bypasses verification (`isQrBoundToCurrentToken` in `middleware/auth.ts`). */
+  /** `hashAuthToken` of the token that minted it, equal to its `hash` in the `auth:` list (#425). OPTIONAL
+   *  (added after release): absent, an older `qr:`-salted value, or a still-plaintext minting token (empty
+   *  list) matches no entry ⇒ never bypasses verification (`isQrBoundToListedToken`, `middleware/auth.ts`). */
   tokenHash?: string;
 }
 

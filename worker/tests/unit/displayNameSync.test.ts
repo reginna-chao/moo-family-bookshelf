@@ -315,8 +315,8 @@ describe("PUT books uses family displayName over client displayName", () => {
       token1,
     );
 
-    const { generateAuthToken } = await import("../../src/middleware/auth");
-    const newToken = await generateAuthToken(kv, USER1);
+    const { mintTestToken } = await import("../helpers/auth");
+    const newToken = await mintTestToken(kv, USER1);
 
     const putRes = await request(
       "PUT",

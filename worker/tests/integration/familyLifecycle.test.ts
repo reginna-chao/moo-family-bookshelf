@@ -590,8 +590,8 @@ describe("GET /api/family/:id/members response", () => {
     await kv.put(kvKeys.member(ALICE), "abcd-ef01");
 
     // Generate a token for alice to authenticate
-    const { generateAuthToken } = await import("../../src/middleware/auth");
-    const aliceToken = await generateAuthToken(kv, ALICE);
+    const { mintTestToken } = await import("../helpers/auth");
+    const aliceToken = await mintTestToken(kv, ALICE);
 
     const res = await request(
       "GET",

@@ -142,7 +142,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { seedAuthToken } from "../helpers/auth";
+import { authTokenKey, seedAuthToken } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
 import {
@@ -853,7 +853,10 @@ describe("PUT /api/user/:id/family-prefs", () => {
     expect(await storedSnapshot(LIVE_TOKEN)).toBeNull();
     // No pointer read either (`token:` is the auth middleware's read).
     // See the header → "§6, family-prefs".
-    expect(readKeys).toEqual([kvKeys.authToken(authToken), kvKeys.user(USER)]);
+    expect(readKeys).toEqual([
+      await authTokenKey(authToken),
+      kvKeys.user(USER),
+    ]);
     expect(await pointerRecord()).toEqual({
       shelves: [shelf(SHELF_ID, LIVE_TOKEN)],
     });
@@ -975,7 +978,7 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId — without a books record"
     // The `token:` read is the auth middleware's; the pointer key is the only
     // read the handler itself pays for.
     expect(readKeys).toEqual([
-      kvKeys.authToken(authToken),
+      await authTokenKey(authToken),
       kvKeys.publicShelves(USER),
     ]);
     expect(ops.deleteKeys()).toEqual([kvKeys.publicShelf(LIVE_TOKEN)]);

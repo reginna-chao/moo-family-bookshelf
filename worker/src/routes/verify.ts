@@ -3,7 +3,6 @@ import { type Env, getVerifyPepper } from "../utils/env";
 import {
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
-  TOKEN_TTL_SECONDS,
   VERIFY_HASH_VERSION_PEPPER,
   type VerifyRecord,
   type OtpRecord,
@@ -23,11 +22,11 @@ import {
   sanitizeVerifySecret,
 } from "../utils/validation";
 import {
-  generateAuthToken,
   getAuthenticatedUserId,
   getPresentedAuthToken,
-  hashTokenForQrBinding,
+  mintAuthToken,
   readPresentedAuth,
+  revokeAuthTokenKeys,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import {
@@ -36,6 +35,7 @@ import {
   verifySecretFormatResponse,
 } from "../services/verification";
 import {
+  hashAuthToken,
   hashSecret,
   hashSecretWithPepper,
   pepperFingerprint,
@@ -160,7 +160,7 @@ const putVerifyRoute = createRoute({
   },
   responses: {
     200: jsonRes(
-      "Updated verification settings; for pin/pattern also the rotated authToken + expiresAt (the old token is revoked). code/none keep the token",
+      "Updated verification settings; for pin/pattern also a new authToken + expiresAt (every existing token of the account is revoked). code/none keep the tokens",
     ),
     400: jsonRes("Invalid request"),
     401: jsonRes("Unauthorized"),
@@ -286,16 +286,23 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     });
   }
 
-  // A new PIN/pattern revokes the shared token (#378) AFTER the record write and drops a pending one-time
-  // code; `code` keeps the token (the Extension cannot enter an OTP). See docs/architecture.md → PWA 登入驗證機制.
-  // No `auth:` record (TTL gap): the presented bearer is still the one to revoke; only `.token` is read.
-  // `secretAt` lets a stale-node join be refused (`passedAgainstStaleVerifyRecord`).
-  const replaced = presented.auth ?? { token: presentedToken, createdAt: "" };
-  const [authToken] = await Promise.all([
-    generateAuthToken(c.env.KV, userId, replaced, record.secretUpdatedAt),
+  // A new PIN/pattern revokes EVERY token (#425) after the record write and drops a pending one-time code; `code`
+  // keeps them. Presented hash AND plaintext cover an `auth:` gap. docs/architecture.md → PWA 登入驗證機制.
+  await Promise.all([
+    revokeAuthTokenKeys(c.env.KV, presented.auth, [
+      presented.presentedHash,
+      presentedToken,
+    ]),
     deleteOtpRecord(c.env.KV, userId),
   ]);
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  // The mint is the request's only `auth:` write (one write per key per second); `secretAt` lets a
+  // stale-node join be refused (`passedAgainstStaleVerifyRecord`).
+  const { token: authToken, expiresAt } = await mintAuthToken(
+    c.env.KV,
+    userId,
+    null,
+    record.secretUpdatedAt,
+  );
 
   return c.json({
     data: {
@@ -507,8 +514,8 @@ verifyRoutes.openapi(postQrTokenRoute, async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   const token = generateQrToken();
-  // Bound to the minting token (#378): redeemable only while `auth:{userId}` still names it.
-  const tokenHash = await hashTokenForQrBinding(presentedToken);
+  // Bound to the minting token (#378): redeemable only while `auth:{userId}` still lists its hash (#425).
+  const tokenHash = await hashAuthToken(presentedToken);
   const record: QrTokenRecord = { userId, tokenHash };
 
   await putQrTokenRecord(c.env.KV, token, record);

@@ -49,7 +49,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import { kvKeys } from "../../src/kv/schema";
 import { createMockKV } from "../helpers/mockKv";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, authTokenKey } from "../helpers/auth";
 import { USER1 } from "../helpers/ids";
 import { watchKvOps } from "../helpers/kvOps";
 import {
@@ -461,7 +461,7 @@ describe("malformed path param ⇒ the exact pre-#227 400", () => {
       // The only KV touch is the auth middleware resolving the token (none on
       // a public route); nothing is written anywhere.
       expect(sent.ops.getKeys()).toEqual(
-        route.auth ? [kvKeys.authToken(sent.token)] : [],
+        route.auth ? [await authTokenKey(sent.token)] : [],
       );
       expect(sent.ops.writeTrail()).toEqual([]);
       expect(perUserCharges(sent)).toEqual([]);

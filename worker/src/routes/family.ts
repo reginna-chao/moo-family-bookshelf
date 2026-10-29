@@ -11,7 +11,6 @@ import {
   normalizeFamilyRecord,
   hasMember,
   findMember,
-  TOKEN_TTL_SECONDS,
 } from "../kv/schema";
 import {
   getFamilyRecord,
@@ -25,6 +24,7 @@ import {
 } from "../kv/families";
 import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
 import { getQrTokenRecord, deleteQrToken } from "../kv/verify";
+import { getAuthTokenRecord } from "../kv/auth";
 import {
   isValidUserId,
   isJsonObject,
@@ -35,13 +35,11 @@ import {
   parseRecoveryFlag,
 } from "../utils/validation";
 import {
-  generateAuthToken,
-  getOrGenerateAuthToken,
-  deleteAuthToken,
+  mintAuthToken,
+  readAndRevokeAllAuthTokens,
   getAuthenticatedUserId,
   readAuthRecord,
-  isQrBoundToCurrentToken,
-  renewAuthToken,
+  isQrBoundToListedToken,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
@@ -401,8 +399,11 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   await putMemberFamilyId(c.env.KV, body.userId, familyId);
   await putFamilyRecord(c.env.KV, familyId, record);
 
-  const authToken = await generateAuthToken(c.env.KV, body.userId, auth);
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  const { token: authToken, expiresAt } = await mintAuthToken(
+    c.env.KV,
+    body.userId,
+    auth,
+  );
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 201);
 });
@@ -565,7 +566,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     await dissolveFamily(c.env.KV, familyId);
     await Promise.all([
       deleteMemberFamilyId(c.env.KV, callerId),
-      deleteAuthToken(c.env.KV, callerId),
+      readAndRevokeAllAuthTokens(c.env.KV, callerId),
     ]);
 
     return c.json({ data: { ok: true } });
@@ -590,7 +591,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     if (strayPointer === familyId) {
       await Promise.all([
         deleteMemberFamilyId(c.env.KV, targetUserId),
-        deleteAuthToken(c.env.KV, targetUserId),
+        readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
       ]);
     }
     return jsonError(c, 404, "MEMBER_NOT_FOUND", "目標使用者不是家庭成員");
@@ -608,7 +609,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     if (leaverPointer === familyId) {
       await Promise.all([
         deleteMemberFamilyId(c.env.KV, targetUserId),
-        deleteAuthToken(c.env.KV, targetUserId),
+        readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
       ]);
     }
     return c.json({ data: { ok: true } });
@@ -647,7 +648,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   if (targetPointer === familyId) {
     await Promise.all([
       deleteMemberFamilyId(c.env.KV, targetUserId),
-      deleteAuthToken(c.env.KV, targetUserId),
+      readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
     ]);
   }
 
@@ -1189,11 +1190,13 @@ async function writeKickedTombstone(
 }
 
 /** A passed join gate (#378): `knownAuth` is the `auth:{userId}` the QR check read (`undefined` when none);
- *  `verifyRecord` / `verifiedSecret` are what the comparison used (`null` / `undefined` after a QR bypass). */
+ *  `qrBoundHash` the listed token hash a QR bypass matched (#425, else `null`); `verifyRecord` /
+ *  `verifiedSecret` are what the comparison used (`null` / `undefined` after a QR bypass). */
 interface JoinGatePass {
   failure: null;
   knownAuth: AuthRecord | null | undefined;
   qrBypassed: boolean;
+  qrBoundHash: string | null;
   verifyRecord: VerifyRecord | null;
   verifiedSecret: string | undefined;
 }
@@ -1207,8 +1210,8 @@ interface JoinStepInput {
   gate: JoinGatePass;
 }
 
-/** Join's verification step: a one-time QR token issued to `userId` and still bound to the account's current
- *  token (#378) skips the gate, else `validateVerification`. `failure` is the gate's error Response. */
+/** Join's verification step: a one-time QR token issued to `userId` and still bound to one of the account's
+ *  listed tokens (#378, #425) skips the gate, else `validateVerification`. `failure` is the gate's error Response. */
 async function passJoinVerificationGate(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -1223,6 +1226,7 @@ async function passJoinVerificationGate(
 
   // QR token bypass: if a valid one-time QR token is provided, skip verification.
   let skipVerification = false;
+  let qrBoundHash: string | null = null;
   let knownAuth: AuthRecord | null | undefined;
   if (qrToken && typeof qrToken === "string") {
     const qrRecord = await getQrTokenRecord(c.env.KV, qrToken);
@@ -1233,10 +1237,8 @@ async function passJoinVerificationGate(
         deleteQrToken(c.env.KV, qrToken),
       ]);
       knownAuth = auth;
-      skipVerification = await isQrBoundToCurrentToken(
-        qrRecord.tokenHash,
-        auth,
-      );
+      skipVerification = isQrBoundToListedToken(qrRecord.tokenHash, auth);
+      qrBoundHash = skipVerification ? (qrRecord.tokenHash ?? null) : null;
     }
     // If token invalid/expired/wrong-user, fall through to normal verification
   }
@@ -1245,6 +1247,7 @@ async function passJoinVerificationGate(
       failure: null,
       knownAuth,
       qrBypassed: true,
+      qrBoundHash,
       verifyRecord: null,
       verifiedSecret: undefined,
     };
@@ -1264,27 +1267,31 @@ async function passJoinVerificationGate(
     failure: null,
     knownAuth,
     qrBypassed: false,
+    qrBoundHash,
     verifyRecord: verification.record,
     verifiedSecret: verifySecret,
   };
 }
 
-/** Token side of a passed join (#378): `auth:{userId}` (read once), plus — after a QR bypass — the bound
- *  token renewed. `null` ⇒ 403 VERIFICATION_REQUIRED: the bound token is gone, or the secret passed
- *  against a stale verify record; a fresh secret pass also upgrades a v1 hash (`upgradeVerifyRecordHash`,
+/** Token side of a passed join (#378, #425): `auth:{userId}` (read once) for the mint. `null` ⇒ 403
+ *  VERIFICATION_REQUIRED: after a QR bypass the bound token's `token:` key is gone (one read), or the secret
+ *  passed against a stale verify record; a fresh secret pass also upgrades a v1 hash (`upgradeVerifyRecordHash`,
  *  fail-open). See docs/architecture.md → PWA 登入驗證機制. */
 async function admitJoinToken(
   env: Env,
   userId: string,
   gate: JoinGatePass,
-): Promise<{ auth: AuthRecord | null; renewed: string | null } | null> {
+): Promise<{ auth: AuthRecord | null } | null> {
   const auth =
     gate.knownAuth === undefined
       ? await readAuthRecord(env.KV, userId)
       : gate.knownAuth;
   if (gate.qrBypassed) {
-    const renewed = await renewAuthToken(env.KV, userId, auth);
-    return renewed === null ? null : { auth, renewed };
+    const bound =
+      gate.qrBoundHash === null
+        ? null
+        : await getAuthTokenRecord(env.KV, gate.qrBoundHash);
+    return bound?.userId === userId ? { auth } : null;
   }
   if (passedAgainstStaleVerifyRecord(auth, gate.verifyRecord)) return null;
   if (gate.verifyRecord && gate.verifiedSecret !== undefined) {
@@ -1295,12 +1302,11 @@ async function admitJoinToken(
       gate.verifiedSecret,
     );
   }
-  return { auth, renewed: null };
+  return { auth };
 }
 
 /** Join's existing-member branch: `admitJoinToken` (may 403), heals the pointer (+ tombstone re-check, may
- *  403) or, when not healing, may put a changed displayName; then the QR-renewed token, else
- *  `getOrGenerateAuthToken` — a QR bypass never mints (#378). */
+ *  403) or, when not healing, may put a changed displayName; then mints a new token for this device (#425). */
 async function reconnectExistingMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput & { existingFamily: string | null },
@@ -1334,15 +1340,16 @@ async function reconnectExistingMember(
     await putFamilyRecord(c.env.KV, familyId, record);
   }
 
-  const authToken =
-    admitted.renewed ??
-    (await getOrGenerateAuthToken(c.env.KV, userId, admitted.auth));
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  const { token: authToken, expiresAt } = await mintAuthToken(
+    c.env.KV,
+    userId,
+    admitted.auth,
+  );
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
 /** Join's new-member branch: 409 FAMILY_FULL, then `admitJoinToken` (may 403), puts `family:{id}` then
- *  `member:{uid}`, re-checks the tombstone (may retract + 403); then the QR-renewed token, else a fresh one. */
+ *  `member:{uid}`, re-checks the tombstone (may retract + 403); then mints a new token for this device (#425). */
 async function admitNewMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput,
@@ -1377,10 +1384,11 @@ async function admitNewMember(
     return memberRemovedResponse(c);
   }
 
-  const authToken =
-    admitted.renewed ??
-    (await generateAuthToken(c.env.KV, userId, admitted.auth));
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
+  const { token: authToken, expiresAt } = await mintAuthToken(
+    c.env.KV,
+    userId,
+    admitted.auth,
+  );
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }

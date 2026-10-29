@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
+import { listsToken, seedAuthToken, tokenOwner } from "../helpers/auth";
 import { ALICE, BOB, CHARLIE } from "../helpers/ids";
-import { hashSecret } from "../../src/utils/crypto";
+import { hashAuthToken, hashSecret } from "../../src/utils/crypto";
 import {
   kvKeys,
   QR_TOKEN_TTL_SECONDS,
@@ -111,17 +112,13 @@ const BRANCHES = [
   { branch: "new member", seed: () => seedFamily([OWNER_ID]) },
 ];
 
-function authRecord(secretAt?: number): AuthRecord {
-  return {
+/** USER_ID's one listed device token TOKEN, with `auth:{userId}.secretAt` when given. */
+async function seedAuth(secretAt?: number): Promise<void> {
+  await seedAuthToken(kv, USER_ID, {
     token: TOKEN,
     createdAt: new Date(PINNED_NOW).toISOString(),
-    ...(secretAt !== undefined && { secretAt }),
-  };
-}
-
-async function seedAuth(secretAt?: number): Promise<void> {
-  await kv.put(kvKeys.authToken(TOKEN), USER_ID);
-  await kv.put(kvKeys.auth(USER_ID), JSON.stringify(authRecord(secretAt)));
+    secretAt,
+  });
 }
 
 async function pinRecord(
@@ -243,7 +240,7 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
 
   it.each(cross(BRANCHES, CURRENT_RECORDS))(
     "$branch: admits $label",
-    async ({ branch, seed, record, secret }) => {
+    async ({ seed, record, secret }) => {
       await seed();
       await seedAuth(SECRET_AT);
       await seedVerify(await record());
@@ -254,11 +251,14 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
       const authToken = ((await res.json()) as Json).data.authToken as string;
       expect(await kv.get(kvKeys.member(USER_ID))).toBe(FAMILY_ID);
       const stored = await kv.get<AuthRecord>(kvKeys.auth(USER_ID), "json");
-      expect(stored?.token).toBe(authToken);
+      expect(stored?.tokens.map((e) => e.hash)).toEqual([
+        await hashAuthToken(TOKEN),
+        await hashAuthToken(authToken),
+      ]);
       expect(stored?.secretAt).toBe(SECRET_AT);
-      // A reconnect renews the live token; a new member gets a fresh one.
-      if (branch === "new member") expect(authToken).not.toBe(TOKEN);
-      else expect(authToken).toBe(TOKEN);
+      // Every join mints this device its own token (#425), next to the live one.
+      expect(authToken).not.toBe(TOKEN);
+      expect(await tokenOwner(kv, TOKEN)).toBe(USER_ID);
     },
   );
 
@@ -300,7 +300,9 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
     await seedVerify(await pinRecord(PIN, SECRET_AT));
     const res = await join({ verifySecret: PIN });
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Json).data.authToken).toBe(TOKEN);
+    const minted = ((await res.json()) as Json).data.authToken as string;
+    expect(minted).not.toBe(TOKEN);
+    expect(await listsToken(kv, USER_ID, minted)).toBe(true);
   });
 
   it("answers 409 FAMILY_FULL before the stale check on the new-member branch", async () => {
@@ -325,7 +327,7 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
       kvKeys.qrToken(qr),
       JSON.stringify({
         userId: USER_ID,
-        tokenHash: await hashSecret("qr:", TOKEN),
+        tokenHash: await hashAuthToken(TOKEN),
       }),
       { expirationTtl: QR_TOKEN_TTL_SECONDS },
     );
@@ -333,7 +335,9 @@ describe("POST /api/family/:id/join — a secret checked against a stale verify 
     const res = await join({ qrToken: qr });
 
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Json).data.authToken).toBe(TOKEN);
+    const minted = ((await res.json()) as Json).data.authToken as string;
+    expect(minted).not.toBe(TOKEN);
+    expect(await listsToken(kv, USER_ID, minted)).toBe(true);
   });
 });
 
@@ -368,7 +372,7 @@ describe("POST /api/family — a secret checked against a stale verify record", 
 
       expect(ops.writeTrail()).toEqual([]);
       expect(ops.getKeys()).toContain(kvKeys.auth(USER_ID));
-      expect(await kv.get(kvKeys.authToken(TOKEN))).toBe(USER_ID);
+      expect(await tokenOwner(kv, TOKEN)).toBe(USER_ID);
       expect(await kv.get(kvKeys.member(USER_ID))).toBe(pointerBefore);
     },
   );
@@ -392,9 +396,13 @@ describe("POST /api/family — a secret checked against a stale verify record", 
       expect(data.authToken).not.toBe(TOKEN);
       expect(await kv.get(kvKeys.member(USER_ID))).toBe(data.familyId);
       const stored = await kv.get<AuthRecord>(kvKeys.auth(USER_ID), "json");
-      expect(stored?.token).toBe(data.authToken);
+      expect(stored?.tokens.map((e) => e.hash)).toEqual([
+        await hashAuthToken(TOKEN),
+        await hashAuthToken(data.authToken),
+      ]);
       expect(stored?.secretAt).toBe(SECRET_AT);
-      expect(await kv.get(kvKeys.authToken(TOKEN))).toBeNull();
+      // Create mints a second device token; the earlier one stays (#425).
+      expect(await tokenOwner(kv, TOKEN)).toBe(USER_ID);
     },
   );
 

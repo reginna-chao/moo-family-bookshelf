@@ -36,7 +36,7 @@
  *   ONE case where the fan-out legitimately survives: a family still on the
  *   legacy `string[]` index, because migration is write-path only and a GET
  *   never writes.
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `family:{familyId}` (routes/borrow.ts, `getFamilyRecord`, membership check) and
  *   `borrows:family:{familyId}` (`readBorrowIndex`) — real cost of the listing.
  * - `member:{callerId}` (routes/borrow.ts, `isActiveMember`) — added by
@@ -74,6 +74,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import {
   BoolFlag,
   BorrowStatus,
@@ -186,7 +187,7 @@ describe("KV budget: GET /api/family/:id/borrow", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // handler, `getFamilyRecord` — the family record
       kvKeys.family(FAMILY_ID),
       // handler, `isActiveMember` — the caller's pointer, for the active-member

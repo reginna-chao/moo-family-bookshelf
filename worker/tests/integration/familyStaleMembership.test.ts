@@ -133,7 +133,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken } from "../helpers/auth";
+import {
+  seedAuthToken,
+  authTokenKey,
+  tokenOwner,
+  listsToken,
+} from "../helpers/auth";
 import { BoolFlag, kvKeys, type AuthRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3, USER4 } from "../helpers/ids";
 
@@ -594,7 +599,7 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
     await Promise.all([
       kv.delete(kvKeys.member(USER2)),
       kv.delete(kvKeys.auth(USER2)),
-      kv.delete(kvKeys.authToken(memberToken)),
+      kv.delete(await authTokenKey(memberToken)),
     ]);
     const ops = watchKvOps(kv);
 
@@ -699,7 +704,7 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
 
     // The B session survives: pointer, token, and both family-scoped reads.
     expect(await kv.get(pointerKey)).toBe(familyB);
-    expect((await readAuthRecord(USER3))?.token).toBe(tokenB);
+    expect(await listsToken(kv, USER3, tokenB)).toBe(true);
     expect(await listedMemberIds(familyB)).toContain(USER3);
     expect((await getMembers(familyB, tokenB)).status).toBe(200);
     expect((await getBookshelf(familyB, tokenB)).status).toBe(200);
@@ -751,7 +756,7 @@ describe("POST /api/family/:id/join tombstone re-check after the pointer put", (
       // The session prefixes the negative assertions above filter on are the
       // ones a successful join really writes.
       expect(ops.putKeys()).toContain(kvKeys.auth(userId));
-      expect(ops.putKeys()).toContain(kvKeys.authToken(token));
+      expect(ops.putKeys()).toContain(await authTokenKey(token));
       expect((await getMembers(familyId, token)).status).toBe(200);
     },
   );
@@ -862,7 +867,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
     await expectErrorCode(res, 404, "MEMBER_NOT_FOUND");
     expect(await kv.get(kvKeys.member(USER3))).toBeNull();
     expect(await readAuthRecord(USER3)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(staleToken))).toBeNull();
+    expect(await tokenOwner(kv, staleToken)).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER3))).not.toBeNull();
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     // Tombstone FIRST, then the parallel stray deletes (compared as a set).
@@ -873,7 +878,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
       [
         `delete ${kvKeys.member(USER3)}`,
         `delete ${kvKeys.auth(USER3)}`,
-        `delete ${kvKeys.authToken(staleToken)}`,
+        `delete ${await authTokenKey(staleToken)}`,
       ].sort(),
     );
   });
@@ -888,7 +893,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
     await expectErrorCode(res, 404, "MEMBER_NOT_FOUND");
     expect(await kv.get(kvKeys.member(USER3))).toBeNull();
     expect(await readAuthRecord(USER3)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(staleToken))).toBeNull();
+    expect(await tokenOwner(kv, staleToken)).toBeNull();
     // Self-leave is never a kick: no tombstone, so rejoining stays possible.
     expect(await kv.get(kvKeys.kicked(familyId, USER3))).toBeNull();
     expect(ops.putKeys()).not.toContain(kvKeys.kicked(familyId, USER3));
@@ -897,7 +902,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
       [
         kvKeys.member(USER3),
         kvKeys.auth(USER3),
-        kvKeys.authToken(staleToken),
+        await authTokenKey(staleToken),
       ].sort(),
     );
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
@@ -923,7 +928,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
       await expectErrorCode(res, 404, "MEMBER_NOT_FOUND");
       expect(ops.deleteKeys()).toEqual([]);
       expect(await kv.get(kvKeys.member(USER3))).toBe(otherFamilyId);
-      expect((await readAuthRecord(USER3))?.token).toBe(otherToken);
+      expect(await listsToken(kv, USER3, otherToken)).toBe(true);
       expect((await getMembers(otherFamilyId, otherToken)).status).toBe(200);
       // Positive companion: the branch ran and read the target's pointer.
       expect(ops.getKeys()).toContain(kvKeys.member(USER3));

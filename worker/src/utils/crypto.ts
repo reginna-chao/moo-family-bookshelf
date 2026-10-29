@@ -55,6 +55,18 @@ export async function pepperFingerprint(pepper: string): Promise<string> {
 }
 
 /**
+ * Auth-token storage hash (#425): hex SHA-256 of UTF-8(token), no salt, no pepper —
+ * the token is 256 random bits, so the hash only keeps the plaintext out of KV.
+ * Deliberately NOT shared's `sha256Hex`: that one derives userIds and trims /
+ * lowercases its input, and token hashing must not be coupled to it.
+ */
+export async function hashAuthToken(token: string): Promise<string> {
+  const data = new TextEncoder().encode(token);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return toHex(buf);
+}
+
+/**
  * Constant-time string comparison to prevent timing attacks.
  * Both strings must be the same length for meaningful comparison.
  */

@@ -24,7 +24,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken } from "../helpers/auth";
+import { authTokenKey, seedAuthToken, tokenOwner } from "../helpers/auth";
 import { BoolFlag, kvKeys, type RawFamilyRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3, USER4 } from "../helpers/ids";
 
@@ -234,7 +234,7 @@ describe("POST /api/family/:id/join recovery after a self-leave (#263 regression
     expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
     expect(await allKeys()).toEqual(keysAfterLeave);
     // Positive companion for "no token": the store's only token is the owner's.
-    expect(keysAfterLeave).toContain(kvKeys.authToken(ownerToken));
+    expect(keysAfterLeave).toContain(await authTokenKey(ownerToken));
 
     // The refusal consumes nothing: a retry is refused the same way.
     await expectRecoveryNotMember(await recoveryJoin(familyId, USER2));
@@ -320,7 +320,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(memberToken)}`,
+        `delete ${await authTokenKey(memberToken)}`,
       ]),
     );
     // And nothing else lives in the store: the owner's session and the family.
@@ -329,7 +329,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         kvKeys.family(familyId),
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
-        kvKeys.authToken(ownerToken),
+        await authTokenKey(ownerToken),
       ]),
     );
   });
@@ -352,6 +352,8 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.otp(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
+        `delete ${await authTokenKey(memberToken)}`,
+        // The presented bearer's pre-#425 plaintext key (a no-op delete for a hashed token).
         `delete ${kvKeys.authToken(memberToken)}`,
       ]),
     );
@@ -360,7 +362,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         kvKeys.family(familyId),
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
-        kvKeys.authToken(ownerToken),
+        await authTokenKey(ownerToken),
       ]),
     );
   });
@@ -500,7 +502,7 @@ describe("POST /api/family/:id/join manual joins and listed reconnects", () => {
       await recoveryJoin(familyId, USER2),
     );
 
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER2);
+    expect(await tokenOwner(kv, token)).toBe(USER2);
     expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
   });
 

@@ -62,7 +62,7 @@ import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
   readPresentedAuth,
-  deleteAuthToken,
+  revokeAllAuthTokens,
 } from "../middleware/auth";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
@@ -1029,10 +1029,11 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
 
   // Same bearer-currency rule and step-up as PUT verify (#396), all BEFORE any KV write below, so a
   // refused request leaves nothing behind. See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+  const presentedToken = getPresentedAuthToken(c);
   const [familyId, verifyRecord, presented] = await Promise.all([
     getMemberFamilyId(c.env.KV, userId),
     getVerifyRecord(c.env.KV, userId),
-    readPresentedAuth(c.env.KV, userId, getPresentedAuthToken(c)),
+    readPresentedAuth(c.env.KV, userId, presentedToken),
   ]);
   if (!presented.current) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
@@ -1117,7 +1118,12 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     deleteVerifyRecord(c.env.KV, userId),
     deleteOtpRecord(c.env.KV, userId),
     deleteMemberFamilyId(c.env.KV, userId),
-    deleteAuthToken(c.env.KV, userId),
+    // Every device's token from the `auth:` record read above, plus the presented hash AND
+    // plaintext, which cover an `auth:` gap (#425 transition).
+    revokeAllAuthTokens(c.env.KV, userId, presented.auth, [
+      presented.presentedHash,
+      presentedToken,
+    ]),
     ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),
   ]);
 

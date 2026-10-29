@@ -24,7 +24,7 @@
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `member:{userId}` (routes/bookshelf.ts, `getMemberFamilyId`),
  *   `family:{familyId}` (`getFamilyRecord`) and one `user:{memberId}` per
  *   member (`getUserBooksRecord`) — the aggregation itself. Inherent
@@ -56,6 +56,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import {
   BoolFlag,
   kvKeys,
@@ -154,7 +155,7 @@ describe("KV budget: GET /api/family/:id/bookshelf", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // handler, `getMemberFamilyId` / `getFamilyRecord` — the caller's pointer and the record
       kvKeys.member(USER1),
       kvKeys.family(FAMILY_ID),

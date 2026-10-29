@@ -102,14 +102,19 @@
  * instead of retrying.
  *
  * Dissolve read fault: the dissolve's only read of `auth:{uid}` is inside
- * deleteAuthToken (auth middleware resolves the bearer via `token:{token}`),
- * so failing it stops the token revoke before either of its deletes starts.
+ * readAndRevokeAllAuthTokens (auth middleware resolves the bearer via
+ * `token:{hash}`), so failing it stops the revoke before any of its deletes starts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken } from "../helpers/auth";
+import {
+  seedAuthToken,
+  authTokenKey,
+  tokenOwner,
+  listsToken,
+} from "../helpers/auth";
 import { kvKeys, type AuthRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3 } from "../helpers/ids";
 
@@ -300,7 +305,7 @@ describe("POST /api/family partial-write convergence", () => {
     ]);
     // Token pair is written in parallel, after both membership keys.
     expect(asSet(trail.slice(2))).toEqual(
-      asSet([`put ${kvKeys.auth(USER1)}`, `put ${kvKeys.authToken(token)}`]),
+      asSet([`put ${kvKeys.auth(USER1)}`, `put ${await authTokenKey(token)}`]),
     );
   });
 
@@ -392,7 +397,7 @@ describe("POST /api/family/:id/join partial-write convergence", () => {
       `put ${kvKeys.member(USER2)}`,
     ]);
     expect(asSet(trail.slice(2))).toEqual(
-      asSet([`put ${kvKeys.auth(USER2)}`, `put ${kvKeys.authToken(token)}`]),
+      asSet([`put ${kvKeys.auth(USER2)}`, `put ${await authTokenKey(token)}`]),
     );
   });
 
@@ -495,7 +500,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(memberToken)}`,
+        `delete ${await authTokenKey(memberToken)}`,
       ]),
     );
   });
@@ -515,7 +520,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(memberToken)}`,
+        `delete ${await authTokenKey(memberToken)}`,
       ]),
     );
   });
@@ -533,8 +538,8 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     // See the header → "Kick trade-off".
     expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
-    expect((await readAuthRecord(USER2))?.token).toBe(memberToken);
-    expect(await kv.get(kvKeys.authToken(memberToken))).toBe(USER2);
+    expect(await listsToken(kv, USER2, memberToken)).toBe(true);
+    expect(await tokenOwner(kv, memberToken)).toBe(USER2);
     // Accepted trade-off: the tombstone stands, so the reconnect is refused.
     // See the header → "Kick trade-off".
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
@@ -546,7 +551,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     );
     // Refused with no second list entry and no new session minted.
     expect(await listedMemberIds(familyId)).toEqual([USER1, USER2]);
-    expect((await readAuthRecord(USER2))?.token).toBe(memberToken);
+    expect(await listsToken(kv, USER2, memberToken)).toBe(true);
 
     const ops = watchKvOps(kv);
     const retry = await removeMember(familyId, USER2, ownerToken);
@@ -562,7 +567,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(memberToken)}`,
+        `delete ${await authTokenKey(memberToken)}`,
       ]),
     );
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
@@ -619,12 +624,12 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(strayToken)}`,
+        `delete ${await authTokenKey(strayToken)}`,
       ]),
     );
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(strayToken))).toBeNull();
+    expect(await tokenOwner(kv, strayToken)).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).not.toBeNull();
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
   });
@@ -696,7 +701,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(memberToken))).toBeNull();
+    expect(await tokenOwner(kv, memberToken)).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
   });
 
@@ -712,7 +717,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     // Unlisted — the leave took effect — with a stray pointer and a live token.
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
-    expect(await kv.get(kvKeys.authToken(memberToken))).toBe(USER2);
+    expect(await tokenOwner(kv, memberToken)).toBe(USER2);
     // That leftover reads nothing family-scoped: the same 404 as a non-member.
     for (const read of [getBookshelf, getMembers]) {
       const res = await read(familyId, memberToken);
@@ -731,12 +736,12 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
-        `delete ${kvKeys.authToken(memberToken)}`,
+        `delete ${await authTokenKey(memberToken)}`,
       ]),
     );
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
-    expect(await kv.get(kvKeys.authToken(memberToken))).toBeNull();
+    expect(await tokenOwner(kv, memberToken)).toBeNull();
     expect(await kv.get(kvKeys.kicked(familyId, USER2))).toBeNull();
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
   });
@@ -788,7 +793,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     // delete at all, and it still reads that family.
     expect(ops.deleteKeys()).toEqual([]);
     expect(await kv.get(kvKeys.member(USER2))).toBe(otherFamilyId);
-    expect((await readAuthRecord(USER2))?.token).toBe(otherToken);
+    expect(await listsToken(kv, USER2, otherToken)).toBe(true);
     expect((await getMembers(otherFamilyId, otherToken)).status).toBe(200);
     // Positive companion: the tombstone and the list update did land, in
     // tombstone-first order, and the revoke did read the target's pointer.
@@ -816,7 +821,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
       asSet([
         `delete ${kvKeys.member(USER1)}`,
         `delete ${kvKeys.auth(USER1)}`,
-        `delete ${kvKeys.authToken(authToken)}`,
+        `delete ${await authTokenKey(authToken)}`,
       ]),
     );
   });
@@ -832,7 +837,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     // Nothing after the family delete ran: had the pointer / token deletes run
     // alongside it, the family would outlive every key that reaches it.
     expect(await kv.get(kvKeys.member(USER1))).toBe(familyId);
-    expect((await readAuthRecord(USER1))?.token).toBe(authToken);
+    expect(await listsToken(kv, USER1, authToken)).toBe(true);
 
     const retry = await removeMember(familyId, USER1, authToken);
 
@@ -855,7 +860,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     await settleOrphanedKvOps();
     expect(await allFamilyRecordKeys()).toEqual([]);
     // The session survived the failed revoke.
-    expect((await readAuthRecord(USER1))?.token).toBe(authToken);
+    expect(await listsToken(kv, USER1, authToken)).toBe(true);
 
     const retry = await removeMember(familyId, USER1, authToken);
 
@@ -879,19 +884,14 @@ describe("Sole-owner dissolve partial-write convergence", () => {
   const followUps = [
     {
       label: "create a new family",
-      run: async () => {
-        const res = await createRequest(USER1);
-        expect(res.status).toBe(201);
-        return ((await res.json()) as Json).data.familyId as string;
-      },
+      run: () => createFamily(USER1),
     },
     {
       label: "join another family",
       run: async () => {
         // Built through the real app with the fault already spent.
         const { familyId } = await createFamily(USER2);
-        expect((await join(familyId, USER1)).status).toBe(200);
-        return familyId;
+        return { familyId, authToken: await joinOk(familyId, USER1) };
       },
     },
   ];
@@ -904,8 +904,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
   );
 
   it.each(cases)("should not leave the owner stuck: $name", async (tc) => {
-    const { familyId } = await createFamily(USER1);
-    const token = (await readAuthRecord(USER1))!.token;
+    const { familyId, authToken: token } = await createFamily(USER1);
     const fault = failNextKvOp("delete", tc.failingKey);
 
     const first = await removeMember(familyId, USER1, token);
@@ -917,12 +916,12 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     expect(await kv.get(kvKeys.family(familyId))).toBeNull();
     expect(await allFamilyRecordKeys()).toEqual([]);
 
-    const nextFamilyId = await tc.followUp();
+    const { familyId: nextFamilyId, authToken: newToken } = await tc.followUp();
 
     // No stuck ALREADY_IN_FAMILY: the owner is now in the new family.
     expect(await kv.get(kvKeys.member(USER1))).toBe(nextFamilyId);
     expect(await listedMemberIds(nextFamilyId)).toContain(USER1);
-    const newToken = (await readAuthRecord(USER1))!.token;
+    expect(await listsToken(kv, USER1, newToken)).toBe(true);
     expect((await getMembers(nextFamilyId, newToken)).status).toBe(200);
   });
 });

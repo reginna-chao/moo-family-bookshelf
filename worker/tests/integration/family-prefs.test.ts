@@ -14,7 +14,7 @@ import {
   type PublicShelvesRecord,
   type UserBooksRecord,
 } from "../../src/kv/schema";
-import { generateAuthToken } from "../../src/middleware/auth";
+import { mintTestToken } from "../helpers/auth";
 import { maxBodySizeFor } from "../../src/utils/bodyLimit";
 import { USER1, USER2 } from "../helpers/ids";
 
@@ -1009,7 +1009,7 @@ describe("PUT /:id/family-prefs per-user rate limit", () => {
   }
 
   it("returns 429 after 60 family-prefs PUTs per user per hour", async () => {
-    const token = await generateAuthToken(kv, TEST_USER);
+    const token = await mintTestToken(kv, TEST_USER);
     await seedUser(TEST_USER);
     const body = { hidden: [ref("b1")] };
 

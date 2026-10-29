@@ -4,7 +4,7 @@ import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import { BoolFlag, kvKeys, type UserBooksRecord } from "../../src/kv/schema";
-import { generateAuthToken } from "../../src/middleware/auth";
+import { mintTestToken } from "../helpers/auth";
 import { ALICE, BOB, USER1, USER2, USER3, USER4, USER5 } from "../helpers/ids";
 
 /**
@@ -364,7 +364,7 @@ describe("PUT /:id/books per-user rate limit", () => {
   }
 
   async function seedAuth(userId: string): Promise<string> {
-    return generateAuthToken(kv, userId);
+    return mintTestToken(kv, userId);
   }
 
   it("should return 429 after 30 PUTs per user per hour", async () => {
@@ -763,7 +763,7 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should update displayName when provided and user is not in a family", async () => {
     // Seed books directly via KV (not in a family)
-    const token = await generateAuthToken(kv, USER3);
+    const token = await mintTestToken(kv, USER3);
     const record = {
       schemaVersion: 1,
       userId: USER3,
@@ -797,7 +797,7 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should NOT overwrite displayName when omitted from body", async () => {
     // Seed user directly (not in family) with a known displayName
-    const token = await generateAuthToken(kv, USER4);
+    const token = await mintTestToken(kv, USER4);
     const record = {
       schemaVersion: 1,
       userId: USER4,
@@ -952,7 +952,7 @@ describe("PATCH /api/user/:id/books", () => {
 
   it("should not rewrite KV when all bookIds are unknown and no displayName provided", async () => {
     // Seed user directly with a fixed lastUpdated (not in a family)
-    const token = await generateAuthToken(kv, USER5);
+    const token = await mintTestToken(kv, USER5);
     const fixedTimestamp = "2020-01-01T00:00:00.000Z";
     const record = {
       schemaVersion: 1,
@@ -1029,7 +1029,7 @@ describe("PATCH /api/user/:id/books — coverUrl lazy cleanup", () => {
         lastUpdated: SEEDED_AT,
       }),
     );
-    return generateAuthToken(kv, LEGACY_USER);
+    return mintTestToken(kv, LEGACY_USER);
   }
 
   async function storedRecord(): Promise<Json> {
@@ -1177,7 +1177,7 @@ describe("PATCH /api/user/:id/books — readmooUrl lazy cleanup", () => {
         lastUpdated: SEEDED_AT,
       }),
     );
-    return generateAuthToken(kv, LEGACY_USER);
+    return mintTestToken(kv, LEGACY_USER);
   }
 
   async function storedRecord(): Promise<Json> {
@@ -1279,7 +1279,7 @@ describe("PATCH /:id/books per-user rate limit", () => {
   }
 
   async function seedAuth(userId: string): Promise<string> {
-    return generateAuthToken(kv, userId);
+    return mintTestToken(kv, userId);
   }
 
   it("should share the rate limit bucket with PUT — 29 PUTs + 1 PATCH = ok, then 1 more PATCH = 429", async () => {

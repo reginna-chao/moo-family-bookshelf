@@ -3,7 +3,11 @@ import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { createRateLimitBindings } from "../helpers/rateLimitBindings";
 import { ALICE, BOB, CHARLIE, DAVE } from "../helpers/ids";
-import { seedAuthToken as seedAuthTokenPair, tokenFor } from "../helpers/auth";
+import {
+  seedAuthToken as seedAuthTokenPair,
+  tokenFor,
+  tokenOwner,
+} from "../helpers/auth";
 import {
   BoolFlag,
   kvKeys,
@@ -615,7 +619,7 @@ describe("Family-domain per-userId write ceiling", () => {
     // both of the removed member's keys — neither happened.
     expect(await kv.get(kvKeys.family(FAMILY_ID))).toBe(recordBefore);
     expect(await kv.get(kvKeys.member(EXTRA_ID))).toBe(FAMILY_ID);
-    expect(await kv.get(kvKeys.authToken(EXTRA_TOKEN))).toBe(EXTRA_ID);
+    expect(await tokenOwner(kv, EXTRA_TOKEN)).toBe(EXTRA_ID);
   });
 
   it("counts each caller independently", async () => {

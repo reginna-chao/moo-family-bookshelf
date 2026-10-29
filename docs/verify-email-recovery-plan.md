@@ -8,8 +8,8 @@
 
 因此還有一台裝置握有有效 token 時，忘記 PIN／圖形也無法在擴充功能設定裡自己重設，處境與「token 已經不在」相同，只差這台裝置在 token 有效期間仍能照常使用，也還能產生 QR Code 讓手機略過驗證加入。本計畫的救援對象因此包括這兩種情況；下面先說明 token 不在時為何卡死：
 
-- 同一個帳號只有一把 token（`auth:{userId}`，`getOrGenerateAuthToken` 讓多台裝置共用），效期 90 天（`TOKEN_TTL_SECONDS`），只在重新發 token 或 `POST /api/auth/refresh` 時續期；
-- 自己離開家庭、被管理者移出都會刪掉這把 token（`deleteAuthToken`，`worker/src/routes/family.ts`）；
+- 同一個帳號只有一把 token（`auth:{userId}`，`getOrGenerateAuthToken` 讓多台裝置共用），效期 90 天（`TOKEN_TTL_SECONDS`），只在重新發 token 或 `POST /api/auth/refresh` 時續期（#425 之後：每裝置一把 token，同一帳號最多 5 把；驗證碼以外的帳號另有自發出起 180 天的絕對上限）；
+- 自己離開家庭、被管理者移出都會刪掉這把 token（`deleteAuthToken`，`worker/src/routes/family.ts`）（#425 之後：每裝置一把 token，離開／移出撤銷全部）；
 - 這時閘門要密鑰、改密鑰要 token（PIN／圖形帳號還要目前的密鑰）、發 token 要過閘門，刪除帳號也要 token 與目前的密鑰。現行唯一的出口是 KV 管理者把 `verify:{userId}` 改寫成臨時 PIN（`worker/DEPLOY.md` → 使用者忘記登入驗證時）。
 - 刪除帳號（`DELETE /api/user/:id`）不會造成卡死：它把驗證設定與 token 一起刪掉（#341，`worker/src/routes/user.ts`），之後同一個 Email 重新開始時沒有密鑰要過。
 
@@ -36,7 +36,7 @@
 2. **比對與寄信**：Worker 依第 6 節決定要不要寄。要寄時產生一把一次性的重設 token（32 bytes 隨機，與 auth token 同強度），寫入 `recover:{token}` → `{ userId }`，並寄出含連結的信。
 3. **統一回應**：不論 Email 對不對應到帳號、有沒有設驗證、這次有沒有真的寄信，一律回同一個成功回應。這不是為了隱藏「有沒有設驗證」（`GET /api/user/:id/verify` 本來就是公開端點），而是讓申請端點不比它多透露任何東西，也不透露「這次有沒有寄信」（第 6 節的冷卻）。
 4. **點連結**：連結開啟 PWA 的「重設登入驗證」畫面，token 放在網址的 fragment（`#` 之後），不會出現在任何伺服器的存取紀錄裡；PWA 讀到 token 後立刻用 `history.replaceState` 把它從網址移除，免得在家人共用的電腦上留在瀏覽紀錄裡。
-5. **設定新的驗證方式**：使用者在畫面上直接選新的 PIN、圖形或「不設定驗證」，用戶端送出 `{ token, method, secret }`。Worker 驗證 token、刪除 `recover:{token}`，用與 `PUT /api/user/:id/verify` 相同的檢查（`isValidPin`／`isValidPattern`）寫入新的 `verify:{userId}`，並帶上 `secretUpdatedAt` 讓舊密鑰的鎖定紀錄作廢（`isFailStreakVoid`）。同一個請求裡也刪掉 `auth:{userId}` 與對應的 `token:`（`deleteAuthToken`）：卡死的帳號照理沒有 token，但若有一把別人持有的 token 還活著，重設後它必須跟著失效。
+5. **設定新的驗證方式**：使用者在畫面上直接選新的 PIN、圖形或「不設定驗證」，用戶端送出 `{ token, method, secret }`。Worker 驗證 token、刪除 `recover:{token}`，用與 `PUT /api/user/:id/verify` 相同的檢查（`isValidPin`／`isValidPattern`）寫入新的 `verify:{userId}`，並帶上 `secretUpdatedAt` 讓舊密鑰的鎖定紀錄作廢（`isFailStreakVoid`）。同一個請求裡也刪掉 `auth:{userId}` 與對應的 `token:`（`deleteAuthToken`；#425 之後：每裝置一把 token，改走撤銷全部的 `revokeAllAuthTokens`）：卡死的帳號照理沒有 token，但若有一把別人持有的 token 還活著，重設後它必須跟著失效。
 6. **之後照常登入**：重設不發 auth token。使用者回到一般的建立／加入家庭流程，用剛設定的新密鑰通過閘門。
 
 選擇「直接設定新密鑰」，而不是「先刪掉驗證設定、讓使用者自己回去設」或「發一個像 QR Token 那樣略過驗證的票」，理由：

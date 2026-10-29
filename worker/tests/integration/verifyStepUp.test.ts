@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
 import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
@@ -110,7 +110,7 @@ async function snapshot(token: string): Promise<(string | null)[]> {
   return Promise.all([
     kv.get(kvKeys.verify(USER_ID)),
     kv.get(kvKeys.auth(USER_ID)),
-    kv.get(kvKeys.authToken(token)),
+    tokenOwner(kv, token),
   ]);
 }
 
@@ -175,7 +175,7 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
     expect(res.status).toBe(200);
     const rotated = ((await res.json()) as Json).data.authToken as string;
     expect(rotated).not.toBe(token);
-    expect(await kv.get(kvKeys.authToken(token))).toBeNull();
+    expect(await tokenOwner(kv, token)).toBeNull();
     expect(await kv.get(FAIL_KEY)).toBeNull();
     expect(await kv.get(await setCounterKey())).toBe("1");
   });

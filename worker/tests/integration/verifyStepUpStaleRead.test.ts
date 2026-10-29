@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, authTokenKey, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
 import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
@@ -104,12 +104,12 @@ async function stageStaleRead(shape: StaleShape): Promise<void> {
 }
 
 /** Every value a refusal must leave identical, books record included. */
-function accountState(token: string): Promise<(string | null)[]> {
+async function accountState(token: string): Promise<(string | null)[]> {
   return Promise.all(
     [
       kvKeys.verify(USER_ID),
       kvKeys.auth(USER_ID),
-      kvKeys.authToken(token),
+      await authTokenKey(token),
       kvKeys.user(USER_ID),
     ].map((key) => kv.get(key)),
   );
@@ -188,7 +188,7 @@ describe("DELETE /api/user/:id — stale verify read after a PIN rotation", () =
       expect(await errorCode(res)).toBe("VERIFICATION_REQUIRED");
       expect(ops.writeTrail()).toEqual([]);
       expect(await accountState(token)).toEqual(before);
-      expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
+      expect(await tokenOwner(kv, token)).toBe(USER_ID);
       expect(await kv.get(kvKeys.user(USER_ID))).not.toBeNull();
     },
   );

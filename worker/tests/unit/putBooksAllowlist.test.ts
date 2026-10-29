@@ -8,7 +8,7 @@ import {
   MAX_FAMILY_PREF_ENTRIES,
   type UserBooksRecord,
 } from "../../src/kv/schema";
-import { generateAuthToken } from "../../src/middleware/auth";
+import { mintTestToken } from "../helpers/auth";
 import { parseBooks, MAX_PUT_BOOKS } from "../../src/routes/user";
 import { maxBodySizeFor } from "../../src/utils/bodyLimit";
 import { USER1 } from "../helpers/ids";
@@ -496,7 +496,7 @@ describe("parseBooks — readmooUrl whitelist sanitize", () => {
 
 describe("PUT /api/user/:id/books — allowlist & familyShelfPrefs", () => {
   async function auth(userId = USER1): Promise<string> {
-    return generateAuthToken(kv, userId);
+    return mintTestToken(kv, userId);
   }
 
   it("does NOT persist unknown top-level body fields (round-trip GET is clean)", async () => {
@@ -846,7 +846,7 @@ describe("PUT /api/user/:id/books — coverUrl sanitize", () => {
   const EXPECTED_COVERS = ["", ALLOWED_COVER, ""];
 
   async function putMixedBooks(): Promise<Response> {
-    const token = await generateAuthToken(kv, USER1);
+    const token = await mintTestToken(kv, USER1);
     return request(
       "PUT",
       `/api/user/${USER1}/books`,
@@ -904,7 +904,7 @@ describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
   const EXPECTED_LINKS = ["", ALLOWED_BOOK_URL, ""];
 
   async function putMixedBooks(): Promise<Response> {
-    const token = await generateAuthToken(kv, USER1);
+    const token = await mintTestToken(kv, USER1);
     return request(
       "PUT",
       `/api/user/${USER1}/books`,
@@ -953,7 +953,7 @@ describe("PUT /api/user/:id/books — readmooUrl sanitize", () => {
   // End-to-end half of the base-sensitivity fix: the string never reaches KV in the first place.
   // See the header → "PUT /api/user/:id/books — readmooUrl sanitize over the real HTTP path".
   it("blanks a base-sensitive bare-scheme link (no //) before it reaches KV", async () => {
-    const token = await generateAuthToken(kv, USER1);
+    const token = await mintTestToken(kv, USER1);
     const res = await request(
       "PUT",
       `/api/user/${USER1}/books`,

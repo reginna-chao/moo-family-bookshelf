@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken, tokenFor } from "../helpers/auth";
+import { authTokenKey, seedAuthToken, tokenFor } from "../helpers/auth";
 import { ALICE, BOB } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
 import {
@@ -208,8 +208,13 @@ describe("verify-set ceiling — charged only after the step-up", () => {
     {
       label: "a revoked bearer a stale colo still accepts",
       token: async () => {
-        await kv.put(kvKeys.authToken(tokenFor(USER_ID)), USER_ID);
-        return tokenFor(USER_ID);
+        // Re-put the revoked token's own key: the middleware accepts it, the list does not name it.
+        const revoked = tokenFor(USER_ID);
+        await kv.put(
+          await authTokenKey(revoked),
+          JSON.stringify({ userId: USER_ID, createdAt: "", expiresAt: 0 }),
+        );
+        return revoked;
       },
     },
   ])(

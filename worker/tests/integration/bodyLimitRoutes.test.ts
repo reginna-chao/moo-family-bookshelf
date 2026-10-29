@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { USER1 } from "../helpers/ids";
 import { BoolFlag, kvKeys, type UserBooksRecord } from "../../src/kv/schema";
 import {
@@ -222,7 +222,7 @@ describe("DELETE /api/user/:id — body over the default limit (#396)", () => {
 
     await expect413(res, "Request body exceeds 256KB limit");
     expect(await storedRecord()).not.toBeNull();
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER1);
+    expect(await tokenOwner(kv, token)).toBe(USER1);
     expect(await kv.get(kvKeys.auth(USER1))).not.toBeNull();
   });
 });
