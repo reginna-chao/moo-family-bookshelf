@@ -64,10 +64,14 @@ agent and the orchestrator lands as two duplicate issues.
 - **P2 and non-goals** are, as before, not raised anywhere at all — no issue, no passing mention.
 - **Worktrees are reserved exclusively for tasks the user explicitly starts.** A finding is never a
   reason to create one.
-- `gh` in this repo runs under the personal account via `GH_CONFIG_DIR`, configured in
-  `.claude/settings.local.json` (gitignored, per-developer). That `env` does not reach the Bash
-  tool's shell: prefix each call with `GH_CONFIG_DIR=<value from settings.local.json>`, and send
-  `--json` output to a file, then Read it — plain-text output can come back empty. Write the issue
+- `gh` in this repo runs under the personal account. On a machine whose `.claude/settings.local.json`
+  (gitignored, per-developer) sets `env.GH_CONFIG_DIR`, the personal account is NOT the default gh
+  login: that `env` does not reach the Bash tool's shell, so prefix each call with
+  `GH_CONFIG_DIR=<value from settings.local.json>`, and send `--json` output to a file, then Read
+  it — plain-text output can come back empty. On such a machine the desktop app's PR bar runs the
+  DEFAULT gh login (another account) and refuses to switch Auto-fix on for a PR it did not author:
+  never call `ccd_pr` `set_monitor` there — after `gh pr create`, tell the user to toggle Auto-fix
+  in the PR bar themselves (`get_status` / `bind_pr` are unaffected). Write the issue
   (or PR) body to a scratchpad file and pass `--body-file`, never `--body`: the shell strips the
   quotes in any code the body carries, and the file survives an interrupted session. If `gh` is unavailable in a session **or
   issue creation itself fails** (auth, network, rate limit), list the item in that run's final report
