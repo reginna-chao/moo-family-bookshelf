@@ -86,6 +86,12 @@ PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜
    openssl rand -hex 32
    ```
 
+   Windows 的 PowerShell 沒有 `openssl` 指令（它是 Git Bash 附帶的），改用 Node 產生，結果一樣是 64 個十六進位字元：
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
 2. 在 `worker/` 目錄把它寫進正式 Worker。`pnpm deploy` 部署的是 `--env production`，secret 也要帶同一個參數：
 
    ```bash
@@ -102,7 +108,7 @@ PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜
      pnpm exec wrangler kv key get "verify:<測試帳號的 userId>" --namespace-id <正式 namespace ID> --remote
      ```
 
-4. 本機開發：在 `worker/.dev.vars` 加一行 `VERIFY_PEPPER=<另一把隨機值>`（範例見 `.dev.vars.example`），不要用正式的那一把。
+4. 本機開發：在 `worker/.dev.vars` 加一行 `VERIFY_PEPPER=<另一把隨機值>`（範例見 `.dev.vars.example`），不要用正式的那一把。不加也可以：本機 Worker 會維持舊格式（v1），`pnpm dev` 和擴充功能都照常運作。只有一種情況會出錯：本機 KV 裡已經有設了 pepper 之後寫入的 PIN 紀錄（`"version":2`），之後把那行拿掉或換成另一把，那些本機測試帳號用 PIN 登入會收到 503 `VERIFY_UNAVAILABLE`，終端機出現 `VERIFY_PEPPER_MISSING` 或 `VERIFY_PEPPER_MISMATCH`。本機資料用完即丟，刪掉那筆 `verify:` 紀錄（或整個 `worker/.wrangler/state`）重新設定 PIN 就好。
 
 設定之後要知道的事：
 
