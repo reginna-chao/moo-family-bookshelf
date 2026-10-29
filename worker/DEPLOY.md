@@ -86,6 +86,12 @@ PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜
    openssl rand -hex 32
    ```
 
+   Windows 的 PowerShell 沒有 `openssl` 指令（它是 Git Bash 附帶的），改用 Node 產生，結果一樣是 64 個十六進位字元：
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
 2. 在 `worker/` 目錄把它寫進正式 Worker。`pnpm deploy` 部署的是 `--env production`，secret 也要帶同一個參數：
 
    ```bash

@@ -5,4 +5,5 @@
 DEV_MODE=1
 
 # Optional: server-side key for PIN / pattern hashes; generate with `openssl rand -hex 32`
+# (PowerShell has no openssl — use: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
 # VERIFY_PEPPER=
