@@ -59,20 +59,28 @@
         var GOOGLE_FORM_VIEWFORM =
           "https://docs.google.com/forms/d/e/1FAIpQLSfKoAOkIvZfGU0vZie2zIQj0LjCv2RcYpj6pJjRMnYzQohTWg/viewform";
         var GOOGLE_FORM_VERSION_ENTRY = "entry.1575026440";
+        // Empty until the form's 問題類型 field exists; `topic` then prefills nothing.
+        var GOOGLE_FORM_TOPIC_ENTRY = "";
+        var GOOGLE_FORM_TOPIC_RECOVERY_VALUE = "忘記登入驗證方式";
 
         function buildGoogleFormUrl() {
           if (!GOOGLE_FORM_VIEWFORM) return GOOGLE_FORM_SHORT;
+          var prefills = [];
           var v = params.get("v");
           if (GOOGLE_FORM_VERSION_ENTRY && v) {
-            return (
-              GOOGLE_FORM_VIEWFORM +
-              "?usp=pp_url&" +
-              GOOGLE_FORM_VERSION_ENTRY +
-              "=" +
-              encodeURIComponent(v)
+            prefills.push(
+              GOOGLE_FORM_VERSION_ENTRY + "=" + encodeURIComponent(v),
             );
           }
-          return GOOGLE_FORM_VIEWFORM;
+          if (GOOGLE_FORM_TOPIC_ENTRY && params.get("topic") === "recovery") {
+            prefills.push(
+              GOOGLE_FORM_TOPIC_ENTRY +
+                "=" +
+                encodeURIComponent(GOOGLE_FORM_TOPIC_RECOVERY_VALUE),
+            );
+          }
+          if (prefills.length === 0) return GOOGLE_FORM_VIEWFORM;
+          return GOOGLE_FORM_VIEWFORM + "?usp=pp_url&" + prefills.join("&");
         }
 
         var DESTINATIONS = {

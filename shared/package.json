@@ -15,6 +15,7 @@
     "./invite/*": "./src/invite/*",
     "./personal/*": "./src/personal/*",
     "./publicShelf/*": "./src/publicShelf/*",
+    "./recovery/*": "./src/recovery/*",
     "./safeUrl/*": "./src/safeUrl/*",
     "./unkick/*": "./src/unkick/*",
     "./verifyInput/*": "./src/verifyInput/*"

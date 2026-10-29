@@ -191,7 +191,7 @@
   <body>
     <header class="header">
       <h1>隱私政策</h1>
-      <p class="subtitle">最後更新：2026-10-23</p>
+      <p class="subtitle">最後更新：2026-10-29</p>
       <a href="index.html" class="back-link">&larr; 回到首頁</a>
     </header>
 
@@ -206,7 +206,8 @@
           </li>
           <li>
             <strong>我們不收集個人資料</strong> — 不需要帳號、不記錄
-            Email、不追蹤你是誰
+            Email、不追蹤你是誰。唯一例外是你忘記登入驗證、自己填表申請救援時給的
+            Email：只有管理者看得到，伺服器仍然收不到（見二）
           </li>
           <li>
             <strong>你的書預設都不公開</strong> —
@@ -229,7 +230,7 @@
         <ul class="policy-list">
           <li>
             <span class="icon no">&#10007;</span>
-            個人識別資訊（姓名、Email、電話）
+            個人識別資訊（姓名、Email、電話；救援申請的例外見二）
           </li>
           <li><span class="icon no">&#10007;</span> 讀墨帳號密碼</li>
           <li><span class="icon no">&#10007;</span> 瀏覽紀錄</li>
@@ -271,6 +272,13 @@
           <code>chrome.storage.local</code>，擴充功能更新後會自動刪除。
         </p>
         <p>伺服器只會收到雜湊後的匿名識別碼，無法反推出您的 Email。</p>
+        <p>
+          您使用官方伺服器、忘記登入驗證方式而申請救援時，會自己在回報表單（Google
+          表單）填寫讀墨註冊 Email。這個 Email 會送到 Google
+          表單，由管理者看到，只用來處理這一次救援：管理者把臨時 PIN
+          寄到這個信箱，處理完就刪除那筆申請。擴充功能和 PWA 不會替您填寫這個
+          Email，伺服器本身仍只收到雜湊後的識別碼。
+        </p>
       </section>
 
       <!-- 三、資料儲存 -->

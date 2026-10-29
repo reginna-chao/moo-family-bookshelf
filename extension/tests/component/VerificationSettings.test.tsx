@@ -10,7 +10,11 @@ import { VerificationSettings } from "@/dialog/VerificationSettings";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
-import { AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY } from "@/constants";
+import {
+  AUTH_TOKEN_KEY,
+  DEFAULT_API_ENDPOINT,
+  TOKEN_EXPIRES_AT_KEY,
+} from "@/constants";
 
 /**
  * VerificationSettings: choosing the PWA-login verification method, the save / OTP-generation
@@ -68,6 +72,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     generateOtp: vi.fn().mockResolvedValue({
       data: { code: "482916", expiresAt: Date.now() + 300000 },
     }),
+    getEndpoint: vi.fn(() => DEFAULT_API_ENDPOINT),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -124,10 +129,44 @@ describe("VerificationSettings", () => {
     const tip = await screen.findByText(/擴充功能需要重新登入時/);
     // JSX joins the source line break into one space; compare with whitespace removed.
     expect(tip.textContent?.replace(/\s+/g, "")).toBe(
-      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的PIN碼或圖形；忘記的話，自架伺服器請找管理者協助。",
+      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的PIN碼或圖形。",
     );
     expect(tip).not.toHaveTextContent("從擴充功能的「設定」改成新的");
+    // The old tip's self-hosted sentence moved into ForgotSecretHint; it must not linger anywhere.
+    expect(
+      screen.queryByText(/自架伺服器請找管理者協助/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
+  });
+
+  it("offers the recovery form below the tip on the official endpoint", async () => {
+    const api = createMockApiClient();
+    render(<VerificationSettings userId="user-1" apiClient={api} />);
+
+    const link = await screen.findByRole("link", { name: "填寫救援申請" });
+    expect(link).toHaveAttribute(
+      "href",
+      `https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=googleform&topic=recovery&v=${__APP_VERSION__}`,
+    );
+    expect(link.closest("p")?.textContent).toBe("沒辦法完成驗證？填寫救援申請");
+    expect(
+      screen.queryByText("忘記的話，請找伺服器管理者協助。"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("points a self-hosted user at the admin, with no recovery link", async () => {
+    const api = createMockApiClient({
+      getEndpoint: vi.fn(() => "https://nas.example.com/moo"),
+    });
+    render(<VerificationSettings userId="user-1" apiClient={api} />);
+
+    expect(
+      await screen.findByText("忘記的話，請找伺服器管理者協助。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "填寫救援申請" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/沒辦法完成驗證/)).not.toBeInTheDocument();
   });
 
   it("shows PIN input when PIN method is selected", async () => {

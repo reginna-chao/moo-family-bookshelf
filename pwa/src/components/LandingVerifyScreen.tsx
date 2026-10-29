@@ -1,9 +1,11 @@
 import type { Dispatch, SetStateAction } from "react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import type { VerifyMethod } from "@/api/client";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { ForgotSecretHint } from "@/components/ForgotSecretHint";
 import { SyncCodeHostNote } from "@/components/SyncCodeHostNote";
 
 interface LandingVerifyScreenProps {
@@ -38,12 +40,19 @@ export function LandingVerifyScreen({
   onVerifyComplete,
   onVerifyCancel,
 }: LandingVerifyScreenProps) {
+  const hostVerdict = classifySyncCodeApiHost(apiHost);
+  // A hand-typed `@<official endpoint>` classifies as `valid`, yet it is the same
+  // server as no `@host` (cf. `canonicalEndpoint` in utils/reauthPending.ts).
+  const official =
+    hostVerdict.kind === "none" ||
+    (hostVerdict.kind === "valid" &&
+      hostVerdict.endpoint === DEFAULT_API_ENDPOINT);
   return (
     <>
       {/* QR / invite arrivals never see the form, so this is their only
           chance to learn which server they are about to authenticate to. */}
       <SyncCodeHostNote
-        result={classifySyncCodeApiHost(apiHost)}
+        result={hostVerdict}
         variant="verify"
         className="mb-4 w-full max-w-xs"
       />
@@ -104,6 +113,7 @@ export function LandingVerifyScreen({
           </button>
         </div>
       )}
+      <ForgotSecretHint official={official} />
     </>
   );
 }

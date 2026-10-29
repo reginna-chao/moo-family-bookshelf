@@ -10,6 +10,7 @@ import {
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { VerifySetupPrompt } from "@/components/VerifySetupPrompt";
 import { ApiClient } from "@/api/client";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
 
 /**
  * VerifySetupPrompt: the PWA overlay that sets up (or skips) login verification.
@@ -60,6 +61,7 @@ function createMockClient(overrides: Record<string, unknown> = {}) {
     getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none" } }),
     setVerifyMethod: vi.fn().mockResolvedValue({ data: { ok: true } }),
     markVerifyPrompted: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    getEndpoint: vi.fn(() => DEFAULT_API_ENDPOINT),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -174,10 +176,14 @@ describe("VerifySetupPrompt", () => {
     const tip = await screen.findByText(/擴充功能需要重新登入時/);
     // Production literal in VerifySetupViews.tsx (`ChooseMethodView`); word-for-word the Extension's tip.
     expect(tip.textContent).toBe(
-      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的 PIN 碼或圖形；忘記的話，自架伺服器請找管理者協助。",
+      "提示：用手機版（PWA）登入，或電腦上的擴充功能需要重新登入時，都要通過這個驗證。要改成別的方式，得先輸入目前的 PIN 碼或圖形。",
     );
     expect(
       screen.queryByText(/從擴充功能的「設定」改成新的/),
+    ).not.toBeInTheDocument();
+    // The old tip's self-hosted sentence moved into ForgotSecretHint; it must not linger anywhere.
+    expect(
+      screen.queryByText(/自架伺服器請找管理者協助/),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/僅用於手機版/)).not.toBeInTheDocument();
   });
@@ -580,6 +586,79 @@ describe("VerifySetupPrompt", () => {
 
       expect(mockOnComplete).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  /** The forgot-secret hint shows only on the steps before a new secret is entered; copy pinned as
+   *  literals, as in ForgotSecretHint.test.tsx. */
+  describe("forgot-secret hint", () => {
+    const LINK_LABEL = "填寫救援申請";
+    const SELF_HOSTED_LINE = "忘記的話，請找伺服器管理者協助。";
+    it.each([
+      { step: "keep-or-change", method: "pin", change: false },
+      { step: "current-secret", method: "pin", change: true },
+      { step: "choose", method: "none", change: false },
+    ])(
+      "links to the recovery form on the $step step",
+      async ({ method, change }) => {
+        await renderSettled(
+          createMockClient({
+            getVerifyMethod: vi.fn().mockResolvedValue({ data: { method } }),
+          }),
+        );
+        if (change) {
+          fireEvent.click(screen.getByRole("button", { name: "改" }));
+          // Landed on the current-secret entry, not still on keep-or-change.
+          expect(screen.getByLabelText("PIN 輸入")).toBeInTheDocument();
+        }
+
+        const link = screen.getByRole("link", { name: LINK_LABEL });
+        expect(link).toHaveAttribute(
+          "href",
+          `https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=googleform&topic=recovery&v=${__APP_VERSION__}`,
+        );
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link.closest("p")?.textContent).toBe(
+          `沒辦法完成驗證？${LINK_LABEL}`,
+        );
+        expect(screen.queryByText(SELF_HOSTED_LINE)).not.toBeInTheDocument();
+      },
+    );
+
+    it.each([
+      { choice: "PIN 碼", step: "setup-pin" },
+      { choice: "圖形驗證", step: "setup-pattern" },
+      { choice: "不設定驗證", step: "confirm-skip" },
+    ])("hides the hint on the $step step", async ({ choice }) => {
+      await renderSettled(createMockClient());
+      // Positive companion: the hint is on the choose step this one is reached from.
+      expect(
+        screen.getByRole("link", { name: LINK_LABEL }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText(choice));
+
+      expect(
+        screen.queryByRole("link", { name: LINK_LABEL }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/沒辦法完成驗證/)).not.toBeInTheDocument();
+      expect(screen.queryByText(SELF_HOSTED_LINE)).not.toBeInTheDocument();
+    });
+
+    it("points a self-hosted user at the admin, with no link", async () => {
+      await renderSettled(
+        createMockClient({
+          getEndpoint: vi.fn(() => "https://nas.example.com/moo"),
+        }),
+      );
+
+      expect(screen.getByText(SELF_HOSTED_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: LINK_LABEL }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(new RegExp(LINK_LABEL)),
+      ).not.toBeInTheDocument();
     });
   });
 });

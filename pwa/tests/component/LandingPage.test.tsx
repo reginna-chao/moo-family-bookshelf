@@ -19,6 +19,7 @@ import { webcrypto } from "node:crypto";
 import { SYNC_CODE_HOST_SETTLE_DELAY_MS } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
 import { LandingPage } from "@/pages/LandingPage";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
 import {
   HALF_TYPED_PREFIXES,
   LAN_CODE,
@@ -1518,6 +1519,57 @@ describe("LandingPage", () => {
         expect(screen.getByTestId("sync-code-host-note")).toHaveTextContent(
           "https://qr.host.com/api",
         );
+      });
+
+      // Forgot-secret hint below the challenge; copy pinned as literals, as in ForgotSecretHint.test.tsx.
+      it("offers the recovery form below the PIN prompt on the official default", async () => {
+        await renderQrArrival(undefined);
+
+        const link = screen.getByRole("link", { name: "填寫救援申請" });
+        expect(link).toHaveAttribute(
+          "href",
+          `https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=googleform&topic=recovery&v=${__APP_VERSION__}`,
+        );
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link.closest("p")?.textContent).toBe(
+          "沒辦法完成驗證？填寫救援申請",
+        );
+        expect(
+          screen.queryByText("忘記的話，請找伺服器管理者協助。"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("points a self-hosted user at the admin, with no recovery link", async () => {
+        await renderQrArrival(QR_ENDPOINT);
+
+        expect(
+          screen.getByText("忘記的話，請找伺服器管理者協助。"),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("link", { name: "填寫救援申請" }),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByText(/填寫救援申請/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/沒辦法完成驗證/)).not.toBeInTheDocument();
+      });
+
+      // A hand-typed `@<official endpoint>` classifies as `valid`, yet it is the same server as no `@host`.
+      it("offers the recovery form when the QR spells out the official endpoint", async () => {
+        await renderQrArrival(DEFAULT_API_ENDPOINT);
+
+        const link = screen.getByRole("link", { name: "填寫救援申請" });
+        expect(link).toHaveAttribute(
+          "href",
+          `https://reginna-chao.github.io/moo-family-bookshelf/feedback.html?platform=googleform&topic=recovery&v=${__APP_VERSION__}`,
+        );
+        expect(link.closest("p")?.textContent).toBe(
+          "沒辦法完成驗證？填寫救援申請",
+        );
+        expect(
+          screen.queryByText("忘記的話，請找伺服器管理者協助。"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(/請找伺服器管理者協助/),
+        ).not.toBeInTheDocument();
       });
     });
   });

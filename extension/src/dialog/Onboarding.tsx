@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { ApiClient } from "../api/client";
 import { DISPLAY_NAME_KEY } from "../constants";
-import {
-  parseSyncCodeApiHost,
-  type SyncCodeApiHostResult,
-} from "moo-family-bookshelf-shared/crypto/syncCode";
 import { useTimedFlag } from "../hooks/useTimedFlag";
 import { safeStorageGet } from "../storage/safeStorage";
 import { classifyAdoptedEndpoint } from "./adoptedEndpoint";
+import { ForgotSecretHint } from "./ForgotSecretHint";
 import { LoadingOverlay } from "./LoadingOverlay";
+import { isAdoptedNoteRedundant } from "./onboardingNoteRules";
 import { SyncCodeHostNote } from "./SyncCodeHostNote";
 import { useAutoSetup } from "./useAutoSetup";
 import {
@@ -24,42 +22,11 @@ import {
   SoloRecoveryConfirmView,
 } from "./OnboardingRecoveryViews";
 import { VerificationPrompt } from "./VerificationPrompt";
-import { useOnboardingFlow, type OnboardingState } from "./useOnboardingFlow";
+import { useOnboardingFlow } from "./useOnboardingFlow";
 
 export interface OnboardingProps {
   onFamilyJoined: (familyId: string, userId: string) => void;
   apiClient: ApiClient;
-}
-
-/** States `renderContent` gives a view of their OWN; every other one (a future state too) falls
- *  through to `<IdleView>`, hence a complement. Keep in step with `renderContent` below. */
-const DEDICATED_VIEW_STATES = new Set<OnboardingState>([
-  "welcome",
-  "error",
-  "created",
-  "recovery-choice",
-  "recovery-join",
-  "solo-recovery-confirm",
-  "verify-prompt",
-]);
-
-/** Whether the view on screen renders the TYPED sync code's own host note.
- *  Exactly two do: `RecoveryJoinView` and `IdleView` (the fallback branch). */
-function rendersTypedSyncCodeNote(state: OnboardingState): boolean {
-  return state === "recovery-join" || !DEDICATED_VIEW_STATES.has(state);
-}
-
-/** Whether the container note would repeat the view's note (same validated address); hides only on
- *  equal `valid` endpoints. See docs/architecture.md → 揭露採用中的伺服器位址. */
-function isAdoptedNoteRedundant(
-  state: OnboardingState,
-  syncCodeInput: string,
-  adopted: SyncCodeApiHostResult,
-): boolean {
-  if (adopted.kind !== "valid") return false;
-  if (!rendersTypedSyncCodeNote(state)) return false;
-  const typed = parseSyncCodeApiHost(syncCodeInput);
-  return typed.kind === "valid" && typed.endpoint === adopted.endpoint;
 }
 
 export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
@@ -202,6 +169,7 @@ export function Onboarding({ onFamilyJoined, apiClient }: OnboardingProps) {
             onSubmit={(secret) => void flow.verify.submit(secret)}
             onCancel={flow.verify.cancel}
           />
+          <ForgotSecretHint apiClient={apiClient} />
         </>
       );
     }
