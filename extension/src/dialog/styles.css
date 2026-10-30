@@ -431,12 +431,6 @@
   }
 }
 
-@keyframes moo-lazy-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Borrow-failure banner flash. Failing the same way twice writes the same text
    in the same place, so without this the screen shows no change at all. The
    banner's React key is the attempt counter, and a re-mount restarts a CSS
@@ -474,18 +468,15 @@
   position: relative;
 }
 
-.moo-lazy-cover__spinner {
+.moo-lazy-cover__placeholder {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 20px;
-  height: 20px;
-  margin-top: -10px;
-  margin-left: -10px;
-  border: 2px solid var(--moo-border);
-  border-top-color: var(--moo-primary);
-  border-radius: 50%;
-  animation: moo-lazy-spin 0.8s linear infinite;
+  inset: 0;
+  background: var(--moo-surface-alt);
+  border-radius: inherit;
+}
+
+.moo-shelf-row__cover .moo-lazy-cover__placeholder {
+  background: var(--moo-border);
 }
 
 .moo-lazy-cover__img {

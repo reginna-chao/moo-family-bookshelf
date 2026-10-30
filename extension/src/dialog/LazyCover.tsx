@@ -46,7 +46,9 @@ export const LazyCover = React.memo(function LazyCover({
 
   return (
     <div className={wrapperClass} style={{ ...sizeStyle, ...style }}>
-      {status === "loading" && <div className="moo-lazy-cover__spinner" />}
+      {status === "loading" && (
+        <div className="moo-lazy-cover__placeholder" aria-hidden="true" />
+      )}
       <img
         src={src}
         alt={alt}

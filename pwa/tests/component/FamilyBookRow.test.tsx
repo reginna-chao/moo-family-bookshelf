@@ -23,9 +23,12 @@ import { BoolFlag } from "@/api/client";
  * then renders the BookOpen fallback box. The CSP `img-src` in pwa/public/_headers is the second
  * layer (tests/unit/cspHeaders.test.ts) but is only served by Cloudflare Pages / Netlify — `vite dev`
  * / `vite preview` and plain static hosts have only this code filter, which is what the cases pin.
- * coverFallback finds LazyCover's BookOpen fallback box by `bg-gray-100`: the wrapper LazyCover
- * renders around a live cover carries `relative` and the row's own classes, never a background, so a
- * non-null result means the fallback branch ran. The nested icon is asserted alongside it.
+ * coverFallback finds LazyCover's BookOpen fallback box by `div.bg-gray-100:not([aria-hidden])`: the
+ * wrapper LazyCover renders around a live cover carries `relative` and the row's own classes, never a
+ * background, and the static loading overlay inside it (#430) is also `bg-gray-100` but carries
+ * `aria-hidden="true"`, which the probe excludes. jsdom never fires `load`, so a live cover stays in
+ * "loading" and that overlay is always present; a non-null result therefore means the fallback branch
+ * ran. The nested icon is asserted alongside it.
  *
  * Book link whitelist: `readmooUrl` is the other attacker-controllable URL on the same server record:
  * a family member can bypass the UI and POST any value, and here the whole ROW is the `<a>`, so a
@@ -155,10 +158,10 @@ describe("FamilyBookRow", () => {
     const READMOO_COVER = "https://cdn.readmoo.com/cover/x.jpg";
     const BEACON_COVER = "https://evil.example/beacon.gif";
 
-    /** LazyCover's BookOpen fallback box, singled out by `bg-gray-100`.
+    /** LazyCover's BookOpen fallback box: `bg-gray-100` minus the aria-hidden loading overlay.
      *  See the header → "Cover URL whitelist". */
     function coverFallback(container: HTMLElement): Element | null {
-      return container.querySelector("div.bg-gray-100");
+      return container.querySelector("div.bg-gray-100:not([aria-hidden])");
     }
 
     // Positive control: without it the negative case below would still pass on
