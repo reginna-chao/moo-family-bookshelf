@@ -122,6 +122,20 @@ describe("useTokenRefresh", () => {
     expect(proactiveRefresh).toHaveBeenCalledTimes(2);
   });
 
+  it("clamps a 90-day token's refresh timer to setTimeout's max instead of re-reading storage in a loop (#428)", async () => {
+    // 90 days = the Worker's TOKEN_TTL_SECONDS; the raw delay exceeds 2^31-1 ms.
+    await seedExpiry(Date.now() + 90 * 24 * 60 * MINUTE);
+    const { client, proactiveRefresh } = createMockApiClient();
+
+    renderHook(() => useTokenRefresh(client));
+    await flush();
+    await vi.advanceTimersByTimeAsync(MINUTE);
+
+    // An overflowed delay fires every ~1ms, so each wake-up would re-read storage.
+    expect(vi.mocked(chrome.storage.local.get)).toHaveBeenCalledTimes(1);
+    expect(proactiveRefresh).not.toHaveBeenCalled();
+  });
+
   it("clears its scheduled timer on unmount so no refresh fires afterwards", async () => {
     await seedExpiry(Date.now() + 30 * MINUTE);
     const { client, proactiveRefresh } = createMockApiClient();
