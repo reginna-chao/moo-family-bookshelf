@@ -328,6 +328,17 @@ pnpm deploy
 
 設了 `VERIFY_PEPPER` 之後，如果回退到不認得 pepper 的舊版 Worker，已升級（`version: 2`）的帳號輸入正確的 PIN 也會被當成打錯，要再更新回新版才會恢復。回退期間這些「打錯」照樣計數：同一來源 5 次就鎖 15 分鐘，換回新版後被鎖的人最多還要再等 15 分鐘；第三方也能在這段期間用錯誤的 PIN 把該帳號每小時 10 次的猜測上限用完，讓本人暫時進不來。
 
+更新到含 #432 的版本後，還沒改存成雜湊的登入會失效：直接從 v1.7.2 或更早的版本升上來的伺服器，所有裝置都要重新登入一次；已經跑過含 #425 的版本一段時間的伺服器，只有那段期間沒有續期或重新登入過的裝置要重新登入。擴充功能與 PWA 會自動重新連線，帳號設了 PIN／圖形的要再輸入一次；同一個網路下同一分鐘內有超過 3 台裝置重新連線時，多出來的要等約 1 分鐘才會自動再試。
+
+設成驗證碼（`code`）的帳號是例外：驗證碼只有登入中的裝置能產生，更新後所有裝置都登出了，就沒有人能產生驗證碼，本人登不回來。更新前先列出有驗證設定的帳號，逐筆看 `method` 是不是 `code`：
+
+```bash
+pnpm exec wrangler kv key list --prefix "verify:" --namespace-id <正式 namespace ID> --remote
+pnpm exec wrangler kv key get "verify:<userId>" --namespace-id <正式 namespace ID> --remote
+```
+
+請這些帳號的本人在更新前先把登入驗證改成 PIN、圖形或不設驗證；來不及改的，更新後照「使用者忘記登入驗證時」改寫成臨時 PIN。
+
 ## KV 每日備份與還原演練
 
 正式 KV 的每日備份由一個獨立的 Cloudflare Worker 執行（程式在 `worker/src/backup/`，設定範本是 `worker/wrangler.backup.toml`），跑在 Workers **Free** 方案。排程是每天 **03:17 UTC（台灣 11:17）**。Worker 只透過 KV／R2 bindings 讀寫，不持有任何 Cloudflare REST token；備份寫進私人 R2 bucket，完成後通知 Healthchecks.io 的兩個 check，任一個超過時限沒收到訊號，就由 Healthchecks 寄 Email。設計理由、費用與升級分界見 [KV 備份計畫](../docs/kv-backup-plan.md)。

@@ -9,13 +9,11 @@ import {
   TOKEN_TTL_SECONDS,
   type AuthRecord,
   type AuthTokenEntry,
-  type AuthTokenRecord,
 } from "../kv/schema";
 import {
   deleteAuthRecord,
   deleteAuthTokenKey,
   getAuthTokenRecord,
-  getLegacyAuthTokenUserId,
   getRawAuthRecord,
   putAuthRecord,
   putAuthTokenRecord,
@@ -42,27 +40,15 @@ function parseBearerToken(authHeader: string | undefined): string | null {
   return match[1];
 }
 
-/**
- * userId of a bearer: `token:{hash}` first; only on a miss the pre-#425 `token:{plaintext}`
- * (#425 transition), accepted only while `auth:{userId}` still names that plaintext token.
- */
+/** userId of a bearer from `token:{hash}`; `null` when absent or malformed. */
 async function resolveTokenUserId(
   kv: KVNamespace,
   token: string,
 ): Promise<string | null> {
   const record = await getAuthTokenRecord(kv, await hashAuthToken(token));
-  if (record !== null) {
-    const userId: unknown = record.userId;
-    return typeof userId === "string" && userId !== "" ? userId : null;
-  }
-  // A 64-hex value only: a #425 record read at a plaintext-shaped key (its hash as bearer) is refused.
-  const legacy = await getLegacyAuthTokenUserId(kv, token);
-  if (typeof legacy !== "string" || !HEX_64.test(legacy)) return null;
-  // A plaintext key left by a failed migration delete is inert: the hashed `auth:` no longer names it.
-  const named = (await readAuthRecord(kv, legacy))?.legacyToken;
-  return typeof named === "string" && timingSafeEqual(named, token)
-    ? legacy
-    : null;
+  if (record === null) return null;
+  const userId: unknown = record.userId;
+  return typeof userId === "string" && userId !== "" ? userId : null;
 }
 
 /**
@@ -120,8 +106,8 @@ function isAuthTokenEntry(value: unknown): value is AuthTokenEntry {
 
 /**
  * Classify `auth:{userId}` as read (#425). Malformed list entries are dropped and a
- * non-array `tokens` reads as `[]`; `secretAt` is kept only when a number; a pre-#425
- * record's string `token` surfaces as `legacyToken` (in memory only). `null` stays `null`.
+ * non-array `tokens` reads as `[]`; `secretAt` is kept only when a number. `null` stays `null`.
+ * An older `{ token, createdAt }` record reads as an empty list (#432).
  */
 export function normalizeAuthRecord(
   raw: RawAuthRecord | null,
@@ -135,7 +121,6 @@ export function normalizeAuthRecord(
   return {
     tokens,
     ...(typeof raw.secretAt === "number" && { secretAt: raw.secretAt }),
-    ...(typeof raw.token === "string" && { legacyToken: raw.token }),
   };
 }
 
@@ -153,84 +138,27 @@ export interface IssuedToken {
   expiresAt: number;
 }
 
-/** A pre-#425 plaintext token moved into the hashed model: its list entry, its `token:{hash}` value, its old key tail. */
-interface LegacyMigration {
-  entry: AuthTokenEntry;
-  record: AuthTokenRecord;
-  plaintext: string;
-}
-
-/** `legacyToken` while its `token:{plaintext}` key still names `userId`, else `null` (never revive a revoked one).
- *  One KV read; see docs/architecture.md → PWA 登入驗證機制. */
-async function readLiveLegacyToken(
-  kv: KVNamespace,
-  userId: string,
-  legacyToken: string,
-): Promise<string | null> {
-  const owner = await getLegacyAuthTokenUserId(kv, legacyToken);
-  const alive = typeof owner === "string" && HEX_64.test(owner);
-  return alive && owner === userId ? legacyToken : null;
-}
-
-/** Called only with a live token; the caller puts `record`, then lists `entry`, then deletes `token:{plaintext}`. */
-async function buildLegacyMigration(
-  legacyToken: string,
-  userId: string,
-  now: number,
-): Promise<LegacyMigration> {
-  const createdAt = new Date(now).toISOString();
-  const hash = await hashAuthToken(legacyToken);
-  return {
-    entry: { hash, createdAt },
-    record: { userId, createdAt, expiresAt: now + TOKEN_TTL_SECONDS * 1000 },
-    plaintext: legacyToken,
-  };
-}
-
-/** The migration of `legacyToken` when it is still live (`readLiveLegacyToken`); `null` when absent or dead. */
-async function buildLiveLegacyMigration(
-  kv: KVNamespace,
-  userId: string,
-  legacyToken: string | undefined,
-  now: number,
-): Promise<LegacyMigration | null> {
-  if (legacyToken === undefined) return null;
-  const live = await readLiveLegacyToken(kv, userId, legacyToken);
-  return live === null ? null : buildLegacyMigration(live, userId, now);
-}
-
-/** Fail-open: after the hashed writes a leftover `token:{plaintext}` is inert (`resolveTokenUserId`). No ids logged. */
-async function deleteMigratedPlaintextKey(
-  kv: KVNamespace,
-  plaintext: string,
-): Promise<void> {
-  await deleteAuthTokenKey(kv, plaintext).catch((err: unknown) => {
-    console.error("LEGACY_TOKEN_DELETE_FAILED", { err });
-  });
-}
-
 function compareIso(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
 }
 
-/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`; `alive` is never read.
+/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`.
  *  See docs/architecture.md → PWA 登入驗證機制. */
 async function evictForNewToken(
   kv: KVNamespace,
   userId: string,
   previous: AuthTokenEntry[],
-  alive: AuthTokenEntry | null,
 ): Promise<{ kept: AuthTokenEntry[]; evicted: string[] }> {
   const excess = previous.length - (MAX_AUTH_TOKENS_PER_USER - 1);
   if (excess <= 0) return { kept: previous, evicted: [] };
   const records = await Promise.all(
-    previous.map((e) => (e === alive ? null : getAuthTokenRecord(kv, e.hash))),
+    previous.map((e) => getAuthTokenRecord(kv, e.hash)),
   );
   const ranked = previous
     .map((entry, index) => {
-      const dead = entry !== alive && records[index]?.userId !== userId;
+      const dead = records[index]?.userId !== userId;
       return { entry, index, dead };
     })
     .sort(
@@ -257,17 +185,9 @@ function generateTokenString(): string {
 /**
  * Mint a NEW token for `userId` (#425; create, join, QR redeem, PIN/pattern save).
  * `knownAuth` is the caller's `auth:{userId}` read (`null` = none, or a full revoke
- * just ran); a legacy plaintext token in it is migrated into the list, never logged
- * out — but only while its `token:{plaintext}` key still names `userId`: a dead one
- * (revoked, `auth:` read stale) is dropped, never revived. Evicted keys are deleted
- * FIRST — a throw fails the mint. A migration then puts its `token:{hash}` BEFORE
- * `auth:`, so a list never names a hash with no record behind it; `auth:` is put
- * exactly once with the new token appended (alongside the new `token:{hash}`), and
- * only then is `token:{plaintext}` deleted. Once `auth:` no longer names it, a
- * plaintext key is INERT — the middleware refuses it — so a failed delete is
- * logged and ignored (the mint still returns the token) and the key merely
- * occupies its TTL. `secretAt` replaces the carried-forward
- * `knownAuth.secretAt` (PIN/pattern only).
+ * just ran). Evicted keys are deleted FIRST — a throw fails the mint. `auth:` is put
+ * exactly once with the new token appended (alongside the new `token:{hash}`).
+ * `secretAt` replaces the carried-forward `knownAuth.secretAt` (PIN/pattern only).
  */
 export async function mintAuthToken(
   kv: KVNamespace,
@@ -279,32 +199,13 @@ export async function mintAuthToken(
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   const expiresAt = now + TOKEN_TTL_SECONDS * 1000;
-  const [hash, migration] = await Promise.all([
-    hashAuthToken(token),
-    buildLiveLegacyMigration(kv, userId, knownAuth?.legacyToken, now),
-  ]);
+  const hash = await hashAuthToken(token);
 
-  const previous = [
-    ...(knownAuth?.tokens ?? []),
-    ...(migration ? [migration.entry] : []),
-  ];
-  const { kept, evicted } = await evictForNewToken(
-    kv,
-    userId,
-    previous,
-    migration?.entry ?? null,
-  );
+  const previous = knownAuth?.tokens ?? [];
+  const { kept, evicted } = await evictForNewToken(kv, userId, previous);
 
   await Promise.all(evicted.map((key) => deleteAuthTokenKey(kv, key)));
 
-  if (migration) {
-    await putAuthTokenRecord(
-      kv,
-      migration.entry.hash,
-      migration.record,
-      TOKEN_TTL_SECONDS,
-    );
-  }
   await Promise.all([
     putAuthRecord(kv, userId, {
       tokens: [...kept, { hash, createdAt }],
@@ -317,7 +218,6 @@ export async function mintAuthToken(
       TOKEN_TTL_SECONDS,
     ),
   ]);
-  if (migration) await deleteMigratedPlaintextKey(kv, migration.plaintext);
 
   return { token, expiresAt };
 }
@@ -331,13 +231,9 @@ export interface PresentedAuth {
 
 function isCurrentBearer(
   auth: AuthRecord | null,
-  presentedToken: string,
   presentedHash: string,
 ): boolean {
   if (auth === null) return true;
-  if (auth.legacyToken !== undefined) {
-    return timingSafeEqual(auth.legacyToken, presentedToken);
-  }
   return (
     auth.tokens.length === 0 ||
     auth.tokens.some((e) => timingSafeEqual(e.hash, presentedHash))
@@ -347,8 +243,8 @@ function isCurrentBearer(
 /**
  * Bearer currency (#378, #425), the one rule shared by refresh (`renewPresentedAuthToken`),
  * `PUT /api/user/:id/verify`, `POST /api/user/:id/verify/prompted` and `DELETE /api/user/:id` (#396):
- * the presented token is current when its hash is in `auth:{userId}`'s list, when a
- * pre-#425 record names it, or when there is no record / an empty list (TTL gap). A
+ * the presented token is current when its hash is in `auth:{userId}`'s list, or when
+ * there is no record / an empty list (TTL gap). A
  * token that still has its `token:` key but is off the list (revoked on a lagging
  * colo, or orphaned by a concurrent mint) is NOT current. A missing bearer never is.
  * One KV read; the record and the bearer's hash are returned for reuse.
@@ -365,37 +261,8 @@ export async function readPresentedAuth(
   const current =
     presentedToken !== null &&
     presentedHash !== null &&
-    isCurrentBearer(auth, presentedToken, presentedHash);
+    isCurrentBearer(auth, presentedHash);
   return { auth, current, presentedHash };
-}
-
-/** Refresh's one-time move of a live pre-#425 token into the list (`null` when dead): `token:{hash}`, then `auth:`,
- *  then a fail-open delete of the inert `token:{plaintext}` — see docs/architecture.md → PWA 登入驗證機制. */
-async function migratePresentedLegacyToken(
-  kv: KVNamespace,
-  userId: string,
-  auth: AuthRecord,
-  legacyToken: string,
-): Promise<IssuedToken | null> {
-  const migration = await buildLiveLegacyMigration(
-    kv,
-    userId,
-    legacyToken,
-    Date.now(),
-  );
-  if (migration === null) return null;
-  await putAuthTokenRecord(
-    kv,
-    migration.entry.hash,
-    migration.record,
-    TOKEN_TTL_SECONDS,
-  );
-  await putAuthRecord(kv, userId, {
-    tokens: [migration.entry],
-    secretAt: auth.secretAt,
-  });
-  await deleteMigratedPlaintextKey(kv, migration.plaintext);
-  return { token: legacyToken, expiresAt: migration.record.expiresAt };
 }
 
 /** Sliding 90 days, capped 180 days after `createdAt` — except on a `code` account (one extra read, cap only). */
@@ -445,9 +312,8 @@ async function slideListedToken(
 /**
  * Refresh (#425): renews only the PRESENTED token. `null` (→ 401 REFRESH_FAILED)
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
- * past the 180-day cap (PIN / pattern / none accounts). A pre-#425 token is migrated
- * in place (same string back) while its plaintext key is live, else `null`; a TTL gap
- * (no record, empty list) mints a new token.
+ * past the 180-day cap (PIN / pattern / none accounts). A TTL gap (no record, empty
+ * list) mints a new token.
  */
 export async function renewPresentedAuthToken(
   kv: KVNamespace,
@@ -460,9 +326,6 @@ export async function renewPresentedAuthToken(
     presentedToken,
   );
   if (!current || presentedHash === null) return null;
-  if (auth?.legacyToken !== undefined) {
-    return migratePresentedLegacyToken(kv, userId, auth, auth.legacyToken);
-  }
   if (auth === null || auth.tokens.length === 0) {
     return mintAuthToken(kv, userId, auth);
   }
@@ -472,10 +335,8 @@ export async function renewPresentedAuthToken(
 }
 
 /**
- * Delete every `token:` key `auth` names — each listed hash, a legacy plaintext
- * token AND its hash (covering a migration whose `auth:` put never landed), and
- * `alsoKeys` — the presented bearer's hash AND its plaintext (a pre-#425 key, for
- * an `auth:` gap) — deduplicated; deleting an absent key is a no-op. Never
+ * Delete every `token:` key `auth` lists plus `alsoKeys` (the presented bearer's
+ * hash, for an `auth:` gap), deduplicated; deleting an absent key is a no-op. Never
  * touches `auth:{userId}`, so a following mint is that key's only write.
  */
 export async function revokeAuthTokenKeys(
@@ -484,10 +345,6 @@ export async function revokeAuthTokenKeys(
   alsoKeys: readonly (string | null | undefined)[] = [],
 ): Promise<void> {
   const keys = new Set<string>((auth?.tokens ?? []).map((e) => e.hash));
-  if (typeof auth?.legacyToken === "string") {
-    keys.add(auth.legacyToken);
-    keys.add(await hashAuthToken(auth.legacyToken));
-  }
   for (const key of alsoKeys) if (typeof key === "string") keys.add(key);
   await Promise.all([...keys].map((key) => deleteAuthTokenKey(kv, key)));
 }

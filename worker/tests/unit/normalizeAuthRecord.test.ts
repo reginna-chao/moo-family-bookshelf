@@ -6,8 +6,8 @@ import type { RawAuthRecord } from "../../src/kv/auth";
  * `normalizeAuthRecord` (#425) classifies `auth:{userId}` exactly as read.
  * The #425 shape (`{ tokens, secretAt? }`) passes through with malformed list
  * entries dropped; a non-array `tokens` reads as `[]`; `secretAt` survives only
- * as a number; a pre-#425 record's string `token` surfaces as `legacyToken`
- * (its `createdAt` is dropped — a migration restarts the age from then).
+ * as a number; a pre-#425 `{ token, createdAt, secretAt? }` record reads as an
+ * empty list, keeping only `secretAt` (#432).
  */
 
 const HASH = "a".repeat(64);
@@ -65,18 +65,13 @@ describe("normalizeAuthRecord", () => {
       expected: { tokens: [] },
     },
     {
-      label: "a pre-#425 record surfaces its token as legacyToken",
-      raw: { token: HASH, createdAt: CREATED_AT, secretAt: 9 },
-      expected: { tokens: [], secretAt: 9, legacyToken: HASH },
+      label: "a pre-#425 record reads as an empty list, keeping secretAt",
+      raw: { token: HASH, createdAt: CREATED_AT, secretAt: 9 } as RawAuthRecord,
+      expected: { tokens: [], secretAt: 9 },
     },
     {
-      label: "a pre-#425 record without secretAt",
-      raw: { token: HASH, createdAt: CREATED_AT },
-      expected: { tokens: [], legacyToken: HASH },
-    },
-    {
-      label: "a non-string legacy token is ignored",
-      raw: { token: 42, createdAt: CREATED_AT },
+      label: "a pre-#425 record without secretAt reads as an empty list",
+      raw: { token: HASH, createdAt: CREATED_AT } as RawAuthRecord,
       expected: { tokens: [] },
     },
   ])("$label", ({ raw, expected }) => {

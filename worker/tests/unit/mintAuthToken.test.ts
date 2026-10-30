@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
-import { failFirstWriteTo, watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken, seedLegacyAuthToken } from "../helpers/auth";
+import { watchKvOps } from "../helpers/kvOps";
+import { seedAuthToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
 import {
   mintAuthToken,
@@ -15,7 +14,6 @@ import {
   MAX_AUTH_TOKENS_PER_USER,
   TOKEN_MAX_AGE_SECONDS,
   TOKEN_TTL_SECONDS,
-  type AuthRecord,
   type AuthTokenRecord,
   type StoredAuthRecord,
 } from "../../src/kv/schema";
@@ -28,23 +26,11 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * with NO TTL, with the hash appended to the account's list. At most
  * `MAX_AUTH_TOKENS_PER_USER` (5) tokens are listed: a sixth mint evicts dead
  * entries (reverse key gone, or naming someone else) first, then the oldest
- * `createdAt`, deleting the evicted `token:` keys. A pre-#425 `legacyToken` in
- * `knownAuth` is migrated into the list (its plaintext key deleted, its hash
- * key written) — never evicted by that same mint, never logged out.
- * `secretAt` replaces the carried-forward value; with neither, it is absent.
- *
- * Live legacy only (C3): the migration first reads `token:{plaintext}` and
- * migrates only while it names this user. A dead one — deleted by a PIN save a
- * stale `auth:` read has not seen, or naming someone else — is dropped: no
- * `token:{hash}`, no list entry, nothing deleted. Order (C4, S1): evicted keys
- * are deleted first, then — one write at a time — the migrated `token:{hash}`,
- * then `auth:` (with the new token's key), and the plaintext key LAST. A
- * migrated-key put that throws (`failFirstWriteTo`) leaves `auth:` in its legacy
- * shape and the plaintext key alive, so a retry that re-reads `auth:` still
- * migrates it. The final plaintext delete is fail-open: when it throws the mint
- * still returns, logging `LEGACY_TOKEN_DELETE_FAILED` with `{ err }` only, and
- * the leftover key is inert (`readBooks` through the real middleware → 401 once
- * the hashed record is revoked).
+ * `createdAt`, deleting the evicted `token:` keys. Evicted keys are deleted
+ * before `auth:` is put. `secretAt` replaces the carried-forward value; with
+ * neither, it is absent. A pre-#425 `{ token, createdAt, secretAt? }` record
+ * reads as `{ tokens: [], secretAt? }` (#432): the mint treats it as an empty
+ * list, reads no `token:` key and keeps `secretAt`.
  *
  * Why `auth:` is permanent (reviewer C1): a `code` account's tokens are exempt
  * from the 180-day cap and keep sliding, so any fixed `auth:` TTL could lapse
@@ -58,7 +44,6 @@ import { hashAuthToken } from "../../src/utils/crypto";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SECRET_AT = 1_767_225_600_000;
 const HEX_64 = /^[a-f0-9]{64}$/;
-const LEGACY = "c".repeat(64);
 
 let kv: KVNamespace;
 
@@ -95,15 +80,6 @@ async function seedDevices(count: number): Promise<string[]> {
     );
   }
   return tokens;
-}
-
-/** An authenticated owner-only read through the real middleware — the "does this bearer open anything" probe. */
-async function readBooks(token: string): Promise<Response> {
-  return app.request(
-    `/api/user/${USER1}/books`,
-    { headers: { Authorization: `Bearer ${token}` } },
-    { KV: kv, DEV_MODE: "1" },
-  );
 }
 
 beforeEach(() => {
@@ -262,197 +238,21 @@ describe("mintAuthToken — eviction past MAX_AUTH_TOKENS_PER_USER", () => {
   });
 });
 
-describe("mintAuthToken — pre-#425 legacy token", () => {
-  it("migrates the legacy token into the list instead of logging it out", async () => {
-    await seedLegacyAuthToken(kv, USER1, LEGACY, SECRET_AT);
-    const known = await readAuthRecord(kv, USER1);
+describe("mintAuthToken — pre-#425 record (#432)", () => {
+  it("mints into the empty list an old-shape record reads as, reading no token: key and keeping secretAt", async () => {
+    const ops = watchKvOps(kv);
 
-    const issued = await mintAuthToken(kv, USER1, known);
+    const issued = await mintAuthToken(kv, USER1, { tokens: [], secretAt: 9 });
 
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBeNull();
-    const migrated = await tokenRecord(LEGACY);
-    expect(migrated?.userId).toBe(USER1);
-    expect(getPutTtl(kv, kvKeys.authToken(await hashAuthToken(LEGACY)))).toBe(
-      TOKEN_TTL_SECONDS,
+    const hash = await hashAuthToken(issued.token);
+    // No read at all — in particular no `token:` lookup of a plaintext bearer.
+    expect(ops.getKeys()).toEqual([]);
+    expect([...ops.writeTrail()].sort()).toEqual(
+      [`put ${kvKeys.auth(USER1)}`, `put ${kvKeys.authToken(hash)}`].sort(),
     );
     const stored = await storedAuth();
-    expect(stored?.tokens.map((e) => e.hash)).toEqual([
-      await hashAuthToken(LEGACY),
-      await hashAuthToken(issued.token),
-    ]);
-    expect(stored?.secretAt).toBe(SECRET_AT);
-    expect(stored).not.toHaveProperty("token");
-    expect(stored).not.toHaveProperty("legacyToken");
-  });
-
-  it("never evicts the just-migrated legacy entry, even on a full list", async () => {
-    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER);
-    const listed = await readAuthRecord(kv, USER1);
-    await kv.put(kvKeys.authToken(LEGACY), USER1);
-    const known: AuthRecord = { ...listed!, legacyToken: LEGACY };
-
-    const issued = await mintAuthToken(kv, USER1, known);
-
-    const hashes = (await storedAuth())!.tokens.map((e) => e.hash);
-    expect(hashes).toHaveLength(MAX_AUTH_TOKENS_PER_USER);
-    expect(hashes).toContain(await hashAuthToken(LEGACY));
-    expect(hashes).toContain(await hashAuthToken(issued.token));
-    expect((await tokenRecord(LEGACY))?.userId).toBe(USER1);
-    // The two oldest live tokens make the room.
-    expect(await tokenRecord(tokens[0])).toBeNull();
-    expect(await tokenRecord(tokens[1])).toBeNull();
-    expect((await tokenRecord(tokens[2]))?.userId).toBe(USER1);
-  });
-
-  it.each([
-    { label: "its plaintext key is gone", plaintext: null },
-    { label: "its plaintext key names another user", plaintext: USER2 },
-  ])(
-    "drops a dead legacy token ($label) instead of reviving it",
-    async ({ plaintext }) => {
-      if (plaintext !== null) {
-        await kv.put(kvKeys.authToken(LEGACY), plaintext);
-      }
-      const ops = watchKvOps(kv);
-
-      const issued = await mintAuthToken(kv, USER1, {
-        tokens: [],
-        legacyToken: LEGACY,
-      });
-
-      const gets = ops.getKeys();
-      const trail = ops.writeTrail();
-      const hash = await hashAuthToken(issued.token);
-      expect(gets).toEqual([kvKeys.authToken(LEGACY)]);
-      expect(trail).toEqual([
-        `put ${kvKeys.auth(USER1)}`,
-        `put ${kvKeys.authToken(hash)}`,
-      ]);
-      expect(await storedAuth()).toEqual({
-        tokens: [
-          { hash, createdAt: (await tokenRecord(issued.token))?.createdAt },
-        ],
-      });
-      expect(await tokenRecord(LEGACY)).toBeNull();
-      expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(plaintext);
-    },
-  );
-
-  it("puts token:{hash}, then auth:, and deletes the plaintext key last", async () => {
-    await seedLegacyAuthToken(kv, USER1, LEGACY);
-    const known = await readAuthRecord(kv, USER1);
-    const ops = watchKvOps(kv);
-
-    const issued = await mintAuthToken(kv, USER1, known);
-
-    expect(ops.writeTrail()).toEqual([
-      `put ${kvKeys.authToken(await hashAuthToken(LEGACY))}`,
-      `put ${kvKeys.auth(USER1)}`,
-      `put ${kvKeys.authToken(await hashAuthToken(issued.token))}`,
-      `delete ${kvKeys.authToken(LEGACY)}`,
-    ]);
-  });
-
-  it("deletes evicted keys before the puts and the migrated plaintext key after them", async () => {
-    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER);
-    const listed = await readAuthRecord(kv, USER1);
-    await kv.put(kvKeys.authToken(LEGACY), USER1);
-    const known: AuthRecord = { ...listed!, legacyToken: LEGACY };
-    const ops = watchKvOps(kv);
-
-    const issued = await mintAuthToken(kv, USER1, known);
-
-    expect(ops.writeTrail()).toEqual([
-      `delete ${kvKeys.authToken(await hashAuthToken(tokens[0]))}`,
-      `delete ${kvKeys.authToken(await hashAuthToken(tokens[1]))}`,
-      `put ${kvKeys.authToken(await hashAuthToken(LEGACY))}`,
-      `put ${kvKeys.auth(USER1)}`,
-      `put ${kvKeys.authToken(await hashAuthToken(issued.token))}`,
-      `delete ${kvKeys.authToken(LEGACY)}`,
-    ]);
-  });
-
-  it("keeps auth: and the plaintext key when the migrated token:{hash} put throws, and a retry migrates it", async () => {
-    await seedLegacyAuthToken(kv, USER1, LEGACY);
-    const legacyRecord = await storedAuth();
-    failFirstWriteTo(kv, "put", kvKeys.authToken(await hashAuthToken(LEGACY)));
-
-    await expect(
-      mintAuthToken(kv, USER1, await readAuthRecord(kv, USER1)),
-    ).rejects.toThrow("KV down");
-
-    expect(await storedAuth()).toEqual(legacyRecord);
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(USER1);
-    expect(await tokenRecord(LEGACY)).toBeNull();
-
-    const retried = await mintAuthToken(
-      kv,
-      USER1,
-      await readAuthRecord(kv, USER1),
-    );
-
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBeNull();
-    expect((await tokenRecord(LEGACY))?.userId).toBe(USER1);
-    expect((await storedAuth())?.tokens.map((e) => e.hash)).toEqual([
-      await hashAuthToken(LEGACY),
-      await hashAuthToken(retried.token),
-    ]);
-  });
-
-  it("keeps auth: and the plaintext key when the auth: put throws, and a retry migrates it", async () => {
-    await seedLegacyAuthToken(kv, USER1, LEGACY);
-    const legacyRecord = await storedAuth();
-    failFirstWriteTo(kv, "put", kvKeys.auth(USER1));
-
-    await expect(
-      mintAuthToken(kv, USER1, await readAuthRecord(kv, USER1)),
-    ).rejects.toThrow("KV down");
-
-    expect(await storedAuth()).toEqual(legacyRecord);
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(USER1);
-
-    const retried = await mintAuthToken(
-      kv,
-      USER1,
-      await readAuthRecord(kv, USER1),
-    );
-
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBeNull();
-    expect((await storedAuth())?.tokens.map((e) => e.hash)).toEqual([
-      await hashAuthToken(LEGACY),
-      await hashAuthToken(retried.token),
-    ]);
-  });
-
-  it("still returns the token when the plaintext delete throws, logging no identifier", async () => {
-    await seedLegacyAuthToken(kv, USER1, LEGACY);
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    failFirstWriteTo(kv, "delete", kvKeys.authToken(LEGACY));
-
-    const issued = await mintAuthToken(
-      kv,
-      USER1,
-      await readAuthRecord(kv, USER1),
-    );
-
-    expect(issued.token).toMatch(HEX_64);
-    expect(errors).toHaveBeenCalledTimes(1);
-    expect(errors.mock.calls[0][0]).toBe("LEGACY_TOKEN_DELETE_FAILED");
-    expect(Object.keys(errors.mock.calls[0][1] as object)).toEqual(["err"]);
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(USER1);
-    expect((await tokenRecord(LEGACY))?.userId).toBe(USER1);
-    expect((await storedAuth())?.tokens.map((e) => e.hash)).toEqual([
-      await hashAuthToken(LEGACY),
-      await hashAuthToken(issued.token),
-    ]);
-    // The leftover key alone opens nothing once the hashed record is revoked.
-    await readAndRevokeAllAuthTokens(kv, USER1);
-    expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(USER1);
-    const res = await readBooks(LEGACY);
-    expect(res.status).toBe(401);
-    expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
-      "UNAUTHORIZED",
-    );
+    expect(stored?.tokens.map((e) => e.hash)).toEqual([hash]);
+    expect(stored?.secretAt).toBe(9);
   });
 });
 
