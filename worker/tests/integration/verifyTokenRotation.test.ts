@@ -93,11 +93,10 @@ import {
  * the gate and the bound-key check (a rotation landing mid-request).
  *
  * TTL-gap PUT: with no `auth:{userId}` record the presented bearer is still the
- * token a PIN / pattern save revokes — `token:{hash(presented)}` is deleted,
- * and so is `token:{presented}` itself (every PIN save issues that one extra
- * delete). A pre-#425 PLAINTEXT bearer never reaches the handler in a gap: the
- * middleware accepts one only while a legacy `auth:` record names it (C5), so
- * with no record it answers `401 UNAUTHORIZED` and nothing is written.
+ * token a PIN / pattern save revokes — `token:{hash(presented)}` is deleted.
+ * A plaintext bearer is refused by the middleware (#432): it only reads
+ * `token:{hash}`, so a bare `token:{plaintext}` key answers `401 UNAUTHORIZED`
+ * before the handler and nothing is written.
  *
  * `AuthRecord.secretAt`: a PIN / pattern save writes it as the new verify
  * record's `secretUpdatedAt`; later mints carry it forward and refreshes never
@@ -520,7 +519,6 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
         `put ${kvKeys.verify(USER_ID)}`,
         `list ${kvKeys.authTokenIndex(USER_ID, "")}`,
         `delete ${keyOf(oldToken)}`,
-        `delete ${kvKeys.authToken(oldToken)}`,
         `delete ${kvKeys.otp(USER_ID)}`,
         `put ${indexKeyOf(newToken)}`,
         `put ${kvKeys.auth(USER_ID)}`,
@@ -534,12 +532,10 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
     expect(trail.indexOf(`put ${indexKeyOf(newToken)}`)).toBeLessThan(
       trail.indexOf(`put ${keyOf(newToken)}`),
     );
-    // The swap stays serialized: both old reverse keys (hash + pre-#425 plaintext) go before the new pair.
-    for (const oldKey of [keyOf(oldToken), kvKeys.authToken(oldToken)]) {
-      const revoke = trail.indexOf(`delete ${oldKey}`);
-      expect(revoke).toBeLessThan(trail.indexOf(`put ${kvKeys.auth(USER_ID)}`));
-      expect(revoke).toBeLessThan(trail.indexOf(`put ${keyOf(newToken)}`));
-    }
+    // The swap stays serialized: the old reverse key goes before the new pair.
+    const revoke = trail.indexOf(`delete ${keyOf(oldToken)}`);
+    expect(revoke).toBeLessThan(trail.indexOf(`put ${kvKeys.auth(USER_ID)}`));
+    expect(revoke).toBeLessThan(trail.indexOf(`put ${keyOf(newToken)}`));
     // The one auth: write (never deleted first) carries the secretAt of this rotation.
     expect(trail).not.toContain(`delete ${kvKeys.auth(USER_ID)}`);
     const authPut = (kv.put as unknown as MockInstance).mock.calls.find(
@@ -747,8 +743,8 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
     },
   );
 
-  // See the header → "TTL-gap PUT": a plaintext bearer is refused before the handler.
-  it("refuses a pre-#425 plaintext bearer in a TTL gap and writes nothing", async () => {
+  // See the header → "TTL-gap PUT": a plaintext bearer is refused by the middleware (#432).
+  it("refuses a plaintext bearer and writes nothing", async () => {
     const token = "f".repeat(64);
     await kv.put(kvKeys.authToken(token), USER_ID);
     const ops = watchKvOps(kv);

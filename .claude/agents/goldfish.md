@@ -2,7 +2,7 @@
 name: goldfish
 description: Fresh-context plan reviewer for /develop — the Goldfish of Google's Elephant-Goldfish Model. Reads ONLY the PLAN.md draft and the files it names — no conversation history, no startup CLAUDE.md; a path-scoped .claude/rules file still loads when it opens a matching source file — and returns Blocker / Major / Nit findings for the orchestrator (the Elephant) to classify. Three personas — implementation-readiness, codebase-details, design-critic. Read-only. Dispatched by /develop between the execution plan and the GO gate, full cycle only.
 tools: Read, Glob, Grep
-model: inherit
+model: opus
 omitClaudeMd: true
 ---
 

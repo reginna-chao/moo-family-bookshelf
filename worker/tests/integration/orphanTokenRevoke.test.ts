@@ -200,8 +200,6 @@ describe("revoke-all — an orphan token left by two mints from one stale read",
           `delete ${kvKeys.authToken(h)}`,
           `delete ${index(h)}`,
         ]),
-        // The presented bearer's pre-#425 plaintext key (a no-op delete).
-        `delete ${kvKeys.authToken(current.token)}`,
         `put ${index(newHash)}`,
         `put ${kvKeys.auth(USER_ID)}`,
         `put ${kvKeys.authToken(newHash)}`,

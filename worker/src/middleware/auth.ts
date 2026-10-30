@@ -1,11 +1,11 @@
 import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { getAuthTokenRecord, getLegacyAuthTokenUserId } from "../kv/auth";
-import { HEX_64, readAuthRecord } from "../services/authRecord";
+import { getAuthTokenRecord } from "../kv/auth";
+import { HEX_64 } from "../services/authRecord";
 import { isPublicRoute } from "../utils/routes";
 import { jsonError } from "../utils/errors";
-import { hashAuthToken, timingSafeEqual } from "../utils/crypto";
+import { hashAuthToken } from "../utils/crypto";
 
 // Extend Hono Variables to carry authenticated userId
 declare module "hono" {
@@ -21,27 +21,15 @@ function parseBearerToken(authHeader: string | undefined): string | null {
   return match[1];
 }
 
-/**
- * userId of a bearer: `token:{hash}` first; only on a miss the pre-#425 `token:{plaintext}`
- * (#425 transition), accepted only while `auth:{userId}` still names that plaintext token.
- */
+/** userId of a bearer from `token:{hash}`; `null` when absent or malformed. */
 async function resolveTokenUserId(
   kv: KVNamespace,
   token: string,
 ): Promise<string | null> {
   const record = await getAuthTokenRecord(kv, await hashAuthToken(token));
-  if (record !== null) {
-    const userId: unknown = record.userId;
-    return typeof userId === "string" && userId !== "" ? userId : null;
-  }
-  // A 64-hex value only: a #425 record read at a plaintext-shaped key (its hash as bearer) is refused.
-  const legacy = await getLegacyAuthTokenUserId(kv, token);
-  if (typeof legacy !== "string" || !HEX_64.test(legacy)) return null;
-  // A plaintext key left by a failed migration delete is inert: the hashed `auth:` no longer names it.
-  const named = (await readAuthRecord(kv, legacy))?.legacyToken;
-  return typeof named === "string" && timingSafeEqual(named, token)
-    ? legacy
-    : null;
+  if (record === null) return null;
+  const userId: unknown = record.userId;
+  return typeof userId === "string" && userId !== "" ? userId : null;
 }
 
 /**

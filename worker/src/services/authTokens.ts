@@ -1,4 +1,4 @@
-/** Auth-token writes (#425, #431): minting a new token (cap eviction, legacy migration, `tokenidx:` index) and revoking
+/** Auth-token writes (#425, #431): minting a new token (cap eviction, `tokenidx:` index) and revoking
  *  an account's `token:` keys via its list AND index (revoke-all drops `auth:` too). See docs/architecture.md → PWA 登入驗證機制. */
 import {
   kvKeys,
@@ -18,7 +18,7 @@ import {
   putAuthTokenRecord,
 } from "../kv/auth";
 import { hashAuthToken } from "../utils/crypto";
-import { buildLiveLegacyMigration, HEX_64, readAuthRecord } from "./authRecord";
+import { HEX_64, readAuthRecord } from "./authRecord";
 
 /** Upper bound on `tokenidx:` list pages per listing; a page holds up to 1000 keys, an account normally a handful. */
 const MAX_INDEX_PAGES = 10;
@@ -127,38 +127,27 @@ export interface IssuedToken {
   expiresAt: number;
 }
 
-/** Fail-open: after the hashed writes a leftover `token:{plaintext}` is inert (`resolveTokenUserId`). No ids logged. */
-export async function deleteMigratedPlaintextKey(
-  kv: KVNamespace,
-  plaintext: string,
-): Promise<void> {
-  await deleteAuthTokenKey(kv, plaintext).catch((err: unknown) => {
-    console.error("LEGACY_TOKEN_DELETE_FAILED", { err });
-  });
-}
-
 function compareIso(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
 }
 
-/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`; `alive` is never read.
+/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`.
  *  See docs/architecture.md → PWA 登入驗證機制. */
 async function evictForNewToken(
   kv: KVNamespace,
   userId: string,
   previous: AuthTokenEntry[],
-  alive: AuthTokenEntry | null,
 ): Promise<{ kept: AuthTokenEntry[]; evicted: string[] }> {
   const excess = previous.length - (MAX_AUTH_TOKENS_PER_USER - 1);
   if (excess <= 0) return { kept: previous, evicted: [] };
   const records = await Promise.all(
-    previous.map((e) => (e === alive ? null : getAuthTokenRecord(kv, e.hash))),
+    previous.map((e) => getAuthTokenRecord(kv, e.hash)),
   );
   const ranked = previous
     .map((entry, index) => {
-      const dead = entry !== alive && records[index]?.userId !== userId;
+      const dead = records[index]?.userId !== userId;
       return { entry, index, dead };
     })
     .sort(
@@ -185,22 +174,14 @@ function generateTokenString(): string {
 /**
  * Mint a NEW token for `userId` (#425; create, join, QR redeem, PIN/pattern save).
  * `knownAuth` is the caller's `auth:{userId}` read (`null` = none, or a full revoke
- * just ran); a legacy plaintext token in it is migrated into the list, never logged
- * out — but only while its `token:{plaintext}` key still names `userId`: a dead one
- * (revoked, `auth:` read stale) is dropped, never revived. Write order (#431):
- * evicted `token:` keys are deleted FIRST — a throw fails the mint — then their
- * `tokenidx:` keys, fail-open (`AUTH_TOKEN_INDEX_DELETE_FAILED`; a leftover index
- * names a deleted key). Every `token:{hash}` put is preceded by its
- * `tokenidx:{userId}:{hash}` put with the same TTL, and an index failure throws
- * before that token exists, so revoke-all can list every token this mint writes.
- * A migration puts its index, then its `token:{hash}`, BEFORE `auth:`, so a list
- * never names a hash with no record behind it; then the new token's index, then
- * `auth:` (put exactly once, new token appended) together with the new
- * `token:{hash}`; only then is `token:{plaintext}` deleted. Once `auth:` no longer
- * names it, a plaintext key is INERT — the middleware refuses it — so a failed
- * delete is logged and ignored (the mint still returns the token) and the key
- * merely occupies its TTL. `secretAt` replaces the carried-forward
- * `knownAuth.secretAt` (PIN/pattern only).
+ * just ran). Write order (#431): evicted `token:` keys are deleted FIRST — a throw
+ * fails the mint — then their `tokenidx:` keys, fail-open
+ * (`AUTH_TOKEN_INDEX_DELETE_FAILED`; a leftover index names a deleted key). The new
+ * token's `tokenidx:{userId}:{hash}` is put next, with the same TTL as its
+ * `token:{hash}`, and an index failure throws before that token exists, so
+ * revoke-all can list every token this mint writes. Only then are `auth:` (put
+ * exactly once, new token appended) and the new `token:{hash}` put together.
+ * `secretAt` replaces the carried-forward `knownAuth.secretAt` (PIN/pattern only).
  */
 export async function mintAuthToken(
   kv: KVNamespace,
@@ -212,39 +193,14 @@ export async function mintAuthToken(
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   const expiresAt = now + TOKEN_TTL_SECONDS * 1000;
-  const [hash, migration] = await Promise.all([
-    hashAuthToken(token),
-    buildLiveLegacyMigration(kv, userId, knownAuth?.legacyToken, now),
-  ]);
+  const hash = await hashAuthToken(token);
 
-  const previous = [
-    ...(knownAuth?.tokens ?? []),
-    ...(migration ? [migration.entry] : []),
-  ];
-  const { kept, evicted } = await evictForNewToken(
-    kv,
-    userId,
-    previous,
-    migration?.entry ?? null,
-  );
+  const previous = knownAuth?.tokens ?? [];
+  const { kept, evicted } = await evictForNewToken(kv, userId, previous);
 
   await Promise.all(evicted.map((key) => deleteAuthTokenKey(kv, key)));
   await deleteIndexKeys(kv, userId, evicted);
 
-  if (migration) {
-    await putAuthTokenIndex(
-      kv,
-      userId,
-      migration.entry.hash,
-      TOKEN_TTL_SECONDS,
-    );
-    await putAuthTokenRecord(
-      kv,
-      migration.entry.hash,
-      migration.record,
-      TOKEN_TTL_SECONDS,
-    );
-  }
   await putAuthTokenIndex(kv, userId, hash, TOKEN_TTL_SECONDS);
   await Promise.all([
     putAuthRecord(kv, userId, {
@@ -258,7 +214,6 @@ export async function mintAuthToken(
       TOKEN_TTL_SECONDS,
     ),
   ]);
-  if (migration) await deleteMigratedPlaintextKey(kv, migration.plaintext);
 
   return { token, expiresAt };
 }
@@ -277,11 +232,10 @@ async function listIndexHashesOrNone(
 }
 
 /**
- * Delete every `token:` key of the account — each hash `auth` lists, a legacy
- * plaintext token AND its hash (covering a migration whose `auth:` put never
- * landed), `alsoKeys` — the presented bearer's hash AND its plaintext (a pre-#425
- * key, for an `auth:` gap) — and every hash its `tokenidx:{userId}:` keys name,
- * which reaches a token a racing mint left off the list (#431); deduplicated,
+ * Delete every `token:` key of the account — each hash `auth` lists, `alsoKeys`
+ * (the presented bearer's hash, for an `auth:` gap) and every hash its
+ * `tokenidx:{userId}:` keys name, which reaches a token a racing mint left off
+ * the list (#431); deduplicated,
  * deleting an absent key is a no-op. The index is listed FIRST (so a following
  * mint's new index is never in it); a list failure is logged
  * (`AUTH_TOKEN_INDEX_LIST_FAILED`) and the known set is still deleted — revoke-all
@@ -303,10 +257,6 @@ export async function revokeAuthTokenKeys(
   if (capped)
     console.error("AUTH_TOKEN_INDEX_CAPPED", { listed: indexed.length });
   const keys = new Set<string>((auth?.tokens ?? []).map((e) => e.hash));
-  if (typeof auth?.legacyToken === "string") {
-    keys.add(auth.legacyToken);
-    keys.add(await hashAuthToken(auth.legacyToken));
-  }
   for (const key of alsoKeys) if (typeof key === "string") keys.add(key);
   for (const hash of indexed) keys.add(hash);
   await Promise.all([...keys].map((key) => deleteAuthTokenKey(kv, key)));

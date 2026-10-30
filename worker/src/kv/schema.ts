@@ -120,7 +120,7 @@ export const kvKeys = {
   member: (userId: string) => `member:${userId}`,
   kicked: (familyId: string, userId: string) => `kicked:${familyId}:${userId}`,
   auth: (userId: string) => `auth:${userId}`,
-  // `tokenHash` = `hashAuthToken(token)`; a pre-#425 key's tail is the plaintext token (read-only fallback).
+  // `tokenHash` = `hashAuthToken(token)`.
   authToken: (tokenHash: string) => `token:${tokenHash}`,
   // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
   authTokenIndex: (userId: string, tokenHash: string) =>
@@ -400,7 +400,7 @@ export const MAX_FAMILY_PREF_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
 /** Value of `token:{hash}` (#425), where hash = `hashAuthToken(token)`; the token itself is never stored. */
 export interface AuthTokenRecord {
   userId: string;
-  /** ISO time of the mint (or of a legacy token's migration); the absolute cap counts from here. */
+  /** ISO time of the mint; the absolute cap counts from here. */
   createdAt: string;
   /** Epoch ms matching this put's `expirationTtl`; refresh skips the write when its target is within an hour. */
   expiresAt: number;
@@ -422,11 +422,7 @@ export interface StoredAuthRecord {
 }
 
 /** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `services/authRecord.ts`). */
-export interface AuthRecord extends StoredAuthRecord {
-  /** The plaintext token of a pre-#425 record (`{ token, createdAt, secretAt? }`); in memory only — never
-   *  written back (`putAuthRecord` rebuilds its value). Migrated by the next mint or refresh, deleted by a revoke. */
-  legacyToken?: string;
-}
+export type AuthRecord = StoredAuthRecord;
 
 /** Token TTL: 90 days in seconds — the sliding lifetime of `token:{hash}`, renewed by refresh. */
 export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
@@ -449,8 +445,8 @@ export const QR_TOKEN_TTL_SECONDS = 5 * 60;
 export interface QrTokenRecord {
   userId: string;
   /** `hashAuthToken` of the token that minted it, equal to its `hash` in the `auth:` list (#425). OPTIONAL
-   *  (added after release): absent, an older `qr:`-salted value, or a still-plaintext minting token (empty
-   *  list) matches no entry ⇒ never bypasses verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
+   *  (added after release): absent, or an older `qr:`-salted value, matches no entry ⇒ never bypasses
+   *  verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
   tokenHash?: string;
 }
 

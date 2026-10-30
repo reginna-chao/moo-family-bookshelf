@@ -1118,11 +1118,10 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     deleteVerifyRecord(c.env.KV, userId),
     deleteOtpRecord(c.env.KV, userId),
     deleteMemberFamilyId(c.env.KV, userId),
-    // Every device's token from the `auth:` record read above, plus the presented hash AND
-    // plaintext, which cover an `auth:` gap (#425 transition).
+    // Every device's token from the `auth:` record read above, plus the presented hash, which
+    // covers an `auth:` gap.
     revokeAllAuthTokens(c.env.KV, userId, presented.auth, [
       presented.presentedHash,
-      presentedToken,
     ]),
     ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),
   ]);

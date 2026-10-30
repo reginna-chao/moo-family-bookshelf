@@ -1,5 +1,5 @@
 /** Shared auth-token seeding for tests — the rationale (hashed `token:` key, token list,
- *  `kvKeys`, no TTL, one-half seeds, legacy shape) is in `seedAuthToken`'s JSDoc. */
+ *  `kvKeys`, no TTL, one-half seeds) is in `seedAuthToken`'s JSDoc. */
 
 import { expect } from "vitest";
 import {
@@ -76,8 +76,7 @@ export interface SeedAuthTokenOptions {
  *
  * Tests that deliberately seed only ONE half (only `token:{hash}`, or an
  * `auth:` record with no matching token key) must keep doing that inline —
- * that asymmetry is the thing under test, not a case for this helper. The
- * pre-#425 plaintext shape is `seedLegacyAuthToken`.
+ * that asymmetry is the thing under test, not a case for this helper.
  */
 export async function seedAuthToken(
   kv: KVNamespace,
@@ -200,27 +199,4 @@ export async function mintTestToken(
   userId: string,
 ): Promise<string> {
   return (await mintAuthToken(kv, userId, null)).token;
-}
-
-/**
- * Seed the PRE-#425 plaintext shape that the transition fallback still accepts:
- * `token:{token}` → userId (bare text) and `auth:{userId}` →
- * `{ token, createdAt, secretAt? }`. Production never writes this shape any
- * more; it is migrated by the account's next refresh or mint. No TTL, like
- * `seedAuthToken`. Returns the token.
- */
-export async function seedLegacyAuthToken(
-  kv: KVNamespace,
-  userId: string,
-  token: string,
-  secretAt?: number,
-): Promise<string> {
-  const record = {
-    token,
-    createdAt: new Date().toISOString(),
-    ...(secretAt !== undefined && { secretAt }),
-  };
-  await kv.put(kvKeys.authToken(token), userId);
-  await kv.put(kvKeys.auth(userId), JSON.stringify(record));
-  return token;
 }

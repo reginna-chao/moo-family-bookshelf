@@ -363,8 +363,6 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.otp(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
-        // The presented bearer's pre-#425 plaintext key (a no-op delete for a hashed token).
-        `delete ${kvKeys.authToken(memberToken)}`,
       ]),
     );
     expectRevokeIndexOrder(trail, USER2);

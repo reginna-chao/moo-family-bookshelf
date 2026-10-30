@@ -1,57 +1,21 @@
-/** Auth-token renewal for `POST /api/auth/refresh` (#425): slide the presented token's TTL, migrate a
- *  pre-#425 one in place, or mint anew in a TTL gap. See docs/architecture.md → PWA 登入驗證機制. */
+/** Auth-token renewal for `POST /api/auth/refresh` (#425): slide the presented token's TTL, or mint anew in a TTL
+ *  gap. See docs/architecture.md → PWA 登入驗證機制. */
 import {
   KV_MIN_TTL_SECONDS,
   TOKEN_MAX_AGE_SECONDS,
   TOKEN_RENEW_SKIP_WINDOW_MS,
   TOKEN_TTL_SECONDS,
-  type AuthRecord,
   type AuthTokenEntry,
 } from "../kv/schema";
 import {
   getAuthTokenRecord,
-  putAuthRecord,
   putAuthTokenIndex,
   putAuthTokenRecord,
 } from "../kv/auth";
 import { getVerifyRecord } from "../kv/verify";
 import { timingSafeEqual } from "../utils/crypto";
-import { buildLiveLegacyMigration, readPresentedAuth } from "./authRecord";
-import {
-  deleteMigratedPlaintextKey,
-  mintAuthToken,
-  type IssuedToken,
-} from "./authTokens";
-
-/** Refresh's one-time move of a live pre-#425 token into the list (`null` when dead): `tokenidx:`, `token:{hash}`, then
- *  `auth:` (a throw stops the rest), then a fail-open delete of the inert `token:{plaintext}` — docs/architecture.md → PWA 登入驗證機制. */
-async function migratePresentedLegacyToken(
-  kv: KVNamespace,
-  userId: string,
-  auth: AuthRecord,
-  legacyToken: string,
-): Promise<IssuedToken | null> {
-  const migration = await buildLiveLegacyMigration(
-    kv,
-    userId,
-    legacyToken,
-    Date.now(),
-  );
-  if (migration === null) return null;
-  await putAuthTokenIndex(kv, userId, migration.entry.hash, TOKEN_TTL_SECONDS);
-  await putAuthTokenRecord(
-    kv,
-    migration.entry.hash,
-    migration.record,
-    TOKEN_TTL_SECONDS,
-  );
-  await putAuthRecord(kv, userId, {
-    tokens: [migration.entry],
-    secretAt: auth.secretAt,
-  });
-  await deleteMigratedPlaintextKey(kv, migration.plaintext);
-  return { token: legacyToken, expiresAt: migration.record.expiresAt };
-}
+import { readPresentedAuth } from "./authRecord";
+import { mintAuthToken, type IssuedToken } from "./authTokens";
 
 /** Sliding 90 days, capped 180 days after `createdAt` — except on a `code` account (one extra read, cap only). */
 async function renewalTarget(
@@ -102,10 +66,9 @@ async function slideListedToken(
 /**
  * Refresh (#425): renews only the PRESENTED token. `null` (→ 401 REFRESH_FAILED)
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
- * past the 180-day cap (PIN / pattern / none accounts). A pre-#425 token is migrated
- * in place (same string back) while its plaintext key is live, else `null`; a TTL gap
- * (no record, empty list) mints a new token. Every path that writes `token:{hash}`
- * puts that token's `tokenidx:` key first, with the same TTL (#431).
+ * past the 180-day cap (PIN / pattern / none accounts). A TTL gap (no record, empty
+ * list) mints a new token. Every path that writes `token:{hash}` puts that token's
+ * `tokenidx:` key first, with the same TTL (#431).
  */
 export async function renewPresentedAuthToken(
   kv: KVNamespace,
@@ -118,9 +81,6 @@ export async function renewPresentedAuthToken(
     presentedToken,
   );
   if (!current || presentedHash === null) return null;
-  if (auth?.legacyToken !== undefined) {
-    return migratePresentedLegacyToken(kv, userId, auth, auth.legacyToken);
-  }
   if (auth === null || auth.tokens.length === 0) {
     return mintAuthToken(kv, userId, auth);
   }

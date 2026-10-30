@@ -4,7 +4,6 @@ import { watchKvOps } from "../helpers/kvOps";
 import {
   expectRevokeIndexOrder,
   seedAuthToken,
-  seedLegacyAuthToken,
   tokenOwner,
 } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
@@ -23,7 +22,6 @@ import {
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,
   TOKEN_TTL_SECONDS,
-  type StoredAuthRecord,
 } from "../../src/kv/schema";
 import { hashAuthToken } from "../../src/utils/crypto";
 
@@ -37,8 +35,8 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *
  * Write rules pinned here (each guard had a one-shot mutation check when it was
  * written — see the run report):
- * - Index BEFORE token: every `token:{hash}` put (new token, a mint's legacy
- *   migration, refresh's migration, a slide) is preceded by its index put with
+ * - Index BEFORE token: every `token:{hash}` put (a new token, a refresh slide)
+ *   is preceded by its index put with
  *   the same TTL, and an index put that throws stops the write before that
  *   `token:` (and `auth:`) exists — so no token ever lacks its index.
  * - Token deletes BEFORE index deletes: a revoke whose `token:` delete throws
@@ -211,40 +209,6 @@ describe("mintAuthToken — tokenidx index", () => {
     expect(await kv.get(kvKeys.auth(USER1))).toBeNull();
     expect(await keysUnder(kvKeys.authToken(""))).toEqual([]);
     expect(await keysUnder(INDEX_PREFIX)).toEqual([]);
-  });
-
-  it("indexes a migrated legacy token with its token: TTL, before its token: put", async () => {
-    const legacy = "c".repeat(64);
-    await seedLegacyAuthToken(kv, USER1, legacy);
-    const ops = watchKvOps(kv);
-
-    await mintAuthToken(kv, USER1, await readAuthRecord(kv, USER1));
-
-    const legacyHash = await hashOf(legacy);
-    const trail = ops.writeTrail();
-    expect(trail.indexOf(`put ${indexKey(legacyHash)}`)).toBeLessThan(
-      trail.indexOf(`put ${kvKeys.authToken(legacyHash)}`),
-    );
-    expect(getPutTtl(kv, indexKey(legacyHash))).toBe(
-      getPutTtl(kv, kvKeys.authToken(legacyHash)),
-    );
-    expect(getPutTtl(kv, indexKey(legacyHash))).toBe(TOKEN_TTL_SECONDS);
-  });
-
-  it("leaves the legacy record and plaintext key alone when the migration's index put throws", async () => {
-    const legacy = "c".repeat(64);
-    await seedLegacyAuthToken(kv, USER1, legacy);
-    const before = await kv.get<StoredAuthRecord>(kvKeys.auth(USER1), "json");
-    const legacyHash = await hashOf(legacy);
-    failWrites("put", (key) => key === indexKey(legacyHash));
-
-    await expect(
-      mintAuthToken(kv, USER1, await readAuthRecord(kv, USER1)),
-    ).rejects.toThrow("KV down");
-
-    expect(await kv.get(kvKeys.authToken(legacyHash))).toBeNull();
-    expect(await kv.get(kvKeys.authToken(legacy))).toBe(USER1);
-    expect(await kv.get(kvKeys.auth(USER1), "json")).toEqual(before);
   });
 
   it("deletes an evicted token's index after its token: key", async () => {
@@ -699,35 +663,5 @@ describe("renewPresentedAuthToken — the index put comes first", () => {
 
     expect(puts.mock.calls.map((c) => String(c[0]))).toEqual([indexKey(hash)]);
     expect(await kv.get(kvKeys.authToken(hash))).toBe(before);
-  });
-
-  it("fails refresh's legacy migration without a token:{hash} when its index put throws", async () => {
-    const legacy = "c".repeat(64);
-    await seedLegacyAuthToken(kv, USER1, legacy);
-    const before = await kv.get(kvKeys.auth(USER1));
-    const hash = await hashOf(legacy);
-    failWrites("put", (key) => key.startsWith(INDEX_PREFIX));
-    const puts = kv.put as unknown as { mock: { calls: unknown[][] } };
-
-    await expect(renewPresentedAuthToken(kv, USER1, legacy)).rejects.toThrow(
-      "KV down",
-    );
-
-    expect(puts.mock.calls.map((c) => String(c[0]))).toEqual([indexKey(hash)]);
-    expect(await kv.get(kvKeys.authToken(hash))).toBeNull();
-    expect(await kv.get(kvKeys.auth(USER1))).toBe(before);
-    expect(await kv.get(kvKeys.authToken(legacy))).toBe(USER1);
-  });
-
-  it("indexes refresh's legacy migration with the token's TTL (positive companion)", async () => {
-    const legacy = "c".repeat(64);
-    await seedLegacyAuthToken(kv, USER1, legacy);
-    const hash = await hashOf(legacy);
-
-    await renewPresentedAuthToken(kv, USER1, legacy);
-
-    expect(await kv.get(indexKey(hash))).toBe("1");
-    expect(getPutTtl(kv, indexKey(hash))).toBe(TOKEN_TTL_SECONDS);
-    expect(getPutTtl(kv, kvKeys.authToken(hash))).toBe(TOKEN_TTL_SECONDS);
   });
 });
