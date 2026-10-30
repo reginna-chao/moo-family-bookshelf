@@ -51,6 +51,7 @@ Follow the loaded reference's full process. You are dispatched **non-interactive
 Key cross-cutting rules:
 
 - **Pencil mockups**: `.pen` files only under `design/{surface}/{feature}/`; never export PNG/JPG there; remind the user to save (Ctrl+S) after. Never `Read`/`Grep` `.pen` files — only `mcp__pencil__*` tools.
+- **Pencil unreachable** (the MCP tools fail because neither the Pencil app nor its editor host is open): do not return only a spec table and an empty `.pen`. Produce one self-contained HTML comparison sheet in the scratchpad instead — real px sizes, every option × every state side by side, each cell labelled with its spec — and say in Integration Notes that the invoker serves it from a local static server (`127.0.0.1`; the built-in browser refuses `file://`).
 - **SVG assets**: follow the reference's sizing/spec tables exactly (adaptive icon safe zones, OG 1200×630, 24dp icon grid, etc.).
 - **Do not commit** design files without the user's go-ahead — designs iterate.
 

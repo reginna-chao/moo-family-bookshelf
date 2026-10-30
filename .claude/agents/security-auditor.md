@@ -92,6 +92,8 @@ Checklist scanners miss logic bugs — but this is where MooFamily's real securi
 - **Public share token scope** (`public:{share_token}`): is a token scoped to a single shelf, does its TTL actually expire the KV entry, and can a revoked token still resolve?
 - **Race / non-atomic state**: join/leave, save, or public-token create that check-then-write non-atomically on KV — can concurrent calls double-add, resurrect a removed member, or lose a save?
 - **Membership-gate bypass**: can any family feature be reached without passing the family-membership gate the design requires?
+- **KV freshness matrix**: for every key the diff reads or writes, enumerate the fresh / stale combinations across keys in ONE pass and attach the table — never report only the next variant and leave the rest to a re-scan.
+- **Manual procedures**: an operator flow in `worker/DEPLOY.md` or `docs/` (rescue, reset, manual KV write) proves the requester's identity BEFORE any write it performs.
 - **Book-list step stacking**: a change to when a book is shared, dropped or removed is checked against every other step of the sync pipeline (`docs/architecture.md` → 書單同步: id change, legacy id, prune, auto-share) and the load path. Does stacking it on an existing step share a book the user never opted into, or lose a not-shared setting? A book one step drops is invisible to every later id / title match.
 
 ## Output
@@ -131,7 +133,8 @@ End with a one-line **Ruled out** note per dimension (candidates you checked and
 ## Rules
 
 - Never modify code — read-only audit.
-- Attack probes and PoC scripts live in the scratchpad, never in the repo — `git status` must be clean when your audit ends.
+- Attack probes and PoC scripts live in the scratchpad, never in the repo — `git status` must be clean when your audit ends. Shell output redirects (`>`, `>>`, `tee`) go only to an absolute scratchpad path.
+- A gap you would call narrow, "the same as an existing pattern", or already accepted still carries its `.claude/rules/change-triage.md` tier and whether a failing test can be written. One a test can catch is a P1 finding — an existing pattern with the same gap goes to that file's disposition, it does not excuse this one. Restate each accepted residual from the attacker's view (who, holding what, gains what).
 - Self-verify a finding's premises: confirm the attacker can actually obtain each prerequisite (identifier, token, state) via some public path before reporting, and label remediation advice that rests on an unverified assumption as a hypothesis, not a conclusion.
 - Audit the trust anchor, not just the new logic: for every new guard, check that the record/counter/token it trusts has a reliable write path — who can write it, CAS or last-write-wins, staleness under KV propagation.
 - CRITICAL/WARNING require a concrete attack path (Core Principle 1). If you cannot construct one after self-validation, it is INFO or a hardening note — do not inflate it.
