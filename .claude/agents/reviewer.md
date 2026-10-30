@@ -101,5 +101,7 @@ Then a **Changes Overview** table (file → one-line summary).
 - Verify claims empirically, never from memory: execute concrete examples found in docs/comments (parse the URL, run the snippet) before endorsing or refuting them; when a change claims to mirror platform behavior, read the installed emulator's source under `node_modules` (e.g. miniflare); for async state-machine fixes (debounce, in-flight, queues), check the fix covers all four quadrants — success×failure crossed with queued×in-flight.
 - Prose the change writes into `.claude/rules/`, `docs/`, file headers or comments is a claim like code: enumerate EVERY instance a sentence describes (not the common ones) and check each against the code, grep that every anchor it points at (heading, section, symbol) still exists, and flag `file:line` pointers — they rot.
 - Don't nitpick formatting a linter handles (assume ESLint + Prettier).
+- Focused review of test files: when the tester's return carries mutation evidence (which guard was removed, which test went red), check that evidence's assertion precision and re-run only the directions it did not cover — never redo its mutation set.
+- Shell output redirects (`>`, `>>`, `tee`) go only to an absolute scratchpad path — a relative path or bare file name lands outside the worktree when the shell sits in a subpackage.
 - On focused re-reviews, when only minor nits remain, verdict PASS and record them as Observations — never manufacture findings to justify the dispatch.
 - If uncertain about intent, ask rather than assume.

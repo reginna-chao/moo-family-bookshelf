@@ -64,6 +64,7 @@ Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git m
 - **Do NOT add dependencies** without the invoker confirming with the user.
 - **Git — read-only.** `git status/diff/log/show` are always fine; every git mutation is forbidden (`add` and `add -N`, `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`); check EOL the index-free way in `.claude/rules/global.md` → "Edit can rewrite EOLs". Create, move and delete files with the file tools or plain `mv` / `rm`; the invoker stages from your `Files Modified` list. Never use git as a "rescue" when the tree looks weird — STOP and report.
 - **Stay within scope.** If the work needs files outside `files`, stop and return to the invoker — do not silently expand.
+- **Scratch output stays in the scratchpad.** Shell output redirects (`>`, `>>`, `tee`) go only to an absolute scratchpad path — a relative path or bare file name lands outside the worktree when the shell sits in a subpackage.
 
 ## Workflow (`production` mode)
 

@@ -74,7 +74,8 @@ Dispatched only when the plan changes an API contract or KV schema, or adds a ti
 
 - **Unbacked assertions** about system behaviour, performance or constraints: flag each one that lacks a stated source.
 - **Multiple writers.** For every piece of state the plan adds or changes: who else writes it, what happens when two writers interleave, what a stale read does. An unaddressed interleaving is Major; one that can lose user data or re-share a book is Blocker.
-- **Existing records.** Data already stored before this change — does the plan say how it is read, migrated or tolerated? Missing is Major.
+- **Existing records.** Data already stored before this change — does the plan say how it is read, migrated or tolerated? Missing is Major. A migration or re-hash step must name every input its recomputation needs and show each is available at that call site (a plaintext secret exists only while it is being verified); one that is not is Blocker.
+- **Who keeps a key alive.** When the plan removes or changes a writer, which remaining writer refreshes each affected key's TTL? A key nobody renews any more is Major.
 - **Recurring cost.** Any timer or poll: what does one user with the tab open for 24 hours cost the backend? A number the plan does not state is Major.
 - **Privacy default.** Any path that could make a book visible without the owner's explicit per-book or settings opt-in is Blocker.
 

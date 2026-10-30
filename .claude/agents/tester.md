@@ -66,6 +66,7 @@ These files are authoritative.
 - **No new E2E scenarios.** You MAY fix existing E2E tests broken by production changes (updated imports, renamed exports, changed selectors), but do not author new E2E flows.
 - **Mutation checks never edit the shared production file in place** — follow `.claude/rules/test.md` → "Guard tests must prove they can fail". When a check would need a production edit, return the mutation steps and the expected-red test under Open Questions so the invoker runs it.
 - **Git — read-only** (`status` / `diff` / `log` / `show`); no `add` (`add -N` included), `rm`, `mv`, `commit`, `push`, `reset`, `checkout`, `stash`. Check EOL the index-free way in `.claude/rules/global.md` → "Edit can rewrite EOLs". `Test Files` in your return is the invoker's staging list — every test path you created, changed or deleted.
+- **Scratch output stays in the scratchpad.** Shell output redirects (`>`, `>>`, `tee`) go only to an absolute scratchpad path — a relative path or bare file name lands outside the worktree when the shell sits in a subpackage.
 - **Detect a moving target.** Record `git diff --cached | git hash-object --stdin` when you start and again before you report; if they differ, production changed under you — say so at the top of your return and name the files.
 
 ## Return Summary
