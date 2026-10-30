@@ -12,7 +12,7 @@ import {
   type UserBooksRecord,
   type BookEntry,
 } from "../../src/kv/schema";
-import { generateAuthToken } from "../../src/middleware/auth";
+import { mintTestToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
 
 /**
@@ -146,7 +146,7 @@ async function seedFamily(
 ): Promise<{ familyId: string; token: string }> {
   const familyId = "abcd-1234";
   const owner = members[0];
-  const token = await generateAuthToken(kv, owner.userId);
+  const token = await mintTestToken(kv, owner.userId);
   await kv.put(
     kvKeys.family(familyId),
     JSON.stringify({

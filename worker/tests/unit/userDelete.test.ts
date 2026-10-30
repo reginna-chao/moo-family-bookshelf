@@ -9,7 +9,7 @@ import {
   type OtpRecord,
 } from "../../src/kv/schema";
 import { OWNER1, USER1, USER2, NOBODY } from "../helpers/ids";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { hashSecret } from "../../src/utils/crypto";
 
 /** A valid 64-hex id for the "not in any family" solo-user scenario. */
@@ -138,7 +138,7 @@ describe("DELETE /api/user/:id", () => {
     // Verify KV cleanup
     expect(await kv.get(kvKeys.user(SOLO_USER))).toBeNull();
     expect(await kv.get(kvKeys.auth(SOLO_USER))).toBeNull();
-    expect(await kv.get(kvKeys.authToken(tokenHex))).toBeNull();
+    expect(await tokenOwner(kv, tokenHex)).toBeNull();
   });
 
   it("should successfully delete account when user is in family but not owner", async () => {
@@ -317,6 +317,6 @@ describe("DELETE /api/user/:id", () => {
     expect(await kv.get(kvKeys.otp(USER2))).toBeNull();
 
     // Verify the auth token reverse-lookup is also deleted
-    // (We can't easily check without knowing the token, but deleteAuthToken handles it)
+    // (We can't easily check without knowing the token, but revokeAllAuthTokens handles it)
   });
 });

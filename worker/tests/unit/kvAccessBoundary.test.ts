@@ -108,6 +108,7 @@ import * as usersDal from "../../src/kv/users";
 import * as publicShelvesDal from "../../src/kv/publicShelves";
 import * as verifyDal from "../../src/kv/verify";
 import * as newBookDefaultDal from "../../src/kv/newBookDefault";
+import * as authDal from "../../src/kv/auth";
 import { writeBorrowPointer } from "../../src/services/borrowIndex";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -331,6 +332,19 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
     "src/kv/newBookDefault.ts",
     newBookDefaultDal,
     ["readNewBookDefault", "putNewBookDefault", "deleteNewBookDefault"],
+  ],
+  [
+    "src/kv/auth.ts",
+    authDal,
+    [
+      "getRawAuthRecord",
+      "putAuthRecord",
+      "deleteAuthRecord",
+      "getAuthTokenRecord",
+      "getLegacyAuthTokenUserId",
+      "putAuthTokenRecord",
+      "deleteAuthTokenKey",
+    ],
   ],
 ];
 

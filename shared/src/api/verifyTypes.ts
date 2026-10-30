@@ -26,8 +26,9 @@ export interface DeleteAccountBody {
   currentSecret?: string;
 }
 
-/** `PUT /api/user/:id/verify` result. A new `pin` / `pattern` / `code` revokes the account's
- *  shared auth token and issues `authToken` + `expiresAt`; `none` issues neither. */
+/** `PUT /api/user/:id/verify` result. A new `pin` / `pattern` revokes every auth token of the
+ *  account (one per device, #425) and issues `authToken` + `expiresAt` for this device only;
+ *  `code` and `none` issue neither. */
 export interface SetVerifyResult {
   method: VerifyMethod;
   prompted: BoolFlag;

@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { seedAuthToken } from "../helpers/auth";
+import { authTokenKey, seedAuthToken } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
 import { USER1 } from "../helpers/ids";
@@ -211,7 +211,10 @@ describe("PUT /api/user/:id/books — malformed expectedLastUpdated", () => {
     });
 
     await expectError(res, 400, "INVALID_FIELDS");
-    expect(ops.getKeys()).toEqual([kvKeys.authToken(token), PUT_BOOKS_COUNTER]);
+    expect(ops.getKeys()).toEqual([
+      await authTokenKey(token),
+      PUT_BOOKS_COUNTER,
+    ]);
     expect(ops.writeTrail()).toEqual([`put ${PUT_BOOKS_COUNTER}`]);
   });
 });
@@ -280,7 +283,7 @@ describe("PUT /api/user/:id/books — precondition mismatch", () => {
     await expectError(res, 409, "BOOKS_CONFLICT");
     // The handler's reads still happen; only the counter charge is written.
     expect(ops.getKeys()).toEqual([
-      kvKeys.authToken(token),
+      await authTokenKey(token),
       PUT_BOOKS_COUNTER,
       kvKeys.user(USER1),
       kvKeys.member(USER1),

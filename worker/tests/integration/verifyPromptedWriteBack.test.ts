@@ -7,9 +7,10 @@ import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
 import {
   kvKeys,
-  type AuthRecord,
+  type StoredAuthRecord,
   type VerifyRecord,
 } from "../../src/kv/schema";
+import { hashAuthToken } from "../../src/utils/crypto";
 import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
 import { VERIFY_WRITE_LIMIT } from "../../src/routes/verify";
 
@@ -19,8 +20,8 @@ import { VERIFY_WRITE_LIMIT } from "../../src/routes/verify";
  * The handler charges the shared `verify-write` ceiling, then reads
  * `verify:{userId}` and `auth:{userId}` together and decides:
  *
- * - Stale bearer: `token:{T}` still maps to the user (a colo that missed a
- *   rotation's delete) while `auth:{userId}` names another token. Bearer
+ * - Stale bearer: `token:{hash(T)}` still maps to the user (a colo that missed a
+ *   rotation's delete) while `auth:{userId}` lists only another token. Bearer
  *   currency says T is NOT current → `401 UNAUTHORIZED`, nothing written past
  *   the counter slot it already spent.
  * - Already prompted: `prompted === 1` → `200 { method, prompted: 1 }` and no
@@ -88,8 +89,17 @@ async function writeCounterPut(): Promise<string> {
   return `put ${key}`;
 }
 
-/** Overwrite `auth:{userId}` while `token:{TOKEN}` stays — the bearer pair. */
-async function seedAuthRecord(record: AuthRecord): Promise<void> {
+/** Overwrite `auth:{userId}` with a list of `token` alone while `token:{hash(TOKEN)}` stays. */
+async function seedAuthRecord(token: string, secretAt?: number): Promise<void> {
+  const record: StoredAuthRecord = {
+    tokens: [
+      {
+        hash: await hashAuthToken(token),
+        createdAt: new Date(PINNED_NOW).toISOString(),
+      },
+    ],
+    ...(secretAt !== undefined && { secretAt }),
+  };
   await kv.put(kvKeys.auth(USER_ID), JSON.stringify(record));
 }
 
@@ -113,7 +123,7 @@ afterEach(() => {
 
 describe("POST /api/user/:id/verify/prompted — stale bearer", () => {
   it("answers 401 for a bearer auth: no longer names, writing only the counter slot", async () => {
-    await seedAuthRecord({ token: OTHER_TOKEN, createdAt: "x" });
+    await seedAuthRecord(OTHER_TOKEN);
     const verifyRaw = await seedVerify(PIN_RECORD);
     const ops = watchKvOps(kv);
 
@@ -157,11 +167,7 @@ describe("POST /api/user/:id/verify/prompted — no write-back", () => {
   ])(
     "keeps the stored PIN record byte-identical when auth.secretAt is newer than $label",
     async ({ record }) => {
-      await seedAuthRecord({
-        token: TOKEN,
-        createdAt: "x",
-        secretAt: ROTATED_AT,
-      });
+      await seedAuthRecord(TOKEN, ROTATED_AT);
       const verifyRaw = await seedVerify(record);
       const ops = watchKvOps(kv);
 
@@ -177,11 +183,7 @@ describe("POST /api/user/:id/verify/prompted — no write-back", () => {
   );
 
   it("writes no default record when auth.secretAt is set and the verify read is null", async () => {
-    await seedAuthRecord({
-      token: TOKEN,
-      createdAt: "x",
-      secretAt: ROTATED_AT,
-    });
+    await seedAuthRecord(TOKEN, ROTATED_AT);
     const ops = watchKvOps(kv);
 
     const res = await postPrompted(TOKEN);
@@ -205,13 +207,13 @@ describe("POST /api/user/:id/verify/prompted — write proceeds", () => {
     },
     {
       label: "a matching pair without secretAt",
-      auth: { token: TOKEN, createdAt: "x" },
+      auth: { secretAt: undefined },
       existing: PIN_RECORD,
       stored: { ...PIN_RECORD, prompted: 1 },
     },
     {
       label: "secretAt equal to the record's secretUpdatedAt",
-      auth: { token: TOKEN, createdAt: "x", secretAt: ROTATED_AT },
+      auth: { secretAt: ROTATED_AT },
       existing: { ...PIN_RECORD, secretUpdatedAt: ROTATED_AT },
       stored: { ...PIN_RECORD, secretUpdatedAt: ROTATED_AT, prompted: 1 },
     },
@@ -219,7 +221,7 @@ describe("POST /api/user/:id/verify/prompted — write proceeds", () => {
     "writes the record with prompted 1 for $label",
     async ({ auth, existing, stored }) => {
       if (auth === null) await kv.delete(kvKeys.auth(USER_ID));
-      else await seedAuthRecord(auth);
+      else await seedAuthRecord(TOKEN, auth.secretAt);
       if (existing !== null) await seedVerify(existing);
       const ops = watchKvOps(kv);
 

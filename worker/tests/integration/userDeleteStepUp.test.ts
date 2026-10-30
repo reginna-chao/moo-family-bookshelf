@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken, tokenFor } from "../helpers/auth";
+import { seedAuthToken, tokenFor, authTokenKey } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
@@ -123,7 +123,7 @@ async function accountState(token: string): Promise<(string | null)[]> {
       kvKeys.user(USER_ID),
       kvKeys.verify(USER_ID),
       kvKeys.auth(USER_ID),
-      kvKeys.authToken(token),
+      await authTokenKey(token),
     ].map((key) => kv.get(key)),
   );
 }
@@ -213,7 +213,11 @@ describe.each(FAMILY_SHAPES)(
       const token = await setPin(PIN);
       await seed();
       const old = tokenFor(USER_ID);
-      await kv.put(kvKeys.authToken(old), USER_ID);
+      // Re-put the revoked token's own key: the middleware accepts it, the list does not name it.
+      await kv.put(
+        await authTokenKey(old),
+        JSON.stringify({ userId: USER_ID, createdAt: "", expiresAt: 0 }),
+      );
       const before = await accountState(token);
       const ops = watchKvOps(kv);
 
@@ -238,7 +242,7 @@ describe.each(FAMILY_SHAPES)(
         kvKeys.member(USER_ID),
         kvKeys.verify(USER_ID),
         kvKeys.auth(USER_ID),
-        kvKeys.authToken(token),
+        await authTokenKey(token),
       ]) {
         expect(await kv.get(key)).toBeNull();
       }

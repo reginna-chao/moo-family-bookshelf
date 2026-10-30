@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { generateAuthToken } from "../../src/middleware/auth";
+import { mintTestToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
 import {
   BoolFlag,
@@ -86,7 +86,7 @@ describe("GET /api/family/:id/bookshelf — coverUrl length ceiling", () => {
       sharedBook("over", urlOfLength(BOOK_URL_MAX_LENGTH + 1)),
       sharedBook("at", atLimit),
     ]);
-    const token = await generateAuthToken(kv, USER1);
+    const token = await mintTestToken(kv, USER1);
 
     const res = await app.request(
       `/api/family/${FAMILY_ID}/bookshelf`,

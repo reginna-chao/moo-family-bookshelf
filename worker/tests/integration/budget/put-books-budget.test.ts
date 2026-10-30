@@ -30,7 +30,7 @@
  *   "finish the job" by deleting it — see `bindingForWindow` in
  *   middleware/rateLimit.ts. The key stays on the AUTHENTICATED caller, never
  *   on a body/path target id (security-ux Invariant 6).
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `user:{userId}` (get `getUserBooksRecord`, put `putUserBooksRecord`),
  *   `member:{userId}` (`getMemberFamilyId`) and `publicshelves:{userId}`
  *   (`getPublicShelves`) — three parallel reads plus the
@@ -62,6 +62,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import {
   BoolFlag,
   kvKeys,
@@ -175,7 +176,7 @@ describe("KV budget: PUT /api/user/:id/books", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // HOURLY per-userId counter read, `peekPerUserRateLimit` — on KV by design
       // (BINDING_PERIOD_SECONDS is 60; no binding serves an hour).
       `ratelimit:user:put-books:${USER1}:${HOUR_BUCKET}`,

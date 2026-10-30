@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken } from "../helpers/auth";
+import { authTokenKey, seedAuthToken } from "../helpers/auth";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
 import {
   BoolFlag,
@@ -326,7 +326,7 @@ describe("PUT /api/user/:id/new-book-default — accepted save", () => {
     const trail = ops.writeTrail();
 
     expect(trail).toEqual([`put ${kvKeys.newBookDefault(USER1)}`]);
-    expect(readKeys).toEqual([kvKeys.authToken(token)]);
+    expect(readKeys).toEqual([await authTokenKey(token)]);
     expect(await kv.get(kvKeys.publicShelf(LIVE_TOKEN))).toBeNull();
     expect(await kv.get(kvKeys.publicShelf(LEGACY_TOKEN))).toBeNull();
     expect(await rawUser()).toBe(JSON.stringify(seeded));

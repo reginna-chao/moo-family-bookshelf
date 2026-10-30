@@ -96,7 +96,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps, type KvOpLog } from "../helpers/kvOps";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner, authTokenKey } from "../helpers/auth";
 import {
   BoolFlag,
   BorrowStatus,
@@ -795,7 +795,7 @@ describe("last listed member leaving — dissolve, never an empty list (#222)", 
 
     // The pointer names G, not this family: USER2's G session survives intact.
     expect(await kv.get(kvKeys.member(USER2))).toBe(otherFamilyId);
-    expect(await kv.get(kvKeys.authToken(otherToken))).toBe(USER2);
+    expect(await tokenOwner(kv, otherToken)).toBe(USER2);
     expect(await kv.get(kvKeys.auth(USER2))).not.toBeNull();
     expect(ops.writeTrail()).not.toContain(`delete ${kvKeys.member(USER2)}`);
     expect(ops.writeTrail()).not.toContain(`delete ${kvKeys.auth(USER2)}`);
@@ -829,7 +829,7 @@ describe("last listed member leaving — dissolve, never an empty list (#222)", 
     // `ownerId` points at USER1, who is no longer listed.
     await makeUser2LastListed(ctx, USER1);
     expect(await kv.get(kvKeys.member(USER2))).toBe(ctx.familyId);
-    expect(await kv.get(kvKeys.authToken(ctx.memberToken))).toBe(USER2);
+    expect(await tokenOwner(kv, ctx.memberToken)).toBe(USER2);
 
     const ops = watchKvOps(kv);
     const res = await request(
@@ -848,7 +848,7 @@ describe("last listed member leaving — dissolve, never an empty list (#222)", 
 
     // The pointer named THIS family, so the leaver's session is revoked.
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
-    expect(await kv.get(kvKeys.authToken(ctx.memberToken))).toBeNull();
+    expect(await tokenOwner(kv, ctx.memberToken)).toBeNull();
     expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
     expect(ops.writeTrail()).toContain(`delete ${kvKeys.member(USER2)}`);
     // Family record first, then the pointer (orphan pointer over orphan family).
@@ -884,7 +884,7 @@ describe("last listed member leaving — dissolve, never an empty list (#222)", 
     // The account teardown still ran.
     expect(await kv.get(kvKeys.user(USER2))).toBeNull();
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
-    expect(await kv.get(kvKeys.authToken(ctx.memberToken))).toBeNull();
+    expect(await tokenOwner(kv, ctx.memberToken)).toBeNull();
 
     // The old sync code answers 404, not 500.
     await expectError(
@@ -999,13 +999,16 @@ describe("owner rules need ownerId AND a listing (#222 INFO-2 / INFO-4)", () => 
       await expectError(res, 404, "MEMBER_NOT_FOUND");
       // Exactly the stray-pointer cleanup (#213 convergence): no tombstone
       // (a self-leave is never a kick), no family write, no dissolve.
-      expect(ops.writeTrail()).toEqual([
-        `delete ${kvKeys.member(USER1)}`,
-        `delete ${kvKeys.auth(USER1)}`,
-        `delete ${kvKeys.authToken(ctx.ownerToken)}`,
-      ]);
+      // The three deletes run in parallel; their entry order is not a rule.
+      expect([...ops.writeTrail()].sort()).toEqual(
+        [
+          `delete ${kvKeys.member(USER1)}`,
+          `delete ${kvKeys.auth(USER1)}`,
+          `delete ${await authTokenKey(ctx.ownerToken)}`,
+        ].sort(),
+      );
       expect(await kv.get(kvKeys.member(USER1))).toBeNull();
-      expect(await kv.get(kvKeys.authToken(ctx.ownerToken))).toBeNull();
+      expect(await tokenOwner(kv, ctx.ownerToken)).toBeNull();
       expect(await kv.get(kvKeys.kicked(ctx.familyId, USER1))).toBeNull();
       expect(await listedMemberIds(ctx.familyId)).toEqual([USER2, USER3]);
     });
@@ -1036,12 +1039,12 @@ describe("owner rules need ownerId AND a listing (#222 INFO-2 / INFO-4)", () => 
 
       // The listed member is untouched.
       expect(await kv.get(kvKeys.member(USER2))).toBe(ctx.familyId);
-      expect(await kv.get(kvKeys.authToken(ctx.memberToken))).toBe(USER2);
+      expect(await tokenOwner(kv, ctx.memberToken)).toBe(USER2);
 
       // The caller's account data is deleted as usual.
       expect(await kv.get(kvKeys.user(USER1))).toBeNull();
       expect(await kv.get(kvKeys.member(USER1))).toBeNull();
-      expect(await kv.get(kvKeys.authToken(ctx.ownerToken))).toBeNull();
+      expect(await tokenOwner(kv, ctx.ownerToken)).toBeNull();
     });
 
     it("positive companion: a LISTED non-owner's account deletion writes the shrunken list", async () => {

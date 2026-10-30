@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { seedAuthToken } from "../helpers/auth";
+import { hashAuthToken } from "../../src/utils/crypto";
 import {
   kvKeys,
   KICKED_TOMBSTONE_TTL_SECONDS,
@@ -104,6 +105,8 @@ describe("POST /api/user/:id/qr-token", () => {
     const qrToken = json.data.token;
     const stored = JSON.parse((await kv.get(`qr:${qrToken}`)) as string);
     expect(stored.userId).toBe(VALID_USER_ID);
+    // Bound to the minting token by its list hash (#425).
+    expect(stored.tokenHash).toBe(await hashAuthToken(authToken));
   });
 
   it("should return 401 without authentication", async () => {
@@ -191,6 +194,8 @@ describe("Join with QR token bypass", () => {
     expect(joinRes.status).toBe(200);
     const joinJson = (await joinRes.json()) as Json;
     expect(joinJson.data.authToken).toMatch(/^[a-f0-9]{64}$/);
+    // The redeeming device gets its own token (#425).
+    expect(joinJson.data.authToken).not.toBe(userAuthToken);
   });
 
   it("should delete qrToken after one-time use", async () => {

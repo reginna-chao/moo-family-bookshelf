@@ -35,7 +35,7 @@
  *   also answers the per-borrower PENDING ceiling
  *   (`BORROW_MAX_PENDING_PER_BORROWER`, routes/borrow.ts) — a second
  *   bound added on top of it, at no extra KV cost.
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `family:{familyId}` (routes/borrow.ts, `getFamilyRecord`) and
  *   `borrows:family:{familyId}` (get `readBorrowIndex`, put `writeBorrowIndex`) —
  *   real cost of creating the request.
@@ -96,6 +96,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import {
   BoolFlag,
   BorrowStatus,
@@ -216,7 +217,7 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // handler, `getFamilyRecord` — the family record
       kvKeys.family(FAMILY_ID),
       // handler, `isActiveMember` — both parties' pointers, for the

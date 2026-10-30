@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
 import {
+  hashAuthToken,
   hashSecret,
   hashSecretWithPepper,
   pepperFingerprint,
@@ -14,7 +15,6 @@ import {
   kvKeys,
   QR_TOKEN_TTL_SECONDS,
   VERIFY_HASH_VERSION_PEPPER,
-  type AuthRecord,
   type VerifyRecord,
 } from "../../src/kv/schema";
 import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
@@ -381,14 +381,11 @@ describe("create / join / lookup — v1 → v2 upgrade on a correct secret", () 
 
 describe("create / join / lookup — no upgrade after a stale-record pass", () => {
   async function seedAuth(secretAt: number): Promise<void> {
-    const token = "9".repeat(64);
-    const record: AuthRecord = {
-      token,
+    await seedAuthToken(kv, USER_ID, {
+      token: "9".repeat(64),
       createdAt: new Date(PINNED_NOW).toISOString(),
       secretAt,
-    };
-    await kv.put(kvKeys.authToken(token), USER_ID);
-    await kv.put(kvKeys.auth(USER_ID), JSON.stringify(record));
+    });
   }
 
   it.each(ROUTES)(
@@ -458,7 +455,7 @@ describe("paths that compare no secret never upgrade", () => {
       kvKeys.qrToken(qr),
       JSON.stringify({
         userId: USER_ID,
-        tokenHash: await hashSecret("qr:", token),
+        tokenHash: await hashAuthToken(token),
       }),
       { expirationTtl: QR_TOKEN_TTL_SECONDS },
     );
@@ -473,7 +470,10 @@ describe("paths that compare no secret never upgrade", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Json).data.authToken).toBe(token);
+    // The QR redeem mints this device its own token (#425).
+    const minted = ((await res.json()) as Json).data.authToken as string;
+    expect(minted).toMatch(/^[a-f0-9]{64}$/);
+    expect(minted).not.toBe(token);
     expect(verifyPuts(ops)).toEqual([]);
     expect(await kv.get(VERIFY_KEY)).toBe(raw);
   });
@@ -678,7 +678,7 @@ describe("step-ups never upgrade, and inherit the 503", () => {
     expect(errors.mock.calls).toEqual([["VERIFY_PEPPER_MISMATCH"]]);
     expect(ops.writeTrail()).toEqual([]);
     expect(await kv.get(VERIFY_KEY)).toBe(raw);
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
+    expect(await tokenOwner(kv, token)).toBe(USER_ID);
   });
 });
 

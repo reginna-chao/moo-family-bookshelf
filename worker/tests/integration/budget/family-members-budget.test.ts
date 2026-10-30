@@ -25,7 +25,7 @@
  *   per-IP one, and no `ratelimit:user:*` key may appear in either array. If a
  *   second binding call ever shows up, a rate limit was added to a read-only
  *   endpoint — treat that as the change to justify, not as drift to absorb.
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `member:{userId}` (routes/family.ts, `getMemberFamilyId`) and
  *   `family:{familyId}` (`getFamilyRecord`) — membership check then the record
  *   itself. Real cost, and FLAT in the member count: the response is the
@@ -48,6 +48,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import { BoolFlag, kvKeys, type FamilyRecord } from "../../../src/kv/schema";
 import { USER1, USER2 } from "../../helpers/ids";
 
@@ -125,7 +126,7 @@ describe("KV budget: GET /api/family/:id/members", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // handler, `getMemberFamilyId` / `getFamilyRecord` — no per-userId counter on this route
       kvKeys.member(USER1),
       kvKeys.family(FAMILY_ID),

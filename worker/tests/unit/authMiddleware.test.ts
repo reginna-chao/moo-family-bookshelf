@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { USER1 } from "../helpers/ids";
+import { seedAuthToken } from "../helpers/auth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -67,7 +68,7 @@ describe("Auth middleware token validation", () => {
     },
   ])("should return 401 for $label", async ({ header }) => {
     // The 64-char token is seeded, so only the header's shape can refuse these.
-    await kv.put(`token:${"a".repeat(64)}`, USER1);
+    await seedAuthToken(kv, USER1, { token: "a".repeat(64) });
     const res = await requestWithRawAuth(
       "GET",
       `/api/user/${USER1}/books`,
@@ -80,7 +81,7 @@ describe("Auth middleware token validation", () => {
   });
 
   it("should admit an exact 64-char lowercase hex token that is in KV", async () => {
-    await kv.put(`token:${"a".repeat(64)}`, USER1);
+    await seedAuthToken(kv, USER1, { token: "a".repeat(64) });
     const res = await request(
       "GET",
       `/api/user/${USER1}/books`,

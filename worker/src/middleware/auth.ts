@@ -1,10 +1,30 @@
 import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { kvKeys, type AuthRecord, TOKEN_TTL_SECONDS } from "../kv/schema";
+import {
+  KV_MIN_TTL_SECONDS,
+  MAX_AUTH_TOKENS_PER_USER,
+  TOKEN_MAX_AGE_SECONDS,
+  TOKEN_RENEW_SKIP_WINDOW_MS,
+  TOKEN_TTL_SECONDS,
+  type AuthRecord,
+  type AuthTokenEntry,
+  type AuthTokenRecord,
+} from "../kv/schema";
+import {
+  deleteAuthRecord,
+  deleteAuthTokenKey,
+  getAuthTokenRecord,
+  getLegacyAuthTokenUserId,
+  getRawAuthRecord,
+  putAuthRecord,
+  putAuthTokenRecord,
+  type RawAuthRecord,
+} from "../kv/auth";
+import { getVerifyRecord } from "../kv/verify";
 import { isPublicRoute } from "../utils/routes";
 import { jsonError } from "../utils/errors";
-import { hashSecret, timingSafeEqual } from "../utils/crypto";
+import { hashAuthToken, timingSafeEqual } from "../utils/crypto";
 
 // Extend Hono Variables to carry authenticated userId
 declare module "hono" {
@@ -13,11 +33,36 @@ declare module "hono" {
   }
 }
 
+const HEX_64 = /^[a-f0-9]{64}$/;
+
 /** The 64-char hex token of a `Bearer <token>` header, or `null` when the header is absent or malformed. */
 function parseBearerToken(authHeader: string | undefined): string | null {
   const match = authHeader?.match(/^Bearer\s+(.+)$/);
-  if (!match || !/^[a-f0-9]{64}$/.test(match[1])) return null;
+  if (!match || !HEX_64.test(match[1])) return null;
   return match[1];
+}
+
+/**
+ * userId of a bearer: `token:{hash}` first; only on a miss the pre-#425 `token:{plaintext}`
+ * (#425 transition), accepted only while `auth:{userId}` still names that plaintext token.
+ */
+async function resolveTokenUserId(
+  kv: KVNamespace,
+  token: string,
+): Promise<string | null> {
+  const record = await getAuthTokenRecord(kv, await hashAuthToken(token));
+  if (record !== null) {
+    const userId: unknown = record.userId;
+    return typeof userId === "string" && userId !== "" ? userId : null;
+  }
+  // A 64-hex value only: a #425 record read at a plaintext-shaped key (its hash as bearer) is refused.
+  const legacy = await getLegacyAuthTokenUserId(kv, token);
+  if (typeof legacy !== "string" || !HEX_64.test(legacy)) return null;
+  // A plaintext key left by a failed migration delete is inert: the hashed `auth:` no longer names it.
+  const named = (await readAuthRecord(kv, legacy))?.legacyToken;
+  return typeof named === "string" && timingSafeEqual(named, token)
+    ? legacy
+    : null;
 }
 
 /**
@@ -44,8 +89,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
       return jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
 
-    const userId = await c.env.KV.get(kvKeys.authToken(token));
-
+    const userId = await resolveTokenUserId(c.env.KV, token);
     if (!userId) {
       return jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
@@ -68,195 +112,420 @@ export function getPresentedAuthToken(c: Context): string | null {
   return parseBearerToken(c.req.header("Authorization"));
 }
 
+function isAuthTokenEntry(value: unknown): value is AuthTokenEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as { hash?: unknown; createdAt?: unknown };
+  return typeof entry.hash === "string" && typeof entry.createdAt === "string";
+}
+
 /**
- * Generate a new auth token for a user and store both directions in KV.
- * Serialized: delete old token first, then write new one to avoid
- * orphaned token entries from concurrent requests.
- *
- * `knownAuth` lets a caller that has already read `auth:{userId}` avoid a
- * redundant KV read: pass the record (or `null` if the caller looked and
- * found nothing) to skip the read. Leave it `undefined` (the default) to
- * have this function read the record itself. The null-vs-undefined
- * distinction matters — `null` means "already looked, nothing there".
- *
- * `secretAt` is written as the new record's `AuthRecord.secretAt` (PIN/pattern
- * rotation only); when omitted, the replaced record's value is carried forward.
- *
- * Returns the token string.
+ * Classify `auth:{userId}` as read (#425). Malformed list entries are dropped and a
+ * non-array `tokens` reads as `[]`; `secretAt` is kept only when a number; a pre-#425
+ * record's string `token` surfaces as `legacyToken` (in memory only). `null` stays `null`.
  */
-export async function generateAuthToken(
-  kv: KVNamespace,
-  userId: string,
-  knownAuth?: AuthRecord | null,
-  secretAt?: number,
-): Promise<string> {
-  // 1. Delete any existing token first (serialized to avoid orphans).
-  //    Reuse the caller's already-read record when provided.
-  const existingAuth =
-    knownAuth === undefined
-      ? await kv.get<AuthRecord>(kvKeys.auth(userId), "json")
-      : knownAuth;
-  if (existingAuth?.token) {
-    await kv.delete(kvKeys.authToken(existingAuth.token));
-  }
-
-  // 2. Generate new token
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  const token = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const carriedSecretAt = secretAt ?? existingAuth?.secretAt;
-  const authRecord: AuthRecord = {
-    token,
-    createdAt: new Date().toISOString(),
-    ...(typeof carriedSecretAt === "number" && { secretAt: carriedSecretAt }),
+export function normalizeAuthRecord(
+  raw: RawAuthRecord | null,
+): AuthRecord | null {
+  if (raw === null) return null;
+  const tokens = Array.isArray(raw.tokens)
+    ? raw.tokens
+        .filter(isAuthTokenEntry)
+        .map(({ hash, createdAt }) => ({ hash, createdAt }))
+    : [];
+  return {
+    tokens,
+    ...(typeof raw.secretAt === "number" && { secretAt: raw.secretAt }),
+    ...(typeof raw.token === "string" && { legacyToken: raw.token }),
   };
-
-  // 3. Write both directions with TTL
-  await Promise.all([
-    kv.put(kvKeys.auth(userId), JSON.stringify(authRecord), {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-    kv.put(kvKeys.authToken(token), userId, {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-  ]);
-
-  return token;
 }
 
-/**
- * Renew-only (#378): when `auth`'s token still has its reverse `token:{token}`
- * entry mapping to `userId`, slide both entries' TTL (token, createdAt and
- * secretAt kept) and return it; otherwise write nothing and return `null`.
- * One KV read. Never mints — the QR-bypass join relies on that.
- */
-export async function renewAuthToken(
-  kv: KVNamespace,
-  userId: string,
-  auth: AuthRecord | null,
-): Promise<string | null> {
-  if (!auth?.token) return null;
-  if ((await kv.get(kvKeys.authToken(auth.token))) !== userId) return null;
-  await Promise.all([
-    kv.put(kvKeys.auth(userId), JSON.stringify(auth), {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-    kv.put(kvKeys.authToken(auth.token), userId, {
-      expirationTtl: TOKEN_TTL_SECONDS,
-    }),
-  ]);
-  return auth.token;
-}
-
-/**
- * Return the existing valid auth token for a user (renewed via
- * `renewAuthToken`), or generate a new one. Prevents token churn when the same
- * user re-joins from multiple devices. `knownAuth` skips the `auth:{userId}`
- * read, with the same null-vs-undefined meaning as in `generateAuthToken`.
- */
-export async function getOrGenerateAuthToken(
-  kv: KVNamespace,
-  userId: string,
-  knownAuth?: AuthRecord | null,
-): Promise<string> {
-  const existingAuth =
-    knownAuth === undefined ? await readAuthRecord(kv, userId) : knownAuth;
-  const renewed = await renewAuthToken(kv, userId, existingAuth);
-  if (renewed !== null) return renewed;
-  // No valid token: mint one, passing the record already read (AuthRecord | null, never
-  // undefined) so generateAuthToken does not re-read auth:{userId}.
-  return generateAuthToken(kv, userId, existingAuth);
-}
-
-/** Read `auth:{userId}` — the account's one current token record; `null` when there is none. */
+/** Read `auth:{userId}` — the account's token list — normalized; `null` when there is none. */
 export async function readAuthRecord(
   kv: KVNamespace,
   userId: string,
 ): Promise<AuthRecord | null> {
-  return kv.get<AuthRecord>(kvKeys.auth(userId), "json");
+  return normalizeAuthRecord(await getRawAuthRecord(kv, userId));
 }
 
-/** `auth:{userId}` as read, and whether the presented bearer is still the account's current token. */
-export interface PresentedAuth {
-  auth: AuthRecord | null;
-  current: boolean;
+/** A token handed to the client, with the epoch-ms expiry it was stored for. */
+export interface IssuedToken {
+  token: string;
+  expiresAt: number;
+}
+
+/** A pre-#425 plaintext token moved into the hashed model: its list entry, its `token:{hash}` value, its old key tail. */
+interface LegacyMigration {
+  entry: AuthTokenEntry;
+  record: AuthTokenRecord;
+  plaintext: string;
+}
+
+/** `legacyToken` while its `token:{plaintext}` key still names `userId`, else `null` (never revive a revoked one).
+ *  One KV read; see docs/architecture.md → PWA 登入驗證機制. */
+async function readLiveLegacyToken(
+  kv: KVNamespace,
+  userId: string,
+  legacyToken: string,
+): Promise<string | null> {
+  const owner = await getLegacyAuthTokenUserId(kv, legacyToken);
+  const alive = typeof owner === "string" && HEX_64.test(owner);
+  return alive && owner === userId ? legacyToken : null;
+}
+
+/** Called only with a live token; the caller puts `record`, then lists `entry`, then deletes `token:{plaintext}`. */
+async function buildLegacyMigration(
+  legacyToken: string,
+  userId: string,
+  now: number,
+): Promise<LegacyMigration> {
+  const createdAt = new Date(now).toISOString();
+  const hash = await hashAuthToken(legacyToken);
+  return {
+    entry: { hash, createdAt },
+    record: { userId, createdAt, expiresAt: now + TOKEN_TTL_SECONDS * 1000 },
+    plaintext: legacyToken,
+  };
+}
+
+/** The migration of `legacyToken` when it is still live (`readLiveLegacyToken`); `null` when absent or dead. */
+async function buildLiveLegacyMigration(
+  kv: KVNamespace,
+  userId: string,
+  legacyToken: string | undefined,
+  now: number,
+): Promise<LegacyMigration | null> {
+  if (legacyToken === undefined) return null;
+  const live = await readLiveLegacyToken(kv, userId, legacyToken);
+  return live === null ? null : buildLegacyMigration(live, userId, now);
+}
+
+/** Fail-open: after the hashed writes a leftover `token:{plaintext}` is inert (`resolveTokenUserId`). No ids logged. */
+async function deleteMigratedPlaintextKey(
+  kv: KVNamespace,
+  plaintext: string,
+): Promise<void> {
+  await deleteAuthTokenKey(kv, plaintext).catch((err: unknown) => {
+    console.error("LEGACY_TOKEN_DELETE_FAILED", { err });
+  });
+}
+
+function compareIso(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`; `alive` is never read.
+ *  See docs/architecture.md → PWA 登入驗證機制. */
+async function evictForNewToken(
+  kv: KVNamespace,
+  userId: string,
+  previous: AuthTokenEntry[],
+  alive: AuthTokenEntry | null,
+): Promise<{ kept: AuthTokenEntry[]; evicted: string[] }> {
+  const excess = previous.length - (MAX_AUTH_TOKENS_PER_USER - 1);
+  if (excess <= 0) return { kept: previous, evicted: [] };
+  const records = await Promise.all(
+    previous.map((e) => (e === alive ? null : getAuthTokenRecord(kv, e.hash))),
+  );
+  const ranked = previous
+    .map((entry, index) => {
+      const dead = entry !== alive && records[index]?.userId !== userId;
+      return { entry, index, dead };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.dead) - Number(a.dead) ||
+        compareIso(a.entry.createdAt, b.entry.createdAt) ||
+        a.index - b.index,
+    );
+  const out = new Set(ranked.slice(0, excess).map((r) => r.index));
+  return {
+    kept: previous.filter((_, i) => !out.has(i)),
+    evicted: previous.filter((_, i) => out.has(i)).map((e) => e.hash),
+  };
+}
+
+function generateTokenString(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
- * Bearer currency (#378), the one rule shared by refresh (`renewPresentedAuthToken`),
+ * Mint a NEW token for `userId` (#425; create, join, QR redeem, PIN/pattern save).
+ * `knownAuth` is the caller's `auth:{userId}` read (`null` = none, or a full revoke
+ * just ran); a legacy plaintext token in it is migrated into the list, never logged
+ * out — but only while its `token:{plaintext}` key still names `userId`: a dead one
+ * (revoked, `auth:` read stale) is dropped, never revived. Evicted keys are deleted
+ * FIRST — a throw fails the mint. A migration then puts its `token:{hash}` BEFORE
+ * `auth:`, so a list never names a hash with no record behind it; `auth:` is put
+ * exactly once with the new token appended (alongside the new `token:{hash}`), and
+ * only then is `token:{plaintext}` deleted. Once `auth:` no longer names it, a
+ * plaintext key is INERT — the middleware refuses it — so a failed delete is
+ * logged and ignored (the mint still returns the token) and the key merely
+ * occupies its TTL. `secretAt` replaces the carried-forward
+ * `knownAuth.secretAt` (PIN/pattern only).
+ */
+export async function mintAuthToken(
+  kv: KVNamespace,
+  userId: string,
+  knownAuth: AuthRecord | null,
+  secretAt?: number,
+): Promise<IssuedToken> {
+  const token = generateTokenString();
+  const now = Date.now();
+  const createdAt = new Date(now).toISOString();
+  const expiresAt = now + TOKEN_TTL_SECONDS * 1000;
+  const [hash, migration] = await Promise.all([
+    hashAuthToken(token),
+    buildLiveLegacyMigration(kv, userId, knownAuth?.legacyToken, now),
+  ]);
+
+  const previous = [
+    ...(knownAuth?.tokens ?? []),
+    ...(migration ? [migration.entry] : []),
+  ];
+  const { kept, evicted } = await evictForNewToken(
+    kv,
+    userId,
+    previous,
+    migration?.entry ?? null,
+  );
+
+  await Promise.all(evicted.map((key) => deleteAuthTokenKey(kv, key)));
+
+  if (migration) {
+    await putAuthTokenRecord(
+      kv,
+      migration.entry.hash,
+      migration.record,
+      TOKEN_TTL_SECONDS,
+    );
+  }
+  await Promise.all([
+    putAuthRecord(kv, userId, {
+      tokens: [...kept, { hash, createdAt }],
+      secretAt: secretAt ?? knownAuth?.secretAt,
+    }),
+    putAuthTokenRecord(
+      kv,
+      hash,
+      { userId, createdAt, expiresAt },
+      TOKEN_TTL_SECONDS,
+    ),
+  ]);
+  if (migration) await deleteMigratedPlaintextKey(kv, migration.plaintext);
+
+  return { token, expiresAt };
+}
+
+/** `auth:{userId}` as read, whether the presented bearer is one of the account's current tokens, and its hash. */
+export interface PresentedAuth {
+  auth: AuthRecord | null;
+  current: boolean;
+  presentedHash: string | null;
+}
+
+function isCurrentBearer(
+  auth: AuthRecord | null,
+  presentedToken: string,
+  presentedHash: string,
+): boolean {
+  if (auth === null) return true;
+  if (auth.legacyToken !== undefined) {
+    return timingSafeEqual(auth.legacyToken, presentedToken);
+  }
+  return (
+    auth.tokens.length === 0 ||
+    auth.tokens.some((e) => timingSafeEqual(e.hash, presentedHash))
+  );
+}
+
+/**
+ * Bearer currency (#378, #425), the one rule shared by refresh (`renewPresentedAuthToken`),
  * `PUT /api/user/:id/verify`, `POST /api/user/:id/verify/prompted` and `DELETE /api/user/:id` (#396):
- * the presented token is current when
- * `auth:{userId}` names it, or when there is no record at all (TTL gap). A revoked
- * bearer still accepted by a colo that has not seen the delete is NOT current.
- * A missing bearer is never current. One KV read; the record is returned for reuse.
+ * the presented token is current when its hash is in `auth:{userId}`'s list, when a
+ * pre-#425 record names it, or when there is no record / an empty list (TTL gap). A
+ * token that still has its `token:` key but is off the list (revoked on a lagging
+ * colo, or orphaned by a concurrent mint) is NOT current. A missing bearer never is.
+ * One KV read; the record and the bearer's hash are returned for reuse.
  */
 export async function readPresentedAuth(
   kv: KVNamespace,
   userId: string,
   presentedToken: string | null,
 ): Promise<PresentedAuth> {
-  const auth = await readAuthRecord(kv, userId);
+  const [auth, presentedHash] = await Promise.all([
+    readAuthRecord(kv, userId),
+    presentedToken === null ? null : hashAuthToken(presentedToken),
+  ]);
   const current =
     presentedToken !== null &&
-    (!auth?.token || timingSafeEqual(auth.token, presentedToken));
-  return { auth, current };
+    presentedHash !== null &&
+    isCurrentBearer(auth, presentedToken, presentedHash);
+  return { auth, current, presentedHash };
+}
+
+/** Refresh's one-time move of a live pre-#425 token into the list (`null` when dead): `token:{hash}`, then `auth:`,
+ *  then a fail-open delete of the inert `token:{plaintext}` — see docs/architecture.md → PWA 登入驗證機制. */
+async function migratePresentedLegacyToken(
+  kv: KVNamespace,
+  userId: string,
+  auth: AuthRecord,
+  legacyToken: string,
+): Promise<IssuedToken | null> {
+  const migration = await buildLiveLegacyMigration(
+    kv,
+    userId,
+    legacyToken,
+    Date.now(),
+  );
+  if (migration === null) return null;
+  await putAuthTokenRecord(
+    kv,
+    migration.entry.hash,
+    migration.record,
+    TOKEN_TTL_SECONDS,
+  );
+  await putAuthRecord(kv, userId, {
+    tokens: [migration.entry],
+    secretAt: auth.secretAt,
+  });
+  await deleteMigratedPlaintextKey(kv, migration.plaintext);
+  return { token: legacyToken, expiresAt: migration.record.expiresAt };
+}
+
+/** Sliding 90 days, capped 180 days after `createdAt` — except on a `code` account (one extra read, cap only). */
+async function renewalTarget(
+  kv: KVNamespace,
+  userId: string,
+  createdAt: string,
+  now: number,
+): Promise<number | null> {
+  const slidingMs = now + TOKEN_TTL_SECONDS * 1000;
+  const capMs = Date.parse(createdAt) + TOKEN_MAX_AGE_SECONDS * 1000;
+  if (Number.isNaN(capMs)) return null;
+  if (capMs >= slidingMs) return slidingMs;
+  const verify = await getVerifyRecord(kv, userId);
+  return verify?.method === "code" ? slidingMs : capMs;
+}
+
+/** Slide one listed token's `token:{hash}` TTL; never writes `auth:`, and skips the put when nothing would change. */
+async function slideListedToken(
+  kv: KVNamespace,
+  userId: string,
+  entry: AuthTokenEntry,
+  presentedToken: string,
+): Promise<IssuedToken | null> {
+  const stored = await getAuthTokenRecord(kv, entry.hash);
+  if (stored === null || stored.userId !== userId) return null;
+  const now = Date.now();
+  const target = await renewalTarget(kv, userId, entry.createdAt, now);
+  if (target === null) return null;
+  const ttlSeconds = Math.floor((target - now) / 1000);
+  if (ttlSeconds < KV_MIN_TTL_SECONDS) return null;
+  if (
+    typeof stored.expiresAt === "number" &&
+    target - stored.expiresAt < TOKEN_RENEW_SKIP_WINDOW_MS
+  ) {
+    return { token: presentedToken, expiresAt: stored.expiresAt };
+  }
+  await putAuthTokenRecord(
+    kv,
+    entry.hash,
+    { userId, createdAt: entry.createdAt, expiresAt: target },
+    ttlSeconds,
+  );
+  return { token: presentedToken, expiresAt: target };
 }
 
 /**
- * Refresh's renewal (#378): `null` when the presented bearer is not current
- * (`readPresentedAuth`) — it must never be handed the account's NEW token. A
- * current one goes through `getOrGenerateAuthToken`, reusing that one read.
+ * Refresh (#425): renews only the PRESENTED token. `null` (→ 401 REFRESH_FAILED)
+ * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
+ * past the 180-day cap (PIN / pattern / none accounts). A pre-#425 token is migrated
+ * in place (same string back) while its plaintext key is live, else `null`; a TTL gap
+ * (no record, empty list) mints a new token.
  */
 export async function renewPresentedAuthToken(
   kv: KVNamespace,
   userId: string,
   presentedToken: string,
-): Promise<string | null> {
-  const { auth, current } = await readPresentedAuth(kv, userId, presentedToken);
-  if (!current) return null;
-  return getOrGenerateAuthToken(kv, userId, auth);
-}
-
-/** Fixed salt of the QR binding hash below; a hash of the raw token, never the token itself, sits in `qr:{token}`. */
-const QR_BINDING_SALT = "qr:";
-
-/** Hex SHA-256 of the auth token that mints a QR token, stored as `QrTokenRecord.tokenHash` (#378). */
-export function hashTokenForQrBinding(authToken: string): Promise<string> {
-  return hashSecret(QR_BINDING_SALT, authToken);
+): Promise<IssuedToken | null> {
+  const { auth, current, presentedHash } = await readPresentedAuth(
+    kv,
+    userId,
+    presentedToken,
+  );
+  if (!current || presentedHash === null) return null;
+  if (auth?.legacyToken !== undefined) {
+    return migratePresentedLegacyToken(kv, userId, auth, auth.legacyToken);
+  }
+  if (auth === null || auth.tokens.length === 0) {
+    return mintAuthToken(kv, userId, auth);
+  }
+  const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, presentedHash));
+  if (!entry) return null;
+  return slideListedToken(kv, userId, entry, presentedToken);
 }
 
 /**
- * QR redeem rule (#378): a QR token may skip verification only while `auth` — the
- * just-read `auth:{userId}` — still names the token that minted it. No KV op: the
- * join then only RENEWS that token (`renewAuthToken`), whose reverse-entry read
- * refuses a token the rotation already deleted. A record without `tokenHash`
- * (older shape) never bypasses.
+ * Delete every `token:` key `auth` names — each listed hash, a legacy plaintext
+ * token AND its hash (covering a migration whose `auth:` put never landed), and
+ * `alsoKeys` — the presented bearer's hash AND its plaintext (a pre-#425 key, for
+ * an `auth:` gap) — deduplicated; deleting an absent key is a no-op. Never
+ * touches `auth:{userId}`, so a following mint is that key's only write.
  */
-export async function isQrBoundToCurrentToken(
-  tokenHash: string | undefined,
+export async function revokeAuthTokenKeys(
+  kv: KVNamespace,
   auth: AuthRecord | null,
-): Promise<boolean> {
-  if (typeof tokenHash !== "string" || !auth?.token) return false;
-  const expected = await hashTokenForQrBinding(auth.token);
-  return timingSafeEqual(expected, tokenHash);
+  alsoKeys: readonly (string | null | undefined)[] = [],
+): Promise<void> {
+  const keys = new Set<string>((auth?.tokens ?? []).map((e) => e.hash));
+  if (typeof auth?.legacyToken === "string") {
+    keys.add(auth.legacyToken);
+    keys.add(await hashAuthToken(auth.legacyToken));
+  }
+  for (const key of alsoKeys) if (typeof key === "string") keys.add(key);
+  await Promise.all([...keys].map((key) => deleteAuthTokenKey(kv, key)));
 }
 
-/**
- * Delete the auth token for a user (both directions).
- */
-export async function deleteAuthToken(
+/** Revoke all of the account's tokens (plus `alsoKeys`) and drop `auth:{userId}`, reusing the caller's read of it. */
+export async function revokeAllAuthTokens(
+  kv: KVNamespace,
+  userId: string,
+  knownAuth: AuthRecord | null,
+  alsoKeys: readonly (string | null | undefined)[] = [],
+): Promise<void> {
+  await Promise.all([
+    revokeAuthTokenKeys(kv, knownAuth, alsoKeys),
+    deleteAuthRecord(kv, userId),
+  ]);
+}
+
+/** `revokeAllAuthTokens` for a caller that has not read `auth:{userId}` (leave / kick / dissolve). */
+export async function readAndRevokeAllAuthTokens(
   kv: KVNamespace,
   userId: string,
 ): Promise<void> {
-  const authRecord = await kv.get<AuthRecord>(kvKeys.auth(userId), "json");
+  await revokeAllAuthTokens(kv, userId, await readAuthRecord(kv, userId));
+}
 
-  const ops: Promise<void>[] = [kv.delete(kvKeys.auth(userId))];
-  if (authRecord?.token) {
-    ops.push(kv.delete(kvKeys.authToken(authRecord.token)));
-  }
-
-  await Promise.all(ops);
+/**
+ * QR redeem rule (#378, #425): a QR token may skip verification only while the
+ * just-read `auth` still lists the token that minted it. No KV op; the join then
+ * checks that token's `token:` key before minting. A record without `tokenHash`
+ * (older shape) never bypasses.
+ */
+export function isQrBoundToListedToken(
+  tokenHash: string | undefined,
+  auth: AuthRecord | null,
+): boolean {
+  return (
+    typeof tokenHash === "string" &&
+    auth !== null &&
+    auth.tokens.some((e) => timingSafeEqual(e.hash, tokenHash))
+  );
 }

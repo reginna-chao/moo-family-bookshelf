@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { ALICE } from "../helpers/ids";
 import { kvKeys, VERIFY_MAX_FAILURES } from "../../src/kv/schema";
 
@@ -158,7 +158,7 @@ describe("step-up lockout shared with PWA login", () => {
     expect(failKeys).toEqual([kvKeys.verifyFail(USER_ID, LOCKED_IP)]);
     // Nothing was changed or deleted while locked.
     expect(await kv.get(kvKeys.verify(USER_ID))).not.toBeNull();
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
+    expect(await tokenOwner(kv, token)).toBe(USER_ID);
   });
 
   it("leaves another address its own budget", async () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, tokenOwner, authTokenKey } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
@@ -100,7 +100,7 @@ describe("DELETE /api/user/:id — guess ceiling already spent", () => {
     // Only the caller's streak may be written; the spent ceiling and every account key stay put.
     expect(ops.writeTrail()).toEqual([`put ${FAIL_KEY}`]);
     expect(await kv.get(kvKeys.verify(USER_ID))).not.toBeNull();
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
+    expect(await tokenOwner(kv, token)).toBe(USER_ID);
 
     const right = await deleteAccount(token, PIN);
     expect(right.status).toBe(200);
@@ -108,7 +108,7 @@ describe("DELETE /api/user/:id — guess ceiling already spent", () => {
     for (const key of [
       kvKeys.verify(USER_ID),
       kvKeys.auth(USER_ID),
-      kvKeys.authToken(token),
+      await authTokenKey(token),
     ]) {
       expect(await kv.get(key)).toBeNull();
     }

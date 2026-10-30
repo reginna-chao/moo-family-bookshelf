@@ -14,8 +14,7 @@ const SECRET_AT = 1_000_000;
 
 function auth(secretAt?: unknown): AuthRecord {
   return {
-    token: "a".repeat(64),
-    createdAt: "2026-01-01T00:00:00.000Z",
+    tokens: [{ hash: "a".repeat(64), createdAt: "2026-01-01T00:00:00.000Z" }],
     ...(secretAt !== undefined && { secretAt: secretAt as number }),
   };
 }

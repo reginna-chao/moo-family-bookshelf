@@ -24,7 +24,7 @@
  *   It MUST stay keyed on the AUTHENTICATED caller, never on a body/path
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
- * - `token:{token}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
  * - `borrow:{requestId}` — 1 get (routes/borrow.ts, `readBorrowPointer`)
  *   and NO put. Since #160 item 2 the key holds a `BorrowPointer`
  *   (`{ familyId }`); a bare requestId cannot name its family, so this read
@@ -93,6 +93,7 @@ import { createMockKV } from "../../helpers/mockKv";
 import { watchKvOps } from "../../helpers/kvOps";
 import { createRateLimitBindings } from "../../helpers/rateLimitBindings";
 import { seedAuthToken } from "../../helpers/auth";
+import { hashAuthToken } from "../../../src/utils/crypto";
 import {
   BoolFlag,
   BorrowStatus,
@@ -193,7 +194,7 @@ describe("KV budget: PATCH /api/borrow/:requestId", () => {
 
     expect(ops.getKeys()).toEqual([
       // auth middleware, `authMiddleware`
-      kvKeys.authToken(token),
+      kvKeys.authToken(await hashAuthToken(token)),
       // handler, `readBorrowPointer` — the pointer, read for its `familyId` only
       kvKeys.borrow(REQUEST_ID),
       // handler, `getFamilyRecord` — the family record for the #159 re-check; FIRST of

@@ -7,18 +7,18 @@ import {
   vi,
   type MockInstance,
 } from "vitest";
+import { createHash } from "node:crypto";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
-import { seedAuthToken, tokenFor } from "../helpers/auth";
+import { seedAuthToken, tokenFor, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
-import { hashSecret } from "../../src/utils/crypto";
 import {
   kvKeys,
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
   TOKEN_TTL_SECONDS,
-  type AuthRecord,
+  type StoredAuthRecord,
   type OtpRecord,
   type QrTokenRecord,
   type VerifyRecord,
@@ -29,9 +29,10 @@ import {
  * that must not hand a pre-change session back its access: the QR bypass on
  * join, `POST /api/auth/refresh`, and the verify PUT itself.
  *
- * Setting a NEW secret — `pin` or `pattern` — revokes the account's auth
- * token and issues a fresh pair: `token:{old}` is deleted, `auth:{userId}` and
- * `token:{new}` are written, and the response carries `authToken` +
+ * Setting a NEW secret — `pin` or `pattern` — revokes EVERY token of the
+ * account (#425) and mints one for the saving device: each listed
+ * `token:{hash}` is deleted, `auth:{userId}` is put once listing only the new
+ * hash, `token:{hash(new)}` is written, and the response carries `authToken` +
  * `expiresAt` next to `method` / `prompted`. A session opened under the old
  * secret (a stolen PWA token, a shared device) stops working the moment the
  * owner changes it. `none` and `code` rotate nothing: `none` sets no secret,
@@ -57,43 +58,50 @@ import {
  *
  * Stale colo: KV is eventually consistent, so a colo that has not seen the
  * rotation's delete can still accept the revoked token. Modelled by re-seeding
- * `token:{old}` alone while `auth:{userId}` names the rotated token
- * (`revokedButAccepted`). Bearer currency — the one rule shared by refresh and
+ * `token:{hash(old)}` alone (`revive`) while `auth:{userId}` lists only the
+ * rotated token (`revokedButAccepted`). Bearer currency — the one rule shared by refresh and
  * the verify PUT — says such a bearer is NOT current: refresh answers
  * `401 REFRESH_FAILED` and the verify PUT `401 UNAUTHORIZED`, both writing
  * nothing, rather than renew it or let it change the secret. With no
  * `auth:{userId}` record at all (TTL gap) the bearer counts as current.
  *
  * QR binding: `POST /qr-token` stores `{ userId, tokenHash }`, where
- * `tokenHash` is the hex SHA-256 of `"qr:" + <minting bearer>` — pinned here
- * with `hashSecret("qr:", …)` directly, not through the production helper, so
- * a salt change fails this file. A join presenting a QR token issued to its
+ * `tokenHash` is the hex SHA-256 of the minting bearer — the same hash the
+ * `auth:` list and the `token:` key carry (#425). `sha256` pins it with
+ * `node:crypto` directly, not through the production `hashAuthToken`, so a
+ * hash change fails this file. A join presenting a QR token issued to its
  * userId always SPENDS it (deleted). The gate skips verification only while
- * `auth:{userId}` still names the minting token (a pure hash compare); the
- * join then only RENEWS that token, which needs `token:{that token}` to still
- * map to the user — otherwise `403 VERIFICATION_REQUIRED` before any write. A
+ * `auth:{userId}` still lists the minting token (a pure hash compare); the
+ * join then needs `token:{that hash}` to still name the user before it mints —
+ * otherwise `403 VERIFICATION_REQUIRED` before any write. A
  * record without `tokenHash` (the older shape), or whose hash names another
  * token, never bypasses; such a QR falls through to the ordinary secret check,
  * so it neither opens the account nor blocks the correct secret. `none` /
  * `code` keep the token, so a QR survives a switch to them.
  *
- * A QR bypass never mints, on either join branch: the new-member join and the
- * reconnect both hand back the bound token with its pair re-put (sliding TTL).
- * When the colo missed the WHOLE rotation (both halves of the old pair
- * re-seeded) the bound QR still bypasses and the join hands back that OLD token
- * — never the rotated one; the colo still accepts the old token anyway (accepted
- * residual, docs/architecture.md → PWA 登入驗證機制). `staleFirstRead` sharpens
- * this: the gate's `auth:` read sees the old record while any later read would
- * see the new one, so the join must reuse the gate's record. Half-stale —
- * `auth:` names the old token but `token:{old}` is gone — is refused with only
+ * A QR bypass mints the redeeming device its OWN token (#425), on either join
+ * branch, appended next to the bound one — which keeps working; the bound
+ * token's key is read, never re-put. When the colo missed the WHOLE rotation
+ * (both halves of the old pair re-seeded) the bound QR still bypasses and the
+ * join mints next to that OLD token — never handing out the rotated one; the
+ * colo still accepts the old token anyway (accepted residual,
+ * docs/architecture.md → PWA 登入驗證機制). `staleFirstRead` sharpens this: the
+ * gate's `auth:` read sees the old record while any later read would see the
+ * new one, so the join must mint from the gate's record. Half-stale — `auth:`
+ * lists the old token but `token:{hash(old)}` is gone — is refused with only
  * the QR delete written. `onDeleteOf` models the reverse key vanishing between
- * the gate and the renewal (a rotation landing mid-request).
+ * the gate and the bound-key check (a rotation landing mid-request).
  *
  * TTL-gap PUT: with no `auth:{userId}` record the presented bearer is still the
- * token a PIN / pattern save revokes — `token:{presented}` is deleted.
+ * token a PIN / pattern save revokes — `token:{hash(presented)}` is deleted,
+ * and so is `token:{presented}` itself (every PIN save issues that one extra
+ * delete). A pre-#425 PLAINTEXT bearer never reaches the handler in a gap: the
+ * middleware accepts one only while a legacy `auth:` record names it (C5), so
+ * with no record it answers `401 UNAUTHORIZED` and nothing is written.
  *
  * `AuthRecord.secretAt`: a PIN / pattern save writes it as the new verify
- * record's `secretUpdatedAt`; later mints and renewals carry it forward; a
+ * record's `secretUpdatedAt`; later mints carry it forward and refreshes never
+ * rewrite `auth:`; a
  * token minted for an account that never saved a PIN has none. The join's
  * refusal of a secret checked against an older verify record lives in
  * `joinStaleVerifyRecord.test.ts`.
@@ -192,9 +200,14 @@ function join(extra: Record<string, unknown>): Promise<Response> {
   });
 }
 
-/** The `tokenHash` a QR minted by `authToken` carries. See the header → "QR binding". */
-function qrBindingOf(authToken: string): Promise<string> {
-  return hashSecret("qr:", authToken);
+/** Hex SHA-256 of a token: its `auth:` list hash, `token:` key tail and QR binding. See the header → "QR binding". */
+function sha256(authToken: string): string {
+  return createHash("sha256").update(authToken, "utf8").digest("hex");
+}
+
+/** The `token:{hash}` key of `authToken`. */
+function keyOf(authToken: string): string {
+  return kvKeys.authToken(sha256(authToken));
 }
 
 function seedFamilyRecord(members: string[]): Promise<void> {
@@ -229,13 +242,29 @@ async function seedQrRecord(token: string, record: QrTokenRecord) {
   });
 }
 
-function authRecordFor(token: string): AuthRecord {
-  return { token, createdAt: new Date(PINNED_NOW).toISOString() };
+function authRecordFor(token: string): StoredAuthRecord {
+  return {
+    tokens: [
+      { hash: sha256(token), createdAt: new Date(PINNED_NOW).toISOString() },
+    ],
+  };
 }
 
-/** Put back an `auth:{userId}` record naming `token` — a colo that missed the rotation's record write. */
+/** Put back an `auth:{userId}` record listing only `token` — a colo that missed the rotation's record write. */
 async function seedStaleAuthRecord(token: string): Promise<void> {
   await kv.put(kvKeys.auth(USER_ID), JSON.stringify(authRecordFor(token)));
+}
+
+/** Re-put a revoked token's `token:{hash}` key alone — a colo that missed its delete. */
+async function revive(token: string): Promise<void> {
+  await kv.put(
+    keyOf(token),
+    JSON.stringify({
+      userId: USER_ID,
+      createdAt: new Date(PINNED_NOW).toISOString(),
+      expiresAt: PINNED_NOW + TOKEN_TTL_SECONDS * 1000,
+    }),
+  );
 }
 
 /** PIN change, then a stale colo still mapping the revoked token to the user.
@@ -243,7 +272,7 @@ async function seedStaleAuthRecord(token: string): Promise<void> {
 async function revokedButAccepted(): Promise<{ old: string; next: string }> {
   const old = await seedAuthToken(kv, USER_ID);
   const next = await setPin(old);
-  await kv.put(kvKeys.authToken(old), USER_ID);
+  await revive(old);
   return { old, next };
 }
 
@@ -272,8 +301,13 @@ async function expectErrorCode(res: Response, code: string): Promise<void> {
 async function readAuthRecord(
   store: KVNamespace,
   userId: string,
-): Promise<AuthRecord | null> {
-  return store.get<AuthRecord>(kvKeys.auth(userId), "json");
+): Promise<StoredAuthRecord | null> {
+  return store.get<StoredAuthRecord>(kvKeys.auth(userId), "json");
+}
+
+/** The tokens `auth:{userId}` lists, as hashes (`null` without a record). */
+async function listed(userId: string): Promise<string[] | null> {
+  return (await readAuthRecord(kv, userId))?.tokens.map((e) => e.hash) ?? null;
 }
 
 async function readVerifyRecord(
@@ -322,7 +356,7 @@ function staleFirstRead(key: string, staleValue: string): void {
 }
 
 /** After the request's `delete` of `key`, also delete `alsoDelete` from the plain store (unwatched).
- *  See the header → "A QR bypass never mints". */
+ *  See the header → "A QR bypass mints". */
 function onDeleteOf(key: string, alsoDelete: string): void {
   const base = kv;
   const del = base.delete.bind(base);
@@ -390,12 +424,12 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
       const res = await putVerify(oldToken, body);
       const newToken = ((await res.json()) as Json).data.authToken as string;
 
-      expect(await kv.get(kvKeys.authToken(oldToken))).toBeNull();
-      expect(await kv.get(kvKeys.authToken(newToken))).toBe(USER_ID);
-      expect((await readAuthRecord(kv, USER_ID))?.token).toBe(newToken);
-      // Both halves expire with the token, like every other issued pair.
-      expect(getPutTtl(kv, kvKeys.authToken(newToken))).toBe(TOKEN_TTL_SECONDS);
-      expect(getPutTtl(kv, kvKeys.auth(USER_ID))).toBe(TOKEN_TTL_SECONDS);
+      expect(await tokenOwner(kv, oldToken)).toBeNull();
+      expect(await tokenOwner(kv, newToken)).toBe(USER_ID);
+      expect(await listed(USER_ID)).toEqual([sha256(newToken)]);
+      // The token key slides with the token; the list itself is permanent.
+      expect(getPutTtl(kv, keyOf(newToken))).toBe(TOKEN_TTL_SECONDS);
+      expect(getPutTtl(kv, kvKeys.auth(USER_ID))).toBeUndefined();
     },
   );
 
@@ -410,8 +444,7 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
       const verify = await readVerifyRecord(kv, USER_ID);
       expect(verify?.secretUpdatedAt).toBe(PINNED_NOW);
       expect(await readAuthRecord(kv, USER_ID)).toEqual({
-        token: newToken,
-        createdAt: new Date(PINNED_NOW).toISOString(),
+        ...authRecordFor(newToken),
         secretAt: verify?.secretUpdatedAt,
       });
     },
@@ -465,8 +498,8 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
 
     await setPin(oldToken);
 
-    expect(await kv.get(kvKeys.authToken(otherToken))).toBe(OTHER_USER_ID);
-    expect((await readAuthRecord(kv, OTHER_USER_ID))?.token).toBe(otherToken);
+    expect(await tokenOwner(kv, otherToken)).toBe(OTHER_USER_ID);
+    expect(await listed(OTHER_USER_ID)).toEqual([sha256(otherToken)]);
   });
 
   it("writes the verify record before swapping the token pair", async () => {
@@ -480,25 +513,26 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
     expect([...trail].sort()).toEqual(
       [
         `put ${kvKeys.verify(USER_ID)}`,
+        `delete ${keyOf(oldToken)}`,
         `delete ${kvKeys.authToken(oldToken)}`,
         `delete ${kvKeys.otp(USER_ID)}`,
         `put ${kvKeys.auth(USER_ID)}`,
-        `put ${kvKeys.authToken(newToken)}`,
+        `put ${keyOf(newToken)}`,
       ].sort(),
     );
-    // The swap itself stays serialized: the old reverse key goes before the new pair.
-    const revoke = trail.indexOf(`delete ${kvKeys.authToken(oldToken)}`);
-    expect(revoke).toBeLessThan(trail.indexOf(`put ${kvKeys.auth(USER_ID)}`));
-    expect(revoke).toBeLessThan(
-      trail.indexOf(`put ${kvKeys.authToken(newToken)}`),
-    );
-    // The auth: put carries the secretAt of this rotation.
+    // The swap stays serialized: both old reverse keys (hash + pre-#425 plaintext) go before the new pair.
+    for (const oldKey of [keyOf(oldToken), kvKeys.authToken(oldToken)]) {
+      const revoke = trail.indexOf(`delete ${oldKey}`);
+      expect(revoke).toBeLessThan(trail.indexOf(`put ${kvKeys.auth(USER_ID)}`));
+      expect(revoke).toBeLessThan(trail.indexOf(`put ${keyOf(newToken)}`));
+    }
+    // The one auth: write (never deleted first) carries the secretAt of this rotation.
+    expect(trail).not.toContain(`delete ${kvKeys.auth(USER_ID)}`);
     const authPut = (kv.put as unknown as MockInstance).mock.calls.find(
       ([key]) => key === kvKeys.auth(USER_ID),
     );
     expect(JSON.parse(String(authPut?.[1]))).toEqual({
-      token: newToken,
-      createdAt: new Date(PINNED_NOW).toISOString(),
+      ...authRecordFor(newToken),
       secretAt: PINNED_NOW,
     });
   });
@@ -529,8 +563,8 @@ describe("PUT /api/user/:id/verify — methods none and code keep the session", 
 
       await putVerify(token, { method });
 
-      expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
-      expect((await readAuthRecord(kv, USER_ID))?.token).toBe(token);
+      expect(await tokenOwner(kv, token)).toBe(USER_ID);
+      expect(await listed(USER_ID)).toEqual([sha256(token)]);
       expect((await readBooks(token)).status).toBe(200);
     },
   );
@@ -619,8 +653,8 @@ describe("PUT /api/user/:id/verify — a rejected request rotates nothing", () =
     const res = await putVerify(token, body);
 
     expect(res.status).toBe(400);
-    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
-    expect((await readAuthRecord(kv, USER_ID))?.token).toBe(token);
+    expect(await tokenOwner(kv, token)).toBe(USER_ID);
+    expect(await listed(USER_ID)).toEqual([sha256(token)]);
     expect(await readVerifyRecord(kv, USER_ID)).toBeNull();
   });
 
@@ -631,8 +665,8 @@ describe("PUT /api/user/:id/verify — a rejected request rotates nothing", () =
     const res = await putVerify(callerToken, SECRET_METHODS[0].body);
 
     await expectUnauthorized(res);
-    expect((await readAuthRecord(kv, USER_ID))?.token).toBe(victimToken);
-    expect((await readAuthRecord(kv, OTHER_USER_ID))?.token).toBe(callerToken);
+    expect(await listed(USER_ID)).toEqual([sha256(victimToken)]);
+    expect(await listed(OTHER_USER_ID)).toEqual([sha256(callerToken)]);
     expect(await readVerifyRecord(kv, USER_ID)).toBeNull();
   });
 });
@@ -654,8 +688,8 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
       });
       expect(ops.writeTrail()).toEqual([]);
       expect(await kv.get(kvKeys.verify(USER_ID))).toBe(verifyBefore);
-      expect((await readAuthRecord(kv, USER_ID))?.token).toBe(next);
-      expect(await kv.get(kvKeys.authToken(next))).toBe(USER_ID);
+      expect(await listed(USER_ID)).toEqual([sha256(next)]);
+      expect(await tokenOwner(kv, next)).toBe(USER_ID);
     },
   );
 
@@ -675,8 +709,8 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
   it.each(SECRET_METHODS)(
     "allows a bearer when no auth record exists (TTL gap), revoking it and minting a token on a $method save",
     async ({ method, body }) => {
-      const token = "f".repeat(64);
-      await kv.put(kvKeys.authToken(token), USER_ID);
+      const token = await seedAuthToken(kv, USER_ID, { token: "f".repeat(64) });
+      await kv.delete(kvKeys.auth(USER_ID));
       const ops = watchKvOps(kv);
 
       const res = await putVerify(token, body);
@@ -686,19 +720,31 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
       expect(minted).toMatch(HEX_64);
       expect(minted).not.toBe(token);
       // The presented bearer is the token revoked, even without an auth: record.
-      expect(ops.deleteKeys()).toContain(kvKeys.authToken(token));
-      expect(await kv.get(kvKeys.authToken(token))).toBeNull();
+      expect(ops.deleteKeys()).toContain(keyOf(token));
+      expect(await tokenOwner(kv, token)).toBeNull();
       await expectUnauthorized(await readBooks(token));
       expect((await readBooks(minted)).status).toBe(200);
       expect(await readAuthRecord(kv, USER_ID)).toEqual({
-        token: minted,
-        createdAt: new Date(PINNED_NOW).toISOString(),
+        ...authRecordFor(minted),
         secretAt: PINNED_NOW,
       });
-      expect(await kv.get(kvKeys.authToken(minted))).toBe(USER_ID);
+      expect(await tokenOwner(kv, minted)).toBe(USER_ID);
       expect((await readVerifyRecord(kv, USER_ID))?.method).toBe(method);
     },
   );
+
+  // See the header → "TTL-gap PUT": a plaintext bearer is refused before the handler.
+  it("refuses a pre-#425 plaintext bearer in a TTL gap and writes nothing", async () => {
+    const token = "f".repeat(64);
+    await kv.put(kvKeys.authToken(token), USER_ID);
+    const ops = watchKvOps(kv);
+
+    await expectUnauthorized(await putVerify(token, SECRET_METHODS[0].body));
+
+    expect(ops.writeTrail()).toEqual([]);
+    expect(await kv.get(kvKeys.verify(USER_ID))).toBeNull();
+    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
+  });
 });
 
 describe("PUT /api/user/:id/verify — a failed token swap", () => {
@@ -734,7 +780,7 @@ describe("POST /api/user/:id/qr-token — bound to the minting token", () => {
     const raw = (await kv.get(kvKeys.qrToken(qr))) as string;
     expect(JSON.parse(raw)).toEqual({
       userId: USER_ID,
-      tokenHash: await qrBindingOf(token),
+      tokenHash: sha256(token),
     });
     expect(JSON.parse(raw).tokenHash).toMatch(HEX_64);
     expect(raw).not.toContain(token);
@@ -810,18 +856,19 @@ describe("POST /api/family/:id/join — a QR whose binding is not live", () => {
 
   it.each([
     {
-      label: "auth:{userId} names the old token but token:{old} is gone",
+      label: "auth:{userId} lists the old token but token:{hash(old)} is gone",
       breakBinding: (old: string) => seedStaleAuthRecord(old),
     },
     {
-      label: "token:{old} still maps but auth:{userId} names the new token",
-      breakBinding: (old: string) => kv.put(kvKeys.authToken(old), USER_ID),
+      label:
+        "token:{hash(old)} still maps but auth:{userId} lists only the new token",
+      breakBinding: (old: string) => revive(old),
     },
     {
       label: "there is no auth:{userId} record at all",
       breakBinding: async (old: string) => {
         await kv.delete(kvKeys.auth(USER_ID));
-        await kv.put(kvKeys.authToken(old), USER_ID);
+        await revive(old);
       },
     },
   ])(
@@ -872,7 +919,7 @@ describe("POST /api/family/:id/join — a QR whose binding is not live", () => {
       label: "the hash of another user's token",
       record: async (): Promise<QrTokenRecord> => ({
         userId: USER_ID,
-        tokenHash: await qrBindingOf(tokenFor(OTHER_USER_ID)),
+        tokenHash: sha256(tokenFor(OTHER_USER_ID)),
       }),
       admitted: false,
     },
@@ -880,7 +927,7 @@ describe("POST /api/family/:id/join — a QR whose binding is not live", () => {
       label: "the hash of the live token",
       record: async (live: string): Promise<QrTokenRecord> => ({
         userId: USER_ID,
-        tokenHash: await qrBindingOf(live),
+        tokenHash: sha256(live),
       }),
       admitted: true,
     },
@@ -914,7 +961,7 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
     expect(await kv.get(kvKeys.qrToken(qr))).toBeNull();
   });
 
-  it("hands a new member the bound token renewed, minting nothing", async () => {
+  it("mints a new member its own token next to the bound one, which keeps working", async () => {
     const next = await setPin(await seedAuthToken(kv, USER_ID));
     const qr = await mintQr(next);
     const ops = watchKvOps(kv);
@@ -922,24 +969,30 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
     const res = await join({ qrToken: qr });
 
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Json).data.authToken).toBe(next);
+    const minted = ((await res.json()) as Json).data.authToken as string;
+    expect(minted).toMatch(HEX_64);
+    expect(minted).not.toBe(next);
     expect([...ops.putKeys()].sort()).toEqual(
       [
         kvKeys.family(FAMILY_ID),
         kvKeys.member(USER_ID),
         kvKeys.auth(USER_ID),
-        kvKeys.authToken(next),
+        keyOf(minted),
       ].sort(),
     );
     expect(ops.deleteKeys()).toEqual([kvKeys.qrToken(qr)]);
-    // The renewal keeps the record, secretAt included, and slides both TTLs.
+    // The bound token's key is read, never re-put; the list grows by the new one.
+    expect(ops.getKeys()).toContain(keyOf(next));
     expect(await readAuthRecord(kv, USER_ID)).toEqual({
-      token: next,
-      createdAt: new Date(PINNED_NOW).toISOString(),
+      tokens: [
+        { hash: sha256(next), createdAt: new Date(PINNED_NOW).toISOString() },
+        { hash: sha256(minted), createdAt: new Date(PINNED_NOW).toISOString() },
+      ],
       secretAt: PINNED_NOW,
     });
-    expect(getPutTtl(kv, kvKeys.authToken(next))).toBe(TOKEN_TTL_SECONDS);
-    expect(getPutTtl(kv, kvKeys.auth(USER_ID))).toBe(TOKEN_TTL_SECONDS);
+    expect(getPutTtl(kv, keyOf(minted))).toBe(TOKEN_TTL_SECONDS);
+    expect((await readBooks(next)).status).toBe(200);
+    expect((await readBooks(minted)).status).toBe(200);
   });
 
   it("stays usable after a refresh of the token it is bound to", async () => {
@@ -968,7 +1021,7 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
 describe("POST /api/family/:id/join — the reconnect after a QR bypass", () => {
   beforeEach(seedFamilyWithUser);
 
-  it("hands back the token the QR is bound to, reading auth:{userId} once", async () => {
+  it("mints this device its own token, reading auth:{userId} once", async () => {
     const next = await setPin(await seedAuthToken(kv, USER_ID));
     const qr = await mintQr(next);
     const ops = watchKvOps(kv);
@@ -976,16 +1029,19 @@ describe("POST /api/family/:id/join — the reconnect after a QR bypass", () => 
     const res = await join({ qrToken: qr });
 
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Json).data.authToken).toBe(next);
+    const minted = ((await res.json()) as Json).data.authToken as string;
+    expect(minted).toMatch(HEX_64);
+    expect(minted).not.toBe(next);
     expect(
       ops.getKeys().filter((k) => k === kvKeys.auth(USER_ID)),
     ).toHaveLength(1);
     expect(ops.deleteKeys()).toEqual([kvKeys.qrToken(qr)]);
+    expect(await listed(USER_ID)).toEqual([sha256(next), sha256(minted)]);
   });
 
-  it("hands a colo that missed the whole rotation the OLD token, minting nothing", async () => {
+  it("on a colo that missed the whole rotation, mints next to the OLD token and never hands out the rotated one", async () => {
     const { old, next, qr } = await qrThenPinChange();
-    await kv.put(kvKeys.authToken(old), USER_ID);
+    await revive(old);
     await seedStaleAuthRecord(old);
     const ops = watchKvOps(kv);
 
@@ -993,29 +1049,32 @@ describe("POST /api/family/:id/join — the reconnect after a QR bypass", () => 
 
     expect(res.status).toBe(200);
     const authToken = ((await res.json()) as Json).data.authToken as string;
-    expect(authToken).toBe(old);
+    expect(authToken).not.toBe(old);
     expect(authToken).not.toBe(next);
-    // Only the sliding renew of the bound pair; no new token:* key, no revoke.
+    // One new token:* key and the list; the old one is neither re-put nor revoked.
     expect(ops.putKeys().sort()).toEqual(
-      [kvKeys.auth(USER_ID), kvKeys.authToken(old)].sort(),
+      [kvKeys.auth(USER_ID), keyOf(authToken)].sort(),
     );
     expect(ops.putKeys().filter((k) => k.startsWith(TOKEN_KEY_PREFIX))).toEqual(
-      [kvKeys.authToken(old)],
+      [keyOf(authToken)],
     );
     expect(ops.deleteKeys()).toEqual([kvKeys.qrToken(qr)]);
+    expect(await listed(USER_ID)).toEqual([sha256(old), sha256(authToken)]);
   });
 
-  it("reuses the gate's auth record, never a newer one read later", async () => {
+  it("mints from the gate's auth record, never a newer one read later", async () => {
     const { old, next, qr } = await qrThenPinChange();
-    await kv.put(kvKeys.authToken(old), USER_ID);
+    await revive(old);
     staleFirstRead(kvKeys.auth(USER_ID), JSON.stringify(authRecordFor(old)));
 
     const res = await join({ qrToken: qr });
 
     expect(res.status).toBe(200);
     const authToken = ((await res.json()) as Json).data.authToken as string;
-    expect(authToken).toBe(old);
+    expect(authToken).not.toBe(old);
     expect(authToken).not.toBe(next);
+    // Built on the gate's (stale) list: a re-read would have listed `next` instead.
+    expect(await listed(USER_ID)).toEqual([sha256(old), sha256(authToken)]);
   });
 
   it("refuses a QR minted before the PIN change without a secret", async () => {
@@ -1058,18 +1117,18 @@ describe("POST /api/family/:id/join — the bound token's reverse key vanishes a
       const qr = await mintQr(live);
       const familyBefore = await kv.get(kvKeys.family(FAMILY_ID));
       const memberBefore = await kv.get(kvKeys.member(USER_ID));
-      onDeleteOf(kvKeys.qrToken(qr), kvKeys.authToken(live));
+      onDeleteOf(kvKeys.qrToken(qr), keyOf(live));
       const ops = watchKvOps(kv);
 
       const res = await join({ qrToken: qr, displayName: "Renamed" });
 
       await expectErrorCode(res, "VERIFICATION_REQUIRED");
       expect(ops.writeTrail()).toEqual([`delete ${kvKeys.qrToken(qr)}`]);
-      // Positive companion: the renewal did look up the bound reverse key.
-      expect(ops.getKeys()).toContain(kvKeys.authToken(live));
+      // Positive companion: the join did look up the bound reverse key.
+      expect(ops.getKeys()).toContain(keyOf(live));
       expect(await kv.get(kvKeys.family(FAMILY_ID))).toBe(familyBefore);
       expect(await kv.get(kvKeys.member(USER_ID))).toBe(memberBefore);
-      expect(await kv.get(kvKeys.authToken(live))).toBeNull();
+      expect(await tokenOwner(kv, live)).toBeNull();
     },
   );
 });
@@ -1086,17 +1145,28 @@ describe("AuthRecord.secretAt across later token writes", () => {
     const minted = ((await res.json()) as Json).data.authToken as string;
     expect(minted).not.toBe(rotated);
     expect(await readAuthRecord(kv, USER_ID)).toEqual({
-      token: minted,
-      createdAt: new Date(PINNED_NOW + 60_000).toISOString(),
+      tokens: [
+        {
+          hash: sha256(rotated),
+          createdAt: new Date(PINNED_NOW).toISOString(),
+        },
+        {
+          hash: sha256(minted),
+          createdAt: new Date(PINNED_NOW + 60_000).toISOString(),
+        },
+      ],
       secretAt: PINNED_NOW,
     });
   });
 
-  it("is kept by a refresh renewal", async () => {
+  it("is kept by a refresh renewal, which never rewrites auth:", async () => {
     const rotated = await setPin(await seedAuthToken(kv, USER_ID));
+    vi.setSystemTime(PINNED_NOW + 2 * 60 * 60 * 1000); // past the one-hour skip window
+    const ops = watchKvOps(kv);
 
     expect((await refresh(rotated)).status).toBe(200);
 
+    expect(ops.putKeys()).toEqual([keyOf(rotated)]);
     expect((await readAuthRecord(kv, USER_ID))?.secretAt).toBe(PINNED_NOW);
   });
 
@@ -1108,7 +1178,7 @@ describe("AuthRecord.secretAt across later token writes", () => {
     expect(res.status).toBe(200);
     const minted = ((await res.json()) as Json).data.authToken as string;
     const record = await readAuthRecord(kv, USER_ID);
-    expect(record?.token).toBe(minted);
+    expect(record?.tokens.map((e) => e.hash)).toEqual([sha256(minted)]);
     expect(record).not.toHaveProperty("secretAt");
   });
 
@@ -1137,12 +1207,14 @@ describe("POST /api/auth/refresh — renews only the token it was presented", ()
       error: { code: "REFRESH_FAILED", message: "Token refresh failed" },
     });
     expect(ops.writeTrail()).toEqual([]);
-    expect((await readAuthRecord(kv, USER_ID))?.token).toBe(next);
-    expect(await kv.get(kvKeys.authToken(next))).toBe(USER_ID);
+    expect(await listed(USER_ID)).toEqual([sha256(next)]);
+    expect(await tokenOwner(kv, next)).toBe(USER_ID);
   });
 
   it("renews the account's current token when that token is presented", async () => {
     const { next } = await revokedButAccepted();
+    const later = PINNED_NOW + 2 * 60 * 60 * 1000; // past the one-hour skip window
+    vi.setSystemTime(later);
     const ops = watchKvOps(kv);
 
     const res = await refresh(next);
@@ -1151,12 +1223,10 @@ describe("POST /api/auth/refresh — renews only the token it was presented", ()
     const { data } = (await res.json()) as Json;
     expect(data).toEqual({
       token: next,
-      expiresAt: PINNED_NOW + TOKEN_TTL_SECONDS * 1000,
+      expiresAt: later + TOKEN_TTL_SECONDS * 1000,
     });
-    // Positive companion of the empty trail above: a renewal does write.
-    expect(ops.putKeys().sort()).toEqual(
-      [kvKeys.auth(USER_ID), kvKeys.authToken(next)].sort(),
-    );
+    // Positive companion of the empty trail above: a renewal does write — its own key only.
+    expect(ops.putKeys()).toEqual([keyOf(next)]);
     // The guard reuses the one auth-record read for the renewal.
     expect(
       ops.getKeys().filter((k) => k === kvKeys.auth(USER_ID)),
@@ -1164,8 +1234,8 @@ describe("POST /api/auth/refresh — renews only the token it was presented", ()
   });
 
   it("still mints a token when no auth record exists (TTL gap)", async () => {
-    const token = "f".repeat(64);
-    await kv.put(kvKeys.authToken(token), USER_ID);
+    const token = await seedAuthToken(kv, USER_ID, { token: "f".repeat(64) });
+    await kv.delete(kvKeys.auth(USER_ID));
     const ops = watchKvOps(kv);
 
     const res = await refresh(token);
@@ -1178,7 +1248,7 @@ describe("POST /api/auth/refresh — renews only the token it was presented", ()
     expect(
       ops.getKeys().filter((k) => k === kvKeys.auth(USER_ID)),
     ).toHaveLength(1);
-    expect((await readAuthRecord(kv, USER_ID))?.token).toBe(minted);
-    expect(await kv.get(kvKeys.authToken(minted))).toBe(USER_ID);
+    expect(await listed(USER_ID)).toEqual([sha256(minted)]);
+    expect(await tokenOwner(kv, minted)).toBe(USER_ID);
   });
 });

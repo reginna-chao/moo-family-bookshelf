@@ -64,7 +64,7 @@ import { ALICE, BOB, CHARLIE, DAVE } from "../helpers/ids";
  *
  * Orphan setup: the family is dissolved by dropping `family:{familyId}`
  * (setup-only KV surgery; every assertion still goes through HTTP). Auth
- * tokens live in `auth:{userId}` / `token:{token}` and dropping the family
+ * tokens live in `auth:{userId}` / `token:{hash}` and dropping the family
  * record deletes neither, so Bob's token survives it — that is precisely the
  * residual being pinned. The borrower CAN still cancel: PATCH
  * /api/borrow/:requestId does re-read `family:{familyId}` for its membership

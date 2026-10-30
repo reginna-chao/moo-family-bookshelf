@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { Env } from "../utils/env";
-import { BoolFlag, TOKEN_TTL_SECONDS, type VerifyRecord } from "../kv/schema";
+import { BoolFlag, type VerifyRecord } from "../kv/schema";
 import { getMemberFamilyId } from "../kv/families";
 import { getVerifyRecord } from "../kv/verify";
 import {
@@ -71,6 +71,14 @@ const refreshRoute = createRoute({
   path: "/refresh",
   tags: ["Auth"],
   summary: "Refresh auth token",
+  description:
+    "Body: `{ userId: string, familyId?: string }`. Renews the presented " +
+    "token only — never another device's — and answers `{ token, expiresAt }` " +
+    "with the same token string (a new one only when the account's token " +
+    "list is missing). `expiresAt` is now + 90 days, or earlier " +
+    "when the token nears its absolute age: a PIN / pattern / none " +
+    "account's token past its 180-day absolute age is refused " +
+    "(401 `REFRESH_FAILED`); a code account's is not.",
   responses: {
     200: jsonRes("New auth token"),
     400: jsonRes("Invalid input"),
@@ -235,16 +243,18 @@ authRoutes.openapi(refreshRoute, async (c) => {
     }
   }
 
-  // Never hands out a token other than the bearer (#378); a stale colo renewing the OLD token
-  // is an accepted residual — docs/architecture.md → PWA 登入驗證機制.
+  // Renews only the presented token (#425), never another device's; a stale colo renewing a revoked
+  // one is an accepted residual — docs/architecture.md → PWA 登入驗證機制.
   const presentedToken = getPresentedAuthToken(c);
-  const newToken = presentedToken
+  const issued = presentedToken
     ? await renewPresentedAuthToken(c.env.KV, body.userId, presentedToken)
     : null;
-  if (!newToken) {
+  if (!issued) {
     return jsonError(c, 401, "REFRESH_FAILED", "Token refresh failed");
   }
-  const expiresAt = Date.now() + TOKEN_TTL_SECONDS * 1000;
 
-  return c.json({ data: { token: newToken, expiresAt } }, 200);
+  return c.json(
+    { data: { token: issued.token, expiresAt: issued.expiresAt } },
+    200,
+  );
 });

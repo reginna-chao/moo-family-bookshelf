@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { rateLimitBindings } from "../helpers/rateLimitBindings";
-import { seedAuthToken } from "../helpers/auth";
+import { seedAuthToken, authTokenKey } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
@@ -126,7 +126,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
     expect(res.status).toBe(200);
     expect([...ops.getKeys()].sort()).toEqual(
       [
-        kvKeys.authToken(token),
+        await authTokenKey(token),
         kvKeys.auth(USER_ID),
         kvKeys.verify(USER_ID),
         FAIL_KEY,
@@ -145,7 +145,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
     expect(res.status).toBe(200);
     expect([...ops.getKeys()].sort()).toEqual(
       [
-        kvKeys.authToken(token),
+        await authTokenKey(token),
         kvKeys.auth(USER_ID),
         kvKeys.verify(USER_ID),
         setKey,
