@@ -30,10 +30,13 @@ import type { BookWithMember } from "@/hooks/useFamilyShelfBooks";
  * The card's favorite and hide-menu behaviour is covered through
  * FamilyShelfPage's own suites.
  *
- * Cover fallback probe: coverFallback finds LazyCover's BookOpen fallback box by `bg-gray-100`. The
- * wrapper LazyCover renders around a live cover carries `relative` and the card's own classes, never a
- * background, and the overflow trigger's grey is the distinct `hover:bg-gray-100` token. The nested
- * icon is asserted alongside it.
+ * Cover fallback probe: coverFallback finds LazyCover's BookOpen fallback box by
+ * `div.bg-gray-100:not([aria-hidden])`. The wrapper LazyCover renders around a live cover carries
+ * `relative` and the card's own classes, never a background; the static loading overlay inside it
+ * (#430) is also `bg-gray-100` but carries `aria-hidden="true"`, which the probe excludes — jsdom
+ * never fires `load`, so a live cover stays in "loading" and that overlay is always present. The
+ * overflow trigger's grey is the distinct `hover:bg-gray-100` token. The nested icon is asserted
+ * alongside it.
  *
  * Book link whitelist: `readmooUrl` is the other attacker-controllable URL on the same server record,
  * and it lands in an `<a href>` wrapping the cover AND the title — so following it looks exactly like
@@ -101,10 +104,10 @@ function renderCard(
   );
 }
 
-/** LazyCover's BookOpen fallback box, singled out by `bg-gray-100`.
+/** LazyCover's BookOpen fallback box: `bg-gray-100` minus the aria-hidden loading overlay.
  *  See the header → "Cover fallback probe". */
 function coverFallback(container: HTMLElement): Element | null {
-  return container.querySelector("div.bg-gray-100");
+  return container.querySelector("div.bg-gray-100:not([aria-hidden])");
 }
 
 describe("FamilyBookCard", () => {

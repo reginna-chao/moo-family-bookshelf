@@ -24,9 +24,10 @@ export const LazyCover = React.memo(function LazyCover({
   return (
     <div className={`relative ${className ?? ""}`}>
       {status === "loading" && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-5 h-5 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin" />
-        </div>
+        <div
+          className="absolute inset-0 bg-gray-100 rounded-[inherit]"
+          aria-hidden="true"
+        />
       )}
       <img
         src={src}
