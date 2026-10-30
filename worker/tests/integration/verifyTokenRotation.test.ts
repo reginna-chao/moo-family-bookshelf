@@ -94,8 +94,10 @@ import {
  *
  * TTL-gap PUT: with no `auth:{userId}` record the presented bearer is still the
  * token a PIN / pattern save revokes — `token:{hash(presented)}` is deleted,
- * and so is `token:{presented}` itself, so a pre-#425 plaintext bearer in the
- * same gap stops working too (every PIN save issues that one extra delete).
+ * and so is `token:{presented}` itself (every PIN save issues that one extra
+ * delete). A pre-#425 PLAINTEXT bearer never reaches the handler in a gap: the
+ * middleware accepts one only while a legacy `auth:` record names it (C5), so
+ * with no record it answers `401 UNAUTHORIZED` and nothing is written.
  *
  * `AuthRecord.secretAt`: a PIN / pattern save writes it as the new verify
  * record's `secretUpdatedAt`; later mints carry it forward and refreshes never
@@ -731,15 +733,17 @@ describe("PUT /api/user/:id/verify — only the account's current token may chan
     },
   );
 
-  // See the header → "TTL-gap PUT": the presented plaintext key is deleted too.
-  it("revokes a pre-#425 plaintext bearer on a PIN save in a TTL gap", async () => {
+  // See the header → "TTL-gap PUT": a plaintext bearer is refused before the handler.
+  it("refuses a pre-#425 plaintext bearer in a TTL gap and writes nothing", async () => {
     const token = "f".repeat(64);
     await kv.put(kvKeys.authToken(token), USER_ID);
+    const ops = watchKvOps(kv);
 
-    const res = await putVerify(token, SECRET_METHODS[0].body);
+    await expectUnauthorized(await putVerify(token, SECRET_METHODS[0].body));
 
-    expect(res.status).toBe(200);
-    await expectUnauthorized(await readBooks(token));
+    expect(ops.writeTrail()).toEqual([]);
+    expect(await kv.get(kvKeys.verify(USER_ID))).toBeNull();
+    expect(await kv.get(kvKeys.authToken(token))).toBe(USER_ID);
   });
 });
 

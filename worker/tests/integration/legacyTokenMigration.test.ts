@@ -4,7 +4,11 @@ import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { seedAuthToken, seedLegacyAuthToken } from "../helpers/auth";
 import { ALICE, BOB } from "../helpers/ids";
-import { readAuthRecord } from "../../src/middleware/auth";
+import {
+  mintAuthToken,
+  readAndRevokeAllAuthTokens,
+  readAuthRecord,
+} from "../../src/middleware/auth";
 import { hashAuthToken } from "../../src/utils/crypto";
 import {
   kvKeys,
@@ -20,15 +24,31 @@ import {
  * `{ tokens: [], legacyToken: T }` (secretAt kept). Until the account's next
  * refresh or mint, the middleware accepts T through a fallback read of
  * `token:{T}` that runs only when `token:{hash(T)}` misses — and only for a
- * 64-hex value, so presenting a #425 token's HASH as a bearer is refused.
+ * 64-hex value, so presenting a #425 token's HASH as a bearer is refused. The
+ * fallback also reads `auth:{userId}` and accepts T only while that record is
+ * the legacy shape naming T (C5): a plaintext key with no such record — no
+ * record, a #425 list, or a legacy record naming another token — is inert.
  *
  * Refresh with T migrates in place: the same string comes back,
  * `token:{hash(T)}` is written, `token:{T}` deleted, and `auth:` becomes the
  * #425 list (`legacyToken` / `token` never reach KV). Any other mint for the
  * account (another device joining) migrates T the same way without logging it
  * out. A plaintext token the old record does NOT name (an orphan of the old
- * one-token model) is not current: refresh answers `401 REFRESH_FAILED`.
- * A revoke-all also deletes the plaintext key.
+ * one-token model) is refused by the middleware: refresh answers
+ * `401 UNAUTHORIZED`. A revoke-all also deletes the plaintext key.
+ *
+ * A plaintext key left behind by a failed migration delete is inert (C5): the
+ * migration deletes `token:{T}` last, so the leftover is modelled by putting
+ * it back after a completed mint. No `auth:` record names it any more, so once
+ * a revoke-all drops `token:{hash(T)}`, T answers 401 — refresh included — and
+ * nothing is written for it.
+ *
+ * A revoked legacy token is never revived (C3): a PIN save deletes
+ * `token:{T}`, but a colo that missed its `auth:` write still serves the old
+ * `{ token: T }` record. A correct-PIN join there mints from that stale read;
+ * since `token:{T}` is gone the migration drops T — no `token:{hash(T)}`, no
+ * list entry — so T stays logged out. The stale colo is modelled by putting
+ * the old record back after the PIN save (no `secretAt`, as before #378).
  *
  * Every request runs with DEV_MODE (rate limits are not under test).
  */
@@ -42,6 +62,7 @@ const FAMILY_ID = "abcd-1234";
 const LEGACY = "c".repeat(64);
 const ORPHAN = "e".repeat(64);
 const SECRET_AT = 1_767_225_600_000;
+const PIN = "123456";
 
 let kv: KVNamespace;
 
@@ -164,6 +185,30 @@ describe("legacy token — middleware refusals", () => {
     expect(((await res.json()) as Json).error.code).toBe("UNAUTHORIZED");
   });
 
+  it.each([
+    { label: "there is no auth: record", seedAuth: async () => {} },
+    {
+      label: "auth: is a #425 list",
+      seedAuth: async () => {
+        await seedAuthToken(kv, USER_ID, { token: "d".repeat(64) });
+      },
+    },
+    {
+      label: "the legacy auth: names another token",
+      seedAuth: async () => {
+        await seedLegacyAuthToken(kv, USER_ID, ORPHAN);
+      },
+    },
+  ])("refuses a live plaintext key when $label", async ({ seedAuth }) => {
+    await seedAuth();
+    await kv.put(kvKeys.authToken(LEGACY), USER_ID);
+
+    const res = await readBooks(LEGACY);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as Json).error.code).toBe("UNAUTHORIZED");
+  });
+
   it("refuses a #425 token's hash presented as the bearer", async () => {
     const token = await seedAuthToken(kv, USER_ID);
 
@@ -227,7 +272,7 @@ describe("legacy token — migration on refresh", () => {
     const res = await refresh(ORPHAN);
 
     expect(res.status).toBe(401);
-    expect(((await res.json()) as Json).error.code).toBe("REFRESH_FAILED");
+    expect(((await res.json()) as Json).error.code).toBe("UNAUTHORIZED");
     expect(ops.writeTrail()).toEqual([]);
   });
 });
@@ -270,6 +315,78 @@ describe("legacy token — migration on another device's mint", () => {
     expect(stored?.secretAt).toBe(SECRET_AT);
     expect(stored).not.toHaveProperty("token");
     expect(stored).not.toHaveProperty("legacyToken");
+  });
+});
+
+describe("legacy token — a revoked plaintext token is never revived", () => {
+  it("drops a token a PIN save deleted when a stale auth: still names it", async () => {
+    await seedFamily([OWNER_ID, USER_ID]);
+    await seedLegacyAuthToken(kv, USER_ID, LEGACY);
+    const pinSave = await request(
+      "PUT",
+      `/api/user/${USER_ID}/verify`,
+      LEGACY,
+      {
+        method: "pin",
+        secret: PIN,
+      },
+    );
+    expect(pinSave.status).toBe(200);
+    expect(await kv.get(kvKeys.authToken(LEGACY))).toBeNull();
+    // A colo that missed the PIN save's auth: write. See the header.
+    await kv.put(
+      kvKeys.auth(USER_ID),
+      JSON.stringify({ token: LEGACY, createdAt: new Date().toISOString() }),
+    );
+
+    const res = await request(
+      "POST",
+      `/api/family/${FAMILY_ID}/join`,
+      undefined,
+      { userId: USER_ID, verifySecret: PIN },
+    );
+
+    expect(res.status).toBe(200);
+    const fresh = ((await res.json()) as Json).data.authToken as string;
+    expect(fresh).toMatch(/^[a-f0-9]{64}$/);
+    expect(fresh).not.toBe(LEGACY);
+    expect(await hashedRecord(LEGACY)).toBeNull();
+    expect(await kv.get(kvKeys.authToken(LEGACY))).toBeNull();
+    expect(await storedAuthRaw()).toStrictEqual({
+      tokens: [
+        {
+          hash: await hashAuthToken(fresh),
+          createdAt: (await hashedRecord(fresh))?.createdAt,
+        },
+      ],
+    });
+    expect((await readBooks(LEGACY)).status).toBe(401);
+    expect((await readBooks(fresh)).status).toBe(200);
+  });
+});
+
+describe("legacy token — a plaintext key whose migration delete failed", () => {
+  it("is inert once a revoke-all drops the hashed record", async () => {
+    await seedLegacyAuthToken(kv, USER_ID, LEGACY);
+    await mintAuthToken(kv, USER_ID, await readAuthRecord(kv, USER_ID));
+    // The leftover of a failed plaintext delete. See the header.
+    await kv.put(kvKeys.authToken(LEGACY), USER_ID);
+    expect((await readBooks(LEGACY)).status).toBe(200);
+
+    await readAndRevokeAllAuthTokens(kv, USER_ID);
+
+    expect(await hashedRecord(LEGACY)).toBeNull();
+    expect(await kv.get(kvKeys.authToken(LEGACY))).toBe(USER_ID);
+    const ops = watchKvOps(kv);
+    const books = await readBooks(LEGACY);
+    const renewed = await refresh(LEGACY);
+
+    expect(books.status).toBe(401);
+    expect(((await books.json()) as Json).error.code).toBe("UNAUTHORIZED");
+    expect(renewed.status).toBe(401);
+    expect(((await renewed.json()) as Json).error.code).toBe("UNAUTHORIZED");
+    expect(ops.writeTrail()).toEqual([]);
+    expect(await kv.get(kvKeys.auth(USER_ID))).toBeNull();
   });
 });
 

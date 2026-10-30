@@ -88,3 +88,26 @@ export function watchKvOps(kv: KVNamespace): KvOpLog {
       ]),
   };
 }
+
+/**
+ * Make the FIRST `op` (`put` or `delete`) on `key` reject with `Error("KV down")`;
+ * every other call, and any later `op` on `key`, goes straight through to `kv`. For
+ * partial-failure cases whose retry must be allowed to write. Installs a `vi.spyOn`
+ * on `kv[op]` like {@link watchKvOps} — restore it in `afterEach`
+ * (`vi.restoreAllMocks()`), and call {@link watchKvOps} only AFTER this.
+ */
+export function failFirstWriteTo(
+  kv: KVNamespace,
+  op: "put" | "delete",
+  key: string,
+): void {
+  const real = (kv[op] as (...args: unknown[]) => Promise<void>).bind(kv);
+  let failed = false;
+  vi.spyOn(kv, op).mockImplementation(((...args: unknown[]) => {
+    if (args[0] === key && !failed) {
+      failed = true;
+      return Promise.reject(new Error("KV down"));
+    }
+    return real(...args);
+  }) as never);
+}

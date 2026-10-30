@@ -279,9 +279,9 @@ describe("per-device tokens — departures revoke every device", () => {
     await expectRevoked([TOKEN_A, TOKEN_B]);
   });
 
-  it("DELETE /api/user/:id revokes a pre-#425 plaintext bearer with no auth: record", async () => {
+  // A plaintext bearer needs its legacy auth: record to be accepted at all (C5).
+  it("DELETE /api/user/:id revokes a pre-#425 plaintext bearer", async () => {
     await seedLegacyAuthToken(kv, USER_ID, TOKEN_A);
-    await kv.delete(kvKeys.auth(USER_ID));
     expect((await readBooks(USER_ID, TOKEN_A)).status).toBe(200);
 
     const res = await request("DELETE", `/api/user/${USER_ID}`, TOKEN_A);
