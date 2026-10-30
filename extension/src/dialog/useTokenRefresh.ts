@@ -5,6 +5,8 @@ import { isExtensionContextValid } from "../utils/extensionContext";
 import { TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
+// setTimeout's max delay (~24.8 days); a larger one overflows and fires at once.
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 /**
  * Proactive token refresh hook — "三位一體" strategy:
@@ -52,7 +54,10 @@ export function useTokenRefresh(apiClient: ApiClient): void {
               ? newExpiry - Date.now() - REFRESH_BUFFER_MS
               : 0;
             if (newDelay > 0) {
-              timerRef.current = setTimeout(scheduleRefresh, newDelay);
+              timerRef.current = setTimeout(
+                scheduleRefresh,
+                Math.min(newDelay, MAX_TIMEOUT_MS),
+              );
             }
             // If delay is still <= 0, stop — refresh already happened, nothing to schedule
           } catch {
@@ -61,7 +66,10 @@ export function useTokenRefresh(apiClient: ApiClient): void {
         }
       } else {
         // Schedule future refresh
-        timerRef.current = setTimeout(scheduleRefresh, delay);
+        timerRef.current = setTimeout(
+          scheduleRefresh,
+          Math.min(delay, MAX_TIMEOUT_MS),
+        );
       }
     }
 
