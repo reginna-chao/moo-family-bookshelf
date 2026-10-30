@@ -24,10 +24,9 @@ import {
 import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
-  mintAuthToken,
-  readPresentedAuth,
-  revokeAuthTokenKeys,
 } from "../middleware/auth";
+import { readPresentedAuth } from "../services/authRecord";
+import { mintAuthToken, revokeAuthTokenKeys } from "../services/authTokens";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import {
   enforceCurrentSecret,
@@ -289,7 +288,9 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
   // A new PIN/pattern revokes EVERY token (#425) after the record write and drops a pending one-time code; `code`
   // keeps them. The presented hash covers an `auth:` gap. docs/architecture.md → PWA 登入驗證機制.
   await Promise.all([
-    revokeAuthTokenKeys(c.env.KV, presented.auth, [presented.presentedHash]),
+    revokeAuthTokenKeys(c.env.KV, userId, presented.auth, [
+      presented.presentedHash,
+    ]),
     deleteOtpRecord(c.env.KV, userId),
   ]);
   // The mint is the request's only `auth:` write (one write per key per second); `secretAt` lets a

@@ -61,9 +61,9 @@ import {
 import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
-  readPresentedAuth,
-  revokeAllAuthTokens,
 } from "../middleware/auth";
+import { readPresentedAuth } from "../services/authRecord";
+import { revokeAllAuthTokens } from "../services/authTokens";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";

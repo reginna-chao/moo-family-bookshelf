@@ -3,10 +3,8 @@ import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { seedAuthToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
-import {
-  mintAuthToken,
-  renewPresentedAuthToken,
-} from "../../src/middleware/auth";
+import { mintAuthToken } from "../../src/services/authTokens";
+import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
   kvKeys,
   TOKEN_TTL_SECONDS,
@@ -21,7 +19,8 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * names the user slides to now + 90 days, capped 180 days after its
  * `createdAt` — except on a `code` account, whose `verify:` record is read
  * once, and only when the cap would bite. It writes that one `token:{hash}`
- * key and never `auth:{userId}`; a target within an hour of the stored
+ * key — preceded by its `tokenidx:{userId}:{hash}` key with the SAME TTL
+ * (#431) — and never `auth:{userId}`; a target within an hour of the stored
  * `expiresAt` writes nothing. `null` (→ 401 REFRESH_FAILED) when the bearer is
  * not current, its reverse key is gone or names someone else, its `createdAt`
  * is unreadable, or it is at the cap. A TTL gap (no record, empty list) mints.
@@ -102,10 +101,16 @@ describe("renewPresentedAuthToken — sliding renewal", () => {
     expect(
       Math.abs(issued!.expiresAt - (now + TOKEN_TTL_SECONDS * 1000)),
     ).toBeLessThan(5000);
-    expect(ops.putKeys()).toEqual([kvKeys.authToken(hashA)]);
+    expect(ops.writeTrail()).toEqual([
+      `put ${kvKeys.authTokenIndex(USER1, hashA)}`,
+      `put ${kvKeys.authToken(hashA)}`,
+    ]);
     expect(ops.deleteKeys()).toEqual([]);
     expect(ops.putKeys()).not.toContain(kvKeys.auth(USER1));
     expect(getPutTtl(kv, kvKeys.authToken(hashA))).toBe(TOKEN_TTL_SECONDS);
+    expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hashA))).toBe(
+      TOKEN_TTL_SECONDS,
+    );
     expect(getPutTtl(kv, kvKeys.authToken(hashB))).toBe(TOKEN_TTL_SECONDS);
     expect(await tokenRecord(TOKEN_A)).toEqual({
       userId: USER1,
@@ -174,7 +179,12 @@ describe("renewPresentedAuthToken — the 180-day absolute cap", () => {
       expect(
         ops.getKeys().filter((k) => k === kvKeys.verify(USER1)),
       ).toHaveLength(1);
-      expect(ops.putKeys()).toEqual([kvKeys.authToken(hashA)]);
+      expect(ops.writeTrail()).toEqual([
+        `put ${kvKeys.authTokenIndex(USER1, hashA)}`,
+        `put ${kvKeys.authToken(hashA)}`,
+      ]);
+      // The capped (shorter) TTL is the index's too, so the index never outlives the token.
+      expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hashA))).toBe(ttl);
     },
   );
 
@@ -332,6 +342,12 @@ describe("renewPresentedAuthToken — pre-#425 record (#432)", () => {
       await hashAuthToken(issued!.token),
     ]);
     expect(auth?.secretAt).toBe(9);
+    const newHash = await hashAuthToken(issued!.token);
+    const trail = ops.writeTrail();
+    expect(trail.indexOf(`put ${kvKeys.authTokenIndex(USER1, newHash)}`)).toBe(
+      0,
+    );
+    expect(trail).toContain(`put ${kvKeys.authToken(newHash)}`);
     // Positive companions: the auth: read and put are observed, so the negatives below cannot pass vacuously.
     expect(ops.getKeys()).toContain(kvKeys.auth(USER1));
     expect(ops.writeTrail()).toContain(`put ${kvKeys.auth(USER1)}`);

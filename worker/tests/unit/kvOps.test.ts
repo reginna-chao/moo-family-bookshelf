@@ -13,6 +13,12 @@
  * The delete-BEFORE-put cases below are the anti-vacuity guard: that order can
  * only be reported if the sequencing is genuinely being read, since it is the
  * opposite of the concatenation order.
+ *
+ * `list` joins the trail (#431), labelled by its `prefix`: revoke-all's rule is
+ * "list the index BEFORE any `token:` delete and before the next mint's index
+ * put", so a `list` entered after a write must be reported after it — the
+ * list-AFTER-put case is the anti-vacuity guard there, the opposite of the
+ * concatenation order (puts, deletes, then lists).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createMockKV } from "../helpers/mockKv";
@@ -115,5 +121,42 @@ describe("watchKvOps writeTrail", () => {
     expect(await kv.get(THIRD)).toBeNull();
     // The refused put still ran, so it is still part of the trail.
     expect(ops.writeTrail()).toEqual([`put ${SECOND}`, `put ${THIRD}`]);
+  });
+});
+
+describe("watchKvOps list entries", () => {
+  it("reports a list that ran AFTER a put and a delete in that order, labelled by its prefix", async () => {
+    const ops = watchKvOps(kv);
+
+    await kv.put(SECOND, "v");
+    await kv.delete(FIRST);
+    await kv.list({ prefix: "tokenidx:alice:" });
+
+    expect(ops.writeTrail()).toEqual([
+      `put ${SECOND}`,
+      `delete ${FIRST}`,
+      "list tokenidx:alice:",
+    ]);
+    expect(ops.listPrefixes()).toEqual(["tokenidx:alice:"]);
+  });
+
+  it("labels a list without a prefix with the empty string", async () => {
+    const ops = watchKvOps(kv);
+
+    await kv.list();
+    await kv.put(SECOND, "v");
+
+    expect(ops.writeTrail()).toEqual(["list ", `put ${SECOND}`]);
+    expect(ops.listPrefixes()).toEqual([""]);
+  });
+
+  it("calls list straight through to the namespace", async () => {
+    await kv.put(THIRD, "v");
+    const ops = watchKvOps(kv);
+
+    const page = await kv.list({ prefix: "user:" });
+
+    expect(page.keys.map((k) => k.name)).toEqual([THIRD]);
+    expect(ops.listPrefixes()).toEqual(["user:"]);
   });
 });

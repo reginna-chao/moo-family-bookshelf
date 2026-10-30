@@ -3,12 +3,12 @@ import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { seedAuthToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
+import { readAuthRecord } from "../../src/services/authRecord";
 import {
   mintAuthToken,
   readAndRevokeAllAuthTokens,
-  readAuthRecord,
-  renewPresentedAuthToken,
-} from "../../src/middleware/auth";
+} from "../../src/services/authTokens";
+import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,
@@ -26,8 +26,9 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * with NO TTL, with the hash appended to the account's list. At most
  * `MAX_AUTH_TOKENS_PER_USER` (5) tokens are listed: a sixth mint evicts dead
  * entries (reverse key gone, or naming someone else) first, then the oldest
- * `createdAt`, deleting the evicted `token:` keys. Evicted keys are deleted
- * before `auth:` is put. `secretAt` replaces the carried-forward value; with
+ * `createdAt`, deleting the evicted `token:` keys, then their `tokenidx:` keys
+ * (#431). Evicted keys are deleted before the new token's `tokenidx:` put, which
+ * precedes `auth:` and its `token:{hash}` put. `secretAt` replaces the carried-forward value; with
  * neither, it is absent. A pre-#425 `{ token, createdAt, secretAt? }` record
  * reads as `{ tokens: [], secretAt? }` (#432): the mint treats it as an empty
  * list, reads no `token:` key and keeps `secretAt`.
@@ -207,7 +208,10 @@ describe("mintAuthToken — eviction past MAX_AUTH_TOKENS_PER_USER", () => {
       tokens.map(async (t) => kvKeys.authToken(await hashAuthToken(t))),
     );
     expect([...ops.getKeys()].sort()).toEqual([...expected].sort());
-    expect(ops.deleteKeys()).toEqual([expected[0]]);
+    expect(ops.deleteKeys()).toEqual([
+      expected[0],
+      kvKeys.authTokenIndex(USER1, await hashAuthToken(tokens[0])),
+    ]);
   });
 
   it("deletes the evicted key before it puts auth:", async () => {
@@ -247,9 +251,11 @@ describe("mintAuthToken — pre-#425 record (#432)", () => {
     const hash = await hashAuthToken(issued.token);
     // No read at all — in particular no `token:` lookup of a plaintext bearer.
     expect(ops.getKeys()).toEqual([]);
-    expect([...ops.writeTrail()].sort()).toEqual(
-      [`put ${kvKeys.auth(USER1)}`, `put ${kvKeys.authToken(hash)}`].sort(),
-    );
+    expect(ops.writeTrail()).toEqual([
+      `put ${kvKeys.authTokenIndex(USER1, hash)}`,
+      `put ${kvKeys.auth(USER1)}`,
+      `put ${kvKeys.authToken(hash)}`,
+    ]);
     const stored = await storedAuth();
     expect(stored?.tokens.map((e) => e.hash)).toEqual([hash]);
     expect(stored?.secretAt).toBe(9);

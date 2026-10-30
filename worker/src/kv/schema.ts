@@ -122,6 +122,9 @@ export const kvKeys = {
   auth: (userId: string) => `auth:${userId}`,
   // `tokenHash` = `hashAuthToken(token)`.
   authToken: (tokenHash: string) => `token:${tokenHash}`,
+  // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
+  authTokenIndex: (userId: string, tokenHash: string) =>
+    `tokenidx:${userId}:${tokenHash}`,
   verify: (userId: string) => `verify:${userId}`,
   verifyFail: (userId: string, callerKey: string) =>
     `verifyfail:${userId}:${callerKey}`,
@@ -418,7 +421,7 @@ export interface StoredAuthRecord {
   secretAt?: number;
 }
 
-/** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `middleware/auth.ts`). */
+/** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `services/authRecord.ts`). */
 export type AuthRecord = StoredAuthRecord;
 
 /** Token TTL: 90 days in seconds — the sliding lifetime of `token:{hash}`, renewed by refresh. */
@@ -443,7 +446,7 @@ export interface QrTokenRecord {
   userId: string;
   /** `hashAuthToken` of the token that minted it, equal to its `hash` in the `auth:` list (#425). OPTIONAL
    *  (added after release): absent, or an older `qr:`-salted value, matches no entry ⇒ never bypasses
-   *  verification (`isQrBoundToListedToken`, `middleware/auth.ts`). */
+   *  verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
   tokenHash?: string;
 }
 

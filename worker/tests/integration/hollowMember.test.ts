@@ -96,7 +96,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps, type KvOpLog } from "../helpers/kvOps";
-import { seedAuthToken, tokenOwner, authTokenKey } from "../helpers/auth";
+import {
+  seedAuthToken,
+  tokenOwner,
+  expectRevokeIndexOrder,
+  revokeAllTrailEntries,
+} from "../helpers/auth";
 import {
   BoolFlag,
   BorrowStatus,
@@ -999,14 +1004,15 @@ describe("owner rules need ownerId AND a listing (#222 INFO-2 / INFO-4)", () => 
       await expectError(res, 404, "MEMBER_NOT_FOUND");
       // Exactly the stray-pointer cleanup (#213 convergence): no tombstone
       // (a self-leave is never a kick), no family write, no dissolve.
-      // The three deletes run in parallel; their entry order is not a rule.
-      expect([...ops.writeTrail()].sort()).toEqual(
+      // The deletes run in parallel; only the index order (#431) is a rule.
+      const trail = ops.writeTrail();
+      expect([...trail].sort()).toEqual(
         [
           `delete ${kvKeys.member(USER1)}`,
-          `delete ${kvKeys.auth(USER1)}`,
-          `delete ${await authTokenKey(ctx.ownerToken)}`,
+          ...(await revokeAllTrailEntries(USER1, [ctx.ownerToken])),
         ].sort(),
       );
+      expectRevokeIndexOrder(trail, USER1);
       expect(await kv.get(kvKeys.member(USER1))).toBeNull();
       expect(await tokenOwner(kv, ctx.ownerToken)).toBeNull();
       expect(await kv.get(kvKeys.kicked(ctx.familyId, USER1))).toBeNull();

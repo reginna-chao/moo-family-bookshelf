@@ -8,7 +8,7 @@
  * and safe, none of which the budget suites cover:
  *
  * 1. SHAPE — the logged object is exactly
- *    `{ event, method, route, status, reads, writes, deletes }` and nothing
+ *    `{ event, method, route, status, reads, writes, deletes, lists }` and nothing
  *    else, so a Workers Logs query written against it keeps working.
  * 2. NO SECRETS — `route` is the route PATTERN, never `c.req.path`. The raw
  *    path carries `:shareToken` (which IS a public shelf's capability) and
@@ -18,13 +18,13 @@
  *    500 paths alike, and a log sink that throws is swallowed.
  *
  * WHY THE COUNTS ARE ASSERTED AGAINST A RECORDER, NOT LITERALS. `watchKvOps`
- * observes the same namespace the Proxy wraps, so `reads`/`writes`/`deletes`
- * are compared to what the request ACTUALLY did. The literal numbers belong to
+ * observes the same namespace the Proxy wraps, so `reads`/`writes`/`deletes`/
+ * `lists` are compared to what the request ACTUALLY did. The literal numbers belong to
  * tests/integration/budget/, which exists to fail when they change (#160 has
  * already lowered them), and this file must stay green when they do — it is
  * about the line being CORRECT, not about the bill being small.
  *
- * Caveat on that equality: `watchKvOps` spies `get` / `put` / `delete`, while
+ * Caveat on that equality: `watchKvOps` spies `get` / `put` / `delete` / `list`, while
  * the Proxy also counts `getWithMetadata` as a read. Nothing on these paths
  * calls it, so the two agree today. A future handler that does would fail these
  * assertions — which is the right signal: it means the recorder no longer sees
@@ -116,6 +116,7 @@ interface KvOpsLine {
   reads: number;
   writes: number;
   deletes: number;
+  lists: number;
 }
 
 /** The `console.log` spy surface read below — structural, no vitest types. */
@@ -228,6 +229,7 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       reads: ops.getKeys().length,
       writes: ops.putKeys().length,
       deletes: ops.deleteKeys().length,
+      lists: ops.listPrefixes().length,
     });
 
     // Non-vacuity for `reads` (else 0 === 0); writes are genuinely zero here.
@@ -307,6 +309,7 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       reads: ops.getKeys().length,
       writes: ops.putKeys().length,
       deletes: ops.deleteKeys().length,
+      lists: ops.listPrefixes().length,
     });
 
     // Reads paid before the throw are still reported; only `reads` can prove it.
@@ -336,6 +339,7 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       reads: ops.getKeys().length,
       writes: ops.putKeys().length,
       deletes: ops.deleteKeys().length,
+      lists: ops.listPrefixes().length,
     });
     expect(ops.getKeys().length).toBeGreaterThan(0);
   });
@@ -376,6 +380,7 @@ describe("withKvOpCounting — kv_ops telemetry line", () => {
       reads: ops.getKeys().length,
       writes: ops.putKeys().length,
       deletes: ops.deleteKeys().length,
+      lists: ops.listPrefixes().length,
     });
 
     // The aggregation never ran: a genuine 0/0/0.

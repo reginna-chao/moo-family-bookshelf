@@ -1,5 +1,5 @@
-/** Thin data access (#425) for `auth:{userId}` and `token:{hash}` — one KV op each, no validation.
- *  Normalization and multi-key fan-out live in middleware/auth.ts. See docs/architecture.md → PWA 登入驗證機制. */
+/** Thin data access (#425, #431) for `auth:{userId}`, `token:{hash}`, `tokenidx:{userId}:{hash}` — one KV op each, no validation; normalization,
+ *  list paging and fan-out live in services/authRecord.ts / authTokens.ts / authRenewal.ts. See docs/architecture.md → PWA 登入驗證機制. */
 import { kvKeys, type AuthTokenRecord, type StoredAuthRecord } from "./schema";
 
 /** `auth:{userId}` exactly as read: `tokens`, `secretAt` (both unvalidated). */
@@ -69,4 +69,34 @@ export async function deleteAuthTokenKey(
   keyTail: string,
 ): Promise<void> {
   await kv.delete(kvKeys.authToken(keyTail));
+}
+
+/** Write `tokenidx:{userId}:{tokenHash}` (value `"1"`) with the TTL of the `token:{tokenHash}` put it precedes (#431). */
+export async function putAuthTokenIndex(
+  kv: KVNamespace,
+  userId: string,
+  tokenHash: string,
+  ttlSeconds: number,
+): Promise<void> {
+  await kv.put(kvKeys.authTokenIndex(userId, tokenHash), "1", {
+    expirationTtl: ttlSeconds,
+  });
+}
+
+/** Delete one `tokenidx:{userId}:{tokenHash}` key. */
+export async function deleteAuthTokenIndex(
+  kv: KVNamespace,
+  userId: string,
+  tokenHash: string,
+): Promise<void> {
+  await kv.delete(kvKeys.authTokenIndex(userId, tokenHash));
+}
+
+/** List ONE page of the account's `tokenidx:{userId}:` keys, returned as-is (paging: `listAuthTokenIndexHashes`). */
+export async function listAuthTokenIndexPage(
+  kv: KVNamespace,
+  userId: string,
+  cursor?: string,
+): Promise<KVNamespaceListResult<unknown, string>> {
+  return kv.list({ prefix: kvKeys.authTokenIndex(userId, ""), cursor });
 }

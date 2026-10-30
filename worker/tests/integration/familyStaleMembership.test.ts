@@ -136,6 +136,8 @@ import { watchKvOps } from "../helpers/kvOps";
 import {
   seedAuthToken,
   authTokenKey,
+  expectRevokeIndexOrder,
+  revokeAllTrailEntries,
   tokenOwner,
   listsToken,
 } from "../helpers/auth";
@@ -874,13 +876,14 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
     // See the header → "MEMBER_NOT_FOUND re-kick order".
     const trail = ops.writeTrail();
     expect(trail[0]).toBe(`put ${kvKeys.kicked(familyId, USER3)}`);
+    // The seeded token has no `tokenidx:` key, so the list names nothing to delete (#431).
     expect([...trail.slice(1)].sort()).toEqual(
       [
         `delete ${kvKeys.member(USER3)}`,
-        `delete ${kvKeys.auth(USER3)}`,
-        `delete ${await authTokenKey(staleToken)}`,
+        ...(await revokeAllTrailEntries(USER3, [staleToken], [])),
       ].sort(),
     );
+    expectRevokeIndexOrder(trail, USER3);
   });
 
   it("should clear the caller's own stray pointer and token on a self-targeted leave, without a tombstone", async () => {

@@ -112,6 +112,9 @@ import { watchKvOps } from "../helpers/kvOps";
 import {
   seedAuthToken,
   authTokenKey,
+  authTokenIndexKey,
+  expectRevokeIndexOrder,
+  revokeAllTrailEntries,
   tokenOwner,
   listsToken,
 } from "../helpers/auth";
@@ -126,6 +129,8 @@ let kv: KVNamespace;
 /** What the app is handed as `env.KV`: `kv`, or a fault-injecting Proxy over it.
  *  See the header → "Fault injection". */
 let envKv: KVNamespace;
+/** `kv.list` captured before any spy, so a test-side key scan never enters a `writeTrail()`. */
+let listUnwatched: KVNamespace["list"];
 
 /** `"family:"`, taken from the production key builder so the "no other family
  *  record exists" assertions cannot pass vacuously after a key rename. */
@@ -208,7 +213,7 @@ async function listedMemberIds(familyId: string): Promise<string[]> {
 
 /** Every `family:*` key in the store, whichever family it belongs to. */
 async function allFamilyRecordKeys(): Promise<string[]> {
-  const { keys } = await kv.list();
+  const { keys } = await listUnwatched();
   return keys
     .map((k) => k.name)
     .filter((name) => name.startsWith(FAMILY_KEY_PREFIX));
@@ -276,6 +281,7 @@ function failNextKvOp(
 beforeEach(() => {
   kv = createMockKV();
   envKv = kv;
+  listUnwatched = kv.list.bind(kv);
 });
 
 afterEach(() => {
@@ -303,8 +309,9 @@ describe("POST /api/family partial-write convergence", () => {
       `put ${kvKeys.member(USER1)}`,
       `put ${kvKeys.family(familyId)}`,
     ]);
-    // Token pair is written in parallel, after both membership keys.
-    expect(asSet(trail.slice(2))).toEqual(
+    // The token's index, then the token pair in parallel, after both membership keys (#431).
+    expect(trail[2]).toBe(`put ${await authTokenIndexKey(USER1, token)}`);
+    expect(asSet(trail.slice(3))).toEqual(
       asSet([`put ${kvKeys.auth(USER1)}`, `put ${await authTokenKey(token)}`]),
     );
   });
@@ -396,7 +403,8 @@ describe("POST /api/family/:id/join partial-write convergence", () => {
       `put ${kvKeys.family(familyId)}`,
       `put ${kvKeys.member(USER2)}`,
     ]);
-    expect(asSet(trail.slice(2))).toEqual(
+    expect(trail[2]).toBe(`put ${await authTokenIndexKey(USER2, token)}`);
+    expect(asSet(trail.slice(3))).toEqual(
       asSet([`put ${kvKeys.auth(USER2)}`, `put ${await authTokenKey(token)}`]),
     );
   });
@@ -499,10 +507,10 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(2))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
   });
 
   it("should update the member list before revoking pointer and token on a self-leave, with no tombstone", async () => {
@@ -519,10 +527,10 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
   });
 
   it("should revoke nothing when the kick's family put fails, refuse the still-listed target's reconnect, and converge on the owner's retry", async () => {
@@ -566,10 +574,10 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(2))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
     expect(await listedMemberIds(familyId)).toEqual([USER1]);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
@@ -620,13 +628,15 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(((await retry.json()) as Json).error.code).toBe("MEMBER_NOT_FOUND");
     const trail = ops.writeTrail();
     expect(trail[0]).toBe(`put ${kvKeys.kicked(familyId, USER2)}`);
+    // The seeded stray token has no index, and the first kick's revoke already
+    // deleted the joined token's, so the list returns nothing to delete.
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(strayToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [strayToken], [])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
     expect(await tokenOwner(kv, strayToken)).toBeNull();
@@ -732,13 +742,14 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     // pointer and the caller's own token — and, a self-leave, bans nothing.
     expect(retry.status).toBe(404);
     expect(((await retry.json()) as Json).error.code).toBe("MEMBER_NOT_FOUND");
-    expect(asSet(ops.writeTrail())).toEqual(
+    const trail = ops.writeTrail();
+    expect(asSet(trail)).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
     expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await readAuthRecord(USER2)).toBeNull();
     expect(await tokenOwner(kv, memberToken)).toBeNull();
@@ -820,10 +831,10 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER1)}`,
-        `delete ${kvKeys.auth(USER1)}`,
-        `delete ${await authTokenKey(authToken)}`,
+        ...(await revokeAllTrailEntries(USER1, [authToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER1);
   });
 
   it("should keep the owner's pointer and token when the family delete fails, so the same session can retry", async () => {

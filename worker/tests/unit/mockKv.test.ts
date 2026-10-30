@@ -33,6 +33,16 @@
  * `expiration: 1` would come back a 400. The mock deliberately models none of
  * that because no production code passes an absolute `expiration`; if that
  * changes, this gap has to close before the caller can be trusted.
+ *
+ * `list` paging (#431): revoke-all lists `tokenidx:{userId}:` and deletes every
+ * hash it names, so a mock `list` that ignored `prefix` would hand production
+ * another account's (or another family's) keys and let a test go green while
+ * deleting the wrong things. The `list` cases pin prefix filtering, the
+ * lexicographic order real KV returns, `limit` paging with the offset cursor,
+ * and that `cursor` is present ONLY while another page exists — the shape the
+ * production paging guards (`listAuthTokenIndexHashes`, `listSavedKeys`)
+ * check. The no-argument case is the positive control that every key is
+ * still returned, so a filter cannot pass by returning nothing.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
@@ -238,5 +248,94 @@ describe("getPutTtl", () => {
 
     expect(getPutTtl(kv, KEY)).toBeUndefined();
     expect(getPutTtl(otherKv, KEY)).toBe(900);
+  });
+});
+
+describe("createMockKV list", () => {
+  // Inserted out of order on purpose, so lexicographic sorting is observable.
+  const SEEDED = [
+    "user:b",
+    "tokenidx:u1:bb",
+    "auth:u1",
+    "tokenidx:u1:aa",
+    "tokenidx:u10:cc",
+  ];
+
+  beforeEach(async () => {
+    for (const key of SEEDED) await kv.put(key, "1");
+  });
+
+  it("returns every key in lexicographic order when called without options", async () => {
+    const page = await kv.list();
+
+    expect(page.keys.map((k) => k.name)).toEqual([...SEEDED].sort());
+    expect(page.list_complete).toBe(true);
+    expect("cursor" in page).toBe(false);
+  });
+
+  it.each([
+    { prefix: "tokenidx:u1:", expected: ["tokenidx:u1:aa", "tokenidx:u1:bb"] },
+    {
+      // Code-unit order: "0" (0x30) sorts before ":" (0x3a), so u10 precedes u1.
+      prefix: "tokenidx:",
+      expected: ["tokenidx:u10:cc", "tokenidx:u1:aa", "tokenidx:u1:bb"],
+    },
+    { prefix: "user:", expected: ["user:b"] },
+    { prefix: "missing:", expected: [] },
+  ])("filters by prefix $prefix", async ({ prefix, expected }) => {
+    const page = await kv.list({ prefix });
+
+    expect(page.keys.map((k) => k.name)).toEqual(expected);
+    expect(page.list_complete).toBe(true);
+  });
+
+  it("pages with limit and an offset cursor, which appears only while another page exists", async () => {
+    const first = await kv.list({ prefix: "tokenidx:", limit: 2 });
+    expect(first.keys.map((k) => k.name)).toEqual([
+      "tokenidx:u10:cc",
+      "tokenidx:u1:aa",
+    ]);
+    expect(first.list_complete).toBe(false);
+    if (first.list_complete) throw new Error("expected another page");
+    expect(first.cursor).toBe("2");
+
+    const second = await kv.list({
+      prefix: "tokenidx:",
+      limit: 2,
+      cursor: first.cursor,
+    });
+    expect(second.keys.map((k) => k.name)).toEqual(["tokenidx:u1:bb"]);
+    expect(second.list_complete).toBe(true);
+    expect("cursor" in second).toBe(false);
+  });
+
+  it("omits the cursor when a page ends exactly at the last key", async () => {
+    const page = await kv.list({ prefix: "tokenidx:u1:", limit: 2 });
+
+    expect(page.keys).toHaveLength(2);
+    expect(page.list_complete).toBe(true);
+    expect("cursor" in page).toBe(false);
+  });
+
+  it("defaults limit to 1000 keys per page", async () => {
+    for (let i = 0; i < 1001; i += 1)
+      await kv.put(`bulk:${String(i).padStart(4, "0")}`, "1");
+
+    const first = await kv.list({ prefix: "bulk:" });
+    expect(first.keys).toHaveLength(1000);
+    expect(first.list_complete).toBe(false);
+    if (first.list_complete) throw new Error("expected another page");
+
+    const second = await kv.list({ prefix: "bulk:", cursor: first.cursor });
+    expect(second.keys.map((k) => k.name)).toEqual(["bulk:1000"]);
+    expect(second.list_complete).toBe(true);
+  });
+
+  it("does not list a deleted key", async () => {
+    await kv.delete("tokenidx:u1:aa");
+
+    const page = await kv.list({ prefix: "tokenidx:u1:" });
+
+    expect(page.keys.map((k) => k.name)).toEqual(["tokenidx:u1:bb"]);
   });
 });
