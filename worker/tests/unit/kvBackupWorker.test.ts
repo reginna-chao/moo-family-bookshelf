@@ -105,7 +105,10 @@ describe("runScheduledBackup", () => {
     });
     const archive = publishedArchive(f.bucket);
     expect(archive.manifest).toEqual(result.manifest);
-    expect(archive.records).toEqual(records);
+    // The archive follows the listing, which is lexicographic (as on real KV).
+    expect(archive.records).toEqual(
+      [...records].sort((a, b) => (a.key < b.key ? -1 : 1)),
+    );
     expect(archive.data.toString("utf8")).not.toContain("token:private");
     expect(f.bucket.trace).toEqual([
       "get:latest.json",
@@ -357,9 +360,10 @@ describe("Healthchecks reporting after a published backup", () => {
 });
 
 describe("TTL expiry during a scheduled backup", () => {
+  // In listing (lexicographic) order, which is the archive's record order.
   const kept = [
-    { key: "user:reader", value: "{}" },
     { key: "family:abcd-1234", value: '{"members":[]}' },
+    { key: "user:reader", value: "{}" },
   ];
 
   it.each([

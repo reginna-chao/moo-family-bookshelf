@@ -1,6 +1,7 @@
 /** Shared auth-token seeding for tests — the rationale (hashed `token:` key, token list,
  *  `kvKeys`, no TTL, one-half seeds, legacy shape) is in `seedAuthToken`'s JSDoc. */
 
+import { expect } from "vitest";
 import {
   kvKeys,
   TOKEN_TTL_SECONDS,
@@ -68,6 +69,11 @@ export interface SeedAuthTokenOptions {
  * Unlike production writes, these seeds carry no `expirationTtl`. A test that
  * asserts auth-key TTLs must go through the production `mintAuthToken()`.
  *
+ * Nor do they write the `tokenidx:{userId}:{hash}` key production puts before
+ * every `token:{hash}` (#431): a seeded token is in the state of one minted
+ * before the index existed — revoke-all reaches it through the `auth:` list
+ * only. A test about the index mints through `mintAuthToken()`.
+ *
  * Tests that deliberately seed only ONE half (only `token:{hash}`, or an
  * `auth:` record with no matching token key) must keep doing that inline —
  * that asymmetry is the thing under test, not a case for this helper. The
@@ -103,6 +109,56 @@ export async function seedAuthToken(
 /** The `token:{hash}` key production reads for `token` (#425) — never `token:{token}`. */
 export async function authTokenKey(token: string): Promise<string> {
   return kvKeys.authToken(await hashAuthToken(token));
+}
+
+/** The `tokenidx:{userId}:{hash}` key production puts before `token`'s `token:{hash}` key (#431). */
+export async function authTokenIndexKey(
+  userId: string,
+  token: string,
+): Promise<string> {
+  return kvKeys.authTokenIndex(userId, await hashAuthToken(token));
+}
+
+/**
+ * The `writeTrail()` entries of a revoke-all of `userId` (#431), pointer
+ * excluded: the `list` of its index prefix, the `auth:` delete, a `token:`
+ * delete per `revoked` token and a `tokenidx:` delete per `indexed` token (the
+ * tokens whose index the list returned — a seeded token has none). Unordered:
+ * compare as a set and pin the order with {@link expectRevokeIndexOrder}.
+ */
+export async function revokeAllTrailEntries(
+  userId: string,
+  revoked: readonly string[],
+  indexed: readonly string[] = revoked,
+): Promise<string[]> {
+  return [
+    `list ${kvKeys.authTokenIndex(userId, "")}`,
+    `delete ${kvKeys.auth(userId)}`,
+    ...(await Promise.all(
+      revoked.map(async (t) => `delete ${await authTokenKey(t)}`),
+    )),
+    ...(await Promise.all(
+      indexed.map(async (t) => `delete ${await authTokenIndexKey(userId, t)}`),
+    )),
+  ];
+}
+
+/**
+ * Pin a revoke's order in `trail` (#431): `userId`'s index is listed exactly
+ * once, before every `token:` delete, and each of its `tokenidx:` deletes comes
+ * after every `token:` delete — so a failed `token:` delete keeps every index
+ * for the retry.
+ */
+export function expectRevokeIndexOrder(trail: string[], userId: string): void {
+  const prefix = kvKeys.authTokenIndex(userId, "");
+  const listAt = trail.indexOf(`list ${prefix}`);
+  expect(trail.filter((e) => e === `list ${prefix}`)).toHaveLength(1);
+  const positions = (start: string) =>
+    trail.flatMap((e, i) => (e.startsWith(start) ? [i] : []));
+  const tokenDeletes = positions(`delete ${kvKeys.authToken("")}`);
+  for (const at of tokenDeletes) expect(at).toBeGreaterThan(listAt);
+  for (const at of positions(`delete ${prefix}`))
+    expect(at).toBeGreaterThan(Math.max(listAt, ...tokenDeletes));
 }
 
 /**

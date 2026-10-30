@@ -210,6 +210,11 @@ function keyOf(authToken: string): string {
   return kvKeys.authToken(sha256(authToken));
 }
 
+/** The `tokenidx:{userId}:{hash}` key of `authToken` (#431), put before its `token:` key. */
+function indexKeyOf(authToken: string): string {
+  return kvKeys.authTokenIndex(USER_ID, sha256(authToken));
+}
+
 function seedFamilyRecord(members: string[]): Promise<void> {
   return kv.put(
     kvKeys.family(FAMILY_ID),
@@ -513,12 +518,21 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
     expect([...trail].sort()).toEqual(
       [
         `put ${kvKeys.verify(USER_ID)}`,
+        `list ${kvKeys.authTokenIndex(USER_ID, "")}`,
         `delete ${keyOf(oldToken)}`,
         `delete ${kvKeys.authToken(oldToken)}`,
         `delete ${kvKeys.otp(USER_ID)}`,
+        `put ${indexKeyOf(newToken)}`,
         `put ${kvKeys.auth(USER_ID)}`,
         `put ${keyOf(newToken)}`,
       ].sort(),
+    );
+    // The revoke lists the index before the new token's index exists, so it cannot revoke it (R6).
+    expect(
+      trail.indexOf(`list ${kvKeys.authTokenIndex(USER_ID, "")}`),
+    ).toBeLessThan(trail.indexOf(`put ${indexKeyOf(newToken)}`));
+    expect(trail.indexOf(`put ${indexKeyOf(newToken)}`)).toBeLessThan(
+      trail.indexOf(`put ${keyOf(newToken)}`),
     );
     // The swap stays serialized: both old reverse keys (hash + pre-#425 plaintext) go before the new pair.
     for (const oldKey of [keyOf(oldToken), kvKeys.authToken(oldToken)]) {
@@ -976,6 +990,7 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
       [
         kvKeys.family(FAMILY_ID),
         kvKeys.member(USER_ID),
+        indexKeyOf(minted),
         kvKeys.auth(USER_ID),
         keyOf(minted),
       ].sort(),
@@ -1053,7 +1068,7 @@ describe("POST /api/family/:id/join — the reconnect after a QR bypass", () => 
     expect(authToken).not.toBe(next);
     // One new token:* key and the list; the old one is neither re-put nor revoked.
     expect(ops.putKeys().sort()).toEqual(
-      [kvKeys.auth(USER_ID), keyOf(authToken)].sort(),
+      [indexKeyOf(authToken), kvKeys.auth(USER_ID), keyOf(authToken)].sort(),
     );
     expect(ops.putKeys().filter((k) => k.startsWith(TOKEN_KEY_PREFIX))).toEqual(
       [keyOf(authToken)],
@@ -1166,7 +1181,7 @@ describe("AuthRecord.secretAt across later token writes", () => {
 
     expect((await refresh(rotated)).status).toBe(200);
 
-    expect(ops.putKeys()).toEqual([keyOf(rotated)]);
+    expect(ops.putKeys()).toEqual([indexKeyOf(rotated), keyOf(rotated)]);
     expect((await readAuthRecord(kv, USER_ID))?.secretAt).toBe(PINNED_NOW);
   });
 
@@ -1225,8 +1240,8 @@ describe("POST /api/auth/refresh — renews only the token it was presented", ()
       token: next,
       expiresAt: later + TOKEN_TTL_SECONDS * 1000,
     });
-    // Positive companion of the empty trail above: a renewal does write — its own key only.
-    expect(ops.putKeys()).toEqual([keyOf(next)]);
+    // Positive companion of the empty trail above: a renewal does write — its own index and key only.
+    expect(ops.putKeys()).toEqual([indexKeyOf(next), keyOf(next)]);
     // The guard reuses the one auth-record read for the renewal.
     expect(
       ops.getKeys().filter((k) => k === kvKeys.auth(USER_ID)),

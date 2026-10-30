@@ -5,10 +5,15 @@ import { routePath } from "hono/route";
 import type { Env } from "../utils/env";
 
 /** Per-request KV operation tally, one field per Cloudflare billing class. */
-export type KvOpCounts = { reads: number; writes: number; deletes: number };
+export type KvOpCounts = {
+  reads: number;
+  writes: number;
+  deletes: number;
+  lists: number;
+};
 
-/** KVNamespace method → counter; null = forwarded UNCOUNTED (only `list`, which nothing calls). A switch,
- *  not a lookup object: an object literal answers inherited keys ("toString") and would mis-count them. */
+/** KVNamespace method → counter; null = forwarded UNCOUNTED (any other method). A switch, not a lookup
+ *  object: an object literal answers inherited keys ("toString") and would mis-count them. */
 function kvOpKindFor(prop: string | symbol): keyof KvOpCounts | null {
   switch (prop) {
     case "get":
@@ -18,6 +23,8 @@ function kvOpKindFor(prop: string | symbol): keyof KvOpCounts | null {
       return "writes";
     case "delete":
       return "deletes";
+    case "list":
+      return "lists";
     default:
       return null;
   }
@@ -89,7 +96,7 @@ export function createCountingKv(
  */
 export const withKvOpCounting = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
-    const counts: KvOpCounts = { reads: 0, writes: 0, deletes: 0 };
+    const counts: KvOpCounts = { reads: 0, writes: 0, deletes: 0, lists: 0 };
     c.env = { ...c.env, KV: createCountingKv(c.env.KV, counts) };
 
     try {
@@ -110,6 +117,7 @@ export const withKvOpCounting = createMiddleware<{ Bindings: Env }>(
           reads: counts.reads,
           writes: counts.writes,
           deletes: counts.deletes,
+          lists: counts.lists,
         });
       } catch {
         // Telemetry must never fail a request; console.error could throw too.

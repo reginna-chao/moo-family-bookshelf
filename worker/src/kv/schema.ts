@@ -122,6 +122,9 @@ export const kvKeys = {
   auth: (userId: string) => `auth:${userId}`,
   // `tokenHash` = `hashAuthToken(token)`; a pre-#425 key's tail is the plaintext token (read-only fallback).
   authToken: (tokenHash: string) => `token:${tokenHash}`,
+  // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
+  authTokenIndex: (userId: string, tokenHash: string) =>
+    `tokenidx:${userId}:${tokenHash}`,
   verify: (userId: string) => `verify:${userId}`,
   verifyFail: (userId: string, callerKey: string) =>
     `verifyfail:${userId}:${callerKey}`,

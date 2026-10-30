@@ -34,6 +34,12 @@ export function getPutTtl(kv: KVNamespace, key: string): number | undefined {
   return ttlRegistry.get(kv)?.get(key);
 }
 
+/** Lexicographic key order for `list` — see `createMockKV`'s JSDoc → "`list`". */
+function compareKeyNames(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 /**
  * Simple in-memory KV mock for unit/integration tests. TTLs are VALIDATED and
  * RECORDED, never SIMULATED; the policy side (expiry never happens, a test that
@@ -74,6 +80,15 @@ export function getPutTtl(kv: KVNamespace, key: string): number | undefined {
  * constraint. Sharing one constant would let a wrong value in production
  * silently redefine what the test infrastructure accepts, so the check would
  * pass by construction.
+ *
+ * `list({ prefix, limit, cursor })` models the platform's paging: keys sorted
+ * lexicographically (by UTF-16 code unit — the same order as UTF-8 bytes for
+ * every key this suite builds), filtered by `prefix`, `limit` per page (default
+ * 1000, like real KV), `cursor` = the stringified offset of the next page in
+ * the filtered list, present ONLY while `list_complete` is false. A call with
+ * no options therefore returns every key, sorted, when the store holds at
+ * most 1000. Each key carries its `name` only — no `expiration` / `metadata`.
+ * The cursor is the mock's own encoding; production must treat it as opaque.
  *
  * `expiration` is not modelled: only `expirationTtl` is recognized. An absolute
  * `expiration` (epoch seconds) is silently ignored — `getPutTtl` would read back
@@ -122,9 +137,19 @@ export function createMockKV(): KVNamespace {
       store.delete(key);
       ttls.delete(key);
     },
-    list: async () => {
-      const keys = [...store.keys()].map((name) => ({ name }));
-      return { keys, list_complete: true, cacheStatus: null };
+    list: async (options?: KVNamespaceListOptions) => {
+      const prefix = options?.prefix ?? "";
+      const names = [...store.keys()].filter((name) => name.startsWith(prefix));
+      names.sort(compareKeyNames);
+      const start = options?.cursor ? Number(options.cursor) : 0;
+      const page = names.slice(start, start + (options?.limit ?? 1000));
+      const next = start + page.length;
+      return {
+        keys: page.map((name) => ({ name })),
+        list_complete: next >= names.length,
+        ...(next < names.length ? { cursor: String(next) } : {}),
+        cacheStatus: null,
+      };
     },
     getWithMetadata: async () => ({
       value: null,

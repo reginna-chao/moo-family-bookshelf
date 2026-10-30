@@ -2,7 +2,7 @@
  *  semantics are in the `watchKvOps` / `KvOpLog` JSDoc. */
 import { vi } from "vitest";
 
-/** The spy surface this helper reads — structural, so all three ops share it. */
+/** The spy surface this helper reads — structural, so all four ops share it. */
 interface SpyLog {
   mock: { calls: unknown[][]; invocationCallOrder: number[] };
 }
@@ -10,12 +10,16 @@ interface SpyLog {
 /**
  * Keys touched by KV since {@link watchKvOps} was called, per operation.
  *
- * `writeTrail`: every `put` / `delete` in the order it actually ran, as
- * `"{op} {key}"` — e.g. `"put publicshelves:abc"`. Assert it with `toEqual` to
- * pin a handler's COMPLETE mutation sequence, order included.
+ * `writeTrail`: every `put` / `delete` / `list` in the order it actually ran,
+ * as `"{op} {key}"` — e.g. `"put publicshelves:abc"` — where a `list` entry's
+ * key is its `prefix` option (`""` when none was passed), e.g.
+ * `"list tokenidx:{uid}:"`. Assert it with `toEqual` to pin a handler's
+ * COMPLETE mutation sequence, order included. `list` is in the trail because a
+ * revoke-all's correctness depends on it (#431): the index is listed BEFORE
+ * the `token:` deletes, and before a following mint puts its own index.
  *
  * The sequence comes from Vitest's global `invocationCallOrder`, so it is one
- * real cross-spy ordering rather than three independent per-op lists. It
+ * real cross-spy ordering rather than four independent per-op lists. It
  * records when a call was ENTERED, not when its promise settled; a handler
  * that `await`s its writes one at a time — which every write ordering rule in
  * this codebase relies on — makes the two identical.
@@ -28,8 +32,10 @@ export interface KvOpLog {
   getKeys: () => string[];
   putKeys: () => string[];
   deleteKeys: () => string[];
-  /** Every `put` / `delete` in run order, as `"{op} {key}"`; reads excluded.
-   *  Semantics: see {@link KvOpLog}. */
+  /** The `prefix` option of every `list` call, in call order (`""` when absent). */
+  listPrefixes: () => string[];
+  /** Every `put` / `delete` / `list` in run order, as `"{op} {key}"`; reads
+   *  excluded. Semantics: see {@link KvOpLog}. */
   writeTrail: () => string[];
 }
 
@@ -50,7 +56,8 @@ export interface KvOpLog {
  * - WRITE ORDER (`writeTrail`): pinning the SEQUENCE of a multi-step mutation
  *   whose partial-failure safety depends on which step lands first. The three
  *   per-op lists cannot see that — a handler that swaps two writes keeps
- *   every one of them green.
+ *   every one of them green. A `list` is part of the sequence, labelled by
+ *   its `prefix` (see {@link KvOpLog}).
  *
  * Call it AFTER seeding, so only the request under test is counted, and restore
  * the spies in `afterEach` (`vi.restoreAllMocks()`); the recorder installs
@@ -65,14 +72,17 @@ export function watchKvOps(kv: KVNamespace): KvOpLog {
   const gets = vi.spyOn(kv, "get");
   const puts = vi.spyOn(kv, "put");
   const deletes = vi.spyOn(kv, "delete");
+  const lists = vi.spyOn(kv, "list");
   const keysOf = (spy: SpyLog): string[] =>
     spy.mock.calls.map((call) => String(call[0]));
+  const prefixOf = (call: unknown[]): string =>
+    String((call[0] as KVNamespaceListOptions | undefined)?.prefix ?? "");
   const trailOf = (labelled: [string, SpyLog][]): string[] =>
     labelled
       .flatMap(([op, spy]) =>
         spy.mock.calls.map((call, i) => ({
           at: spy.mock.invocationCallOrder[i],
-          entry: `${op} ${String(call[0])}`,
+          entry: `${op} ${op === "list" ? prefixOf(call) : String(call[0])}`,
         })),
       )
       .sort((a, b) => a.at - b.at)
@@ -81,10 +91,12 @@ export function watchKvOps(kv: KVNamespace): KvOpLog {
     getKeys: () => keysOf(gets),
     putKeys: () => keysOf(puts),
     deleteKeys: () => keysOf(deletes),
+    listPrefixes: () => lists.mock.calls.map(prefixOf),
     writeTrail: () =>
       trailOf([
         ["put", puts],
         ["delete", deletes],
+        ["list", lists],
       ]),
   };
 }

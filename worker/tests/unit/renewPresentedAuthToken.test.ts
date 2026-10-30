@@ -23,7 +23,8 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * names the user slides to now + 90 days, capped 180 days after its
  * `createdAt` — except on a `code` account, whose `verify:` record is read
  * once, and only when the cap would bite. It writes that one `token:{hash}`
- * key and never `auth:{userId}`; a target within an hour of the stored
+ * key — preceded by its `tokenidx:{userId}:{hash}` key with the SAME TTL
+ * (#431) — and never `auth:{userId}`; a target within an hour of the stored
  * `expiresAt` writes nothing. `null` (→ 401 REFRESH_FAILED) when the bearer is
  * not current, its reverse key is gone or names someone else, its `createdAt`
  * is unreadable, or it is at the cap. A TTL gap (no record, empty list) mints.
@@ -36,8 +37,9 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * Pre-#425 legacy token, the unit-level halves (C3 / C4): the migration
  * migrates only while `token:{plaintext}` still names the user — a key deleted
  * since the middleware read it (a PIN save on another colo) answers `null` and
- * writes nothing. The writes run one at a time (C4, S1): `token:{hash}`, then
- * `auth:`, then the plaintext delete. Either put throwing (`failFirstWriteTo`)
+ * writes nothing. The writes run one at a time (C4, S1, #431): the migrated
+ * token's `tokenidx:`, its `token:{hash}`, then `auth:`, then the plaintext
+ * delete. Either put throwing (`failFirstWriteTo`)
  * leaves `auth:` in its legacy shape and the plaintext key alive, so the
  * device's retried refresh still migrates; and a revoke-all reading that legacy
  * record deletes both `token:{T}` and the already-written `token:{hash(T)}`.
@@ -124,10 +126,16 @@ describe("renewPresentedAuthToken — sliding renewal", () => {
     expect(
       Math.abs(issued!.expiresAt - (now + TOKEN_TTL_SECONDS * 1000)),
     ).toBeLessThan(5000);
-    expect(ops.putKeys()).toEqual([kvKeys.authToken(hashA)]);
+    expect(ops.writeTrail()).toEqual([
+      `put ${kvKeys.authTokenIndex(USER1, hashA)}`,
+      `put ${kvKeys.authToken(hashA)}`,
+    ]);
     expect(ops.deleteKeys()).toEqual([]);
     expect(ops.putKeys()).not.toContain(kvKeys.auth(USER1));
     expect(getPutTtl(kv, kvKeys.authToken(hashA))).toBe(TOKEN_TTL_SECONDS);
+    expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hashA))).toBe(
+      TOKEN_TTL_SECONDS,
+    );
     expect(getPutTtl(kv, kvKeys.authToken(hashB))).toBe(TOKEN_TTL_SECONDS);
     expect(await tokenRecord(TOKEN_A)).toEqual({
       userId: USER1,
@@ -196,7 +204,12 @@ describe("renewPresentedAuthToken — the 180-day absolute cap", () => {
       expect(
         ops.getKeys().filter((k) => k === kvKeys.verify(USER1)),
       ).toHaveLength(1);
-      expect(ops.putKeys()).toEqual([kvKeys.authToken(hashA)]);
+      expect(ops.writeTrail()).toEqual([
+        `put ${kvKeys.authTokenIndex(USER1, hashA)}`,
+        `put ${kvKeys.authToken(hashA)}`,
+      ]);
+      // The capped (shorter) TTL is the index's too, so the index never outlives the token.
+      expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hashA))).toBe(ttl);
     },
   );
 
@@ -356,7 +369,7 @@ describe("renewPresentedAuthToken — pre-#425 legacy token", () => {
     },
   );
 
-  it("puts token:{hash}, then auth:, and deletes the plaintext key last", async () => {
+  it("puts the index, then token:{hash}, then auth:, and deletes the plaintext key last", async () => {
     await seedLegacyAuthToken(kv, USER1, LEGACY);
     const ops = watchKvOps(kv);
 
@@ -364,11 +377,17 @@ describe("renewPresentedAuthToken — pre-#425 legacy token", () => {
       LEGACY,
     );
 
+    const hash = await hashAuthToken(LEGACY);
     expect(ops.writeTrail()).toEqual([
-      `put ${kvKeys.authToken(await hashAuthToken(LEGACY))}`,
+      `put ${kvKeys.authTokenIndex(USER1, hash)}`,
+      `put ${kvKeys.authToken(hash)}`,
       `put ${kvKeys.auth(USER1)}`,
       `delete ${kvKeys.authToken(LEGACY)}`,
     ]);
+    expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hash))).toBe(
+      getPutTtl(kv, kvKeys.authToken(hash)),
+    );
+    expect(getPutTtl(kv, kvKeys.authToken(hash))).toBe(TOKEN_TTL_SECONDS);
   });
 
   it.each([

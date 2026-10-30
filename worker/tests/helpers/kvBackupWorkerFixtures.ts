@@ -42,9 +42,10 @@ export interface BatchEntry {
  * The backup Worker's view of ONE shared `createMockKV()` store, which owns
  * every value; this wrapper only adds what that mock does not model:
  *
- * - `list({ limit, cursor })` pages the store's keys in insertion order,
- *   `limit` (default 1000) per page, with the next offset as the cursor, and
- *   attaches each record's canned absolute `expiration`.
+ * - `list(options)` forwards to the store's own `list` — lexicographic order,
+ *   `prefix` / `limit` (default 1000) / offset `cursor` as `createMockKV`'s
+ *   JSDoc describes — and attaches each record's canned absolute `expiration`,
+ *   which that mock does not model.
  * - `getWithMetadata(names, "text")` — the binding's array overload — answers
  *   a real `Map` keyed by name in request order, value read from the store,
  *   `metadata` canned from the fixture record.
@@ -65,17 +66,14 @@ export async function workerKv(records: RecordFixture[]) {
 
   const list: Mock<(options?: KVNamespaceListOptions) => Promise<ListPage>> =
     vi.fn(async (options?: KVNamespaceListOptions) => {
-      const names = (await base.list()).keys.map((key) => key.name);
-      const start = options?.cursor ? Number(options.cursor) : 0;
-      const page = names.slice(start, start + (options?.limit ?? 1000));
-      const next = start + page.length;
+      const page = await base.list(options);
       return {
-        keys: page.map((name) => ({
+        keys: page.keys.map(({ name }) => ({
           name,
           expiration: attributes.get(name)?.expiration,
         })),
-        list_complete: next >= names.length,
-        ...(next < names.length ? { cursor: String(next) } : {}),
+        list_complete: page.list_complete,
+        ...(page.list_complete ? {} : { cursor: page.cursor }),
         cacheStatus: null,
       };
     });

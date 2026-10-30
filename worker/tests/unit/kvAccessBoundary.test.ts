@@ -344,6 +344,9 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
       "getLegacyAuthTokenUserId",
       "putAuthTokenRecord",
       "deleteAuthTokenKey",
+      "putAuthTokenIndex",
+      "deleteAuthTokenIndex",
+      "listAuthTokenIndexPage",
     ],
   ],
 ];

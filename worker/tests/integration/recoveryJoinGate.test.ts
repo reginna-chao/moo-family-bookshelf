@@ -24,7 +24,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { authTokenKey, seedAuthToken, tokenOwner } from "../helpers/auth";
+import {
+  authTokenIndexKey,
+  authTokenKey,
+  expectRevokeIndexOrder,
+  revokeAllTrailEntries,
+  seedAuthToken,
+  tokenOwner,
+} from "../helpers/auth";
 import { BoolFlag, kvKeys, type RawFamilyRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3, USER4 } from "../helpers/ids";
 
@@ -35,6 +42,8 @@ type Json = any;
 let kv: KVNamespace;
 /** What the app is handed as `env.KV` — `kv`, or a fault-injecting Proxy over it. */
 let envKv: KVNamespace;
+/** `kv.list` captured before any spy, so a test-side key scan never enters a `writeTrail()`. */
+let listUnwatched: KVNamespace["list"];
 
 /** Production refusal copy (`routes/family.ts`), asserted only on real responses
  *  (test.md, "User-visible copy needs a production-anchored assertion"). */
@@ -127,7 +136,7 @@ async function listedMemberIds(familyId: string): Promise<string[]> {
 
 /** Every key in the store, sorted — the whole observable KV state. */
 async function allKeys(): Promise<string[]> {
-  const { keys } = await kv.list();
+  const { keys } = await listUnwatched();
   return keys.map((k) => k.name).sort();
 }
 
@@ -207,6 +216,7 @@ function settleOrphanedKvOps(): Promise<void> {
 beforeEach(() => {
   kv = createMockKV();
   envKv = kv;
+  listUnwatched = kv.list.bind(kv);
 });
 
 afterEach(() => {
@@ -319,10 +329,10 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
     // And nothing else lives in the store: the owner's session and the family.
     expect(await allKeys()).toEqual(
       asSet([
@@ -330,6 +340,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
         await authTokenKey(ownerToken),
+        await authTokenIndexKey(USER1, ownerToken),
       ]),
     );
   });
@@ -351,18 +362,19 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.verify(USER2)}`,
         `delete ${kvKeys.otp(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
-        `delete ${kvKeys.auth(USER2)}`,
-        `delete ${await authTokenKey(memberToken)}`,
+        ...(await revokeAllTrailEntries(USER2, [memberToken])),
         // The presented bearer's pre-#425 plaintext key (a no-op delete for a hashed token).
         `delete ${kvKeys.authToken(memberToken)}`,
       ]),
     );
+    expectRevokeIndexOrder(trail, USER2);
     expect(await allKeys()).toEqual(
       asSet([
         kvKeys.family(familyId),
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
         await authTokenKey(ownerToken),
+        await authTokenIndexKey(USER1, ownerToken),
       ]),
     );
   });

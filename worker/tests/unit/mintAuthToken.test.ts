@@ -36,9 +36,11 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * Live legacy only (C3): the migration first reads `token:{plaintext}` and
  * migrates only while it names this user. A dead one — deleted by a PIN save a
  * stale `auth:` read has not seen, or naming someone else — is dropped: no
- * `token:{hash}`, no list entry, nothing deleted. Order (C4, S1): evicted keys
- * are deleted first, then — one write at a time — the migrated `token:{hash}`,
- * then `auth:` (with the new token's key), and the plaintext key LAST. A
+ * `token:{hash}`, no list entry, nothing deleted. Order (C4, S1, #431): evicted
+ * `token:` keys are deleted first, then their `tokenidx:` keys, then — one write
+ * at a time — the migrated token's `tokenidx:` and `token:{hash}`, the new
+ * token's `tokenidx:`, then `auth:` (with the new token's key), and the
+ * plaintext key LAST. Every `token:{hash}` put is preceded by its index put. A
  * migrated-key put that throws (`failFirstWriteTo`) leaves `auth:` in its legacy
  * shape and the plaintext key alive, so a retry that re-reads `auth:` still
  * migrates it. The final plaintext delete is fail-open: when it throws the mint
@@ -231,7 +233,10 @@ describe("mintAuthToken — eviction past MAX_AUTH_TOKENS_PER_USER", () => {
       tokens.map(async (t) => kvKeys.authToken(await hashAuthToken(t))),
     );
     expect([...ops.getKeys()].sort()).toEqual([...expected].sort());
-    expect(ops.deleteKeys()).toEqual([expected[0]]);
+    expect(ops.deleteKeys()).toEqual([
+      expected[0],
+      kvKeys.authTokenIndex(USER1, await hashAuthToken(tokens[0])),
+    ]);
   });
 
   it("deletes the evicted key before it puts auth:", async () => {
@@ -325,6 +330,7 @@ describe("mintAuthToken — pre-#425 legacy token", () => {
       const hash = await hashAuthToken(issued.token);
       expect(gets).toEqual([kvKeys.authToken(LEGACY)]);
       expect(trail).toEqual([
+        `put ${kvKeys.authTokenIndex(USER1, hash)}`,
         `put ${kvKeys.auth(USER1)}`,
         `put ${kvKeys.authToken(hash)}`,
       ]);
@@ -338,17 +344,21 @@ describe("mintAuthToken — pre-#425 legacy token", () => {
     },
   );
 
-  it("puts token:{hash}, then auth:, and deletes the plaintext key last", async () => {
+  it("puts each index before its token:{hash}, then auth:, and deletes the plaintext key last", async () => {
     await seedLegacyAuthToken(kv, USER1, LEGACY);
     const known = await readAuthRecord(kv, USER1);
     const ops = watchKvOps(kv);
 
     const issued = await mintAuthToken(kv, USER1, known);
 
+    const legacyHash = await hashAuthToken(LEGACY);
+    const newHash = await hashAuthToken(issued.token);
     expect(ops.writeTrail()).toEqual([
-      `put ${kvKeys.authToken(await hashAuthToken(LEGACY))}`,
+      `put ${kvKeys.authTokenIndex(USER1, legacyHash)}`,
+      `put ${kvKeys.authToken(legacyHash)}`,
+      `put ${kvKeys.authTokenIndex(USER1, newHash)}`,
       `put ${kvKeys.auth(USER1)}`,
-      `put ${kvKeys.authToken(await hashAuthToken(issued.token))}`,
+      `put ${kvKeys.authToken(newHash)}`,
       `delete ${kvKeys.authToken(LEGACY)}`,
     ]);
   });
@@ -362,12 +372,19 @@ describe("mintAuthToken — pre-#425 legacy token", () => {
 
     const issued = await mintAuthToken(kv, USER1, known);
 
+    const [h0, h1] = await Promise.all(tokens.slice(0, 2).map(hashAuthToken));
+    const legacyHash = await hashAuthToken(LEGACY);
+    const newHash = await hashAuthToken(issued.token);
     expect(ops.writeTrail()).toEqual([
-      `delete ${kvKeys.authToken(await hashAuthToken(tokens[0]))}`,
-      `delete ${kvKeys.authToken(await hashAuthToken(tokens[1]))}`,
-      `put ${kvKeys.authToken(await hashAuthToken(LEGACY))}`,
+      `delete ${kvKeys.authToken(h0)}`,
+      `delete ${kvKeys.authToken(h1)}`,
+      `delete ${kvKeys.authTokenIndex(USER1, h0)}`,
+      `delete ${kvKeys.authTokenIndex(USER1, h1)}`,
+      `put ${kvKeys.authTokenIndex(USER1, legacyHash)}`,
+      `put ${kvKeys.authToken(legacyHash)}`,
+      `put ${kvKeys.authTokenIndex(USER1, newHash)}`,
       `put ${kvKeys.auth(USER1)}`,
-      `put ${kvKeys.authToken(await hashAuthToken(issued.token))}`,
+      `put ${kvKeys.authToken(newHash)}`,
       `delete ${kvKeys.authToken(LEGACY)}`,
     ]);
   });

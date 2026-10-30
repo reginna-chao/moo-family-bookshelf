@@ -68,7 +68,7 @@ KV binding 的批次讀取：一次最多 100 個 key、算 1 次內部 subreque
 
 `user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`kicked:`
 
-不備份（短期憑證與計數）：`auth:`、`token:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`
+不備份（短期憑證與計數）：`auth:`、`token:`、`tokenidx:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`
 
 出現未列入兩邊的 key 類別時，備份停止並失敗，由告警反映；新增 key 家族必須同時更新允許清單。
 

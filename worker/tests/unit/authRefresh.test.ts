@@ -152,11 +152,15 @@ describe("POST /api/auth/refresh", () => {
       Date.now() + TOKEN_TTL_SECONDS * 1000,
     );
 
+    const hash = await hashAuthToken(oldToken);
     const putKeys = putSpy.mock.calls.map(([k]) => k);
-    expect(putKeys).toEqual([kvKeys.authToken(await hashAuthToken(oldToken))]);
-    expect(putSpy.mock.calls[0][2]).toMatchObject({
-      expirationTtl: TOKEN_TTL_SECONDS,
-    });
+    // The token's index key goes first, with the same TTL (#431).
+    expect(putKeys).toEqual([
+      kvKeys.authTokenIndex(VALID_USER_ID, hash),
+      kvKeys.authToken(hash),
+    ]);
+    for (const call of putSpy.mock.calls)
+      expect(call[2]).toMatchObject({ expirationTtl: TOKEN_TTL_SECONDS });
   });
 
   it("should return 401 when token belongs to different user than body.userId", async () => {

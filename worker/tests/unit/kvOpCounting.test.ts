@@ -152,10 +152,10 @@ function makeDouble(): { instance: ReceiverCheckingKv; kv: KVNamespace } {
 }
 
 function freshCounts(): KvOpCounts {
-  return { reads: 0, writes: 0, deletes: 0 };
+  return { reads: 0, writes: 0, deletes: 0, lists: 0 };
 }
 
-const ZERO_COUNTS: KvOpCounts = { reads: 0, writes: 0, deletes: 0 };
+const ZERO_COUNTS: KvOpCounts = { reads: 0, writes: 0, deletes: 0, lists: 0 };
 
 interface MethodCase {
   /** Row label for the `it.each` title. */
@@ -200,9 +200,9 @@ const METHOD_CASES: MethodCase[] = [
     invoke: (kv) => kv.delete("k"),
   },
   {
-    // THE row the fix turns on: the old trap returned the UNCOUNTED `list` unwrapped, so it ran
-    // with the proxy as `this` and threw `TypeError: Illegal invocation` against a real binding.
-    label: "list — the UNCOUNTED method",
+    // THE row the receiver fix turned on: the old trap returned the then-uncounted `list` unwrapped,
+    // so it ran with the proxy as `this` and threw `Illegal invocation`; it is counted as `lists` now (#431).
+    label: "list (counted as lists)",
     method: "list",
     args: [{ prefix: "k" }],
     invoke: (kv) => kv.list({ prefix: "k" }),
@@ -228,7 +228,7 @@ describe("createCountingKv", () => {
     },
   );
 
-  it("counts reads, writes and deletes by billing class and ignores list", async () => {
+  it("counts reads, writes, deletes and lists by billing class", async () => {
     const { kv } = makeDouble();
     const counts = freshCounts();
     const proxied = createCountingKv(kv, counts);
@@ -239,9 +239,9 @@ describe("createCountingKv", () => {
     await proxied.delete("k");
     await proxied.list();
 
-    expect(counts).toEqual({ reads: 2, writes: 1, deletes: 1 });
-    // Positive companion to "list moves no counter": it really did run and
-    // reach the namespace, so the tally above is not green by omission.
+    expect(counts).toEqual({ reads: 2, writes: 1, deletes: 1, lists: 1 });
+    // Every call really ran and reached the namespace, so the tally above
+    // matches the calls made rather than being green by omission.
     expect(callLog.map((call) => call.method)).toEqual([
       "get",
       "getWithMetadata",
@@ -260,7 +260,7 @@ describe("createCountingKv", () => {
 
     await expect(proxied.put("k", "v")).rejects.toBe(boom);
 
-    expect(counts).toEqual({ reads: 0, writes: 1, deletes: 0 });
+    expect(counts).toEqual({ reads: 0, writes: 1, deletes: 0, lists: 0 });
     expect(callLog).toEqual([
       { method: "put", args: ["k", "v"], thisWasOriginal: true },
     ]);

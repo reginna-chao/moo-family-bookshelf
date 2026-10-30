@@ -11,6 +11,7 @@ import {
 import {
   getAuthTokenRecord,
   putAuthRecord,
+  putAuthTokenIndex,
   putAuthTokenRecord,
 } from "../kv/auth";
 import { getVerifyRecord } from "../kv/verify";
@@ -22,8 +23,8 @@ import {
   type IssuedToken,
 } from "./authTokens";
 
-/** Refresh's one-time move of a live pre-#425 token into the list (`null` when dead): `token:{hash}`, then `auth:`,
- *  then a fail-open delete of the inert `token:{plaintext}` — see docs/architecture.md → PWA 登入驗證機制. */
+/** Refresh's one-time move of a live pre-#425 token into the list (`null` when dead): `tokenidx:`, `token:{hash}`, then
+ *  `auth:` (a throw stops the rest), then a fail-open delete of the inert `token:{plaintext}` — docs/architecture.md → PWA 登入驗證機制. */
 async function migratePresentedLegacyToken(
   kv: KVNamespace,
   userId: string,
@@ -37,6 +38,7 @@ async function migratePresentedLegacyToken(
     Date.now(),
   );
   if (migration === null) return null;
+  await putAuthTokenIndex(kv, userId, migration.entry.hash, TOKEN_TTL_SECONDS);
   await putAuthTokenRecord(
     kv,
     migration.entry.hash,
@@ -66,7 +68,8 @@ async function renewalTarget(
   return verify?.method === "code" ? slidingMs : capMs;
 }
 
-/** Slide one listed token's `token:{hash}` TTL; never writes `auth:`, and skips the put when nothing would change. */
+/** Slide one listed token's `token:{hash}` TTL, re-putting its `tokenidx:` key first with the same TTL (a throw writes
+ *  nothing more); never writes `auth:`, and skips both puts when nothing would change. */
 async function slideListedToken(
   kv: KVNamespace,
   userId: string,
@@ -86,6 +89,7 @@ async function slideListedToken(
   ) {
     return { token: presentedToken, expiresAt: stored.expiresAt };
   }
+  await putAuthTokenIndex(kv, userId, entry.hash, ttlSeconds);
   await putAuthTokenRecord(
     kv,
     entry.hash,
@@ -100,7 +104,8 @@ async function slideListedToken(
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
  * past the 180-day cap (PIN / pattern / none accounts). A pre-#425 token is migrated
  * in place (same string back) while its plaintext key is live, else `null`; a TTL gap
- * (no record, empty list) mints a new token.
+ * (no record, empty list) mints a new token. Every path that writes `token:{hash}`
+ * puts that token's `tokenidx:` key first, with the same TTL (#431).
  */
 export async function renewPresentedAuthToken(
   kv: KVNamespace,

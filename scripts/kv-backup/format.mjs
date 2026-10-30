@@ -18,7 +18,15 @@ export const PREFIXES = [
   "newbookdefault:",
   "kicked:",
 ];
-const IGNORED = ["auth:", "token:", "otp:", "qr:", "verifyfail:", "ratelimit:"];
+const IGNORED = [
+  "auth:",
+  "token:",
+  "tokenidx:",
+  "otp:",
+  "qr:",
+  "verifyfail:",
+  "ratelimit:",
+];
 const RECORD_FIELDS = ["key", "value", "expiration", "metadata"];
 const OBJECT_PATH =
   /^(?:daily|snapshots)\/\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f-]{36}\.(jsonl|manifest\.json)$/;

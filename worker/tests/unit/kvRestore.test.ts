@@ -182,9 +182,10 @@ describe("KV restore safety", () => {
     expect(
       target.client.writeRecords.mock.calls.flatMap(([batch]) => batch),
     ).toEqual([records[0], records[5]]);
+    // The mock lists in lexicographic order, like real KV.
     expect((await target.kv.list()).keys.map(({ name }) => name)).toEqual([
-      "user:live",
       "kicked:live",
+      "user:live",
     ]);
   });
 
