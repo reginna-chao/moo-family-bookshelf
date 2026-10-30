@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
-import { seedAuthToken, seedLegacyAuthToken } from "../helpers/auth";
+import { seedAuthToken } from "../helpers/auth";
 import { ALICE, BOB } from "../helpers/ids";
 import { hashAuthToken, hashSecret } from "../../src/utils/crypto";
 import {
@@ -278,17 +278,28 @@ describe("per-device tokens — departures revoke every device", () => {
     expect(res.status).toBe(200);
     await expectRevoked([TOKEN_A, TOKEN_B]);
   });
+});
 
-  // A plaintext bearer needs its legacy auth: record to be accepted at all (C5).
-  it("DELETE /api/user/:id revokes a pre-#425 plaintext bearer", async () => {
-    await seedLegacyAuthToken(kv, USER_ID, TOKEN_A);
-    expect((await readBooks(USER_ID, TOKEN_A)).status).toBe(200);
+describe("per-device tokens — a pre-#425 plaintext bearer (#432)", () => {
+  it("POST /api/auth/refresh answers 401 UNAUTHORIZED and writes no token:{hash}", async () => {
+    await seedFamily([OWNER_ID, USER_ID]);
+    const oldAuth = JSON.stringify({
+      token: TOKEN_A,
+      createdAt: new Date().toISOString(),
+    });
+    await kv.put(kvKeys.authToken(TOKEN_A), USER_ID);
+    await kv.put(kvKeys.auth(USER_ID), oldAuth);
 
-    const res = await request("DELETE", `/api/user/${USER_ID}`, TOKEN_A);
+    const res = await request("POST", "/api/auth/refresh", TOKEN_A, {
+      userId: USER_ID,
+    });
 
-    expect(res.status).toBe(200);
-    expect(await kv.get(kvKeys.authToken(TOKEN_A))).toBeNull();
-    expect((await readBooks(USER_ID, TOKEN_A)).status).toBe(401);
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as Json).error.code).toBe("UNAUTHORIZED");
+    expect(
+      await kv.get(kvKeys.authToken(await hashAuthToken(TOKEN_A))),
+    ).toBeNull();
+    expect(await kv.get(kvKeys.auth(USER_ID))).toBe(oldAuth);
   });
 });
 

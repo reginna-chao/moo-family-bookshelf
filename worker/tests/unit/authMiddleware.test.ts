@@ -3,6 +3,8 @@ import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
 import { USER1 } from "../helpers/ids";
 import { seedAuthToken } from "../helpers/auth";
+import { kvKeys } from "../../src/kv/schema";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -113,5 +115,29 @@ describe("Auth middleware token validation", () => {
     const json = (await res.json()) as Json;
     expect(json.error.code).toBe("UNAUTHORIZED");
     expect(json.error.message).toBe("Authorization header required");
+  });
+});
+
+describe("Auth middleware token record validation", () => {
+  it.each([
+    { label: "a number", userId: 42 },
+    { label: "missing", userId: undefined },
+    { label: "an empty string", userId: "" },
+  ])("answers 401 when token:{hash}'s userId is $label", async ({ userId }) => {
+    // A malformed record must not admit the bearer under any userId.
+    const token = "f".repeat(64);
+    await kv.put(
+      kvKeys.authToken(await hashAuthToken(token)),
+      JSON.stringify({
+        userId,
+        createdAt: new Date().toISOString(),
+        expiresAt: 0,
+      }),
+    );
+
+    const res = await request("GET", `/api/user/${USER1}/books`, token);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as Json).error.code).toBe("UNAUTHORIZED");
   });
 });

@@ -353,8 +353,6 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.member(USER2)}`,
         `delete ${kvKeys.auth(USER2)}`,
         `delete ${await authTokenKey(memberToken)}`,
-        // The presented bearer's pre-#425 plaintext key (a no-op delete for a hashed token).
-        `delete ${kvKeys.authToken(memberToken)}`,
       ]),
     );
     expect(await allKeys()).toEqual(
