@@ -12,9 +12,9 @@ import {
 import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
-  readAuthRecord,
-  renewPresentedAuthToken,
 } from "../middleware/auth";
+import { readAuthRecord } from "../services/authRecord";
+import { renewPresentedAuthToken } from "../services/authRenewal";
 import { getCallerIp } from "../middleware/rateLimit";
 import {
   isVerificationConfigured,

@@ -9,13 +9,13 @@ import {
   type StoredAuthRecord,
 } from "../../src/kv/schema";
 import { hashAuthToken } from "../../src/utils/crypto";
-import { mintAuthToken } from "../../src/middleware/auth";
+import { mintAuthToken } from "../../src/services/authTokens";
 
 /**
  * Deterministic 64-char auth token derived from a 64-hex userId.
  *
  * Test convention only — production tokens are 32 random bytes hex-encoded
- * (`crypto.getRandomValues` in `middleware/auth.ts`). Deriving keeps a suite's
+ * (`crypto.getRandomValues` in `services/authTokens.ts`). Deriving keeps a suite's
  * token readable next to its userId. Distinctness holds only while the FIRST
  * 32 chars of two userIds differ — true for the fixed-nibble ids in
  * `helpers/ids.ts`, but NOT for `makeUserId()` ids (they share an all-`0`

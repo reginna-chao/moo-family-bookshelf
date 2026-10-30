@@ -34,13 +34,12 @@ import {
   sanitizeShortString,
   parseRecoveryFlag,
 } from "../utils/validation";
+import { getAuthenticatedUserId } from "../middleware/auth";
+import { readAuthRecord, isQrBoundToListedToken } from "../services/authRecord";
 import {
   mintAuthToken,
   readAndRevokeAllAuthTokens,
-  getAuthenticatedUserId,
-  readAuthRecord,
-  isQrBoundToListedToken,
-} from "../middleware/auth";
+} from "../services/authTokens";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
   passedAgainstStaleVerifyRecord,

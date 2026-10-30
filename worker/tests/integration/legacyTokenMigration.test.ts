@@ -4,11 +4,11 @@ import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { watchKvOps } from "../helpers/kvOps";
 import { seedAuthToken, seedLegacyAuthToken } from "../helpers/auth";
 import { ALICE, BOB } from "../helpers/ids";
+import { readAuthRecord } from "../../src/services/authRecord";
 import {
   mintAuthToken,
   readAndRevokeAllAuthTokens,
-  readAuthRecord,
-} from "../../src/middleware/auth";
+} from "../../src/services/authTokens";
 import { hashAuthToken } from "../../src/utils/crypto";
 import {
   kvKeys,

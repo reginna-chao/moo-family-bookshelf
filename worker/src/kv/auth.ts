@@ -1,5 +1,5 @@
-/** Thin data access (#425) for `auth:{userId}` and `token:{hash}` — one KV op each, no validation. Old-shape
- *  normalization and multi-key fan-out live in middleware/auth.ts. See docs/architecture.md → PWA 登入驗證機制. */
+/** Thin data access (#425) for `auth:{userId}` and `token:{hash}` — one KV op each, no validation. Old-shape normalization
+ *  and multi-key fan-out live in services/authRecord.ts / authTokens.ts / authRenewal.ts. See docs/architecture.md → PWA 登入驗證機制. */
 import { kvKeys, type AuthTokenRecord, type StoredAuthRecord } from "./schema";
 
 /** `auth:{userId}` exactly as read: the #425 shape (`tokens`, `secretAt`) or the older one (`token`, `createdAt`). */

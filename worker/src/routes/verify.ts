@@ -24,10 +24,9 @@ import {
 import {
   getAuthenticatedUserId,
   getPresentedAuthToken,
-  mintAuthToken,
-  readPresentedAuth,
-  revokeAuthTokenKeys,
 } from "../middleware/auth";
+import { readPresentedAuth } from "../services/authRecord";
+import { mintAuthToken, revokeAuthTokenKeys } from "../services/authTokens";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import {
   enforceCurrentSecret,

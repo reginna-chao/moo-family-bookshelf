@@ -7,8 +7,8 @@ import { USER1, USER2 } from "../helpers/ids";
 import {
   mintAuthToken,
   readAndRevokeAllAuthTokens,
-  renewPresentedAuthToken,
-} from "../../src/middleware/auth";
+} from "../../src/services/authTokens";
+import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
   kvKeys,
   TOKEN_TTL_SECONDS,

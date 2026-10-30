@@ -4,12 +4,12 @@ import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { failFirstWriteTo, watchKvOps } from "../helpers/kvOps";
 import { seedAuthToken, seedLegacyAuthToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
+import { readAuthRecord } from "../../src/services/authRecord";
 import {
   mintAuthToken,
   readAndRevokeAllAuthTokens,
-  readAuthRecord,
-  renewPresentedAuthToken,
-} from "../../src/middleware/auth";
+} from "../../src/services/authTokens";
+import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,

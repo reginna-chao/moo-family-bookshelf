@@ -418,7 +418,7 @@ export interface StoredAuthRecord {
   secretAt?: number;
 }
 
-/** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `middleware/auth.ts`). */
+/** `auth:{userId}` as read and normalized (`normalizeAuthRecord`, `services/authRecord.ts`). */
 export interface AuthRecord extends StoredAuthRecord {
   /** The plaintext token of a pre-#425 record (`{ token, createdAt, secretAt? }`); in memory only — never
    *  written back (`putAuthRecord` rebuilds its value). Migrated by the next mint or refresh, deleted by a revoke. */
@@ -447,7 +447,7 @@ export interface QrTokenRecord {
   userId: string;
   /** `hashAuthToken` of the token that minted it, equal to its `hash` in the `auth:` list (#425). OPTIONAL
    *  (added after release): absent, an older `qr:`-salted value, or a still-plaintext minting token (empty
-   *  list) matches no entry ⇒ never bypasses verification (`isQrBoundToListedToken`, `middleware/auth.ts`). */
+   *  list) matches no entry ⇒ never bypasses verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
   tokenHash?: string;
 }
 

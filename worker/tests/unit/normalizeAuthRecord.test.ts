@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeAuthRecord } from "../../src/middleware/auth";
+import { normalizeAuthRecord } from "../../src/services/authRecord";
 import type { RawAuthRecord } from "../../src/kv/auth";
 
 /**
