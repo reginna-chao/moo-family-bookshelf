@@ -57,9 +57,10 @@
  *      dropped from a filter skips that package's checks on exactly the PR
  *      that needed them, and the gate reads the `skipped` as a pass. The
  *      globs pinned here each guard a change class no package directory
- *      covers — the workspace definition, the root `.env.*` files, the Docker
- *      files — plus the one non-filter wiring that rides on them:
- *      `worker-check`'s job-level `if:` accepting the `docker` output.
+ *      covers — the workspace definition, the root `.env.*` files, the root
+ *      `.prettierignore`, the Docker files — plus the one non-filter wiring
+ *      that rides on them: `worker-check`'s job-level `if:` accepting the
+ *      `docker` output.
  *
  *   5. AMO-LISTED FAILURE VISIBILITY. The listed submission is deliberately
  *      non-blocking (`continue-on-error: true`), which on its own turns a
@@ -251,6 +252,12 @@
  *    env files (`envDir: ..`), and `.env.production` is baked into the release
  *    build — a typo there must fail a PR, not the tag. The Worker never reads
  *    them.
+ *  - `.prettierignore` only in `extension`:
+ *    `extension/tests/unit/prettierIgnore.test.ts` pins the repo-root ignore
+ *    file and lives in `extension-check` alone, so a change to that file must
+ *    reach this job or the guard never runs on the change class it exists to
+ *    catch (`.claude/rules/test.md` → "Cross-package parity tests must be
+ *    CI-reachable").
  *  - `docker` lists the Docker files plus the manifests and lockfile, because
  *    the image installs the whole workspace and a manifest-only change can
  *    break it without touching a Docker file.
@@ -717,7 +724,7 @@ const EXPECTED_CHECKOUT_COUNT = 16;
 // Globs each filter must contain (containment); each guards a change class no package dir covers.
 // See the header → "FILTER GLOBS, in detail".
 const EXPECTED_FILTER_GLOBS: ReadonlyArray<[string, readonly string[]]> = [
-  ["extension", ["pnpm-workspace.yaml", ".env.*"]],
+  ["extension", ["pnpm-workspace.yaml", ".env.*", ".prettierignore"]],
   ["pwa", ["pnpm-workspace.yaml", ".env.*"]],
   ["worker", ["pnpm-workspace.yaml"]],
   [
