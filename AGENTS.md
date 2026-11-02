@@ -37,6 +37,7 @@ moo-family-bookshelf/
 │   │   ├── publicShelf/        # Public-shelf local-vs-server divergence rule
 │   │   ├── recovery/           # Forgot-secret hint copy (question / link label / self-hosted fallback)
 │   │   ├── safeUrl/            # Readmoo cover / book URL render-time filters (return `String(url)`)
+│   │   ├── storePage/          # Store-page chip index (build / parse / lookup) + chip copy (#313)
 │   │   ├── unkick/             # Member-removal copy (remove confirm / un-kick notice / refused rejoin) + rejoin-wait hours
 │   │   └── verifyInput/        # PIN / pattern secret-entry rules (lengths, min dots, digit strip, wire serialization) + mismatch / counter copy
 │   ├── eslint.config.js
@@ -49,7 +50,7 @@ moo-family-bookshelf/
 │   │   │   ├── PersonalShelf.tsx    # Per-book share toggle
 │   │   │   ├── FamilyShelf.tsx      # Aggregated family bookshelf
 │   │   │   └── FamilySettings.tsx   # Sync code, members, leave family
-│   │   ├── settings/            # Extension settings (custom API endpoint, etc.)
+│   │   ├── options/             # Extension options page (store-page chip switch; opened from the toolbar icon)
 │   │   ├── secureFrame/         # Extension-origin iframe (secure-frame.html) hosting the secret-entry / credential screens; MessageChannel + nonce protocol
 │   │   ├── content/             # Content Script (scrape book list + inject Dialog)
 │   │   ├── background/         # Service Worker

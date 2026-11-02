@@ -14,6 +14,7 @@ import {
   RECOVERY_COOLDOWN_UNTIL_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
+  STORE_PAGE_INDEX_KEY,
 } from "@/constants";
 
 /**
@@ -1256,7 +1257,7 @@ describe("clearFamilyStorage", () => {
 
       // Order is binding → endpoint. See the header → "clearFamilyStorage".
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
-      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY]);
+      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]);
       expect(removeCalls[1][0]).toEqual(
         expect.arrayContaining([
           API_ENDPOINT_KEY,
@@ -1280,7 +1281,10 @@ describe("clearFamilyStorage", () => {
         await expect(clearFamilyStorage()).resolves.toBeUndefined();
 
         // The family binding — the part that must not survive — was still dropped.
-        expect(remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+        expect(remove).toHaveBeenCalledWith([
+          FAMILY_ID_KEY,
+          STORE_PAGE_INDEX_KEY,
+        ]);
         // Swallowed, not silenced — the failure stays on the record.
         expect(warn).toHaveBeenCalled();
       } finally {

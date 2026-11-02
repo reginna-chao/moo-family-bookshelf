@@ -70,7 +70,23 @@ const extensionApiMock = {
     onStartup: {
       addListener: vi.fn(),
     },
+    openOptionsPage: vi.fn().mockResolvedValue(undefined),
     lastError: null,
+  },
+  // Store-page chip (#313): optional host permission, dynamic content script, toolbar click.
+  permissions: {
+    contains: vi.fn().mockResolvedValue(false),
+    request: vi.fn().mockResolvedValue(false),
+    onAdded: { addListener: vi.fn(), removeListener: vi.fn() },
+    onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+  },
+  scripting: {
+    registerContentScripts: vi.fn().mockResolvedValue(undefined),
+    unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
+    getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
+  },
+  action: {
+    onClicked: { addListener: vi.fn(), removeListener: vi.fn() },
   },
   storage: {
     local: createStorageAreaMock(localStorageMock),

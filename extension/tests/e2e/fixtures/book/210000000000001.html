@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <title>測試書籍 | Readmoo 讀墨電子書</title>
+  </head>
+  <body class="rm-store rm-store-cat">
+    <!--
+      讀墨購買頁（https://readmoo.com/book/{bookId}）的最小 mock，給 store-page-chip.spec.ts 用。
+      serve 預設 cleanUrls，網址是 http://localhost:4173/book/210000000000001。
+      只保留 chip 依賴的兩個 selector（shared/src/config/readmooStore.ts 的 READMOO_STORE_SELECTORS）：
+      .book-meta-box > h1.book-detail-title。body 的 class 照實機（2026-11-02）抄。
+    -->
+    <main>
+      <div class="book-meta-box">
+        <h1 class="book-detail-title">測試書籍</h1>
+        <div class="book-author">測試作者</div>
+      </div>
+    </main>
+  </body>
+</html>

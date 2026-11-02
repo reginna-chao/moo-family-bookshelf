@@ -59,11 +59,14 @@ function verifyTarget(target: FirefoxTarget): boolean {
 
   // Required bundle files.
   check(resolve(dist, "content.js"), `${target} content.js`);
+  check(resolve(dist, "content-store.js"), `${target} content-store.js`);
   check(resolve(dist, "background.js"), `${target} background.js`);
   check(resolve(dist, "popup.js"), `${target} popup.js`);
   check(resolve(dist, "fiber-bridge.js"), `${target} fiber-bridge.js`);
   check(resolve(dist, "secure-frame.html"), `${target} secure-frame.html`);
   check(resolve(dist, "secure-frame.js"), `${target} secure-frame.js`);
+  check(resolve(dist, "options.html"), `${target} options.html`);
+  check(resolve(dist, "options.js"), `${target} options.js`);
   check(resolve(dist, "manifest.json"), `${target} manifest.json`);
 
   // Manifest-specific Firefox checks.

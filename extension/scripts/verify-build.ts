@@ -1,9 +1,9 @@
-/** Verify dist/: expected files exist, content.js is IIFE, the manifest grants exactly the Readmoo hosts.
+/** Verify dist/: expected files exist, content scripts are IIFE, the manifest grants exactly the Readmoo hosts.
  *  See docs/architecture.md → Chrome 建置檢查（verify-build.ts）. */
 import { existsSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { READMOO_MATCH_PATTERNS } from "moo-family-bookshelf-shared/config/readmoo";
+import { checkManifest, type DistManifestFields } from "./verify-build-checks";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(__dirname, "..", "dist");
@@ -21,95 +21,54 @@ function check(filePath: string, label: string): void {
 
 // Check required files exist
 check(resolve(dist, "content.js"), "dist/content.js");
+check(resolve(dist, "content-store.js"), "dist/content-store.js");
 check(resolve(dist, "background.js"), "dist/background.js");
 check(resolve(dist, "popup.js"), "dist/popup.js");
 check(resolve(dist, "fiber-bridge.js"), "dist/fiber-bridge.js");
 check(resolve(dist, "secure-frame.html"), "dist/secure-frame.html");
 check(resolve(dist, "secure-frame.js"), "dist/secure-frame.js");
+check(resolve(dist, "options.html"), "dist/options.html");
+check(resolve(dist, "options.js"), "dist/options.js");
 check(resolve(dist, "manifest.json"), "dist/manifest.json");
 
-// Check content.js is IIFE format (not ESM)
-const contentPath = resolve(dist, "content.js");
-if (existsSync(contentPath)) {
-  const head = readFileSync(contentPath, "utf-8").slice(0, 200);
+/** FAIL when a classic content script starts with `import` — it must be IIFE, not ESM. */
+function checkNotEsm(fileName: string): void {
+  const filePath = resolve(dist, fileName);
+  if (!existsSync(filePath)) return;
+  const head = readFileSync(filePath, "utf-8").slice(0, 200);
   const trimmed = head.trimStart();
   if (trimmed.startsWith("import ") || trimmed.startsWith("import{")) {
     console.error(
-      "FAIL: dist/content.js starts with 'import' — expected IIFE format (var or (function)",
+      `FAIL: dist/${fileName} starts with 'import' — expected IIFE format (var or (function)`,
     );
     console.error(`  First 200 chars: ${head}`);
     failed = true;
   } else {
-    console.log("OK: dist/content.js is not ESM (no leading import)");
+    console.log(`OK: dist/${fileName} is not ESM (no leading import)`);
   }
 }
 
-/** Only the fields this script asserts on, all optional, so a malformed or
- *  renamed field surfaces as a FAIL instead of a crash. */
-interface DistManifest {
-  host_permissions?: string[];
-  content_scripts?: { matches?: string[] }[];
-  web_accessible_resources?: { matches?: string[] }[];
-}
+checkNotEsm("content.js");
+checkNotEsm("content-store.js");
 
-/** FAIL unless `patterns` equals READMOO_MATCH_PATTERNS exactly — nothing missing, nothing extra.
- *  Why exact, and why build-e2e's localhost is safe: docs/architecture.md → Chrome 建置檢查（verify-build.ts）. */
-function checkMatchPatterns(
-  patterns: string[] | undefined,
-  label: string,
-): void {
-  const found = patterns ?? [];
-  const missing = READMOO_MATCH_PATTERNS.filter(
-    (pattern) => !found.includes(pattern),
-  );
-  const extra = found.filter(
-    (pattern) => !READMOO_MATCH_PATTERNS.includes(pattern),
-  );
-
-  if (missing.length > 0 || extra.length > 0) {
-    if (missing.length > 0) {
-      console.error(`FAIL: ${label} is missing ${missing.join(", ")}`);
-    }
-    if (extra.length > 0) {
-      console.error(
-        `FAIL: ${label} has unexpected pattern(s) ${extra.join(", ")}`,
-      );
-    }
-    console.error(`  Found: ${JSON.stringify(patterns ?? null)}`);
-    failed = true;
-    return;
-  }
-  console.log(`OK: ${label} matches the Readmoo match patterns exactly`);
-}
-
-/** Run `checkMatchPatterns` over EVERY entry: checking only `[0]` would let a second
- *  entry ship a wrong or over-broad match list unnoticed. */
-function checkEntryMatches(
-  entries: { matches?: string[] }[] | undefined,
-  label: string,
-): void {
-  if (!entries || entries.length === 0) {
-    console.error(`FAIL: ${label} is missing or empty`);
-    failed = true;
-    return;
-  }
-  entries.forEach((entry, index) => {
-    checkMatchPatterns(entry.matches, `${label}[${index}].matches`);
-  });
-}
-
-// Check the manifest grants exactly the supported Readmoo hosts in all three places
+// Check the manifest: Readmoo patterns in all three places, the store-page chip's permissions,
+// and the pages that must stay out of web_accessible_resources.
 const manifestPath = resolve(dist, "manifest.json");
 if (existsSync(manifestPath)) {
   const manifest = JSON.parse(
     readFileSync(manifestPath, "utf-8"),
-  ) as DistManifest;
-  checkMatchPatterns(manifest.host_permissions, "manifest host_permissions");
-  checkEntryMatches(manifest.content_scripts, "manifest content_scripts");
-  checkEntryMatches(
-    manifest.web_accessible_resources,
-    "manifest web_accessible_resources",
-  );
+  ) as DistManifestFields;
+  const failures = checkManifest(manifest);
+  for (const message of failures) {
+    console.error(`FAIL: ${message}`);
+  }
+  if (failures.length > 0) {
+    failed = true;
+  } else {
+    console.log(
+      "OK: manifest host / content-script / web-accessible patterns, optional_host_permissions, scripting and options_ui",
+    );
+  }
 }
 
 if (failed) {

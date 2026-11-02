@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import browser, { type Runtime } from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
@@ -8,6 +9,8 @@ import {
   API_ENDPOINT_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
   USER_EMAIL_KEY,
+  STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_INDEX_KEY,
 } from "@/constants";
 
 /**
@@ -45,7 +48,17 @@ import {
  * refusal from the validator's own throw, and fails loudly if `raw` is accepted,
  * which would make a "refuses …" case silently vacuous), so the handler and the
  * shared rules cannot drift apart while staying green.
+ *
+ * Store-page chip (#313): `@/background/storePageScript` is mocked with a stable spy, so these cases
+ * pin only the WIRING (which event re-runs the reconcile) and stay independent of the reconcile's own
+ * async storage work — the synchronous `remove` count in "runtime.onInstalled" would otherwise depend
+ * on microtask timing. The reconcile itself is covered by tests/unit/background/storePageScript.test.ts.
  */
+
+const reconcileStorePageScript = vi.hoisted(() => vi.fn());
+vi.mock("@/background/storePageScript", () => ({
+  reconcileStorePageScript,
+}));
 
 type MessageListener = (
   message: unknown,
@@ -83,6 +96,7 @@ describe("background service worker", () => {
     vi.mocked(browser.storage.sync.get).mockResolvedValue({});
     vi.mocked(browser.storage.sync.set).mockResolvedValue();
     vi.mocked(browser.storage.sync.remove).mockResolvedValue();
+    reconcileStorePageScript.mockResolvedValue(undefined);
 
     // Capture the module's onMessage listener; the cast targets the spy's own
     // signature. See the header → "Messaging contract".
@@ -395,6 +409,131 @@ describe("background service worker", () => {
       } finally {
         logSpy.mockRestore();
       }
+    });
+
+    it("also reconciles the store-page script (#313)", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        const addListener = vi.mocked(browser.runtime.onInstalled.addListener);
+        const onInstalled = addListener.mock.calls[0][0] as () => void;
+        expect(reconcileStorePageScript).not.toHaveBeenCalled();
+
+        onInstalled();
+
+        expect(reconcileStorePageScript).toHaveBeenCalledOnce();
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  // See the header → "Store-page chip".
+  describe("store-page chip wiring (#313)", () => {
+    /** The single listener background/index registered on `addListener`. */
+    function onlyListener<T>(addListener: unknown): T {
+      const spy = vi.mocked(addListener as (fn: T) => void);
+      expect(spy).toHaveBeenCalledOnce();
+      return spy.mock.calls[0][0];
+    }
+
+    it.each([
+      ["runtime.onStartup", () => browser.runtime.onStartup.addListener],
+      ["permissions.onAdded", () => browser.permissions.onAdded.addListener],
+      [
+        "permissions.onRemoved",
+        () => browser.permissions.onRemoved.addListener,
+      ],
+    ])("re-runs the reconcile on %s", (_name, addListenerOf) => {
+      const fire = onlyListener<() => void>(addListenerOf());
+      expect(reconcileStorePageScript).not.toHaveBeenCalled();
+
+      fire();
+
+      expect(reconcileStorePageScript).toHaveBeenCalledOnce();
+    });
+
+    type ChangeListener = (
+      changes: Record<string, unknown>,
+      areaName: string,
+    ) => void;
+
+    it.each([
+      [
+        "the local switch key changes",
+        { [STORE_PAGE_CHIP_ENABLED_KEY]: { newValue: BoolFlag.TRUE } },
+      ],
+      [
+        "the local index is written",
+        { [STORE_PAGE_INDEX_KEY]: { newValue: {} } },
+      ],
+      [
+        "the switch is turned off (no newValue on the index side)",
+        {
+          [STORE_PAGE_CHIP_ENABLED_KEY]: {
+            oldValue: BoolFlag.TRUE,
+            newValue: BoolFlag.FALSE,
+          },
+        },
+      ],
+    ])("re-runs the reconcile once when %s", (_name, changes) => {
+      const onChanged = onlyListener<ChangeListener>(
+        browser.storage.onChanged.addListener,
+      );
+
+      onChanged(changes, "local");
+
+      expect(reconcileStorePageScript).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      [
+        "an index removal (oldValue only)",
+        { [STORE_PAGE_INDEX_KEY]: { oldValue: {} } },
+        "local",
+      ],
+      [
+        "an unrelated local key",
+        { [FAMILY_ID_KEY]: { newValue: "fam-1" } },
+        "local",
+      ],
+      [
+        "the switch key in sync storage",
+        { [STORE_PAGE_CHIP_ENABLED_KEY]: { newValue: BoolFlag.TRUE } },
+        "sync",
+      ],
+      [
+        "an index write in sync storage",
+        { [STORE_PAGE_INDEX_KEY]: { newValue: {} } },
+        "sync",
+      ],
+    ])("ignores %s", (_name, changes, area) => {
+      const onChanged = onlyListener<ChangeListener>(
+        browser.storage.onChanged.addListener,
+      );
+
+      onChanged(changes, area);
+
+      expect(reconcileStorePageScript).not.toHaveBeenCalled();
+    });
+
+    it("opens the options page when the toolbar icon is clicked", () => {
+      const onClicked = onlyListener<() => void>(
+        browser.action.onClicked.addListener,
+      );
+      expect(browser.runtime.openOptionsPage).not.toHaveBeenCalled();
+
+      onClicked();
+
+      expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
+    });
+
+    it("answers OPEN_OPTIONS_PAGE by opening the options page", async () => {
+      const response = await sendMessage({ type: "OPEN_OPTIONS_PAGE" });
+
+      expect(response).toEqual({ ok: 1 });
+      expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
+      // The options page owns the permission prompt; the message itself grants nothing.
+      expect(browser.permissions.request).not.toHaveBeenCalled();
     });
   });
 });

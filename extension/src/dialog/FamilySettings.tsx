@@ -21,6 +21,7 @@ import { FamilySettingsReportLinks } from "./FamilySettingsReportLinks";
 import { useFamilySettingsCopy } from "./useFamilySettingsCopy";
 import { useFamilySettingsSyncArchived } from "./useFamilySettingsSyncArchived";
 import { useFamilySettingsNewBookDefault } from "./useFamilySettingsNewBookDefault";
+import { useStorePageChip } from "./useStorePageChip";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -85,6 +86,7 @@ export function FamilySettings({
 
   // After the hooks above, so their effect order stays as documented; reads the server once per mount.
   const newBookDefault = useFamilySettingsNewBookDefault(apiClient, userId);
+  const storePageChip = useStorePageChip(userId);
 
   return (
     <div>
@@ -107,6 +109,7 @@ export function FamilySettings({
           syncArchived={syncArchived}
           onToggleSyncArchived={handleToggleSyncArchived}
           newBookDefault={newBookDefault}
+          storePageChip={storePageChip}
           autoSyncInterval={autoSyncInterval}
           onAutoSyncIntervalChange={setAutoSyncInterval}
           iconSize={iconSize}

@@ -11,6 +11,7 @@ import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  STORE_PAGE_INDEX_KEY,
 } from "@/constants";
 
 /**
@@ -1813,7 +1814,10 @@ describe("ApiClient", () => {
         TOKEN_EXPIRES_AT_KEY,
       ]);
       // Then: clear family data after recovery fails
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        FAMILY_ID_KEY,
+        STORE_PAGE_INDEX_KEY,
+      ]);
     });
 
     // A throttled recovery (429) yields a localized envelope, never the raw 401 nor

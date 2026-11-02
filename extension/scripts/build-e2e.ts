@@ -24,6 +24,7 @@ interface ManifestContentScript {
   matches: string[];
   js: string[];
   css?: string[];
+  run_at?: string;
 }
 
 interface ManifestWebAccessibleResource {
@@ -53,6 +54,15 @@ if (manifest.content_scripts && manifest.content_scripts.length > 0) {
   }
 }
 
+// Store-page chip: production registers content-store.js at runtime after a permission prompt E2E
+// cannot click, so register it statically for the localhost store fixture. See .claude/rules/test.md.
+manifest.content_scripts ??= [];
+manifest.content_scripts.push({
+  matches: ["http://localhost:*/book/*"],
+  js: ["content-store.js"],
+  run_at: "document_idle",
+});
+
 // Add localhost to host_permissions
 if (!manifest.host_permissions) {
   manifest.host_permissions = [];
@@ -73,10 +83,9 @@ if (manifest.web_accessible_resources) {
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 console.log("[build-e2e] manifest.json patched successfully.");
 
-// Step 3: copy dist/ to dist-e2e-open/ with an OPEN Dialog shadow root, since Playwright
-// cannot pierce a closed one. Which spec loads which: .claude/rules/test.md → E2E tooling.
+// Step 3: copy dist/ to dist-e2e-open/ with OPEN shadow roots (the Dialog's and the store-page chip's),
+// since Playwright cannot pierce a closed one. Which spec loads which: .claude/rules/test.md → E2E tooling.
 const openDistDir = resolve(__dirname, "..", "dist-e2e-open");
-const openContentPath = resolve(openDistDir, "content.js");
 const CLOSED_TOKEN = 'mode:"closed"';
 const OPEN_TOKEN = 'mode:"open"';
 
@@ -89,29 +98,38 @@ function failBuild(message: string): never {
   process.exit(1);
 }
 
+/** Swap the single closed shadow-root call in dist-e2e-open/<fileName> for an open one. */
+function openShadowRootIn(fileName: string): void {
+  const filePath = resolve(openDistDir, fileName);
+  const closedSource = readFileSync(filePath, "utf-8");
+  const closedCount = countToken(closedSource, CLOSED_TOKEN);
+  console.log(`[build-e2e] ${fileName} holds ${closedCount} x ${CLOSED_TOKEN}`);
+  if (closedCount !== 1) {
+    failBuild(
+      `expected exactly 1 x ${CLOSED_TOKEN} in ${fileName}, found ${closedCount}; update build-e2e.ts to match the minified shadow-root call`,
+    );
+  }
+
+  const openSource = closedSource.replace(CLOSED_TOKEN, OPEN_TOKEN);
+  if (
+    countToken(openSource, OPEN_TOKEN) !==
+      countToken(closedSource, OPEN_TOKEN) + 1 ||
+    countToken(openSource, CLOSED_TOKEN) !== 0
+  ) {
+    failBuild(
+      `dist-e2e-open/${fileName} was not switched to an open shadow root`,
+    );
+  }
+  writeFileSync(filePath, openSource);
+  console.log(
+    `[build-e2e] dist-e2e-open/${fileName} switched to an open shadow root.`,
+  );
+}
+
 console.log("[build-e2e] Copying dist/ to dist-e2e-open/...");
 rmSync(openDistDir, { recursive: true, force: true });
 cpSync(distDir, openDistDir, { recursive: true });
 
-const closedSource = readFileSync(openContentPath, "utf-8");
-const closedCount = countToken(closedSource, CLOSED_TOKEN);
-console.log(`[build-e2e] content.js holds ${closedCount} x ${CLOSED_TOKEN}`);
-if (closedCount !== 1) {
-  failBuild(
-    `expected exactly 1 x ${CLOSED_TOKEN} in content.js, found ${closedCount}; update build-e2e.ts to match the minified shadow-root call`,
-  );
-}
-
-const openSource = closedSource.replace(CLOSED_TOKEN, OPEN_TOKEN);
-if (
-  countToken(openSource, OPEN_TOKEN) !==
-    countToken(closedSource, OPEN_TOKEN) + 1 ||
-  countToken(openSource, CLOSED_TOKEN) !== 0
-) {
-  failBuild("dist-e2e-open/content.js was not switched to an open shadow root");
-}
-writeFileSync(openContentPath, openSource);
-console.log(
-  "[build-e2e] dist-e2e-open/content.js switched to an open shadow root.",
-);
+openShadowRootIn("content.js");
+openShadowRootIn("content-store.js");
 console.log("[build-e2e] E2E build complete.");

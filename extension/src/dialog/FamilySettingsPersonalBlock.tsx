@@ -7,6 +7,11 @@ import { AutoSyncIntervalSelector } from "./AutoSyncIntervalSelector";
 import { DisplayNameEditor } from "./DisplayNameEditor";
 import type { UseFamilySettingsNewBookDefaultResult } from "./useFamilySettingsNewBookDefault";
 import { AUTO_SHARE_MAX_NEW } from "../sync/autoShare";
+import type { UseStorePageChipResult } from "./useStorePageChip";
+
+const STORE_PAGE_CHIP_LABEL = "在購買頁顯示家人開放的書";
+const STORE_PAGE_CHIP_HINT =
+  "開啟後，瀏覽讀墨書籍頁面時，書名下方會顯示哪位家人已開放這本書；第一次開啟需要在設定頁授權";
 
 const NEW_BOOK_DEFAULT_HINT = `打開後，同步時個人書櫃裡還沒有的書（例如新買的書、從封存移回書櫃的書）會自動開放給家人，也會出現在你的公開書櫃。第一次同步，或一次新增超過 ${AUTO_SHARE_MAX_NEW} 本書時，不會自動開放，封存的書也不會`;
 
@@ -26,6 +31,8 @@ export interface FamilySettingsPersonalBlockProps {
   onToggleSyncArchived: () => void;
   /** The 新書預設開放 switch's state (`useFamilySettingsNewBookDefault`). */
   newBookDefault: UseFamilySettingsNewBookDefaultResult;
+  /** The store-page chip switch's state (`useStorePageChip`). */
+  storePageChip: UseStorePageChipResult;
   autoSyncInterval: AutoSyncInterval;
   onAutoSyncIntervalChange: (interval: AutoSyncInterval) => void;
   iconSize: FloatingIconSize;
@@ -42,12 +49,14 @@ export function FamilySettingsPersonalBlock({
   syncArchived,
   onToggleSyncArchived,
   newBookDefault,
+  storePageChip,
   autoSyncInterval,
   onAutoSyncIntervalChange,
   iconSize,
   onIconSizeChange,
 }: FamilySettingsPersonalBlockProps) {
   const newBookOn = newBookDefault.newBookDefaultShared === BoolFlag.TRUE;
+  const storeChipOn = storePageChip.enabled === BoolFlag.TRUE;
   const newBookMessageIsHint =
     newBookDefault.status === "unsupported" ||
     newBookDefault.status === "noRecord";
@@ -91,6 +100,24 @@ export function FamilySettingsPersonalBlock({
         <div className="moo-settings__hint">{NEW_BOOK_DEFAULT_HINT}</div>
         {newBookDefault.message && (
           <div className={newBookMessageClass}>{newBookDefault.message}</div>
+        )}
+      </div>
+      <div className="moo-settings__block">
+        <button
+          role="switch"
+          aria-checked={storeChipOn}
+          aria-label={STORE_PAGE_CHIP_LABEL}
+          onClick={storePageChip.toggle}
+          className="moo-switch"
+        >
+          <span className={switchTrackClass(storeChipOn)}>
+            <span className={switchKnobClass(storeChipOn)} />
+          </span>
+          {STORE_PAGE_CHIP_LABEL}
+        </button>
+        <div className="moo-settings__hint">{STORE_PAGE_CHIP_HINT}</div>
+        {storePageChip.hint && (
+          <div className="moo-settings__hint">{storePageChip.hint}</div>
         )}
       </div>
       <div className="moo-settings__block">

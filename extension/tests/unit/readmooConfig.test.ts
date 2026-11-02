@@ -205,9 +205,9 @@ import {
  *  - Apex trap (anti-drift tripwire): `isReadmooHost` looks like the obvious
  *    predicate to reuse, but its exact-match list holds only the two WEB-APP
  *    hosts (next. / read.), while every legitimate book link lives on the APEX —
- *    `readmooUrl` is built as `${READMOO_BOOK_BASE}${bookId}` with
- *    `READMOO_BOOK_BASE = "https://readmoo.com/book/"`
- *    (extension/src/content/scraper.ts:31). Rebuilding `isAllowedBookUrl` on
+ *    `readmooUrl` is built as `${READMOO_STORE_BOOK_URL_BASE}${bookId}` with
+ *    `READMOO_STORE_BOOK_URL_BASE = "https://readmoo.com/book/"`
+ *    (shared/src/config/readmooStore.ts). Rebuilding `isAllowedBookUrl` on
  *    `isReadmooHost` would blank EVERY real book link — a total feature outage
  *    that no hostile-URL test would catch, because all the hostile cases would
  *    still (correctly) return false.

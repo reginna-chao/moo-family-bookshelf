@@ -4,7 +4,13 @@ import React, { useEffect } from "react";
 import { FamilyDataProvider, useFamilyData } from "@/dialog/FamilyDataContext";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient, BookEntry, FamilyBookshelf } from "@/api/client";
-import { seenKey, chipsKey } from "@/constants";
+import {
+  seenKey,
+  chipsKey,
+  STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_INDEX_KEY,
+} from "@/constants";
+import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 
 /**
  * FamilyDataProvider exposes a `reloadSignal` prop: bumping the number re-runs
@@ -405,5 +411,155 @@ describe("FamilyDataProvider update tracking", () => {
     expect(written[CHIPS_KEY]).toMatchObject({ bookIds: ["b2"] });
     // The chip survives the seen-mark (kept for 24h); the red dot clears.
     expect(screen.getByTestId("updated-ids").textContent).toBe("b2");
+  });
+});
+
+/** #313: a successful bookshelf load rebuilds the store-page chip index, only while the switch is on.
+ *  Observed through the storage write; `storage/storePageChip` is the real module. */
+describe("FamilyDataProvider store-page chip index", () => {
+  const VIEWER_BOOK = "210000000000001";
+  const SHARED_BOOK = "210000000000002";
+  const UNSHARED_BOOK = "210000000000003";
+
+  function makeBook(bookId: string, isShared: BoolFlag): BookEntry {
+    return {
+      bookId,
+      title: `書 ${bookId}`,
+      author: "作者",
+      isbn: "",
+      coverUrl: "",
+      readmooUrl: "",
+      category: "",
+      isShared,
+    };
+  }
+
+  const BOOKSHELF: FamilyBookshelf = {
+    familyId: "fam-1",
+    members: [
+      {
+        userId: "user-1",
+        displayName: "Me",
+        lastUpdated: null,
+        books: [makeBook(VIEWER_BOOK, BoolFlag.TRUE)],
+      },
+      {
+        userId: "user-2",
+        displayName: "wire name",
+        lastUpdated: null,
+        books: [
+          makeBook(SHARED_BOOK, BoolFlag.TRUE),
+          makeBook(UNSHARED_BOOK, BoolFlag.FALSE),
+        ],
+      },
+    ],
+  };
+
+  function clientServing(bookshelfResponse: unknown): ApiClient {
+    return createMockApiClient({
+      getFamilyMembers: vi.fn().mockResolvedValue({
+        data: {
+          familyId: "fam-1",
+          ownerId: "user-1",
+          members: [
+            { userId: "user-1", displayName: "Me" },
+            { userId: "user-2", displayName: "Alice" },
+          ],
+        },
+      }),
+      getFamilyBookshelf: vi.fn().mockResolvedValue(bookshelfResponse),
+    });
+  }
+
+  /** storage.local.get answers the switch with `flag`; every other key reads as absent. */
+  function storeSwitchReads(flag: BoolFlag): void {
+    vi.mocked(chrome.storage.local.get).mockImplementation(((
+      keys: string | string[],
+    ) => {
+      const list = Array.isArray(keys) ? keys : [keys];
+      return Promise.resolve(
+        list.includes(STORE_PAGE_CHIP_ENABLED_KEY)
+          ? { [STORE_PAGE_CHIP_ENABLED_KEY]: flag }
+          : {},
+      );
+    }) as never);
+  }
+
+  function indexWrites(): Record<string, unknown>[] {
+    return vi
+      .mocked(chrome.storage.local.set)
+      .mock.calls.map(([items]) => items as Record<string, unknown>)
+      .filter((items) => STORE_PAGE_INDEX_KEY in items);
+  }
+
+  async function renderUntil(state: "ready" | "error", apiClient: ApiClient) {
+    await act(async () => {
+      renderProvider(apiClient, 0);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("bookshelf-state")).toHaveTextContent(state);
+    });
+    // Let the fire-and-forget index update finish its read before asserting.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    childMountCount = 0;
+  });
+
+  afterEach(async () => {
+    await act(async () => {});
+  });
+
+  it("writes the index of the loaded shelf, without the viewer, when the switch is on", async () => {
+    storeSwitchReads(BoolFlag.TRUE);
+
+    await renderUntil("ready", clientServing({ data: BOOKSHELF }));
+
+    await waitFor(() => expect(indexWrites()).toHaveLength(1));
+    const index = indexWrites()[0][STORE_PAGE_INDEX_KEY];
+    // The display name comes from the members list, as on the family shelf; unshared books are dropped.
+    expect(index).toEqual({
+      ...buildStorePageIndex(
+        [
+          {
+            userId: "user-2",
+            displayName: "Alice",
+            books: [{ bookId: SHARED_BOOK }],
+          },
+        ],
+        "user-1",
+        new Date(),
+      ),
+      updatedAt: expect.any(String),
+    });
+  });
+
+  it("writes nothing when the switch is off", async () => {
+    storeSwitchReads(BoolFlag.FALSE);
+
+    await renderUntil("ready", clientServing({ data: BOOKSHELF }));
+
+    expect(chrome.storage.local.get).toHaveBeenCalledWith([
+      STORE_PAGE_CHIP_ENABLED_KEY,
+    ]);
+    expect(indexWrites()).toHaveLength(0);
+  });
+
+  it("writes nothing when the bookshelf load fails", async () => {
+    storeSwitchReads(BoolFlag.TRUE);
+
+    await renderUntil(
+      "error",
+      clientServing({ error: { code: "SERVER_ERROR", message: "boom" } }),
+    );
+
+    expect(chrome.storage.local.get).not.toHaveBeenCalledWith([
+      STORE_PAGE_CHIP_ENABLED_KEY,
+    ]);
+    expect(indexWrites()).toHaveLength(0);
   });
 });
