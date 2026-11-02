@@ -38,3 +38,7 @@ extension/tests/e2e/fixtures/mock-readmoo.html
 # Vendored third-party skill — kept byte-identical to upstream so it can be
 # re-synced with a plain copy. See .claude/skills/speak-human-tw/VENDORED.md
 .claude/skills/speak-human-tw/
+
+# /develop run files (.claude/runs/<slug>/PLAN.md) are appended to by the orchestrator
+# with Edit; Prettier would rewrite their 繁中 tables and lists, so leave them alone.
+.claude/runs/

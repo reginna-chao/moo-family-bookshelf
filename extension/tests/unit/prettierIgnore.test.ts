@@ -13,6 +13,13 @@ import { fileURLToPath } from "node:url";
  * Deleting `extension/.prettierignore`, or dropping either entry from it, makes
  * prettier flag both files and this check exits non-zero.
  *
+ * Also pins the repo-root `.prettierignore`'s `.claude/runs/` entry (#441).
+ * `/develop` run files (`.claude/runs/<slug>/PLAN.md`) are appended to by the
+ * orchestrator and Prettier would rewrite their Traditional Chinese tables and
+ * lists; a PLAN.md kept at the commit gate must not turn CI's `format` job
+ * (`prettier --check .` from the repo root) red. `--file-info` consults only the
+ * ignore file, so the probed path need not exist on disk.
+ *
  * Path resolution: `extensionRoot` is resolved from `import.meta.url` as a
  * STRING — Vite rewrites the literal `new URL("...", import.meta.url)` form into
  * a served asset URL (`http://localhost:3000/@fs/...`), which `fileURLToPath`
@@ -61,5 +68,21 @@ describe("extension/.prettierignore", () => {
           `${stdout ?? ""}${stderr ?? ""}`,
       );
     }
+  });
+});
+
+describe("repo-root .prettierignore", () => {
+  it("ignores /develop run files under .claude/runs/ when prettier runs from the repo root", () => {
+    // The path need not exist: --file-info only consults the ignore file.
+    const stdout = execFileSync(
+      process.execPath,
+      [prettierCli, "--file-info", ".claude/runs/some-slug/PLAN.md"],
+      { cwd: repoRoot, encoding: "utf8", stdio: "pipe" },
+    );
+    const info = JSON.parse(stdout) as { ignored: boolean };
+    expect(
+      info.ignored,
+      "repo-root .prettierignore must list .claude/runs/ (see the file header)",
+    ).toBe(true);
   });
 });
