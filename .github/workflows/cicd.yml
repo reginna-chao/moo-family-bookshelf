@@ -69,6 +69,9 @@ jobs:
               # The root .env.* files are read through `envDir: ..`; .env.production
               # is baked into the release build, so a typo there must fail a PR, not the tag.
               - '.env.*'
+              # extension/tests/unit/prettierIgnore.test.ts guards the repo-root
+              # .prettierignore — without this the guard never runs on a change to it.
+              - '.prettierignore'
               - '.github/workflows/cicd.yml'
             pwa:
               - 'pwa/**'
