@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { buildInviteUrl } from "../constants";
+import { useTimedFlag } from "../hooks/useTimedFlag";
 import {
   buildSyncCodeInviteMessage,
   buildLinkInviteMessage,
@@ -8,14 +9,17 @@ import {
 export interface UseFamilySettingsCopyResult {
   copied: boolean;
   inviteCopied: boolean;
+  linkCopied: boolean;
   handleCopy: () => Promise<void>;
   handleInviteCopy: () => Promise<void>;
+  handleLinkCopy: () => Promise<void>;
 }
 
 /**
- * Clipboard copy of the sync-code / invite-link messages, each with a 2-second
- * "copied" flag. Called by the always-mounted `FamilySettings`, so the flags
- * and their timers survive collapsing the 家庭設定 section.
+ * Clipboard copy of the sync-code message, the invite-link message and the
+ * bare invite URL, each with a 2-second "copied" flag. Called by the
+ * always-mounted `FamilySettings`, so the flags and their timers survive
+ * collapsing the 家庭設定 section.
  */
 export function useFamilySettingsCopy(
   syncCode: string | null,
@@ -34,6 +38,8 @@ export function useFamilySettingsCopy(
         clearTimeout(inviteCopiedTimerRef.current);
     };
   }, []);
+
+  const [linkCopied, markLinkCopied] = useTimedFlag(2000);
 
   const handleCopy = async () => {
     if (!syncCode) return;
@@ -57,5 +63,19 @@ export function useFamilySettingsCopy(
     );
   };
 
-  return { copied, inviteCopied, handleCopy, handleInviteCopy };
+  // Only the URL, no message text — for pasting the link on its own.
+  const handleLinkCopy = async () => {
+    if (!syncCode) return;
+    await navigator.clipboard.writeText(buildInviteUrl(syncCode));
+    markLinkCopied();
+  };
+
+  return {
+    copied,
+    inviteCopied,
+    linkCopied,
+    handleCopy,
+    handleInviteCopy,
+    handleLinkCopy,
+  };
 }
