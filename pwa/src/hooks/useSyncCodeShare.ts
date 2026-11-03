@@ -6,19 +6,23 @@ import {
 import type { ApiClient } from "@/api/client";
 import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "@/constants";
+import { useTimedFlag } from "@/hooks/useTimedFlag";
 
 export interface SyncCodeShare {
   syncCode: string;
   copied: boolean;
   inviteCopied: boolean;
+  linkCopied: boolean;
   handleCopy: () => Promise<void>;
   handleInvite: () => Promise<void>;
+  handleLinkCopy: () => Promise<void>;
 }
 
 /**
- * The family sync code plus its two share actions (copy the code, send an
- * invite link) and their transient "已複製" confirmations. Called by the
- * always-mounted family section, so a confirmation survives collapsing it.
+ * The family sync code plus its three share actions (copy the code, send an
+ * invite message, copy the bare invite URL) and their transient "已複製"
+ * confirmations. Called by the always-mounted family section, so a
+ * confirmation survives collapsing it.
  */
 export function useSyncCodeShare(
   familyId: string,
@@ -46,6 +50,8 @@ export function useSyncCodeShare(
       if (inviteCopyTimerRef.current) clearTimeout(inviteCopyTimerRef.current);
     };
   }, []);
+
+  const [linkCopied, markLinkCopied] = useTimedFlag(2000);
 
   async function handleCopy() {
     try {
@@ -86,5 +92,23 @@ export function useSyncCodeShare(
     }
   }
 
-  return { syncCode, copied, inviteCopied, handleCopy, handleInvite };
+  // Clipboard only, never `navigator.share`: the button promises a direct copy of the URL.
+  async function handleLinkCopy() {
+    try {
+      await navigator.clipboard.writeText(buildInviteUrl(syncCode));
+      markLinkCopied();
+    } catch {
+      // Clipboard API failed — ignore silently on mobile
+    }
+  }
+
+  return {
+    syncCode,
+    copied,
+    inviteCopied,
+    linkCopied,
+    handleCopy,
+    handleInvite,
+    handleLinkCopy,
+  };
 }

@@ -1,3 +1,4 @@
+import { Link, Check } from "lucide-react";
 import { SyncCodeTextFrame } from "../secureFrame/frames";
 import { InviteQrCode } from "./InviteQrCode";
 
@@ -5,8 +6,10 @@ export interface FamilySettingsSyncCodeBlockProps {
   syncCode: string | null;
   copied: boolean;
   inviteCopied: boolean;
+  linkCopied: boolean;
   onCopy: () => Promise<void>;
   onInviteCopy: () => Promise<void>;
+  onLinkCopy: () => Promise<void>;
 }
 
 /**
@@ -18,8 +21,10 @@ export function FamilySettingsSyncCodeBlock({
   syncCode,
   copied,
   inviteCopied,
+  linkCopied,
   onCopy,
   onInviteCopy,
+  onLinkCopy,
 }: FamilySettingsSyncCodeBlockProps) {
   return (
     <div className="moo-settings__block">
@@ -61,6 +66,24 @@ export function FamilySettingsSyncCodeBlock({
           }
         >
           {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void onLinkCopy()}
+          disabled={!syncCode}
+          aria-label={linkCopied ? "已複製邀請網址" : "複製邀請網址"}
+          title="複製邀請網址"
+          className={
+            linkCopied
+              ? "moo-button moo-button--outline-success moo-settings__link-btn moo-settings__link-btn--copied"
+              : "moo-button moo-button--outline-success moo-settings__link-btn"
+          }
+        >
+          {linkCopied ? (
+            <Check size={18} aria-hidden="true" />
+          ) : (
+            <Link size={18} aria-hidden="true" />
+          )}
         </button>
       </div>
       <div className="moo-settings__hint">

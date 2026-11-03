@@ -17,8 +17,10 @@ import {
 import { BoolFlag, validateEndpointUrl, type ApiClient } from "@/api/client";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import {
   API_ENDPOINT_KEY,
+  buildInviteUrl,
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   DISPLAY_NAME_KEY,
@@ -93,7 +95,19 @@ import {
  * own phone), and building it from the record would make a member who DECLINED a switch still
  * distribute the refused endpoint — the invitee lands on the untrusted host while the decliner never
  * does, so the refusal would protect only the person who made it.
+ *
+ * Invite-URL copy button: the square icon button beside 「邀請成員加入家庭」 copies ONLY
+ * `buildInviteUrl(syncCode)` and, for 2 s, renames itself 「已複製邀請網址」. Its name 「複製邀請網址」 is a
+ * substring of the copied state, so every query is an exact-name role query plus a negative on the
+ * sibling variant. Queries are scoped to the 家庭同步碼 block because the 手機登入與驗證 section on the
+ * same screen has its own 「複製連結」 button (the mobile-login link, `QrCodeLink`), a different action.
+ * The 2-second reset runs on fake timers, so the file-level `afterEach` restores real timers.
  */
+
+// Fake timers exclude RTL waiters; tripwire per tests rule "Fake timers exclude RTL waiters".
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // Remove-confirm question + shared rejoin-wait note, rendered in one element.
 // Literal pin: tests/component/MemberList.test.tsx → "rejoin-wait note".
@@ -377,6 +391,133 @@ describe("FamilySettings", () => {
     // The invite URL should contain the encoded sync code
     const calledWith = writeText.mock.calls[0][0] as string;
     expect(calledWith).toContain("#invite=");
+  });
+
+  // See the file header → "Invite-URL copy button".
+  describe("invite-URL copy button (複製邀請網址)", () => {
+    const EXPECTED_URL = buildInviteUrl(
+      encodeSyncCode({ familyId: "fam-123" }),
+    );
+    let writeText: ReturnType<typeof vi.fn>;
+    let previousClipboard: Clipboard | undefined;
+
+    beforeEach(() => {
+      previousClipboard = navigator.clipboard;
+      writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+    });
+
+    afterEach(() => {
+      Object.assign(navigator, { clipboard: previousClipboard });
+    });
+
+    async function renderSettled() {
+      await act(async () => {
+        renderFamilySettings();
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+
+    function syncCodeBlock() {
+      const block = screen
+        .getByText("家庭同步碼")
+        .closest(".moo-settings__block");
+      expect(block).not.toBeNull();
+      return within(block as HTMLElement);
+    }
+
+    it("copies exactly the invite URL and renames itself 已複製邀請網址", async () => {
+      await renderSettled();
+      const block = syncCodeBlock();
+
+      await act(async () => {
+        fireEvent.click(block.getByRole("button", { name: "複製邀請網址" }));
+      });
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText.mock.calls[0][0]).toBe(EXPECTED_URL);
+      const copiedButton = block.getByRole("button", {
+        name: "已複製邀請網址",
+      });
+      expect(copiedButton).toHaveAttribute("title", "複製邀請網址");
+      expect(
+        block.queryByRole("button", { name: "複製邀請網址" }),
+      ).not.toBeInTheDocument();
+      // The message button beside it is untouched.
+      expect(
+        block.getByRole("button", { name: "邀請成員加入家庭" }),
+      ).toBeInTheDocument();
+      expect(block.queryByText("已複製邀請連結")).not.toBeInTheDocument();
+    });
+
+    it("stays 複製邀請網址 when only the invite-message button is pressed", async () => {
+      await renderSettled();
+      const block = syncCodeBlock();
+
+      await act(async () => {
+        fireEvent.click(
+          block.getByRole("button", { name: "邀請成員加入家庭" }),
+        );
+      });
+
+      expect(
+        block.getByRole("button", { name: "已複製邀請連結" }),
+      ).toBeInTheDocument();
+      expect(
+        block.getByRole("button", { name: "複製邀請網址" }),
+      ).toBeInTheDocument();
+      expect(
+        block.queryByRole("button", { name: "已複製邀請網址" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("returns to 複製邀請網址 after 2 seconds", async () => {
+      await renderSettled();
+      const block = syncCodeBlock();
+      vi.useFakeTimers();
+
+      await act(async () => {
+        fireEvent.click(block.getByRole("button", { name: "複製邀請網址" }));
+      });
+      expect(
+        block.getByRole("button", { name: "已複製邀請網址" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1999);
+      });
+      expect(
+        block.getByRole("button", { name: "已複製邀請網址" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(
+        block.getByRole("button", { name: "複製邀請網址" }),
+      ).toBeInTheDocument();
+      expect(
+        block.queryByRole("button", { name: "已複製邀請網址" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("is not the mobile-login 複製連結 button on the same screen", async () => {
+      await renderSettled();
+      const block = syncCodeBlock();
+
+      // The QR section's button exists on screen, just not in this block.
+      expect(
+        screen.getByRole("button", { name: "複製連結" }),
+      ).toBeInTheDocument();
+      expect(
+        block.getByRole("button", { name: "複製邀請網址" }),
+      ).toBeInTheDocument();
+      expect(
+        block.queryByRole("button", { name: "複製連結" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("shows member list after loading", async () => {

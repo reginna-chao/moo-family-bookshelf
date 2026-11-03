@@ -1,3 +1,4 @@
+import { Link, Check } from "lucide-react";
 import type { SyncCodeShare } from "@/hooks/useSyncCodeShare";
 
 interface SettingsSyncCodeShareProps {
@@ -5,12 +6,20 @@ interface SettingsSyncCodeShareProps {
 }
 
 /**
- * The 家庭同步碼 block: the code, 複製同步碼 and 邀請成員加入家庭. Stateless —
- * the confirmations are owned by `useSyncCodeShare` in the always-mounted
- * family section.
+ * The 家庭同步碼 block: the code, 複製同步碼, 邀請成員加入家庭 and the square
+ * 複製邀請網址 icon button beside it. Stateless — the confirmations are owned
+ * by `useSyncCodeShare` in the always-mounted family section.
  */
 export function SettingsSyncCodeShare({ share }: SettingsSyncCodeShareProps) {
-  const { syncCode, copied, inviteCopied, handleCopy, handleInvite } = share;
+  const {
+    syncCode,
+    copied,
+    inviteCopied,
+    linkCopied,
+    handleCopy,
+    handleInvite,
+    handleLinkCopy,
+  } = share;
 
   return (
     <>
@@ -26,14 +35,31 @@ export function SettingsSyncCodeShare({ share }: SettingsSyncCodeShareProps) {
       >
         {copied ? "已複製" : "複製同步碼"}
       </button>
-      <button
-        onClick={() => void handleInvite()}
-        className={`w-full rounded-lg border border-green-600 px-4 py-2.5 text-sm font-semibold text-green-600 mt-2 ${
-          inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
-        } transition-colors`}
-      >
-        {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
-      </button>
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={() => void handleInvite()}
+          className={`flex-1 rounded-lg border border-green-600 px-4 py-2.5 text-sm font-semibold text-green-600 ${
+            inviteCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
+          } transition-colors`}
+        >
+          {inviteCopied ? "已複製邀請連結" : "邀請成員加入家庭"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleLinkCopy()}
+          aria-label={linkCopied ? "已複製邀請網址" : "複製邀請網址"}
+          title="複製邀請網址"
+          className={`shrink-0 w-11 rounded-lg border border-green-600 text-green-600 flex items-center justify-center transition-colors ${
+            linkCopied ? "bg-green-50" : "bg-transparent hover:bg-green-50"
+          }`}
+        >
+          {linkCopied ? (
+            <Check size={18} aria-hidden="true" />
+          ) : (
+            <Link size={18} aria-hidden="true" />
+          )}
+        </button>
+      </div>
       <p className="text-gray-400 text-xs mt-1.5 mb-4">
         將此代碼或邀請連結分享給家人即可加入書櫃
       </p>

@@ -2793,6 +2793,18 @@
   --moo-btn-hover-bg: var(--moo-success-bg);
 }
 
+/* Square icon-only invite-URL copy button: fixed 44px, height stretches with the row. */
+.moo-settings__link-btn {
+  flex: 0 0 44px;
+  --moo-btn-padding: 0;
+}
+
+/* Same variable pattern as --copied above (green feedback fill kept on hover). */
+.moo-settings__link-btn--copied {
+  --moo-btn-bg: var(--moo-success-bg);
+  --moo-btn-hover-bg: var(--moo-success-bg);
+}
+
 .moo-settings__members-loading {
   color: var(--moo-text-faint);
   font-size: 14px;

@@ -62,8 +62,14 @@ export function FamilySettings({
 
   // Hook call order is load-bearing: effects run copy-timer cleanup → syncArchived storage read →
   // endpoint switch → sync code.
-  const { copied, inviteCopied, handleCopy, handleInviteCopy } =
-    useFamilySettingsCopy(syncCode);
+  const {
+    copied,
+    inviteCopied,
+    linkCopied,
+    handleCopy,
+    handleInviteCopy,
+    handleLinkCopy,
+  } = useFamilySettingsCopy(syncCode);
   const { syncArchived, handleToggleSyncArchived } =
     useFamilySettingsSyncArchived();
 
@@ -128,8 +134,10 @@ export function FamilySettings({
             syncCode={syncCode}
             copied={copied}
             inviteCopied={inviteCopied}
+            linkCopied={linkCopied}
             onCopy={handleCopy}
             onInviteCopy={handleInviteCopy}
+            onLinkCopy={handleLinkCopy}
           />
           <FamilySettingsMembersBlock
             familyId={familyId}

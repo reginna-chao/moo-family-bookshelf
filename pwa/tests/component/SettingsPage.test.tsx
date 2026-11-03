@@ -17,7 +17,9 @@ import {
 } from "@/components/UnkickNotice";
 import { BoolFlag, type ApiClient } from "@/api/client";
 import { buildRetryMessage } from "@/utils/retryMessage";
-import { DEFAULT_API_ENDPOINT } from "../../src/constants";
+import { DEFAULT_API_ENDPOINT, buildInviteUrl } from "../../src/constants";
+import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
+import { buildLinkInviteMessage } from "moo-family-bookshelf-shared/invite/messages";
 
 /**
  * PWA SettingsPage: sync-code sharing, members (with the un-kick entry), leave / logout / delete, and
@@ -52,7 +54,21 @@ import { DEFAULT_API_ENDPOINT } from "../../src/constants";
  * optional `retryAfter`). Its `message` is English, so both write paths here render the localized
  * back-off copy instead — asserted against the production builder, whose literals are pinned in
  * pwa/tests/unit/retryMessage.test.ts.
+ *
+ * Invite buttons: 「邀請成員加入家庭」 sends the invite MESSAGE (through `navigator.share` when the
+ * browser has it, else the clipboard); the square icon button beside it copies ONLY the bare invite
+ * URL, through the clipboard and never `navigator.share`, and renames itself 「已複製邀請網址」 for
+ * 2 s. 「複製邀請網址」 is a substring of that copied name, so queries are exact-name role queries with
+ * a negative on the sibling variant. A clipboard failure is swallowed: no copied state, no unhandled
+ * rejection (Vitest fails the run on one). Expected values come from the production builders; the
+ * `@/constants` mock keeps the real `buildInviteUrl` and overrides only `DEFAULT_API_ENDPOINT`.
+ * The 2-second reset runs on fake timers, so the file-level `afterEach` restores real timers.
  */
+
+// Fake timers exclude RTL waiters; tripwire per tests rule "Fake timers exclude RTL waiters".
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // Mock syncCode module
 const { mockEncodeSyncCode } = vi.hoisted(() => ({
@@ -62,8 +78,9 @@ vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
   encodeSyncCode: mockEncodeSyncCode,
 }));
 
-// Mock constants to match the default endpoint used in the mock
-vi.mock("@/constants", () => ({
+// Mock constants to match the default endpoint used in the mock; the real `buildInviteUrl` is kept.
+vi.mock("@/constants", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/constants")>()),
   DEFAULT_API_ENDPOINT: "https://default-api.example.com",
 }));
 
@@ -213,6 +230,132 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByRole("button", { name: "已複製" }),
     ).toBeInTheDocument();
+  });
+
+  // See the file header → "Invite buttons".
+  describe("invite buttons", () => {
+    /** What the page builds for fam-001 on the default endpoint, through the production builders. */
+    function expectedInviteUrl() {
+      return buildInviteUrl(encodeSyncCode({ familyId: "fam-001" }));
+    }
+
+    async function renderSettled() {
+      await act(async () => {
+        renderWithProvider();
+      });
+    }
+
+    afterEach(() => {
+      delete (navigator as { share?: unknown }).share;
+    });
+
+    it("copies the invite message when 邀請成員加入家庭 is pressed without navigator.share", async () => {
+      expect(navigator.share).toBeUndefined();
+      await renderSettled();
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "邀請成員加入家庭" }),
+        );
+      });
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toBe(
+        buildLinkInviteMessage(expectedInviteUrl()),
+      );
+    });
+
+    it("copies exactly the invite URL and renames itself 已複製邀請網址", async () => {
+      await renderSettled();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "複製邀請網址" }));
+      });
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toBe(
+        expectedInviteUrl(),
+      );
+      expect(
+        screen.getByRole("button", { name: "已複製邀請網址" }),
+      ).toHaveAttribute("title", "複製邀請網址");
+      expect(
+        screen.queryByRole("button", { name: "複製邀請網址" }),
+      ).not.toBeInTheDocument();
+      // The message button beside it is untouched.
+      expect(
+        screen.getByRole("button", { name: "邀請成員加入家庭" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("已複製邀請連結")).not.toBeInTheDocument();
+    });
+
+    it("copies the invite URL to the clipboard even when navigator.share exists", async () => {
+      const share = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "share", {
+        value: share,
+        configurable: true,
+        writable: true,
+      });
+      await renderSettled();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "複製邀請網址" }));
+      });
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toBe(
+        expectedInviteUrl(),
+      );
+      expect(share).not.toHaveBeenCalled();
+    });
+
+    it("returns to 複製邀請網址 after 2 seconds", async () => {
+      await renderSettled();
+      vi.useFakeTimers();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "複製邀請網址" }));
+      });
+      expect(
+        screen.getByRole("button", { name: "已複製邀請網址" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1999);
+      });
+      expect(
+        screen.getByRole("button", { name: "已複製邀請網址" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(
+        screen.getByRole("button", { name: "複製邀請網址" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "已複製邀請網址" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows no copied state when the clipboard write rejects", async () => {
+      vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(
+        new Error("Clipboard write denied"),
+      );
+      await renderSettled();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "複製邀請網址" }));
+      });
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", { name: "複製邀請網址" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "已複製邀請網址" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   // --- Members ---
