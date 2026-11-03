@@ -71,7 +71,7 @@ Pre-implementation impact analysis. **You MUST NOT use Edit, Write, or any git m
 1. Read the rules files above.
 2. Read the assigned source files; trace upstream/downstream callers as needed for correctness.
 3. Implement, following the scope's conventions.
-4. **Verify.** Run the scope's verify command (capture output ONCE; parse for both success and failure — never run the same command twice). **Never run tests yourself** — that's the tester role.
+4. **Verify.** Run the scope's verify command (capture output ONCE; parse for both success and failure — never run the same command twice). **Never run tests yourself** — that's the tester role. Extension `pnpm typecheck` also compiles `tests/`: when your change removes or renames an export, errors confined to test files are the expected red — report `PASS (tests/ red expected)` and list each failing test file with its new expectation; any error under `src/` is a FAIL.
 5. Compose the return summary.
 
 ## Return Summary — `production`
