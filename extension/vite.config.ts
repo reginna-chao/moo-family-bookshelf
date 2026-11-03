@@ -34,6 +34,8 @@ export default defineConfig({
         // At the project root so the artifact lands at dist/secure-frame.html (html entries keep
         // their source-relative path), matching the manifest's web_accessible_resources entry.
         "secure-frame": resolve(__dirname, "secure-frame.html"),
+        // Same root placement → dist/options.html, the manifest's options_ui page (not web-accessible).
+        options: resolve(__dirname, "options.html"),
       },
       output: {
         entryFileNames: "[name].js",

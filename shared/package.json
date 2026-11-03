@@ -17,6 +17,7 @@
     "./publicShelf/*": "./src/publicShelf/*",
     "./recovery/*": "./src/recovery/*",
     "./safeUrl/*": "./src/safeUrl/*",
+    "./storePage/*": "./src/storePage/*",
     "./unkick/*": "./src/unkick/*",
     "./verifyInput/*": "./src/verifyInput/*"
   },

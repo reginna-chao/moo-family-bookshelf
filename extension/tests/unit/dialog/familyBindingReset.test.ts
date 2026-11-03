@@ -22,7 +22,10 @@ import {
   DECLINED_FAMILY_ENDPOINT_KEY,
   AUTO_SYNC_INTERVAL_KEY,
   DEFAULT_API_ENDPOINT,
+  STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_INDEX_KEY,
 } from "@/constants";
+import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 
 /**
  * familyBindingReset: the device-local teardown shared by leaving a family and
@@ -218,8 +221,40 @@ describe("familyBindingReset", () => {
         FAMILY_ID_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        STORE_PAGE_INDEX_KEY,
       ]);
       await pending;
     });
+  });
+
+  // #313: the index (family names + book ids) dies with the binding; the switch is the user's own.
+  describe("store-page chip keys", () => {
+    beforeEach(async () => {
+      await chrome.storage.local.set({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        [STORE_PAGE_INDEX_KEY]: { version: 1 },
+      });
+    });
+
+    it.each([
+      ["leaving a family", () => clearStoredFamilyBinding()],
+      ["forgetting the account", () => forgetStoredAccount(makeClient())],
+    ])(
+      "drops the index but keeps the switch when %s",
+      async (_name, teardown) => {
+        await teardown();
+
+        const local = await storedLocal();
+        expect(local).not.toHaveProperty(STORE_PAGE_INDEX_KEY);
+        expect(local[STORE_PAGE_CHIP_ENABLED_KEY]).toBe(BoolFlag.TRUE);
+        const removed = vi
+          .mocked(chrome.storage.local.remove)
+          .mock.calls.flatMap(([keys]) =>
+            Array.isArray(keys) ? keys : [keys],
+          );
+        expect(removed).toContain(STORE_PAGE_INDEX_KEY);
+        expect(removed).not.toContain(STORE_PAGE_CHIP_ENABLED_KEY);
+      },
+    );
   });
 });

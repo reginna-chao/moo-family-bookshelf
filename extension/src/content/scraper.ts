@@ -2,6 +2,7 @@
  *  `queryWithLegacyFallback`); a card needs a hover to reveal `.openbook-overlay` (legacy: `.openbook`). */
 
 import { READMOO_SELECTORS } from "moo-family-bookshelf-shared/config/readmoo";
+import { READMOO_STORE_BOOK_URL_BASE } from "moo-family-bookshelf-shared/config/readmooStore";
 import { BoolFlag } from "../api/client";
 import { requestFiberData, requestLibraryFiberData } from "./fiber-data";
 import { queryWithLegacyFallback } from "./readmoo-dom";
@@ -28,7 +29,6 @@ export interface ScrapedBook {
 }
 
 const HOVER_SETTLE_MS = 120;
-const READMOO_BOOK_BASE = "https://readmoo.com/book/";
 const ATTR_COVER = "data-moo-cover-url";
 const ATTR_AUTHOR = "data-moo-author";
 const ATTR_CATEGORY = "data-moo-category";
@@ -114,7 +114,7 @@ async function scrapeItem(item: Element): Promise<ItemOutcome> {
     title,
     author,
     coverUrl,
-    readmooUrl: `${READMOO_BOOK_BASE}${bookId}`,
+    readmooUrl: `${READMOO_STORE_BOOK_URL_BASE}${bookId}`,
     category,
     isArchived: BoolFlag.FALSE,
   };

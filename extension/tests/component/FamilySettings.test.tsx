@@ -22,8 +22,18 @@ import {
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   DISPLAY_NAME_KEY,
+  FAMILY_ID_KEY,
   SYNC_ARCHIVED_KEY,
+  STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
+  STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "@/constants";
+import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
+import {
+  STORE_CHIP_OPEN_OPTIONS_FALLBACK,
+  STORE_CHIP_REVOKED_MESSAGE,
+} from "@/options/storePageChipMessages";
 
 /**
  * FamilySettings: display name, members, sync code / invite, leaving, the un-kick entry, the
@@ -42,6 +52,19 @@ import {
  * deleting the family record answers it on every retry, and keeping the local family would strand the
  * user on a family that no longer exists. The opposite case (a real refusal renders its error and
  * does NOT call onLeave) is pinned by "shows the localized back-off copy when leaving is rate limited".
+ *
+ * Store-page chip switch (#313, `useStorePageChip`): the same storage flag as the options page. The
+ * Dialog has no permissions API, so it reads the background's mirror `moo:storePageHostGranted`:
+ * granted → switching on writes TRUE and, only when the family shelf is already loaded, writes the
+ * index built from that shelf (the viewer's own books excluded); not granted → it asks the background
+ * to open the options page and shows a fallback hint when that fails. The shelf comes from the REAL
+ * FamilyDataProvider, so "loaded" is driven through the mock client's `getFamilyBookshelf` (a
+ * never-resolving promise keeps it loading); `act` around render plus settle ticks is the readiness
+ * barrier. The index goes through the binding-guarded writer, which re-reads the switch and the
+ * stored userId / familyId after the switch write, so the indexing cases use a STATEFUL storage mock
+ * (`seedStatefulStorage`: `set` lands in a map that `get` reads) seeded with the stored binding; a
+ * binding naming another family (or none) must get the switch written but no index — the shelf on
+ * screen may belong to a family the user has just left.
  *
  * Un-kick entry: a removal writes a 6-hour server-side block on rejoining, so the owner gets an entry
  * to lift it right where the removal happened. It is owner-only (the endpoint refuses anyone else)
@@ -1170,6 +1193,333 @@ describe("FamilySettings", () => {
       expect(screen.getByText("載入設定失敗，請稍後再試")).toHaveClass(
         "moo-settings__error-text",
       );
+    });
+  });
+
+  // #313. See the file header → "Store-page chip switch".
+  describe("store-page chip switch (在購買頁顯示家人開放的書)", () => {
+    const STORE_SWITCH = { name: "在購買頁顯示家人開放的書" };
+    const OWN_BOOK = "210000000000001";
+    const SHARED_BOOK = "210000000000002";
+    const UNSHARED_BOOK = "210000000000003";
+
+    function book(bookId: string, isShared: BoolFlag) {
+      return { bookId, title: `書 ${bookId}`, isShared };
+    }
+
+    /** The viewer and one member, each sharing a book; the member also has an unshared one. */
+    const SHELF_MEMBERS = [
+      {
+        userId: "user-abc12345",
+        displayName: "小明",
+        lastUpdated: null,
+        books: [book(OWN_BOOK, BoolFlag.TRUE)],
+      },
+      {
+        userId: "user-def67890",
+        displayName: "阿華",
+        lastUpdated: null,
+        books: [
+          book(SHARED_BOOK, BoolFlag.TRUE),
+          book(UNSHARED_BOOK, BoolFlag.FALSE),
+        ],
+      },
+    ];
+
+    function shelfClient(): ApiClient {
+      return createMockApiClient({
+        getFamilyBookshelf: vi.fn().mockResolvedValue({
+          data: { familyId: "fam-123", members: SHELF_MEMBERS },
+        }),
+      });
+    }
+
+    async function renderSettled(apiClient: ApiClient) {
+      await act(async () => {
+        renderFamilySettings({ apiClient });
+      });
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+      }
+    }
+
+    function storeSwitch() {
+      return screen.getByRole("switch", STORE_SWITCH);
+    }
+
+    function setCallsWith(key: string): Record<string, unknown>[] {
+      return vi
+        .mocked(chrome.storage.local.set)
+        .mock.calls.map(([items]) => items as Record<string, unknown>)
+        .filter((items) => key in items);
+    }
+
+    function openOptionsCalls() {
+      return vi
+        .mocked(chrome.runtime.sendMessage)
+        .mock.calls.filter(
+          ([message]) =>
+            (message as { type?: string } | undefined)?.type ===
+            "OPEN_OPTIONS_PAGE",
+        );
+    }
+
+    /** The stored binding of the rendered viewer (`renderFamilySettings`' default props). */
+    const BOUND = {
+      [USER_ID_KEY]: "user-abc12345",
+      [FAMILY_ID_KEY]: "fam-123",
+    };
+
+    /** `set` writes into a map that `get` returns (every entry, like `mockStorageGet`); granted, switch
+     *  off. See the file header → "Store-page chip switch". */
+    function seedStatefulStorage(binding: Record<string, unknown>) {
+      const store: Record<string, unknown> = {
+        [DISPLAY_NAME_KEY]: "小明",
+        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
+        ...binding,
+      };
+      vi.mocked(chrome.storage.local.get).mockImplementation(((
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        const result = { ...store };
+        if (typeof callback === "function") callback(result);
+        return Promise.resolve(result);
+      }) as never);
+      vi.mocked(chrome.storage.local.set).mockImplementation(((
+        items: Record<string, unknown>,
+      ) => {
+        Object.assign(store, items);
+        return Promise.resolve();
+      }) as never);
+    }
+
+    afterEach(() => {
+      vi.mocked(chrome.runtime.sendMessage).mockReset();
+    });
+
+    it("renders off with its hint by default", async () => {
+      await renderSettled(shelfClient());
+
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      expect(
+        screen.getByText(
+          "開啟後，瀏覽讀墨書籍頁面時，書名下方會顯示哪位家人已開放這本書；第一次開啟需要在設定頁授權",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("switches on and indexes the loaded shelf, without the viewer, when granted", async () => {
+      seedStatefulStorage(BOUND);
+      await renderSettled(shelfClient());
+
+      fireEvent.click(storeSwitch());
+
+      await waitFor(() => {
+        expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(1);
+      });
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+      });
+      const [written] = setCallsWith(STORE_PAGE_INDEX_KEY);
+      const expected = buildStorePageIndex(
+        [
+          {
+            userId: "user-abc12345",
+            displayName: "小明",
+            books: [{ bookId: OWN_BOOK }],
+          },
+          {
+            userId: "user-def67890",
+            displayName: "阿華",
+            books: [{ bookId: SHARED_BOOK }],
+          },
+        ],
+        "user-abc12345",
+        "fam-123",
+        new Date(),
+      );
+      expect(written[STORE_PAGE_INDEX_KEY]).toEqual({
+        ...expected,
+        updatedAt: expect.any(String),
+      });
+      expect(written[STORE_PAGE_INDEX_KEY]).toMatchObject({
+        books: { [SHARED_BOOK]: ["阿華"] },
+      });
+      expect(openOptionsCalls()).toHaveLength(0);
+    });
+
+    it.each<[string, Record<string, unknown>]>([
+      ["names another family", { ...BOUND, [FAMILY_ID_KEY]: "fam-999" }],
+      ["names no family", { [USER_ID_KEY]: "user-abc12345" }],
+    ])(
+      "switches on but writes no index when the stored binding %s",
+      async (_name, binding) => {
+        seedStatefulStorage(binding);
+        await renderSettled(shelfClient());
+
+        fireEvent.click(storeSwitch());
+        for (let i = 0; i < 3; i += 1) {
+          await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+          });
+        }
+
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        });
+        expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(0);
+      },
+    );
+
+    it("switches on without an index while the shelf is still loading", async () => {
+      mockStorageGet({ [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE });
+      const apiClient = createMockApiClient({
+        getFamilyBookshelf: vi.fn().mockReturnValue(new Promise(() => {})),
+      });
+      await renderSettled(apiClient);
+
+      fireEvent.click(storeSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+      });
+      expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(0);
+    });
+
+    it("asks the background to open the options page when not granted", async () => {
+      vi.mocked(chrome.runtime.sendMessage).mockResolvedValue({ ok: 1 });
+      await renderSettled(shelfClient());
+
+      fireEvent.click(storeSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(openOptionsCalls()).toEqual([[{ type: "OPEN_OPTIONS_PAGE" }]]);
+      // The options page owns the switch from here: nothing is saved yet.
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      expect(setCallsWith(STORE_PAGE_CHIP_ENABLED_KEY)).toHaveLength(0);
+      expect(
+        screen.queryByText(STORE_CHIP_OPEN_OPTIONS_FALLBACK),
+      ).not.toBeInTheDocument();
+    });
+
+    it.each<[string, () => void]>([
+      [
+        "rejects",
+        () =>
+          vi
+            .mocked(chrome.runtime.sendMessage)
+            .mockRejectedValue(new Error("Receiving end does not exist.")),
+      ],
+      [
+        "gets no answer",
+        () =>
+          vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined),
+      ],
+      [
+        "throws",
+        () =>
+          vi.mocked(chrome.runtime.sendMessage).mockImplementation(() => {
+            throw new Error("Extension context invalidated.");
+          }),
+      ],
+    ])(
+      "points at the toolbar icon when the request to open the options page %s",
+      async (_name, breakMessage) => {
+        await renderSettled(shelfClient());
+        breakMessage();
+
+        fireEvent.click(storeSwitch());
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+
+        expect(STORE_CHIP_OPEN_OPTIONS_FALLBACK).toBe(
+          "請點瀏覽器工具列上的墨家書櫃圖示，在設定頁開啟",
+        );
+        expect(
+          screen.getByText(STORE_CHIP_OPEN_OPTIONS_FALLBACK),
+        ).toBeInTheDocument();
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      },
+    );
+
+    it("drops the fallback hint and follows the switch once the options page grants and saves", async () => {
+      await renderSettled(shelfClient());
+      fireEvent.click(storeSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(
+        screen.getByText(STORE_CHIP_OPEN_OPTIONS_FALLBACK),
+      ).toBeInTheDocument();
+
+      // The background mirrors the grant, the options page saves TRUE; every listener sees both.
+      const listeners = vi
+        .mocked(chrome.storage.onChanged.addListener)
+        .mock.calls.map(
+          ([fn]) => fn as unknown as (c: unknown, area: string) => void,
+        );
+      await act(async () => {
+        for (const listener of listeners) {
+          listener(
+            {
+              [STORE_PAGE_HOST_GRANTED_KEY]: { newValue: BoolFlag.TRUE },
+              [STORE_PAGE_CHIP_ENABLED_KEY]: { newValue: BoolFlag.TRUE },
+            },
+            "local",
+          );
+        }
+      });
+
+      expect(
+        screen.queryByText(STORE_CHIP_OPEN_OPTIONS_FALLBACK),
+      ).not.toBeInTheDocument();
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("switches off and writes FALSE", async () => {
+      mockStorageGet({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
+      });
+      await renderSettled(shelfClient());
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+      vi.mocked(chrome.storage.local.set).mockClear();
+
+      fireEvent.click(storeSwitch());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE,
+      });
+      expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(0);
+      expect(openOptionsCalls()).toHaveLength(0);
+    });
+
+    it("says the permission was taken back when the switch is on without it", async () => {
+      mockStorageGet({
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.FALSE,
+      });
+      await renderSettled(shelfClient());
+
+      expect(STORE_CHIP_REVOKED_MESSAGE).toBe(
+        "授權已被收回，請關閉後再開啟一次",
+      );
+      expect(screen.getByText(STORE_CHIP_REVOKED_MESSAGE)).toBeInTheDocument();
     });
   });
 

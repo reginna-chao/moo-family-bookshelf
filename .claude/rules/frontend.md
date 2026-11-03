@@ -25,7 +25,7 @@ extension/src/
 │   ├── PersonalShelf.tsx
 │   ├── FamilyShelf.tsx
 │   └── FamilySettings.tsx
-├── settings/        # Extension settings page
+├── options/         # Extension options page (store-page chip switch; opened from the toolbar icon)
 ├── secureFrame/     # Extension-origin iframe (secure-frame.html): secret-entry / credential views + MessageChannel protocol
 ├── content/         # Content Script (scrape + inject)
 ├── background/      # Service Worker
@@ -45,6 +45,7 @@ shared/src/         # moo-family-bookshelf-shared — consumed by extension/, pw
 ├── publicShelf/    # Public-shelf local-vs-server divergence rule
 ├── recovery/       # Forgot-secret hint copy (question / link label / self-hosted fallback)
 ├── safeUrl/        # Readmoo cover / book URL render-time filters (return `String(url)`)
+├── storePage/      # Store-page chip index: build from the family shelf, boundary parse, lookup, chip text
 ├── unkick/         # Member-removal copy (remove confirm / un-kick notice / refused rejoin) + rejoin-wait hours
 └── verifyInput/    # PIN / pattern secret-entry rules (lengths, min dots, digit strip, wire serialization) + mismatch / counter copy
 ```
@@ -154,7 +155,7 @@ The Dialog sits in a closed Shadow Root on the Readmoo page, which is NOT a secu
 
 - A new secret-bearing element gets a view in `src/secureFrame/views/` (signature `{ props, emit }`), its props type + guard in `viewProps.ts`, a preset component in `src/secureFrame/frames.tsx` (the ONLY place a frame's `title`, view name and pre-handshake `placeholderHeight` are defined — call sites render `PinFrame` / `PatternFrame` / `SyncCodeInputFrame` / `SyncCodeTextFrame` / `OtpCodeFrame` / `QrImageFrame`, never a raw `<SecureFrame>`), and a case in the `renderInline` switch of `tests/helpers/secureFrameStub.tsx` (the jsdom stand-in that `tests/setup.ts` installs with one `vi.mock` line). Headings, copy and buttons stay in the Shadow Root; only the element that holds the secret moves.
 - The frame talks to the Dialog ONLY over the `MessageChannel` port handed over in the hello (`protocol.ts` → `acceptHello`: parent origin among the manifest's `web_accessible_resources[].matches` or the extension's own origin, the one-time nonce from the frame URL's hash, the message schema). `postMessage` appears in `protocol.ts` and nowhere else under `src/`; a view that reaches for `window.parent.postMessage` hands the secret to the page.
-- A new extension page must be added to `public/manifest.json` → `web_accessible_resources[].resources` and to the existence checks in `scripts/verify-build.ts` / `scripts/verify-firefox-build.ts`; an html entry under `src/` is emitted at its source-relative path, so page entries live at the package root (`extension/secure-frame.html` → `dist/secure-frame.html`).
+- A new extension page that a content script loads through `runtime.getURL()` (e.g. `secure-frame.html`) must be added to `public/manifest.json` → `web_accessible_resources[].resources`; a page the browser opens itself (`options_ui` / `runtime.openOptionsPage()`, e.g. `options.html`) must NOT be, or a Readmoo page could iframe it. Every new page goes into the existence checks of `scripts/verify-build.ts` / `scripts/verify-firefox-build.ts`; an html entry under `src/` is emitted at its source-relative path, so page entries live at the package root (`extension/secure-frame.html` → `dist/secure-frame.html`).
 - `autoFocus` defaults to false on every call site, so focus-on-mount behaviour is unchanged from before #363; the twin table rows for `PinInput` / `PatternLock` still describe the components themselves, whose behaviour is unchanged (only `PatternLock.tsx` gained two layout class names) and which are merely rendered inside the frame on the Extension.
 - Residuals (documented in `docs/architecture.md` → 浮動按鈕與 Dialog 外殼): plain text that stays in the Shadow Root (the public-shelf link) is still readable through `window.find()`; a compromised page can still paint a fake screen or navigate the frame before its first load.
 

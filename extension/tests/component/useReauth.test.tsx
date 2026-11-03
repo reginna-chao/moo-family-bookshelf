@@ -11,6 +11,7 @@ import {
   RECOVERY_COOLDOWN_UNTIL_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
+  STORE_PAGE_INDEX_KEY,
 } from "@/constants";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
@@ -53,7 +54,7 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * ex-family's custom @host — the value the NEXT boot restores, which a later join with a plain
  * (no-@host) sync code never overwrites — and the new family's traffic goes to the old family's
  * server. In that case a family-gone join short-circuits runReauthJoin before its cooldown remove, so
- * the FIRST storage.local.remove is the `[FAMILY_ID_KEY]` clear inside clearFamilyStorage, which the
+ * the FIRST storage.local.remove is the `[FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]` clear inside clearFamilyStorage, which the
  * rejection aborts before its own endpoint reset.
  * `mockRejectedValueOnce` fails only that call; later removes resolve through the shared setup mock.
  * Exactly two clears, in order (the failed familyId one, then the recovery reset), distinguish the
@@ -385,6 +386,7 @@ describe("useReauth", () => {
         // let another device hand the local one back and resume rejoining.
         expect(chrome.storage.local.remove).toHaveBeenCalledWith([
           FAMILY_ID_KEY,
+          STORE_PAGE_INDEX_KEY,
         ]);
         expect(chrome.storage.sync.remove).toHaveBeenCalledWith([
           FAMILY_ID_KEY,
@@ -464,7 +466,7 @@ describe("useReauth", () => {
     it("resets the endpoint choice and finishes the handover even when the storage clear rejects", async () => {
       seedStorage();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      // The FIRST storage.local.remove here is clearFamilyStorage's `[FAMILY_ID_KEY]` clear;
+      // The FIRST storage.local.remove here is clearFamilyStorage's `[FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]` clear;
       // fail only that call. See the file header, "Storage-clear rejection".
       vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
         new Error("Extension context invalidated"),
@@ -479,7 +481,10 @@ describe("useReauth", () => {
       });
 
       // The clear really was attempted and really did fail.
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
+        FAMILY_ID_KEY,
+        STORE_PAGE_INDEX_KEY,
+      ]);
       // ...and every step after it still ran. Releasing the latch is the one
       // that must not be skipped, or re-auth is muted for the whole session.
       expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
@@ -508,7 +513,7 @@ describe("useReauth", () => {
       // separates the catch-block reset from the one that never ran (before the fix: call #1 only).
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
       expect(removeCalls).toHaveLength(2);
-      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY]);
+      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]);
       expect(removeCalls[1][0]).toEqual(
         expect.arrayContaining([
           API_ENDPOINT_KEY,

@@ -15,11 +15,18 @@ export const GECKO_ID_DIRECT =
   "moo-family-bookshelf-direct@reginna-chao.github.io";
 
 /**
- * Firefox 121 is the first release with stable MV3 support enabled by
- * default (event pages, host_permissions, MV3 content scripts). Picking
- * 121 keeps the floor at a sound MV3-capable baseline.
+ * Firefox 128 is the first release that supports `optional_host_permissions`,
+ * which the store-page chip (#313) asks for at runtime (the store pattern
+ * `https://readmoo.com/book/*`). The previous floor, 121, was the first
+ * release with stable MV3 enabled by default; 128 keeps that baseline too.
+ *
+ * The same constant feeds `gecko_android.strict_min_version` (in
+ * `toFirefoxManifest`) and the self-distributed `updates.json`
+ * (`build-updates-json.ts`), so a direct-install user still on Firefox
+ * 121–127 stops receiving updates, with no prompt. Accepted: Firefox 128 ESR
+ * shipped in 2024-07; the CHANGELOG entry tells those users.
  */
-export const STRICT_MIN_VERSION = "121.0";
+export const STRICT_MIN_VERSION = "128.0";
 
 /**
  * Update manifest URL for the self-distributed (direct-install) build.

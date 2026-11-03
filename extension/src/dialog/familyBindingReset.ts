@@ -13,6 +13,7 @@ import {
   USER_EMAIL_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
   DEFAULT_API_ENDPOINT,
+  STORE_PAGE_INDEX_KEY,
 } from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 import { forgetAccountConfirmation } from "./accountIdentityCheck";
@@ -56,6 +57,9 @@ async function removeSyncFamilyId(): Promise<void> {
  * caller resets the live client (see storage/familyEndpointChoice.ts for why a
  * family-less client must not stay on the old family's server).
  *
+ * The store-page chip index (family names + book ids) goes with the binding;
+ * the chip switch is the user's own setting and stays.
+ *
  * Every removal is started synchronously; rejects if the local removal fails.
  * The background message and the storage.sync removal are best-effort.
  */
@@ -68,6 +72,7 @@ export async function clearStoredFamilyBinding(
     FAMILY_ID_KEY,
     AUTH_TOKEN_KEY,
     TOKEN_EXPIRES_AT_KEY,
+    STORE_PAGE_INDEX_KEY,
     ...extraLocalKeys,
   ]);
   await Promise.all([resetFamilyEndpointChoice(), syncRemoval]);

@@ -24,7 +24,8 @@ const SYNCED_KEYS = [FAMILY_ID_KEY] as const;
 export type BackgroundMessage =
   | { type: "SET_FAMILY_ID"; familyId: string }
   | { type: "CLEAR_FAMILY_ID" }
-  | { type: "SET_API_ENDPOINT"; apiEndpoint: string | null };
+  | { type: "SET_API_ENDPOINT"; apiEndpoint: string | null }
+  | { type: "OPEN_OPTIONS_PAGE" };
 
 /** Message type discriminant union (the `type` field of every message). */
 export type BackgroundMessageType = BackgroundMessage["type"];
@@ -108,9 +109,16 @@ async function handleSetApiEndpoint(
   return { ok: 0, error: "Invalid endpoint value" };
 }
 
+/** The Dialog asks for the options page when the store-page chip still needs its host permission. */
+async function handleOpenOptionsPage(): Promise<unknown> {
+  await browser.runtime.openOptionsPage();
+  return { ok: 1 };
+}
+
 /** Dispatch map: message type → handler. */
 export const messageHandlers: MessageHandlerMap = {
   SET_FAMILY_ID: handleSetFamilyId,
   CLEAR_FAMILY_ID: handleClearFamilyId,
   SET_API_ENDPOINT: handleSetApiEndpoint,
+  OPEN_OPTIONS_PAGE: handleOpenOptionsPage,
 };

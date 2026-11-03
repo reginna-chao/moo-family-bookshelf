@@ -1,5 +1,5 @@
-/** Single source of truth for Readmoo hosts, URLs and DOM selectors — the new and legacy sites are both
- *  supported, so never hard-code one elsewhere. See docs/architecture.md → 2.1 Content Script. */
+/** Single source of truth for Readmoo web-app hosts, URLs and selectors (new and legacy sites); store-page
+ *  host, URL prefix and selectors: `./readmooStore.ts`. See docs/architecture.md → 2.1 Content Script. */
 
 export const READMOO_HOST_NEXT = "next.readmoo.com";
 export const READMOO_HOST_LEGACY = "read.readmoo.com";
@@ -272,8 +272,8 @@ export function isAllowedCoverUrl(url: string): boolean {
  *
  * Deliberately NOT built on `isReadmooHost`: that exact-match list holds only
  * the web-app hosts (`next.` / `read.`), while every legitimate book link lives
- * on the apex — `https://readmoo.com/book/{bookId}`, see `READMOO_BOOK_BASE` in
- * `extension/src/content/scraper.ts` — so reusing it would blank all of them.
+ * on the apex — `https://readmoo.com/book/{bookId}`, see `READMOO_STORE_BOOK_URL_BASE`
+ * in `./readmooStore.ts` — so reusing it would blank all of them.
  *
  * Separate export from {@link isAllowedCoverUrl} on purpose; see that JSDoc.
  */
