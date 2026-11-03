@@ -24,6 +24,10 @@
  * here. Now the code is in another document and find() misses it, while text left in the Shadow Root
  * (the heading — and the public-shelf link, docs/architecture.md → 浮動按鈕與 Dialog 外殼) is still
  * found: the residual is pinned on that heading instead, so a future change flips it consciously.
+ * The `Selection.modify()` read-out (#446) is pinned on the same heading: find() a prefix, extend the
+ * selection to the line boundary, and `toString()` returns the whole heading — characters never
+ * searched for. Adding `user-select: none` to the Dialog (as the store-page chip has) flips it; update
+ * docs/architecture.md → 浮動按鈕與 Dialog 外殼 → 「Shadow Root 外殼：已接受的殘餘風險」 then.
  *
  * Not covered: the invite QR Code's pixels (Settings tab) — the sync code is the same secret and is
  * mandatory here; the QR frame only counts toward the `window.frames` check. A main-world script
@@ -66,6 +70,8 @@ const START_BUTTON = { selector: "button", text: "開始使用" };
 const CREATE_BUTTON = { selector: "button", text: "建立家庭公開書櫃" };
 const PIN_METHOD_BUTTON = { selector: "button", text: "PIN 碼" };
 const CREATED_HEADING = { selector: "h2", text: "家庭公開書櫃已建立" };
+/** Occurs on the page only in that heading (IdleView's 建立家庭公開書櫃 lacks the 已). */
+const CREATED_HEADING_PREFIX = "家庭公開書櫃已";
 const LEAVE_BUTTON = { selector: "button", text: "離開家庭" };
 const LEAVE_CONFIRM_PROMPT = { selector: "div", text: "確定要離開嗎？" };
 const MEMBERS_LOADING = { selector: ".moo-settings__members-loading" };
@@ -322,6 +328,28 @@ test.describe("Dialog shadow root isolation (real closed dist/)", () => {
         code: { hit: false, anchorInDocument: true },
         part: { hit: false, anchorInDocument: true },
         heading: { hit: true, anchorInDocument: true },
+      });
+    });
+
+    await test.step("Selection.modify() extends a find() hit to read the whole Shadow Root line", async () => {
+      const read = await page.evaluate((prefix) => {
+        const find = (
+          window as unknown as { find: (...a: unknown[]) => boolean }
+        ).find;
+        const selection = getSelection();
+        selection?.removeAllRanges();
+        const hit = find(prefix, true, false, true, false, true, false);
+        selection?.modify("extend", "forward", "lineboundary");
+        const text = selection?.toString() ?? "";
+        const rangeCount = selection?.rangeCount ?? 0;
+        selection?.removeAllRanges();
+        return { hit, text, rangeCount };
+      }, CREATED_HEADING_PREFIX);
+      // See the header → "window.find()": the unsearched "建立" proves the read.
+      expect(read).toEqual({
+        hit: true,
+        text: CREATED_HEADING.text,
+        rangeCount: 1,
       });
     });
 
