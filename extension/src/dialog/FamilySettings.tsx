@@ -86,7 +86,7 @@ export function FamilySettings({
 
   // After the hooks above, so their effect order stays as documented; reads the server once per mount.
   const newBookDefault = useFamilySettingsNewBookDefault(apiClient, userId);
-  const storePageChip = useStorePageChip(userId);
+  const storePageChip = useStorePageChip(userId, familyId);
 
   return (
     <div>

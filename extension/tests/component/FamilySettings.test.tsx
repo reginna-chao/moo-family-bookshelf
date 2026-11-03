@@ -22,10 +22,12 @@ import {
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   DISPLAY_NAME_KEY,
+  FAMILY_ID_KEY,
   SYNC_ARCHIVED_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 import {
@@ -58,7 +60,11 @@ import {
  * to open the options page and shows a fallback hint when that fails. The shelf comes from the REAL
  * FamilyDataProvider, so "loaded" is driven through the mock client's `getFamilyBookshelf` (a
  * never-resolving promise keeps it loading); `act` around render plus settle ticks is the readiness
- * barrier.
+ * barrier. The index goes through the binding-guarded writer, which re-reads the switch and the
+ * stored userId / familyId after the switch write, so the indexing cases use a STATEFUL storage mock
+ * (`seedStatefulStorage`: `set` lands in a map that `get` reads) seeded with the stored binding; a
+ * binding naming another family (or none) must get the switch written but no index — the shelf on
+ * screen may belong to a family the user has just left.
  *
  * Un-kick entry: a removal writes a 6-hour server-side block on rejoining, so the owner gets an entry
  * to lift it right where the removal happened. It is owner-only (the endpoint refuses anyone else)
@@ -1260,6 +1266,36 @@ describe("FamilySettings", () => {
         );
     }
 
+    /** The stored binding of the rendered viewer (`renderFamilySettings`' default props). */
+    const BOUND = {
+      [USER_ID_KEY]: "user-abc12345",
+      [FAMILY_ID_KEY]: "fam-123",
+    };
+
+    /** `set` writes into a map that `get` returns (every entry, like `mockStorageGet`); granted, switch
+     *  off. See the file header → "Store-page chip switch". */
+    function seedStatefulStorage(binding: Record<string, unknown>) {
+      const store: Record<string, unknown> = {
+        [DISPLAY_NAME_KEY]: "小明",
+        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
+        ...binding,
+      };
+      vi.mocked(chrome.storage.local.get).mockImplementation(((
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        const result = { ...store };
+        if (typeof callback === "function") callback(result);
+        return Promise.resolve(result);
+      }) as never);
+      vi.mocked(chrome.storage.local.set).mockImplementation(((
+        items: Record<string, unknown>,
+      ) => {
+        Object.assign(store, items);
+        return Promise.resolve();
+      }) as never);
+    }
+
     afterEach(() => {
       vi.mocked(chrome.runtime.sendMessage).mockReset();
     });
@@ -1276,7 +1312,7 @@ describe("FamilySettings", () => {
     });
 
     it("switches on and indexes the loaded shelf, without the viewer, when granted", async () => {
-      mockStorageGet({ [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE });
+      seedStatefulStorage(BOUND);
       await renderSettled(shelfClient());
 
       fireEvent.click(storeSwitch());
@@ -1303,6 +1339,7 @@ describe("FamilySettings", () => {
           },
         ],
         "user-abc12345",
+        "fam-123",
         new Date(),
       );
       expect(written[STORE_PAGE_INDEX_KEY]).toEqual({
@@ -1314,6 +1351,30 @@ describe("FamilySettings", () => {
       });
       expect(openOptionsCalls()).toHaveLength(0);
     });
+
+    it.each<[string, Record<string, unknown>]>([
+      ["names another family", { ...BOUND, [FAMILY_ID_KEY]: "fam-999" }],
+      ["names no family", { [USER_ID_KEY]: "user-abc12345" }],
+    ])(
+      "switches on but writes no index when the stored binding %s",
+      async (_name, binding) => {
+        seedStatefulStorage(binding);
+        await renderSettled(shelfClient());
+
+        fireEvent.click(storeSwitch());
+        for (let i = 0; i < 3; i += 1) {
+          await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+          });
+        }
+
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+          [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        });
+        expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(0);
+      },
+    );
 
     it("switches on without an index while the shelf is still loading", async () => {
       mockStorageGet({ [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE });

@@ -35,6 +35,7 @@ import { isAllowedBookUrl } from "moo-family-bookshelf-shared/config/readmoo";
  */
 
 const VIEWER = "viewer-user-id";
+const FAMILY = "family-id-1";
 const BOOK_A = "210000000000001";
 const BOOK_B = "210000000000002";
 const NOW = new Date("2026-11-02T03:04:05.000Z");
@@ -49,20 +50,23 @@ function member(
 
 function validIndex(books: Record<string, unknown>): Record<string, unknown> {
   return {
-    version: 1,
+    version: 2,
     viewerUserId: VIEWER,
+    familyId: FAMILY,
     updatedAt: NOW.toISOString(),
     books,
   };
 }
 
 describe("buildStorePageIndex", () => {
-  it("stamps the version, viewer and build time", () => {
-    const index = buildStorePageIndex([], VIEWER, NOW);
+  it("stamps the version, viewer, family and build time", () => {
+    const index = buildStorePageIndex([], VIEWER, FAMILY, NOW);
 
+    expect(STORE_INDEX_VERSION).toBe(2);
     expect(index).toEqual({
       version: STORE_INDEX_VERSION,
       viewerUserId: VIEWER,
+      familyId: FAMILY,
       updatedAt: "2026-11-02T03:04:05.000Z",
       books: {},
     });
@@ -72,6 +76,7 @@ describe("buildStorePageIndex", () => {
     const index = buildStorePageIndex(
       [member(VIEWER, "Me", [BOOK_A]), member("user-2", "Bob", [BOOK_B])],
       VIEWER,
+      FAMILY,
       NOW,
     );
 
@@ -82,6 +87,7 @@ describe("buildStorePageIndex", () => {
     const index = buildStorePageIndex(
       [member("user-2", "Bob", ["b1", "12345", "21000000000000x", BOOK_A])],
       VIEWER,
+      FAMILY,
       NOW,
     );
 
@@ -96,6 +102,7 @@ describe("buildStorePageIndex", () => {
         member("user-4", "Alice", [BOOK_A]),
       ],
       VIEWER,
+      FAMILY,
       NOW,
     );
 
@@ -111,6 +118,7 @@ describe("buildStorePageIndex", () => {
       const index = buildStorePageIndex(
         [member("abcdef0123456789", name, [BOOK_A])],
         VIEWER,
+        FAMILY,
         NOW,
       );
 
@@ -123,6 +131,7 @@ describe("buildStorePageIndex", () => {
     const index = buildStorePageIndex(
       [member("user-2", `  ${long}  `, [BOOK_A])],
       VIEWER,
+      FAMILY,
       NOW,
     );
 
@@ -137,6 +146,7 @@ describe("parseStorePageIndex", () => {
     const built = buildStorePageIndex(
       [member("user-2", "Bob", [BOOK_A, BOOK_B])],
       VIEWER,
+      FAMILY,
       NOW,
     );
 
@@ -165,11 +175,27 @@ describe("parseStorePageIndex", () => {
     ["a string", "index"],
     ["an array", [validIndex({})]],
     ["a non-plain object", Object.assign(new NotPlain(), validIndex({}))],
-    ["another version", { ...validIndex({}), version: 2 }],
-    ["a string version", { ...validIndex({}), version: "1" }],
+    ["another version", { ...validIndex({}), version: 3 }],
+    ["a string version", { ...validIndex({}), version: "2" }],
+    [
+      "a version-1 index (no familyId)",
+      {
+        version: 1,
+        viewerUserId: VIEWER,
+        updatedAt: NOW.toISOString(),
+        books: { [BOOK_A]: ["Bob"] },
+      },
+    ],
+    [
+      "a version-1 index carrying a familyId",
+      { ...validIndex({}), version: 1 },
+    ],
     ["a missing viewerUserId", { ...validIndex({}), viewerUserId: undefined }],
     ["an empty viewerUserId", { ...validIndex({}), viewerUserId: "" }],
     ["a numeric viewerUserId", { ...validIndex({}), viewerUserId: 7 }],
+    ["a missing familyId", { ...validIndex({}), familyId: undefined }],
+    ["an empty familyId", { ...validIndex({}), familyId: "" }],
+    ["a numeric familyId", { ...validIndex({}), familyId: 7 }],
     ["a non-string updatedAt", { ...validIndex({}), updatedAt: 0 }],
     ["missing books", { ...validIndex({}), books: undefined }],
     ["books as an array", validIndex([] as unknown as Record<string, unknown>)],
@@ -180,7 +206,7 @@ describe("parseStorePageIndex", () => {
     [
       "a __proto__ key from JSON",
       JSON.parse(
-        `{"version":1,"viewerUserId":"${VIEWER}","updatedAt":"x","books":{"__proto__":["Eve"]}}`,
+        `{"version":2,"viewerUserId":"${VIEWER}","familyId":"${FAMILY}","updatedAt":"x","books":{"__proto__":["Eve"]}}`,
       ),
     ],
   ])("rejects the whole index for %s", (_name, raw) => {
@@ -221,8 +247,9 @@ describe("parseStorePageIndex", () => {
 
 describe("lookupStoreChipNames", () => {
   const index: StorePageIndex = {
-    version: 1,
+    version: 2,
     viewerUserId: VIEWER,
+    familyId: FAMILY,
     updatedAt: NOW.toISOString(),
     books: { [BOOK_A]: ["Alice", "Bob"] },
   };
@@ -257,7 +284,13 @@ describe("formatStoreChipText", () => {
 
 describe("isStoreIndexFresh", () => {
   function builtAt(updatedAt: string): StorePageIndex {
-    return { version: 1, viewerUserId: VIEWER, updatedAt, books: {} };
+    return {
+      version: 2,
+      viewerUserId: VIEWER,
+      familyId: FAMILY,
+      updatedAt,
+      books: {},
+    };
   }
 
   it("counts 30 days as the limit", () => {

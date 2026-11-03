@@ -12,6 +12,7 @@ import {
 import {
   FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
   USER_ID_KEY,
 } from "@/constants";
@@ -25,10 +26,18 @@ import {
 /**
  * The Readmoo store-page content script (#313, `content-store.js`, src/content/storePage/): on
  * `/book/{id}` it shows 「{names} 已開放這本書」 right after the book title when EVERY condition holds —
- * a stored userId and familyId, the switch exactly `BoolFlag.TRUE`, a valid index built for that same
- * userId that lists the book, and Readmoo's login cookie confirming the stored account (fail-closed:
- * absent, undecodable or another account all hide the chip). The entry runs on import, so each case
- * sets the URL, resets the module registry and imports `@/content/storePage/index` afresh.
+ * a stored userId and familyId, the switch exactly `BoolFlag.TRUE`, the background's host-permission
+ * mirror exactly `BoolFlag.TRUE` (a revoked permission leaves an injected script running), a valid
+ * index built for that same userId AND familyId that lists the book, and Readmoo's login cookie
+ * confirming the stored account (fail-closed: absent, undecodable or another account all hide the
+ * chip). The entry runs on import, so each case sets the URL, resets the module registry and imports
+ * `@/content/storePage/index` afresh.
+ *
+ * Page return: the login cookie can change in another tab with no storage change, so the script also
+ * re-renders on `visibilitychange` (only when visible), `window` `focus` and `pageshow`. Every module
+ * import adds those listeners to the shared jsdom `document` / `window`, so `beforeEach` spies on
+ * `addEventListener` (calling through) and `afterEach` removes every listener the script added — a
+ * leaked listener from one case would otherwise re-render inside the next.
  *
  * Stale index: once the index is older than `STORE_INDEX_MAX_AGE_DAYS` the chip shows the stale hint
  * instead of names — for ANY book, listed or not (the hint must not reveal what an old index says) —
@@ -67,21 +76,30 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = new Date();
 const STALE = new Date(NOW.getTime() - STORE_INDEX_MAX_AGE_MS - DAY_MS);
 
-function indexFor(viewer: string, bookId = BOOK_ID, builtAt = NOW) {
+const FAMILY = "fam-1";
+
+function indexFor(
+  viewer: string,
+  bookId = BOOK_ID,
+  builtAt = NOW,
+  familyId = FAMILY,
+) {
   return buildStorePageIndex(
     [
       { userId: "user-2", displayName: "小明", books: [{ bookId }] },
       { userId: "user-3", displayName: "小華", books: [{ bookId }] },
     ],
     viewer,
+    familyId,
     builtAt,
   );
 }
 
 const ELIGIBLE: Record<string, unknown> = {
   [USER_ID_KEY]: OWNER_ID,
-  [FAMILY_ID_KEY]: "fam-1",
+  [FAMILY_ID_KEY]: FAMILY,
   [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+  [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
   [STORE_PAGE_INDEX_KEY]: indexFor(OWNER_ID),
 };
 
@@ -171,15 +189,52 @@ function chipStyleInDocument(): boolean {
   );
 }
 
+const PAGE_RETURN_EVENTS = ["visibilitychange", "focus", "pageshow"];
+
+let docListenSpy: ReturnType<typeof spyDocumentListen>;
+let winListenSpy: ReturnType<typeof spyWindowListen>;
+
+function spyDocumentListen() {
+  return vi.spyOn(document, "addEventListener");
+}
+
+function spyWindowListen() {
+  return vi.spyOn(window, "addEventListener");
+}
+
+/** Types of the page-return listeners the script registered; see the header → "Page return". */
+function pageReturnListenerTypes(): string[] {
+  return [...docListenSpy.mock.calls, ...winListenSpy.mock.calls]
+    .map(([type]) => type)
+    .filter((type) => PAGE_RETURN_EVENTS.includes(type))
+    .sort();
+}
+
+function removePageReturnListeners(): void {
+  for (const [target, spy] of [
+    [document, docListenSpy],
+    [window, winListenSpy],
+  ] as const) {
+    for (const [type, listener, options] of spy.mock.calls) {
+      if (!PAGE_RETURN_EVENTS.includes(type)) continue;
+      target.removeEventListener(type, listener, options);
+    }
+    spy.mockRestore();
+  }
+}
+
 beforeEach(async () => {
   vi.clearAllMocks();
   attachSpy = spyAttachShadow();
+  docListenSpy = spyDocumentListen();
+  winListenSpy = spyWindowListen();
   await chrome.storage.local.clear();
   mountStorePage();
   setReadmooEmailCookie(OWNER_EMAIL);
 });
 
 afterEach(async () => {
+  removePageReturnListeners();
   attachSpy.mockRestore();
   clearReadmooEmailCookie();
   document.body.innerHTML = "";
@@ -283,6 +338,7 @@ describe("store-page chip", () => {
           },
         ],
         OWNER_ID,
+        FAMILY,
         NOW,
       ),
     });
@@ -339,8 +395,48 @@ describe("store-page chip", () => {
       "the index is malformed",
       () =>
         chrome.storage.local.set({
-          [STORE_PAGE_INDEX_KEY]: { ...indexFor(OWNER_ID), version: 2 },
+          [STORE_PAGE_INDEX_KEY]: { ...indexFor(OWNER_ID), version: 3 },
         }),
+    ],
+    [
+      "the index is a version-1 index (no familyId)",
+      () => {
+        const v1: Record<string, unknown> = {
+          ...indexFor(OWNER_ID),
+          version: 1,
+        };
+        delete v1.familyId;
+        return chrome.storage.local.set({ [STORE_PAGE_INDEX_KEY]: v1 });
+      },
+    ],
+    [
+      "the index was built for another family",
+      () =>
+        chrome.storage.local.set({
+          [STORE_PAGE_INDEX_KEY]: indexFor(OWNER_ID, BOOK_ID, NOW, "fam-2"),
+        }),
+    ],
+    [
+      "a stale index was built for another family",
+      () =>
+        chrome.storage.local.set({
+          [STORE_PAGE_INDEX_KEY]: indexFor(OWNER_ID, BOOK_ID, STALE, "fam-2"),
+        }),
+    ],
+    [
+      "the host-permission mirror is absent",
+      () => chrome.storage.local.remove(STORE_PAGE_HOST_GRANTED_KEY),
+    ],
+    [
+      "the host-permission mirror is FALSE",
+      () =>
+        chrome.storage.local.set({
+          [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.FALSE,
+        }),
+    ],
+    [
+      "the host-permission mirror is a raw true",
+      () => chrome.storage.local.set({ [STORE_PAGE_HOST_GRANTED_KEY]: true }),
     ],
     ["there is no family", () => chrome.storage.local.remove(FAMILY_ID_KEY)],
     ["there is no stored user", () => chrome.storage.local.remove(USER_ID_KEY)],
@@ -364,6 +460,7 @@ describe("store-page chip", () => {
 
       expect(chrome.storage.local.get).not.toHaveBeenCalled();
       expect(browser.storage.onChanged.addListener).not.toHaveBeenCalled();
+      expect(pageReturnListenerTypes()).toEqual([]);
       expect(attachSpy).not.toHaveBeenCalled();
       expect(host()).toBeNull();
     },
@@ -422,6 +519,16 @@ describe("store-page chip", () => {
       await expectChipText(EXPECTED_TEXT);
 
       await changeStorage({ [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE });
+
+      await expectNoChip();
+    });
+
+    it("removes the chip when the host permission is revoked (mirror TRUE → FALSE)", async () => {
+      await chrome.storage.local.set(ELIGIBLE);
+      await runOn(`/book/${BOOK_ID}`);
+      await expectChipText(EXPECTED_TEXT);
+
+      await changeStorage({ [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.FALSE });
 
       await expectNoChip();
     });
@@ -487,6 +594,7 @@ describe("store-page chip", () => {
             },
           ],
           OWNER_ID,
+          FAMILY,
           NOW,
         ),
       });
@@ -557,6 +665,113 @@ describe("store-page chip", () => {
       } finally {
         runtime.id = id;
       }
+    });
+  });
+
+  // See the header → "Page return".
+  describe("returning to the page", () => {
+    function setVisibility(state: DocumentVisibilityState) {
+      return vi
+        .spyOn(document, "visibilityState", "get")
+        .mockReturnValue(state);
+    }
+
+    async function showChipThenSwitchAccount(): Promise<void> {
+      await chrome.storage.local.set(ELIGIBLE);
+      await runOn(`/book/${BOOK_ID}`);
+      await expectChipText(EXPECTED_TEXT);
+      setReadmooEmailCookie(OTHER_EMAIL);
+    }
+
+    it("listens for visibilitychange, focus and pageshow on a book page", async () => {
+      await chrome.storage.local.set(ELIGIBLE);
+      await runOn(`/book/${BOOK_ID}`);
+      await expectChipText(EXPECTED_TEXT);
+
+      expect(pageReturnListenerTypes()).toEqual([
+        "focus",
+        "pageshow",
+        "visibilitychange",
+      ]);
+      expect(docListenSpy).toHaveBeenCalledWith(
+        "visibilitychange",
+        expect.any(Function),
+      );
+      expect(winListenSpy).toHaveBeenCalledWith("focus", expect.any(Function));
+      expect(winListenSpy).toHaveBeenCalledWith(
+        "pageshow",
+        expect.any(Function),
+      );
+    });
+
+    it("removes the chip on visibilitychange to visible after an account switch in another tab", async () => {
+      await showChipThenSwitchAccount();
+      const visibility = setVisibility("visible");
+
+      try {
+        document.dispatchEvent(new Event("visibilitychange"));
+
+        await expectNoChip();
+      } finally {
+        visibility.mockRestore();
+      }
+    });
+
+    it.each(["focus", "pageshow"])(
+      "removes the chip on window %s after an account switch in another tab",
+      async (type) => {
+        await showChipThenSwitchAccount();
+
+        window.dispatchEvent(new Event(type));
+
+        await expectNoChip();
+      },
+    );
+
+    it("does not re-render on visibilitychange while the page is hidden", async () => {
+      await showChipThenSwitchAccount();
+      vi.mocked(chrome.storage.local.get).mockClear();
+      const visibility = setVisibility("hidden");
+
+      try {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(chip()?.textContent).toBe(EXPECTED_TEXT);
+      } finally {
+        visibility.mockRestore();
+      }
+    });
+
+    it("shows the chip on return once the cookie names the stored account again", async () => {
+      await chrome.storage.local.set(ELIGIBLE);
+      setReadmooEmailCookie(OTHER_EMAIL);
+      seedStrayHost();
+      await runOn(`/book/${BOOK_ID}`);
+      await expectNoChip();
+      setReadmooEmailCookie(OWNER_EMAIL);
+
+      window.dispatchEvent(new Event("focus"));
+
+      await expectChipText(EXPECTED_TEXT);
+    });
+
+    it("still renders when registering the page listeners throws", async () => {
+      await chrome.storage.local.set(ELIGIBLE);
+      docListenSpy.mockImplementation((type, listener, options) => {
+        if (type === "visibilitychange") throw new Error("context gone");
+        EventTarget.prototype.addEventListener.call(
+          document,
+          type,
+          listener,
+          options,
+        );
+      });
+
+      await expect(runOn(`/book/${BOOK_ID}`)).resolves.toBeUndefined();
+
+      await expectChipText(EXPECTED_TEXT);
     });
   });
 });

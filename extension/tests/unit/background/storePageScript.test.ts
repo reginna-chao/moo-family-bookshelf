@@ -2,15 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { READMOO_STORE_MATCH_PATTERNS } from "moo-family-bookshelf-shared/config/readmooStore";
+import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 import {
   hasStoreHostPermission,
   reconcileStorePageScript,
   STORE_PAGE_SCRIPT_ID,
 } from "@/background/storePageScript";
 import {
+  FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 
 /**
@@ -18,6 +21,12 @@ import {
  * store-page chip. It registers `content-store.js` exactly while the switch is on AND the optional host
  * permission is granted, mirrors `permissions.contains` into storage for the Dialog, and clears the
  * index while the switch is off.
+ *
+ * Binding check: the clear step also drops an index the stored binding no longer names — one that
+ * does not parse (a version-1 index has no `familyId`), or whose `viewerUserId` / `familyId` differs
+ * from the stored `USER_ID_KEY` / `FAMILY_ID_KEY` (absent included). A Dialog index write racing a
+ * family leave would otherwise outlive the family. `INDEX` is a valid version-2 index bound to `BOUND`;
+ * a case that expects the index kept seeds both. With no index stored, nothing is removed.
  *
  * Fake registry: `scripting.*` is backed by a Set, and `registerContentScripts` rejects a duplicate id
  * like the real API does. That is what makes the serialisation case meaningful: without the module's
@@ -37,7 +46,8 @@ import {
  * Storage runs against the store-backed mock in tests/setup.ts, cleared around every case.
  */
 
-const INDEX = { version: 1, viewerUserId: "u", updatedAt: "t", books: {} };
+const INDEX = buildStorePageIndex([], "u", "fam", new Date());
+const BOUND = { [USER_ID_KEY]: "u", [FAMILY_ID_KEY]: "fam" };
 
 let registry: Set<string>;
 let betweenReads: (() => Promise<void>) | null;
@@ -104,6 +114,7 @@ describe("reconcileStorePageScript", () => {
   it("registers the store-page script when the switch is on and the permission granted", async () => {
     grant(true);
     await seed({
+      ...BOUND,
       [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
       [STORE_PAGE_INDEX_KEY]: INDEX,
     });
@@ -135,6 +146,7 @@ describe("reconcileStorePageScript", () => {
     async (_name, granted, flag, mirror, indexKept) => {
       grant(granted);
       await seed({
+        ...BOUND,
         [STORE_PAGE_CHIP_ENABLED_KEY]: flag,
         [STORE_PAGE_INDEX_KEY]: INDEX,
       });
@@ -193,6 +205,7 @@ describe("reconcileStorePageScript", () => {
     betweenReads = async () => {
       betweenReads = null;
       await seed({
+        ...BOUND,
         [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
         [STORE_PAGE_INDEX_KEY]: INDEX,
       });
@@ -202,6 +215,60 @@ describe("reconcileStorePageScript", () => {
 
     expect(chrome.storage.local.remove).not.toHaveBeenCalled();
     expect((await stored())[STORE_PAGE_INDEX_KEY]).toEqual(INDEX);
+  });
+
+  // See the header → "Binding check".
+  it("keeps a bound index while switched on", async () => {
+    await seed({
+      ...BOUND,
+      [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+      [STORE_PAGE_INDEX_KEY]: INDEX,
+    });
+
+    await reconcileStorePageScript();
+
+    expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+    expect((await stored())[STORE_PAGE_INDEX_KEY]).toEqual(INDEX);
+  });
+
+  it.each<[string, Record<string, unknown>, unknown]>([
+    // name, stored binding, stored index
+    ["the stored familyId is absent", { [USER_ID_KEY]: "u" }, INDEX],
+    [
+      "the stored familyId differs",
+      { ...BOUND, [FAMILY_ID_KEY]: "fam2" },
+      INDEX,
+    ],
+    ["the stored userId is absent", { [FAMILY_ID_KEY]: "fam" }, INDEX],
+    ["the stored userId differs", { ...BOUND, [USER_ID_KEY]: "u2" }, INDEX],
+    ["the index does not parse", BOUND, { ...INDEX, version: 1 }],
+  ])(
+    "clears the index while switched on when %s",
+    async (_name, binding, index) => {
+      await seed({
+        ...binding,
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        [STORE_PAGE_INDEX_KEY]: index,
+      });
+
+      await reconcileStorePageScript();
+
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+        STORE_PAGE_INDEX_KEY,
+      );
+      expect(await stored()).not.toHaveProperty(STORE_PAGE_INDEX_KEY);
+    },
+  );
+
+  it.each<[string, BoolFlag]>([
+    ["switched on", BoolFlag.TRUE],
+    ["switched off", BoolFlag.FALSE],
+  ])("removes nothing when no index is stored, %s", async (_name, flag) => {
+    await seed({ ...BOUND, [STORE_PAGE_CHIP_ENABLED_KEY]: flag });
+
+    await reconcileStorePageScript();
+
+    expect(chrome.storage.local.remove).not.toHaveBeenCalled();
   });
 
   // See the header → "Fake registry".

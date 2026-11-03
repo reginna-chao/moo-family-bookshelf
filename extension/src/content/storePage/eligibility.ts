@@ -10,6 +10,7 @@ import {
 import {
   FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
   USER_ID_KEY,
 } from "../../constants";
@@ -32,12 +33,14 @@ function candidateFromStorage(
   now: number,
 ): { userId: string; state: StoreChipState } | null {
   const userId = stored[USER_ID_KEY];
-  if (!isNonEmptyString(userId) || !isNonEmptyString(stored[FAMILY_ID_KEY])) {
-    return null;
-  }
+  const familyId = stored[FAMILY_ID_KEY];
+  if (!isNonEmptyString(userId) || !isNonEmptyString(familyId)) return null;
   if (stored[STORE_PAGE_CHIP_ENABLED_KEY] !== BoolFlag.TRUE) return null;
+  // A revoked permission leaves this script running (unregistering removes no injected script).
+  if (stored[STORE_PAGE_HOST_GRANTED_KEY] !== BoolFlag.TRUE) return null;
   const index = parseStorePageIndex(stored[STORE_PAGE_INDEX_KEY]);
   if (index === null || index.viewerUserId !== userId) return null;
+  if (index.familyId !== familyId) return null;
   // Stale regardless of this book: the hint must not reveal what an old index says about it.
   if (!isStoreIndexFresh(index, now)) {
     return { userId, state: { kind: "stale" } };
@@ -50,7 +53,8 @@ function candidateFromStorage(
 /**
  * What to show for `bookId`: the sharing members' names, the stale hint (the
  * index is older than `STORE_INDEX_MAX_AGE_DAYS`), or nothing — no family,
- * switch off, no usable index, an index built for another user, nobody sharing
+ * switch off, host permission not granted (the background's mirror), no usable
+ * index, an index built for another user or another family, nobody sharing
  * the book, or a login cookie that does not confirm the stored account (that
  * last check gates the names and the stale hint alike). Never rejects.
  */
@@ -63,6 +67,7 @@ export async function resolveStoreChip(
       USER_ID_KEY,
       FAMILY_ID_KEY,
       STORE_PAGE_CHIP_ENABLED_KEY,
+      STORE_PAGE_HOST_GRANTED_KEY,
       STORE_PAGE_INDEX_KEY,
     ]);
     const found = candidateFromStorage(stored, bookId, now);

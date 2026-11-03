@@ -10,9 +10,11 @@ import {
   type StorePageIndex,
 } from "moo-family-bookshelf-shared/storePage/index";
 import {
+  FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "../constants";
 
 /** Only an exact BoolFlag.TRUE reads as TRUE; anything else (absent, legacy) as FALSE. */
@@ -59,17 +61,30 @@ export async function clearStorePageIndex(): Promise<void> {
 
 /**
  * After a successful family-shelf load: rebuild the index from `members`, but
- * only while the switch is on — the index never exists with the switch off.
- * Never rejects; a failure only logs.
+ * only while the switch is on — the index never exists with the switch off —
+ * and only while the stored binding still names `viewerUserId` and `familyId`.
+ * The shelf request can outlive the binding (leave, unbind, account reset), and
+ * a write after that would resurrect an index for a family the user left. A
+ * clear landing between this read and the write is still possible; the store
+ * page covers it by comparing the index's `familyId` / `viewerUserId` with the
+ * stored ones on every render. Never rejects; a failure only logs.
  */
 export async function updateStorePageIndexIfEnabled(
   members: readonly StoreIndexMember[],
   viewerUserId: string,
+  familyId: string,
 ): Promise<void> {
   try {
-    if ((await readStorePageChipEnabled()) !== BoolFlag.TRUE) return;
+    const stored = await browser.storage.local.get([
+      STORE_PAGE_CHIP_ENABLED_KEY,
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+    ]);
+    if (stored[STORE_PAGE_CHIP_ENABLED_KEY] !== BoolFlag.TRUE) return;
+    if (stored[USER_ID_KEY] !== viewerUserId) return;
+    if (stored[FAMILY_ID_KEY] !== familyId) return;
     await writeStorePageIndex(
-      buildStorePageIndex(members, viewerUserId, new Date()),
+      buildStorePageIndex(members, viewerUserId, familyId, new Date()),
     );
   } catch (err) {
     console.warn("[storePageChip] index update failed", err);

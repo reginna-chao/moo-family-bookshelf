@@ -112,7 +112,7 @@ export function useFamilyDataRefreshBookshelf({
           member.userId.slice(0, 8),
         books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
       }));
-      void updateStorePageIndexIfEnabled(parsedMembers, userId);
+      void updateStorePageIndexIfEnabled(parsedMembers, userId, familyId);
 
       // Update tracking: each member's `lastUpdated` comes straight off the wire, since a synthesized
       // `null` would read every existing member as unchanged against the seen baseline.

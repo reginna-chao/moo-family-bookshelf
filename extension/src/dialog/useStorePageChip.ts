@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import browser from "webextension-polyfill";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
-import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 import {
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_HOST_GRANTED_KEY,
@@ -10,8 +9,8 @@ import {
   readStorePageChipEnabled,
   readStorePageHostGranted,
   toBoolFlag,
+  updateStorePageIndexIfEnabled,
   writeStorePageChipEnabled,
-  writeStorePageIndex,
 } from "../storage/storePageChip";
 import {
   STORE_CHIP_OPEN_OPTIONS_FALLBACK,
@@ -29,19 +28,21 @@ export interface UseStorePageChipResult {
   toggle: () => void;
 }
 
-/** Switch on, then index the shelf already on screen — only when it is loaded; a running refresh
- *  writes the index itself when it lands (`updateStorePageIndexIfEnabled`). No rollback on failure. */
+/** Switch on, then index a loaded shelf through the binding-guarded writer, so a switch flipped
+ *  after leaving the family writes nothing; a running refresh indexes itself on landing. */
 async function enableWithIndex(
   userId: string,
+  familyId: string,
   members: readonly MemberBooks[],
   state: LoadState,
 ): Promise<void> {
   try {
     await writeStorePageChipEnabled(BoolFlag.TRUE);
-    if (state !== "ready") return;
-    await writeStorePageIndex(buildStorePageIndex(members, userId, new Date()));
   } catch {
-    // Storage unavailable — the switch stays on screen, as with the other preferences.
+    return; // Storage unavailable — the switch stays on screen, as with the other preferences.
+  }
+  if (state === "ready") {
+    await updateStorePageIndexIfEnabled(members, userId, familyId);
   }
 }
 
@@ -63,9 +64,13 @@ function openOptionsPage(onFail: () => void): void {
 /**
  * The 個人設定 store-page chip switch: the same storage flag as the options
  * page. Turning it on needs the host permission, which only the options page
- * can request, so without it the switch opens that page instead.
+ * can request, so without it the switch opens that page instead. `familyId`
+ * is the family the on-screen shelf belongs to; the index is bound to it.
  */
-export function useStorePageChip(userId: string): UseStorePageChipResult {
+export function useStorePageChip(
+  userId: string,
+  familyId: string,
+): UseStorePageChipResult {
   const { bookshelfMembers, bookshelfState } = useFamilyData();
   const [enabled, setEnabled] = useState<BoolFlag>(BoolFlag.FALSE);
   const [granted, setGranted] = useState<BoolFlag>(BoolFlag.FALSE);
@@ -131,11 +136,16 @@ export function useStorePageChip(userId: string): UseStorePageChipResult {
     }
     if (granted === BoolFlag.TRUE) {
       setEnabled(BoolFlag.TRUE);
-      void enableWithIndex(userId, membersRef.current, stateRef.current);
+      void enableWithIndex(
+        userId,
+        familyId,
+        membersRef.current,
+        stateRef.current,
+      );
       return;
     }
     openOptionsPage(() => setHint(STORE_CHIP_OPEN_OPTIONS_FALLBACK));
-  }, [enabled, granted, userId]);
+  }, [enabled, granted, userId, familyId]);
 
   const visibleHint = storeChipVisibleMessage(
     enabled === BoolFlag.TRUE,

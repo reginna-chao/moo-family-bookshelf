@@ -7,8 +7,10 @@ import type { ApiClient, BookEntry, FamilyBookshelf } from "@/api/client";
 import {
   seenKey,
   chipsKey,
+  FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 
@@ -471,19 +473,33 @@ describe("FamilyDataProvider store-page chip index", () => {
     });
   }
 
-  /** storage.local.get answers the switch with `flag`; every other key reads as absent. */
+  /** storage.local.get answers the switch with `flag` and the binding with the rendered user / family;
+   *  every other key reads as absent. */
   function storeSwitchReads(flag: BoolFlag): void {
+    const answers: Record<string, unknown> = {
+      [STORE_PAGE_CHIP_ENABLED_KEY]: flag,
+      [USER_ID_KEY]: "user-1",
+      [FAMILY_ID_KEY]: "fam-1",
+    };
     vi.mocked(chrome.storage.local.get).mockImplementation(((
       keys: string | string[],
     ) => {
       const list = Array.isArray(keys) ? keys : [keys];
       return Promise.resolve(
-        list.includes(STORE_PAGE_CHIP_ENABLED_KEY)
-          ? { [STORE_PAGE_CHIP_ENABLED_KEY]: flag }
-          : {},
+        Object.fromEntries(
+          list
+            .filter((key) => key in answers)
+            .map((key) => [key, answers[key]]),
+        ),
       );
     }) as never);
   }
+
+  const INDEX_GATE_KEYS = [
+    STORE_PAGE_CHIP_ENABLED_KEY,
+    USER_ID_KEY,
+    FAMILY_ID_KEY,
+  ];
 
   function indexWrites(): Record<string, unknown>[] {
     return vi
@@ -532,6 +548,7 @@ describe("FamilyDataProvider store-page chip index", () => {
           },
         ],
         "user-1",
+        "fam-1",
         new Date(),
       ),
       updatedAt: expect.any(String),
@@ -543,9 +560,7 @@ describe("FamilyDataProvider store-page chip index", () => {
 
     await renderUntil("ready", clientServing({ data: BOOKSHELF }));
 
-    expect(chrome.storage.local.get).toHaveBeenCalledWith([
-      STORE_PAGE_CHIP_ENABLED_KEY,
-    ]);
+    expect(chrome.storage.local.get).toHaveBeenCalledWith(INDEX_GATE_KEYS);
     expect(indexWrites()).toHaveLength(0);
   });
 
@@ -557,9 +572,7 @@ describe("FamilyDataProvider store-page chip index", () => {
       clientServing({ error: { code: "SERVER_ERROR", message: "boom" } }),
     );
 
-    expect(chrome.storage.local.get).not.toHaveBeenCalledWith([
-      STORE_PAGE_CHIP_ENABLED_KEY,
-    ]);
+    expect(chrome.storage.local.get).not.toHaveBeenCalledWith(INDEX_GATE_KEYS);
     expect(indexWrites()).toHaveLength(0);
   });
 });

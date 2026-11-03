@@ -4,6 +4,13 @@
 import browser from "webextension-polyfill";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import { READMOO_STORE_MATCH_PATTERNS } from "moo-family-bookshelf-shared/config/readmooStore";
+import { parseStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
+import {
+  FAMILY_ID_KEY,
+  STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
+} from "../constants";
 import {
   clearStorePageIndex,
   readStorePageChipEnabled,
@@ -56,13 +63,30 @@ async function alignScriptRegistration(): Promise<void> {
   }
 }
 
-/** Its own step, so a failing permission or scripting call above never leaves an index behind. */
+/** True only while the switch is on and the stored index parses and names the stored user and family. */
+function isIndexStillBound(stored: Record<string, unknown>): boolean {
+  if (stored[STORE_PAGE_CHIP_ENABLED_KEY] !== BoolFlag.TRUE) return false;
+  const index = parseStorePageIndex(stored[STORE_PAGE_INDEX_KEY]);
+  if (index === null) return false;
+  return (
+    index.viewerUserId === stored[USER_ID_KEY] &&
+    index.familyId === stored[FAMILY_ID_KEY]
+  );
+}
+
+/** Its own step, so a failing permission or scripting call above never leaves an index behind;
+ *  also drops an index the stored binding no longer names (a write racing a leave). */
 async function clearIndexUnlessEnabled(): Promise<void> {
   try {
     // Read fresh: the Dialog may have switched on (and written an index) since the step above.
-    if ((await readStorePageChipEnabled()) !== BoolFlag.TRUE) {
-      await clearStorePageIndex();
-    }
+    const stored = await browser.storage.local.get([
+      STORE_PAGE_CHIP_ENABLED_KEY,
+      USER_ID_KEY,
+      FAMILY_ID_KEY,
+      STORE_PAGE_INDEX_KEY,
+    ]);
+    if (stored[STORE_PAGE_INDEX_KEY] === undefined) return;
+    if (!isIndexStillBound(stored)) await clearStorePageIndex();
   } catch (err) {
     console.warn("[storePageScript] index clear failed", err);
   }

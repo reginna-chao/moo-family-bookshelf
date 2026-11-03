@@ -15,9 +15,11 @@ import {
   writeStorePageIndex,
 } from "@/storage/storePageChip";
 import {
+  FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 
 /**
@@ -28,9 +30,13 @@ import {
  * Flags follow the BoolFlag convention: only an exact `BoolFlag.TRUE` reads as on. The index exists only
  * while the switch is on, so `updateStorePageIndexIfEnabled` (called after every successful family-shelf
  * load) writes nothing with the switch off; it is fire-and-forget from the Dialog, so it never rejects.
+ * It also writes nothing once the stored userId / familyId no longer name the viewer and the family the
+ * shelf was loaded for: the request can outlive a leave or an account reset, and a late write would
+ * resurrect an index for a family the user already left.
  */
 
 const VIEWER = "viewer-user-id";
+const FAMILY = "family-id-1";
 const BOOK_A = "210000000000001";
 const NOW = new Date("2026-11-02T00:00:00.000Z");
 
@@ -38,6 +44,12 @@ const MEMBERS: StoreIndexMember[] = [
   { userId: VIEWER, displayName: "Me", books: [{ bookId: BOOK_A }] },
   { userId: "user-2", displayName: "Bob", books: [{ bookId: BOOK_A }] },
 ];
+
+const ENABLED_AND_BOUND = {
+  [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+  [USER_ID_KEY]: VIEWER,
+  [FAMILY_ID_KEY]: FAMILY,
+};
 
 async function stored(): Promise<Record<string, unknown>> {
   return chrome.storage.local.get(null);
@@ -108,7 +120,7 @@ describe.each([
 
 describe("store-page index", () => {
   it("reads back the index it wrote", async () => {
-    const index = buildStorePageIndex(MEMBERS, VIEWER, NOW);
+    const index = buildStorePageIndex(MEMBERS, VIEWER, FAMILY, NOW);
 
     await writeStorePageIndex(index);
 
@@ -127,10 +139,23 @@ describe("store-page index", () => {
     expect(await readStorePageIndex()).toBeNull();
   });
 
+  it("reads a well-formed version-1 index (no familyId) as null", async () => {
+    await chrome.storage.local.set({
+      [STORE_PAGE_INDEX_KEY]: {
+        version: 1,
+        viewerUserId: VIEWER,
+        updatedAt: NOW.toISOString(),
+        books: { [BOOK_A]: ["Bob"] },
+      },
+    });
+
+    expect(await readStorePageIndex()).toBeNull();
+  });
+
   it("clears the index and nothing else", async () => {
     await chrome.storage.local.set({
       [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
-      [STORE_PAGE_INDEX_KEY]: buildStorePageIndex(MEMBERS, VIEWER, NOW),
+      [STORE_PAGE_INDEX_KEY]: buildStorePageIndex(MEMBERS, VIEWER, FAMILY, NOW),
     });
 
     await clearStorePageIndex();
@@ -145,28 +170,70 @@ describe("updateStorePageIndexIfEnabled", () => {
   it("writes the index built from the members, without the viewer, when the switch is on", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
-    await chrome.storage.local.set({
-      [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
-    });
+    await chrome.storage.local.set(ENABLED_AND_BOUND);
 
-    await updateStorePageIndexIfEnabled(MEMBERS, VIEWER);
+    await updateStorePageIndexIfEnabled(MEMBERS, VIEWER, FAMILY);
 
     const index = (await stored())[STORE_PAGE_INDEX_KEY];
-    expect(index).toEqual(buildStorePageIndex(MEMBERS, VIEWER, NOW));
+    expect(index).toEqual(buildStorePageIndex(MEMBERS, VIEWER, FAMILY, NOW));
     expect(index).toEqual(
-      expect.objectContaining({ books: { [BOOK_A]: ["Bob"] } }),
+      expect.objectContaining({
+        familyId: FAMILY,
+        books: { [BOOK_A]: ["Bob"] },
+      }),
+    );
+  });
+
+  it("reads the switch and the binding in one storage call", async () => {
+    await chrome.storage.local.set(ENABLED_AND_BOUND);
+    vi.mocked(chrome.storage.local.get).mockClear();
+
+    await updateStorePageIndexIfEnabled(MEMBERS, VIEWER, FAMILY);
+
+    expect(chrome.storage.local.get).toHaveBeenCalledOnce();
+    const [keys] = vi.mocked(chrome.storage.local.get).mock.calls[0];
+    expect([...(keys as string[])].sort()).toEqual(
+      [STORE_PAGE_CHIP_ENABLED_KEY, USER_ID_KEY, FAMILY_ID_KEY].sort(),
     );
   });
 
   it.each<[string, Record<string, unknown>]>([
-    ["off", { [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE }],
-    ["never set", {}],
-    ["a raw true", { [STORE_PAGE_CHIP_ENABLED_KEY]: true }],
-  ])("writes nothing when the switch is %s", async (_name, seed) => {
+    [
+      "the switch is off",
+      { ...ENABLED_AND_BOUND, [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE },
+    ],
+    [
+      "the switch was never set",
+      { [USER_ID_KEY]: VIEWER, [FAMILY_ID_KEY]: FAMILY },
+    ],
+    [
+      "the switch is a raw true",
+      { ...ENABLED_AND_BOUND, [STORE_PAGE_CHIP_ENABLED_KEY]: true },
+    ],
+    [
+      "the stored userId names another user",
+      { ...ENABLED_AND_BOUND, [USER_ID_KEY]: "other-user-id" },
+    ],
+    [
+      "the stored userId is gone",
+      {
+        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+        [FAMILY_ID_KEY]: FAMILY,
+      },
+    ],
+    [
+      "the stored familyId names another family",
+      { ...ENABLED_AND_BOUND, [FAMILY_ID_KEY]: "family-id-2" },
+    ],
+    [
+      "the stored familyId is gone (left / unbound)",
+      { [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE, [USER_ID_KEY]: VIEWER },
+    ],
+  ])("writes nothing when %s", async (_name, seed) => {
     await chrome.storage.local.set(seed);
     vi.mocked(chrome.storage.local.set).mockClear();
 
-    await updateStorePageIndexIfEnabled(MEMBERS, VIEWER);
+    await updateStorePageIndexIfEnabled(MEMBERS, VIEWER, FAMILY);
 
     expect(chrome.storage.local.set).not.toHaveBeenCalled();
     expect(await stored()).not.toHaveProperty(STORE_PAGE_INDEX_KEY);
@@ -179,7 +246,7 @@ describe("updateStorePageIndexIfEnabled", () => {
     );
 
     await expect(
-      updateStorePageIndexIfEnabled(MEMBERS, VIEWER),
+      updateStorePageIndexIfEnabled(MEMBERS, VIEWER, FAMILY),
     ).resolves.toBeUndefined();
 
     expect(warn).toHaveBeenCalledOnce();
@@ -188,15 +255,13 @@ describe("updateStorePageIndexIfEnabled", () => {
 
   it("resolves and only warns when the index write fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await chrome.storage.local.set({
-      [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
-    });
+    await chrome.storage.local.set(ENABLED_AND_BOUND);
     vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(
       new Error("quota"),
     );
 
     await expect(
-      updateStorePageIndexIfEnabled(MEMBERS, VIEWER),
+      updateStorePageIndexIfEnabled(MEMBERS, VIEWER, FAMILY),
     ).resolves.toBeUndefined();
 
     expect(warn).toHaveBeenCalledOnce();

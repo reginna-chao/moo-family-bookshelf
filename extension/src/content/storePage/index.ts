@@ -6,6 +6,7 @@ import { storeBookIdFromPath } from "moo-family-bookshelf-shared/config/readmooS
 import {
   FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
   USER_ID_KEY,
 } from "../../constants";
@@ -13,8 +14,10 @@ import { isExtensionContextValid } from "../../utils/extensionContext";
 import { resolveStoreChip } from "./eligibility";
 import { removeStoreChip, renderStoreChip } from "./chip";
 
+// The granted mirror is rewritten on every background reconcile, `permissions.onRemoved` included.
 const WATCHED_KEYS = [
   STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
   USER_ID_KEY,
   FAMILY_ID_KEY,
@@ -44,9 +47,20 @@ function start(): void {
       if (!WATCHED_KEYS.some((key) => Object.hasOwn(changes, key))) return;
       void render(bookId);
     });
+    watchPageReturn(() => void render(bookId));
   } catch {
     // Extension context already gone: the first render removed any chip.
   }
+}
+
+/** Re-render when the user comes back to this page. The login cookie can change in another tab
+ *  (account switch) without any storage change, so the storage listener alone would miss it. */
+function watchPageReturn(onReturn: () => void): void {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") onReturn();
+  });
+  window.addEventListener("focus", onReturn);
+  window.addEventListener("pageshow", onReturn);
 }
 
 start();

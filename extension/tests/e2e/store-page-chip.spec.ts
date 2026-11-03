@@ -5,7 +5,10 @@
  * permission on the options page — a browser prompt Playwright cannot click. `pnpm build:e2e` therefore
  * registers it statically for `http://localhost:*\/book/*` (see .claude/rules/test.md → E2E tooling),
  * and these specs seed the state the switch + Dialog would have produced: the stored account, a family,
- * the switch on, and the index. The fixture page is `tests/e2e/fixtures/book/{bookId}.html`, served with
+ * the switch on, the host-permission mirror `moo:storePageHostGranted` on, and the index (built for
+ * that account AND that family, at `new Date()` so it is fresh). `build:e2e` also lists the store host
+ * in the E2E manifest's `host_permissions`, so the background's own reconcile keeps the mirror TRUE
+ * rather than overwriting the seed with FALSE. The fixture page is `tests/e2e/fixtures/book/{bookId}.html`, served with
  * clean URLs at `/book/{bookId}`.
  *
  * The page's account is confirmed through Readmoo's login cookie, so each spec sets it on localhost with
@@ -27,6 +30,7 @@ import {
   API_ENDPOINT_KEY,
   FAMILY_ID_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
+  STORE_PAGE_HOST_GRANTED_KEY,
   STORE_PAGE_INDEX_KEY,
   USER_ID_KEY,
 } from "../../src/constants";
@@ -42,6 +46,8 @@ import {
 const BOOK_ID = "210000000000001";
 const BOOK_URL = `${FIXTURES_BASE_URL}/book/${BOOK_ID}`;
 const EMAIL = "store-chip@example.com";
+// The index is bound to this family; the store page shows nothing for an index of another family.
+const FAMILY_ID = "fam-store-chip";
 // Mirrors BoolFlag (shared/src/api/types.ts); a numeric literal keeps this spec off the enum import.
 const FLAG_TRUE = 1;
 const FLAG_FALSE = 0;
@@ -90,6 +96,7 @@ async function indexForViewer(): Promise<
       { userId: "member-b", displayName: "小華", books: [{ bookId: BOOK_ID }] },
     ],
     userId,
+    FAMILY_ID,
     new Date(),
   );
 }
@@ -101,8 +108,9 @@ async function seedEligibleState(
   await seedStorage(context, {
     [API_ENDPOINT_KEY]: WORKER_API_URL,
     [USER_ID_KEY]: await deriveUserId(EMAIL),
-    [FAMILY_ID_KEY]: "fam-store-chip",
+    [FAMILY_ID_KEY]: FAMILY_ID,
     [STORE_PAGE_CHIP_ENABLED_KEY]: switchFlag,
+    [STORE_PAGE_HOST_GRANTED_KEY]: FLAG_TRUE,
     [STORE_PAGE_INDEX_KEY]: await indexForViewer(),
   });
   await setLoginCookie(context);

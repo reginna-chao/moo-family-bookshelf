@@ -5,6 +5,7 @@ import { cpSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { READMOO_STORE_MATCH_PATTERNS } from "moo-family-bookshelf-shared/config/readmooStore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(__dirname, "..", "dist");
@@ -69,6 +70,13 @@ if (!manifest.host_permissions) {
 }
 if (!manifest.host_permissions.includes(localhostPattern)) {
   manifest.host_permissions.push(localhostPattern);
+}
+// Grant the store pattern at install (E2E cannot click the optional prompt) so the background's permission
+// mirror reads TRUE; verify-build already checked the unpatched manifest, so its equality check is unaffected.
+for (const pattern of READMOO_STORE_MATCH_PATTERNS) {
+  if (!manifest.host_permissions.includes(pattern)) {
+    manifest.host_permissions.push(pattern);
+  }
 }
 
 // Add localhost to web_accessible_resources matches

@@ -4,16 +4,19 @@
 import { isRealBookId } from "../api/bookId";
 
 export interface StorePageIndex {
-  version: 1;
+  version: 2;
   /** The user the index was built for; the store page shows nothing when it differs from the stored userId. */
   viewerUserId: string;
+  /** The family the index was built for; the store page shows nothing when it differs from the stored familyId. */
+  familyId: string;
   /** ISO 8601 build time. */
   updatedAt: string;
   /** bookId → display names of the family members sharing it (deduplicated, sorted). */
   books: Record<string, string[]>;
 }
 
-export const STORE_INDEX_VERSION = 1;
+/** Version 2 added `familyId`; an index of any other version fails the parse and is rebuilt. */
+export const STORE_INDEX_VERSION = 2;
 /** Longer names are truncated when the index is built or parsed. */
 export const MAX_STORE_INDEX_NAME_LENGTH = 50;
 /** An index holding more books than this is rejected as a whole on parse. */
@@ -39,14 +42,16 @@ function sortedUnique(names: Iterable<string>): string[] {
 }
 
 /**
- * Build the index from the family-shelf members the Dialog already holds.
- * Skips the viewer's own entry (their own books never get a chip) and every
- * book id that is not a real Readmoo id; a blank display name falls back to
- * the first 8 characters of the member's userId.
+ * Build the index from the family-shelf members the Dialog already holds,
+ * bound to `viewerUserId` and to `familyId` (the family those members belong
+ * to). Skips the viewer's own entry (their own books never get a chip) and
+ * every book id that is not a real Readmoo id; a blank display name falls
+ * back to the first 8 characters of the member's userId.
  */
 export function buildStorePageIndex(
   members: readonly StoreIndexMember[],
   viewerUserId: string,
+  familyId: string,
   now: Date,
 ): StorePageIndex {
   const names = new Map<string, string[]>();
@@ -67,6 +72,7 @@ export function buildStorePageIndex(
   return {
     version: STORE_INDEX_VERSION,
     viewerUserId,
+    familyId,
     updatedAt: now.toISOString(),
     books,
   };
@@ -109,17 +115,27 @@ function parseBooks(raw: unknown): Record<string, string[]> | null {
 
 /**
  * Validate a stored index read back from extension storage. Any malformed
- * field rejects the whole index (`null`), so the store page shows no chip.
+ * field — a blank `viewerUserId` or `familyId`, or a version other than
+ * `STORE_INDEX_VERSION` (a version-1 index has no `familyId`) — rejects the
+ * whole index (`null`), so the store page shows no chip until the next
+ * family-shelf load rebuilds it.
  */
 export function parseStorePageIndex(raw: unknown): StorePageIndex | null {
   if (!isPlainObject(raw)) return null;
   if (raw.version !== STORE_INDEX_VERSION) return null;
-  const { viewerUserId, updatedAt } = raw;
+  const { viewerUserId, familyId, updatedAt } = raw;
   if (typeof viewerUserId !== "string" || viewerUserId === "") return null;
+  if (typeof familyId !== "string" || familyId === "") return null;
   if (typeof updatedAt !== "string") return null;
   const books = parseBooks(raw.books);
   if (books === null) return null;
-  return { version: STORE_INDEX_VERSION, viewerUserId, updatedAt, books };
+  return {
+    version: STORE_INDEX_VERSION,
+    viewerUserId,
+    familyId,
+    updatedAt,
+    books,
+  };
 }
 
 /** Names of the members sharing `bookId`, or `[]` when nobody does. */
