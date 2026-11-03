@@ -78,6 +78,9 @@ These files are authoritative.
 ## Run Result
 - <command>: PASS | FAIL (N passed / M failed — brief details if FAIL)
 
+## Mutation Evidence
+- <guard disabled → test that went red (per `.claude/rules/test.md` → "Guard tests must prove they can fail"), or "none — no guard test">
+
 ## Production Bugs Found (report only — not fixed)
 - <bug @ file:line, or "none">
 
