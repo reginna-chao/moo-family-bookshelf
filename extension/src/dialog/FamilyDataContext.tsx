@@ -42,8 +42,8 @@ interface FamilyDataProviderProps {
   familyId: string;
   userId: string;
   apiClient: ApiClient;
-  /** Monotonic counter: each change re-runs the initial load (members → bookshelf → borrow) in place,
-   *  keeping mounted state. App bumps it after a re-verification so a stale 401 view reloads. */
+  /** Monotonic counter: each change re-runs the initial load (members → bookshelf → borrow) and retries a failed
+   *  prefs read in place, keeping mounted state. App bumps it after a re-verification so a stale 401 view reloads. */
   reloadSignal?: number;
   children: React.ReactNode;
 }
@@ -74,7 +74,7 @@ export function FamilyDataProvider({
     isFavorite,
     toggleFavorite,
     syncFailed: prefsSyncFailed,
-  } = useFamilyShelfPrefs(userId, apiClient);
+  } = useFamilyShelfPrefs(userId, apiClient, reloadSignal);
 
   const { mountedRef, membersRef } = useFamilyDataMountedRefs(
     membersView.members,

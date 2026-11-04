@@ -17,11 +17,13 @@ export type { FamilyShelfPrefs };
  * The load-once / debounce / flush-on-unmount lifecycle lives in the shared
  * `FamilyPrefsSync` controller used by both apps; this hook only owns the
  * React state and wires the controller to mount / unmount and to the
- * `[userId, apiClient]` load trigger.
+ * `[userId, apiClient, reloadSignal]` load trigger. `reloadSignal` is optional:
+ * a re-verification bumps it to retry a load that failed on the dead token.
  */
 export function useFamilyShelfPrefs(
   userId: string,
   apiClient: ApiClient,
+  reloadSignal?: number,
 ): FamilyShelfPrefs {
   const [hiddenRefs, setHiddenRefs] = useState<Set<string>>(new Set());
   const [favoriteRefs, setFavoriteRefs] = useState<Set<string>>(new Set());
@@ -47,11 +49,11 @@ export function useFamilyShelfPrefs(
     return () => sync.detach();
   }, [sync]);
 
-  // `[userId, apiClient]` retries the load until one succeeds; after that the controller skips it,
-  // so an identity change never clobbers unsaved optimistic edits.
+  // `[userId, apiClient, reloadSignal]` retries the load until one succeeds (the signal: a re-verification, after
+  // a load failed on the dead token); after that the controller skips it, so no trigger clobbers unsaved optimistic edits.
   useEffect(() => {
     sync.load();
-  }, [sync, userId, apiClient]);
+  }, [sync, userId, apiClient, reloadSignal]);
 
   const toggle = useCallback(
     (kind: FamilyPrefKind, ownerId: string, bookId: string) =>

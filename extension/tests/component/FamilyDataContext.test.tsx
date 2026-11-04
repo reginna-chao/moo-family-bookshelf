@@ -196,6 +196,57 @@ describe("FamilyDataProvider reloadSignal", () => {
     // ...but the children were never torn down and remounted.
     expect(childMountCount).toBe(1);
   });
+
+  it("retries a prefs load that failed on a dead token, clearing the notice and restoring hidden books", async () => {
+    const HIDDEN_REF = "user-2:210000000000001";
+    const getPersonalBooks = vi
+      .fn()
+      .mockResolvedValueOnce({
+        error: { code: "UNAUTHORIZED", message: "token expired" },
+      })
+      .mockResolvedValueOnce({
+        data: { familyShelfPrefs: { hidden: [HIDDEN_REF], favorites: [] } },
+      });
+    const apiClient = createMockApiClient({ getPersonalBooks });
+
+    function PrefsProbe() {
+      const { prefsSyncFailed, hiddenRefs } = useFamilyData();
+      return (
+        <div>
+          <span data-testid="prefs-sync-failed">{String(prefsSyncFailed)}</span>
+          <span data-testid="hidden-refs">{[...hiddenRefs].join(",")}</span>
+        </div>
+      );
+    }
+    const providerWith = (reloadSignal: number) => (
+      <FamilyDataProvider
+        familyId="fam-1"
+        userId="user-1"
+        apiClient={apiClient}
+        reloadSignal={reloadSignal}
+      >
+        <PrefsProbe />
+      </FamilyDataProvider>
+    );
+
+    const { rerender } = render(providerWith(0));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prefs-sync-failed")).toHaveTextContent("true");
+    });
+    expect(getPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("hidden-refs").textContent).toBe("");
+
+    rerender(providerWith(1));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prefs-sync-failed")).toHaveTextContent(
+        "false",
+      );
+    });
+    expect(getPersonalBooks).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("hidden-refs").textContent).toBe(HIDDEN_REF);
+  });
 });
 
 /** A non-string or empty `error.message` on either load path must neither crash the Dialog nor blank
