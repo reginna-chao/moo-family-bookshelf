@@ -46,7 +46,7 @@ export const FLUSH_DEBOUNCE_MS = 600;
  * re-entrant — React StrictMode's dev unmount→remount calls detach→attach on
  * the SAME instance, which must come back fully working, so detach never
  * disposes anything beyond the pending timer. Results that settle while
- * detached (a load, a flush outcome) are dropped.
+ * detached (a load, a flush outcome) are never published.
  *
  * Adding a future kind = extend the kind helpers in `./prefsModel.ts` and the
  * flush body here, then one state + thin public wrapper trio per adapter.
@@ -63,6 +63,11 @@ export class FamilyPrefsSync {
   private pending: RefsByKind = emptyRefsByKind();
   /** Refs toggled an odd number of times before the first successful load, per kind; replayed as additions. */
   private preLoadDelta: RefsByKind = emptyRefsByKind();
+  /** The latest flush failed and nothing newer was sent; only `load()` resends it. Implies `didLoad`.
+   *  `detach()` must not: a family teardown switches the client's endpoint before the unmount (#454). */
+  private flushFailed = false;
+  /** Id of the newest flush; an older one settling late must not decide `flushFailed`. */
+  private latestFlush = 0;
 
   constructor(options: FamilyPrefsSyncOptions) {
     this.options = options;
@@ -80,8 +85,9 @@ export class FamilyPrefsSync {
   }
 
   /** Single GET of the viewer's refs; a rejected or `{ error }` load changes nothing, reports the failure
-   *  and is retried later. One in flight; a no-op after success, so a client change never clobbers edits. */
+   *  and is retried later. One in flight; no GET after success, so a client change never clobbers edits, but a failed save is resent. */
   load(): void {
+    if (this.flushFailed && this.flushTimer === null) this.sendFlush();
     if (this.didLoad || this.loading) return;
     this.loading = true;
     void this.runLoad();
@@ -168,20 +174,23 @@ export class FamilyPrefsSync {
   /** Fire-and-forget full-replace flush (callers ensure `didLoad`). An `{ error }` or a throw marks the
    *  sync failed, a later success clears it; nothing is published once detached (no post-unmount set). */
   private sendFlush(): void {
+    this.flushFailed = false;
+    const flush = ++this.latestFlush;
     const { userId, api } = this.options.getIo();
     void api
       .updateFamilyPrefs(userId, {
         hidden: [...this.pending.hidden],
         favorites: [...this.pending.favorites],
       })
-      .then((response) => {
-        if (!this.attached) return;
-        this.options.onSyncFailed(Boolean(response.error));
-      })
-      .catch(() => {
-        // Optimistic local state is the session source of truth.
-        if (!this.attached) return;
-        this.options.onSyncFailed(true);
-      });
+      .then((response) => this.settleFlush(flush, Boolean(response.error)))
+      // Optimistic local state is the session source of truth.
+      .catch(() => this.settleFlush(flush, true));
+  }
+
+  /** Only the newest flush decides; the failure is recorded even while detached, but never published then. */
+  private settleFlush(flush: number, failed: boolean): void {
+    if (flush !== this.latestFlush) return;
+    this.flushFailed = failed;
+    if (this.attached) this.options.onSyncFailed(failed);
   }
 }
