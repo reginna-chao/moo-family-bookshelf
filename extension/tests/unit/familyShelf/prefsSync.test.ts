@@ -483,6 +483,35 @@ describe("FamilyPrefsSync", () => {
       expect(onSyncFailed).toHaveBeenLastCalledWith(false);
       expect(api.getPersonalBooks).toHaveBeenCalledTimes(1);
     });
+
+    it("ignores a failure from an older flush that settles after a newer one succeeded", async () => {
+      const api = createApi();
+      const older = deferred<FlushResponse>();
+      api.updateFamilyPrefs.mockReturnValueOnce(older.promise);
+      const { sync, onSyncFailed } = createSync({ userId: "user-1", api });
+
+      await attachAndLoad(sync);
+      sync.toggle("hidden", "o1:b1");
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+
+      sync.toggle("hidden", "o2:b2");
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      await settle();
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+      expect(onSyncFailed).toHaveBeenLastCalledWith(false);
+      const callsBeforeOlderSettled = onSyncFailed.mock.calls.length;
+
+      older.resolve(FLUSH_ERROR);
+      await settle();
+      expect(onSyncFailed).toHaveBeenLastCalledWith(false);
+      expect(onSyncFailed).toHaveBeenCalledTimes(callsBeforeOlderSettled);
+
+      // The newer flush holds the complete lists, so nothing is left to resend.
+      sync.load();
+      await settle();
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("no full-replace PUT before a successful load (issue #219)", () => {
