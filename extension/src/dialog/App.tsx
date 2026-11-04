@@ -57,8 +57,8 @@ export function App({
   // Why the family binding was torn down (removed / family gone / full), shown
   // above Onboarding so the forced flip doesn't look like a spontaneous reset.
   const [familyGoneNotice, setFamilyGoneNotice] = useState<string | null>(null);
-  // Bumped after a successful re-verification: FamilyDataProvider re-runs its initial load
-  // (members → bookshelf → borrow), so the stale 401 view clears without a manual "重試" tap.
+  // Bumped after a successful re-verification: FamilyDataProvider re-runs its initial load (members → bookshelf
+  // → borrow) and retries a failed prefs read, so the stale 401 view clears without a manual "重試" tap.
   const [reloadSignal, setReloadSignal] = useState(0);
   const apiClientRef = useRef(new ApiClient());
   // A teardown or join landing during the boot account check beats its result.

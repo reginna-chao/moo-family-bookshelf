@@ -1292,7 +1292,7 @@ interface PublicShelfSnapshot {
 
 token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時，`extension/src/dialog/useReauth.ts` 就地顯示重新驗證提示（`.claude/rules/security-ux-invariants.md` 的 Invariant 2：token 過期必須提示重新驗證，不得無聲丟掉資料）。它沿用既有的驗證提示機制（`useVerificationPrompt` + `VerificationPrompt`），接上 `apiClient.onReauthRequired`；`ReauthModal.tsx` 是提示外面的遮罩與卡片，疊在仍掛著的主畫面上，使用者不會失去原本的位置。
 
-- **重新加入**（`runReauthJoin`）：以輸入的密鑰重新加入家庭，帶 `recovery: 1`，伺服器會以 `409 RECOVERY_NOT_MEMBER` 拒絕已不在名單上的人。成功時保存新 token、設進記憶體中的 client，清除殘留的復原冷卻（`RECOVERY_COOLDOWN_UNTIL_KEY`：這次成功證明憑證可用，下一次背景 refresh 不該被它節流），再呼叫 `onSuccess`，讓 App 重新載入家庭資料、取代過時的 401 畫面，不必手動重試；失敗時回傳代碼，讓提示重試或顯示鎖定訊息。
+- **重新加入**（`runReauthJoin`）：以輸入的密鑰重新加入家庭，帶 `recovery: 1`，伺服器會以 `409 RECOVERY_NOT_MEMBER` 拒絕已不在名單上的人。成功時保存新 token、設進記憶體中的 client，清除殘留的復原冷卻（`RECOVERY_COOLDOWN_UNTIL_KEY`：這次成功證明憑證可用，下一次背景 refresh 不該被它節流），再呼叫 `onSuccess`，讓 App 重新載入家庭資料、取代過時的 401 畫面，不必手動重試（這次重新載入也會重試先前因 token 失效而失敗的家庭書櫃偏好讀取，已經讀取成功的不會重複讀取）；失敗時回傳代碼，讓提示重試或顯示鎖定訊息。
 - **初始畫面**：提示一開始就帶入實際擋下背景復原的代碼，被鎖定的使用者立刻看到倒數，而不是可輸入的欄位；其他意外的值退回 `VERIFICATION_REQUIRED`，去查詢驗證方式並顯示對應的挑戰（PIN／圖形／OTP）。
 - **latch**：client 在呼叫 `onReauthRequired` 之前設好 latch，設著時之後每個 401 都跳過背景復原。所以每個不顯示提示或提示結束的出口都要以 `clearReauthPending` 釋放它，否則之後再也不會出現重新驗證提示：storage 缺少重新加入所需的身分（無法顯示提示）、使用者放棄提示（只關閉提示、留在主畫面，之後的動作可以再觸發挑戰），以及下面的拆除。
 - **家庭已不存在時的拆除**（`tearDownGoneFamily`）：重新加入回的是家庭已不存在的代碼（家庭被刪、已滿、被移除或已不在名單上）時，清除本機家庭資料、Dialog 退回引導畫面。這條分支並非假設：伺服器的驗證閘門排在 kicked 墓碑檢查之前，設有驗證的被移除成員要先輸入正確的密鑰，才會知道自己被移除；沒有這道拆除，提示會一直要求同樣的輸入，使用者會在「密鑰正確 → 錯誤」之間打轉，直到墓碑過期（6 小時）。錯誤代碼轉交給 `onFamilyRemoved`，引導畫面才能說明原因（見〈家庭綁定被解除時的說明〉）。

@@ -166,7 +166,7 @@ export function FamilyShelfPage({ userId, pageSize }: FamilyShelfPageProps) {
           role="status"
           className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800"
         >
-          ⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。
+          ⚠️ 收藏與隱藏的設定暫時無法同步，請重新整理頁面再試。
         </div>
       )}
 

@@ -377,7 +377,7 @@ describe("FamilyShelf — favorite feature", () => {
   });
 
   describe("prefs sync-failed banner (S7)", () => {
-    const BANNER_COPY = "⚠️ 偏好同步失敗，變更已暫存本機，下次操作將自動重試。";
+    const BANNER_COPY = "⚠️ 收藏與隱藏的設定暫時無法同步，請重新整理頁面再試。";
 
     it("is absent initially and appears when a flush fails, then auto-clears on the next success", async () => {
       const updateFamilyPrefs = vi
