@@ -876,8 +876,8 @@ describe("FamilyPrefsSync", () => {
       expect(api.getPersonalBooks).toHaveBeenCalledTimes(getsBeforeDetach);
     });
 
-    // A family teardown has already switched the client's endpoint by now, so a
-    // resend here would reach a server the family did not choose (issue #454).
+    // Resending a failed save on close is a separate, later change; the #454
+    // teardown order would allow it, but detach() deliberately does not do it yet.
     it("does not resend a failed save", async () => {
       const api = createApi();
       api.updateFamilyPrefs.mockResolvedValueOnce(FLUSH_ERROR);

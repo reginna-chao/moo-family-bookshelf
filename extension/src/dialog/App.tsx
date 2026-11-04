@@ -6,13 +6,13 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   HAS_COMPLETED_INITIAL_SETUP_KEY,
-  DEFAULT_API_ENDPOINT,
 } from "../constants";
 import { readFamilyId } from "../storage/familyId";
 import { readStoredApiEndpoint } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
 import { applyStoredEndpoint } from "./applyStoredEndpoint";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
+import { unmountFamilyTreeThenResetClient } from "./familyTreeTeardown";
 import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
 import { useAccountGate } from "./useAccountGate";
 import { AccountCheckProvider } from "./AccountCheckContext";
@@ -90,7 +90,7 @@ export function App({
       client.setAuthToken(null);
       // Endpoint is family-scoped, as in handleLeaveFamily (storage half ran in
       // clearFamilyStorage); the old server must not get the next join.
-      client.setEndpoint(DEFAULT_API_ENDPOINT);
+      unmountFamilyTreeThenResetClient(client, setView);
       setFamilyId(null);
       setUserId(null);
       setFamilyGoneNotice(familyGoneNoticeText(info.errorCode));
@@ -193,7 +193,7 @@ export function App({
       console.warn("[App] Leave: local family cleanup failed", err);
     });
     // The endpoint is family-scoped; the live client must not keep the old one.
-    apiClientRef.current.setEndpoint(DEFAULT_API_ENDPOINT);
+    unmountFamilyTreeThenResetClient(apiClientRef.current, setView);
     setFamilyId(null);
     setActiveTab("family-shelf");
     setView("onboarding");
