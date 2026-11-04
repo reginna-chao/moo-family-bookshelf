@@ -25,7 +25,7 @@ export interface FamilyShelfProps {
 function PrefsSyncFailedNotice() {
   return (
     <div role="status" className="moo-prefs-sync-notice">
-      ⚠️ 收藏與隱藏的設定暫時無法同步，請重新整理頁面再試。
+      ⚠️ 收藏與隱藏暫時無法同步。再按一次可重試，重新整理會失去未存的變更。
     </div>
   );
 }

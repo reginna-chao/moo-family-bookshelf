@@ -455,6 +455,34 @@ describe("FamilyPrefsSync", () => {
       expect(onSyncFailed).toHaveBeenNthCalledWith(2, false);
       expect(api.updateFamilyPrefs).not.toHaveBeenCalled();
     });
+
+    it("resends a failed save with the complete lists on the next load(), without another GET", async () => {
+      const api = createApi();
+      api.getPersonalBooks.mockResolvedValueOnce(LOADED);
+      api.updateFamilyPrefs.mockResolvedValueOnce(FLUSH_ERROR);
+      const { sync, onSyncFailed } = createSync({ userId: "user-1", api });
+
+      await attachAndLoad(sync);
+      sync.toggle("hidden", "o3:b3");
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      await settle();
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+      expect(onSyncFailed).toHaveBeenLastCalledWith(true);
+
+      sync.load();
+      await settle();
+
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+      expect(api.updateFamilyPrefs).toHaveBeenNthCalledWith(2, "user-1", {
+        hidden: ["o1:b1", "o3:b3"],
+        favorites: ["o2:b2"],
+      });
+      expect(api.updateFamilyPrefs.mock.calls[1]).toEqual(
+        api.updateFamilyPrefs.mock.calls[0],
+      );
+      expect(onSyncFailed).toHaveBeenLastCalledWith(false);
+      expect(api.getPersonalBooks).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("no full-replace PUT before a successful load (issue #219)", () => {
@@ -817,6 +845,26 @@ describe("FamilyPrefsSync", () => {
       await settle();
       expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(callsAfterDetach);
       expect(api.getPersonalBooks).toHaveBeenCalledTimes(getsBeforeDetach);
+    });
+
+    // A family teardown has already switched the client's endpoint by now, so a
+    // resend here would reach a server the family did not choose (issue #454).
+    it("does not resend a failed save", async () => {
+      const api = createApi();
+      api.updateFamilyPrefs.mockResolvedValueOnce(FLUSH_ERROR);
+      const { sync, onSyncFailed } = createSync({ userId: "user-1", api });
+
+      await attachAndLoad(sync);
+      sync.toggle("hidden", "o1:b1");
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      await settle();
+      expect(onSyncFailed).toHaveBeenLastCalledWith(true);
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+
+      sync.detach();
+      await settle();
+
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
     });
   });
 });
