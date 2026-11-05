@@ -42,8 +42,8 @@ export function useFamilyShelfPrefs(
       }),
   );
 
-  // detach() flushes a change still inside the debounce window, then clears
-  // the timer. StrictMode's dev remount re-attaches the SAME controller.
+  // detach() clears the timer, then flushes a change still inside the debounce window or
+  // resends a failed save. StrictMode's dev remount re-attaches the SAME controller.
   useEffect(() => {
     sync.attach();
     return () => sync.detach();

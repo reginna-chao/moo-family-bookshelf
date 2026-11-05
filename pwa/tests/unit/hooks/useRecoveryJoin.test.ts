@@ -78,7 +78,14 @@ function renderRecovery(onLogin = vi.fn()) {
       setLandingError,
     });
     const client = useSessionApiClient(authApi.auth, join);
-    return { auth: authApi.auth, join, client, landingError, onLogin };
+    return {
+      auth: authApi.auth,
+      logout: authApi.logout,
+      join,
+      client,
+      landingError,
+      onLogin,
+    };
   });
 }
 
@@ -183,6 +190,44 @@ describe("useRecoveryJoin", () => {
     expect(result.current.auth?.authToken).toBe(NEW_TOKEN);
     expect(result.current.join).toBe(firstJoin);
     expect(result.current.client).toBe(firstClient);
+    unmount();
+  });
+
+  it("does not log a logged-out user back in when the old session's client gets a 401", async () => {
+    const { result, unmount } = renderRecovery();
+    const oldClient = result.current.client;
+
+    act(() => {
+      result.current.logout();
+    });
+    expect(result.current.auth).toBeNull();
+    expect(result.current.client).not.toBe(oldClient);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: () =>
+        Promise.resolve({
+          error: { code: "UNAUTHORIZED", message: "dead token" },
+        }),
+    });
+    let errorCode: string | undefined;
+    await act(async () => {
+      const response = await oldClient.updateFamilyPrefs(USER, {
+        hidden: [],
+        favorites: [],
+      });
+      errorCode = response.error?.code;
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe(`/api/user/${USER}/family-prefs`);
+    expect(init.method).toBe("PUT");
+    expect(errorCode).toBe("UNAUTHORIZED");
+    expect(result.current.onLogin).not.toHaveBeenCalled();
+    expect(result.current.auth).toBeNull();
+    expect(localStorage.getItem(USER_ID_KEY)).toBeNull();
     unmount();
   });
 });

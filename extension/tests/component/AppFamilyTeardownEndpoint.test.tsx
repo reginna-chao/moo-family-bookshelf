@@ -17,6 +17,7 @@ import {
 } from "vitest";
 import { App } from "@/dialog/App";
 import { ApiClient, BoolFlag } from "@/api/client";
+import { clearFamilyStorage } from "@/api/familyStorageClear";
 import {
   markAccountConfirmed,
   forgetAccountConfirmation,
@@ -82,6 +83,15 @@ import { familyPrefRef } from "moo-family-bookshelf-shared/familyShelf/prefRefs"
  * in the page, so the case seeds that markup and waits out the real 1.5 s hash-navigation settle.
  * The removal route is not asserted on this: App clears the token before its teardown there, and the
  * token is already dead on the refresh path.
+ *
+ * The failed-save resend: `detach()` also resends a save that already failed, so the toggle waits out
+ * the real debounce and fails BEFORE `prepare()`, while the family shelf and its notice are on screen.
+ * A 500 keeps the refresh flow out of it. When that resend gets a 401 instead, the client's refresh
+ * reads storage after the endpoint switch, and only the cleared family binding stops it from posting
+ * to the official server. Leaving clears storage inside its own handler; the removal route's real
+ * caller (`clearFamilyAndNotify`) clears it before `onFamilyRemoved`, which `clearStorageFirst` mirrors
+ * since `run` calls the handler directly. The storage read with the refresh's exact keys is the signal
+ * that the refresh really ran and stopped there, so the empty-official-server assertion is not vacuous.
  */
 
 const SELF_HOSTED = "https://selfhost.example";
@@ -261,6 +271,19 @@ const noFamilyLookupResponder: Responder = ({ url }) =>
 const isPrefsSave = (call: RecordedCall): boolean =>
   call.method === "PUT" && call.url.endsWith("/family-prefs");
 
+/** Answers the prefs saves with these statuses in order; any later save takes the healthy route. */
+function failingSavesResponder(...statuses: number[]): Responder {
+  const remaining = [...statuses];
+  return (call) => {
+    if (!isPrefsSave(call)) return null;
+    const status = remaining.shift();
+    if (status === undefined) return null;
+    return jsonResponse(status, {
+      error: { code: "SAVE_FAILED", message: "save failed" },
+    });
+  };
+}
+
 /** The two loads the initial load starts once members have answered. */
 const followUpLoads = (calls: RecordedCall[]): RecordedCall[] =>
   calls.filter(
@@ -327,6 +350,8 @@ interface TeardownRoute {
   name: string;
   /** Anything the route needs on screen before the toggle starts the debounce. */
   prepare: () => Promise<void>;
+  /** The storage clearing a real caller does before `run`'s entry point (see the header). */
+  clearStorageFirst: () => Promise<void>;
   /** Runs the teardown; returns the endpoint read as soon as the route can observe it. */
   run: (client: ApiClient) => Promise<string>;
 }
@@ -339,6 +364,7 @@ const LEAVE_ROUTE: TeardownRoute = {
       await screen.findByRole("button", { name: "離開家庭" }, WAIT),
     );
   },
+  clearStorageFirst: () => Promise.resolve(),
   // handleLeaveFamily runs after the DELETE's await, so its return is observed through Onboarding.
   run: async (client) => {
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
@@ -352,6 +378,7 @@ const TEARDOWN_ROUTES: TeardownRoute[] = [
   {
     name: "being removed through the client's onFamilyRemoved",
     prepare: () => Promise.resolve(),
+    clearStorageFirst: clearFamilyStorage,
     // Read inside `act`, before its own flush: the value the handler returned with.
     run: async (client) => {
       let endpoint = "";
@@ -433,6 +460,65 @@ describe("App family teardown and the API endpoint", () => {
       expect(prefsCallsTo(calls, DEFAULT_API_ENDPOINT)).toEqual([]);
       expect(endpointAfterTeardown).toBe(DEFAULT_API_ENDPOINT);
       expect(flushSyncComplaints()).toEqual([]);
+    },
+  );
+
+  it.each(TEARDOWN_ROUTES)(
+    "resends a failed save to the family's own server when $name",
+    async ({ prepare, run }) => {
+      const calls = stubFetch(failingSavesResponder(500));
+      render(<App />);
+      const client = await waitForLoadedFamilyShelf();
+
+      toggleFavorite();
+      await screen.findByText(SYNC_FAILED_NOTICE, undefined, WAIT);
+      expect(calls.filter(isPrefsSave)).toHaveLength(1);
+      await prepare();
+
+      const endpointAfterTeardown = await run(client);
+
+      const saves = prefsCallsTo(calls, SELF_HOSTED).filter(isPrefsSave);
+      expect(saves).toHaveLength(2);
+      expect(savedFavorites(saves[1]).sort()).toEqual(
+        [FAVORITED_REF, TOGGLED_REF].sort(),
+      );
+      expect(prefsCallsTo(calls, DEFAULT_API_ENDPOINT)).toEqual([]);
+      expect(endpointAfterTeardown).toBe(DEFAULT_API_ENDPOINT);
+      expect(flushSyncComplaints()).toEqual([]);
+    },
+  );
+
+  it.each(TEARDOWN_ROUTES)(
+    "sends nothing to the official server when the resend gets a 401 after $name",
+    async ({ prepare, clearStorageFirst, run }) => {
+      const calls = stubFetch(failingSavesResponder(500, 401));
+      render(<App />);
+      const client = await waitForLoadedFamilyShelf();
+
+      toggleFavorite();
+      await screen.findByText(SYNC_FAILED_NOTICE, undefined, WAIT);
+      await prepare();
+      await clearStorageFirst();
+      vi.mocked(chrome.storage.local.get).mockClear();
+
+      await run(client);
+
+      // See the header → "The failed-save resend".
+      await waitFor(
+        () =>
+          expect(chrome.storage.local.get).toHaveBeenCalledWith([
+            USER_ID_KEY,
+            FAMILY_ID_KEY,
+            AUTH_TOKEN_KEY,
+          ]),
+        WAIT,
+      );
+      await drainContinuations();
+
+      expect(prefsCallsTo(calls, SELF_HOSTED).filter(isPrefsSave)).toHaveLength(
+        2,
+      );
+      expect(callsTo(calls, DEFAULT_API_ENDPOINT)).toEqual([]);
     },
   );
 
