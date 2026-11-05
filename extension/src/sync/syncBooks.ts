@@ -68,6 +68,10 @@ export function canAutoSync(): Promise<boolean> {
  * is intentionally retained for the `navigate: true` case (and any future
  * caller that already sits on #/library); do not remove it.
  *
+ * `options.apiClient` is pinned by the caller (`pinSyncApi`): a call after the
+ * endpoint changed rejects with `SyncServerChangedError`, which fails this sync
+ * unless the upload already landed (step 10 then skips the auto-return).
+ *
  * 1. Navigate to #/library if needed
  * 2. Wait for render
  * 3. Read the saved books once to fix the prune candidates (nothing else)

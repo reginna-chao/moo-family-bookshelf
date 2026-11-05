@@ -1,7 +1,8 @@
 /** Options and result of `syncBooks` (sync/syncBooks.ts), which re-exports both. */
 
-import type { ApiClient, BookEntry } from "../api/client";
+import type { BookEntry } from "../api/client";
 import type { ScrapeProgressCallback } from "../content/scraper";
+import type { SyncApi } from "./pinnedSyncApi";
 import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
 
@@ -10,8 +11,8 @@ export interface SyncBooksOptions {
   navigate: boolean;
   /** The userId for API calls */
   userId: string;
-  /** API client instance */
-  apiClient: ApiClient;
+  /** Pinned by the caller with `pinSyncApi` at the moment the sync is triggered. */
+  apiClient: SyncApi;
   /** Optional progress callback for the paginated scrape (Wave G) */
   onProgress?: ScrapeProgressCallback;
   /** When present, the borrow list is fetched once before upload: lent books are shielded from
