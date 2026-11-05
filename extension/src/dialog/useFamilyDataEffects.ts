@@ -32,11 +32,18 @@ export function useFamilyDataInitialLoad(
   // Fetch on mount and on each reloadSignal change: members, then bookshelf + borrow. The refreshes
   // keep "ready" instead of flashing "loading", so a post-reverification reload replaces in place.
   useEffect(() => {
+    let stale = false;
     void (async () => {
       await refreshMembers();
+      // An unmounted tree must send nothing further: the client may already point at another
+      // server, and these URLs carry the familyId (#454).
+      if (stale) return;
       void refreshBookshelf();
       void refreshBorrowRequests();
     })();
+    return () => {
+      stale = true;
+    };
   }, [refreshMembers, refreshBookshelf, refreshBorrowRequests, reloadSignal]);
 }
 

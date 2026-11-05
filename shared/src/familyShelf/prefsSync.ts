@@ -63,8 +63,7 @@ export class FamilyPrefsSync {
   private pending: RefsByKind = emptyRefsByKind();
   /** Refs toggled an odd number of times before the first successful load, per kind; replayed as additions. */
   private preLoadDelta: RefsByKind = emptyRefsByKind();
-  /** The latest flush failed and nothing newer was sent; only `load()` resends it. Implies `didLoad`.
-   *  `detach()` must not: a family teardown switches the client's endpoint before the unmount (#454). */
+  /** The latest flush failed and nothing newer was sent; only `load()` resends it. Implies `didLoad`. */
   private flushFailed = false;
   /** Id of the newest flush; an older one settling late must not decide `flushFailed`. */
   private latestFlush = 0;

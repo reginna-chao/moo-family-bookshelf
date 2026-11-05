@@ -167,6 +167,53 @@ describe("FamilyDataProvider reloadSignal", () => {
     expect(apiClient.getFamilyBookshelf).toHaveBeenCalledTimes(2);
   });
 
+  it("lets only the newest run start the bookshelf and borrow loads when a bump lands mid-members", async () => {
+    const membersOk = {
+      data: { familyId: "fam-1", ownerId: "user-1", members: [] },
+    };
+    const answers: Array<(value: typeof membersOk) => void> = [];
+    const getFamilyMembers = vi.fn(
+      () =>
+        new Promise<typeof membersOk>((resolve) => {
+          answers.push(resolve);
+        }),
+    );
+    const apiClient = createMockApiClient({
+      getFamilyMembers:
+        getFamilyMembers as unknown as ApiClient["getFamilyMembers"],
+    });
+
+    const { rerender } = renderProvider(apiClient, 0);
+    rerender(
+      <FamilyDataProvider
+        familyId="fam-1"
+        userId="user-1"
+        apiClient={apiClient}
+        reloadSignal={1}
+      >
+        <MountCounter />
+        <StateProbe />
+      </FamilyDataProvider>,
+    );
+    expect(getFamilyMembers).toHaveBeenCalledTimes(2);
+
+    // The superseded run's members answer first: that run must stop there.
+    await act(async () => {
+      answers[0]?.(membersOk);
+    });
+    expect(apiClient.getFamilyBookshelf).not.toHaveBeenCalled();
+    expect(apiClient.listBorrowRequests).not.toHaveBeenCalled();
+
+    await act(async () => {
+      answers[1]?.(membersOk);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("bookshelf-state")).toHaveTextContent("ready");
+    });
+    expect(apiClient.getFamilyBookshelf).toHaveBeenCalledTimes(1);
+    expect(apiClient.listBorrowRequests).toHaveBeenCalledTimes(1);
+  });
+
   it("reloads without remounting the mounted children", async () => {
     const apiClient = createMockApiClient();
 
