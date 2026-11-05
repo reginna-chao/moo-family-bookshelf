@@ -294,8 +294,10 @@ describe("FamilyPrefsSync", () => {
           await settle();
 
           expect(mocks[callback].mock.calls.length > 0).toBe(published);
-          // A flush already in flight is not repeated by detach().
+          // A flush already in flight is not repeated by detach(), not even once it fails.
           if (op === "flush") {
+            vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS * 2);
+            await settle();
             expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
           }
         },
@@ -876,24 +878,69 @@ describe("FamilyPrefsSync", () => {
       expect(api.getPersonalBooks).toHaveBeenCalledTimes(getsBeforeDetach);
     });
 
-    // Resending a failed save on close is a separate, later change; the #454
-    // teardown order would allow it, but detach() deliberately does not do it yet.
-    it("does not resend a failed save", async () => {
-      const api = createApi();
+    /** A loaded, attached controller whose first PUT (for `o1:b1`) has failed. */
+    async function afterFailedSave(api: MockApi) {
       api.updateFamilyPrefs.mockResolvedValueOnce(FLUSH_ERROR);
-      const { sync, onSyncFailed } = createSync({ userId: "user-1", api });
+      const mocks = createSync({ userId: "user-1", api });
 
-      await attachAndLoad(sync);
-      sync.toggle("hidden", "o1:b1");
+      await attachAndLoad(mocks.sync);
+      mocks.sync.toggle("hidden", "o1:b1");
       vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
       await settle();
-      expect(onSyncFailed).toHaveBeenLastCalledWith(true);
+      expect(mocks.onSyncFailed).toHaveBeenLastCalledWith(true);
       expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+      return mocks;
+    }
+
+    it("resends a failed save once, carrying the complete current lists", async () => {
+      const api = createApi();
+      const { sync } = await afterFailedSave(api);
 
       sync.detach();
       await settle();
 
-      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(1);
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+      expect(sortedPutBody(api, 1)).toEqual({
+        userId: "user-1",
+        hidden: ["o1:b1"],
+        favorites: [],
+      });
+    });
+
+    it("sends one PUT with the newest lists for a failed save plus a toggle still in the debounce window", async () => {
+      const api = createApi();
+      const { sync } = await afterFailedSave(api);
+      sync.toggle("favorites", "o2:b2");
+
+      sync.detach();
+      await settle();
+
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+      expect(sortedPutBody(api, 1)).toEqual({
+        userId: "user-1",
+        hidden: ["o1:b1"],
+        favorites: ["o2:b2"],
+      });
+
+      // The cancelled timer never fires afterwards.
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS * 2);
+      await settle();
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+    });
+
+    it("neither retries nor publishes when the resend itself fails", async () => {
+      const api = createApi();
+      const { sync, onSyncFailed } = await afterFailedSave(api);
+      api.updateFamilyPrefs.mockResolvedValueOnce(FLUSH_ERROR);
+      onSyncFailed.mockClear();
+
+      sync.detach();
+      await settle();
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS * 2);
+      await settle();
+
+      expect(api.updateFamilyPrefs).toHaveBeenCalledTimes(2);
+      expect(onSyncFailed).not.toHaveBeenCalled();
     });
   });
 });

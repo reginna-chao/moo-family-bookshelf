@@ -63,7 +63,7 @@ export class FamilyPrefsSync {
   private pending: RefsByKind = emptyRefsByKind();
   /** Refs toggled an odd number of times before the first successful load, per kind; replayed as additions. */
   private preLoadDelta: RefsByKind = emptyRefsByKind();
-  /** The latest flush failed and nothing newer was sent; only `load()` resends it. Implies `didLoad`. */
+  /** The latest flush failed and nothing newer was sent; only `load()` and `detach()` resend it. Implies `didLoad`. */
   private flushFailed = false;
   /** Id of the newest flush; an older one settling late must not decide `flushFailed`. */
   private latestFlush = 0;
@@ -76,11 +76,13 @@ export class FamilyPrefsSync {
     this.attached = true;
   }
 
-  /** A toggle still inside the debounce window is flushed now rather than lost — once a
-   *  load has succeeded; before that nothing is safe to send. */
+  /** Sends once, rather than loses, a toggle still inside the debounce window (once a load has succeeded;
+   *  before that nothing is safe to send) or a failed save. A failed resend is only recorded, never retried. */
   detach(): void {
     this.attached = false;
-    if (this.cancelFlushTimer() && this.didLoad) this.sendFlush();
+    const hadPendingToggle = this.cancelFlushTimer();
+    if ((hadPendingToggle && this.didLoad) || this.flushFailed)
+      this.sendFlush();
   }
 
   /** Single GET of the viewer's refs; a rejected or `{ error }` load changes nothing, reports the failure
