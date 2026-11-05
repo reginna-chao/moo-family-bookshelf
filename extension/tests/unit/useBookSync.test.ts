@@ -22,6 +22,12 @@ import { BoolFlag, type ApiClient } from "@/api/client";
  * from a renamed book's old id to its new one, so the rename pairs must belong
  * to the SAME sync as `lastSyncBooks` — never a newer list with an older sync's
  * pairs.
+ *
+ * Pinned when triggered (#457): the hook pins the server before its first await,
+ * since a sync waits on `canAutoSync()` / `recheck()` before it reaches
+ * `syncBooks`. `syncBooks` is mocked here, so these cases only call the
+ * `apiClient` it was handed; `syncBooks.serverPin.test.ts` covers what each
+ * server receives.
  */
 
 // Mock syncBooks module
@@ -32,6 +38,7 @@ vi.mock("@/sync/syncBooks", () => ({
 
 import { useBookSync, type UseBookSyncOptions } from "@/dialog/useBookSync";
 import { syncBooks, canAutoSync } from "@/sync/syncBooks";
+import { SyncServerChangedError } from "@/sync/pinnedSyncApi";
 import {
   AccountCheckProvider,
   type AccountCheck,
@@ -46,11 +53,32 @@ const MATCH_ACCOUNT: AccountCheck = {
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(AccountCheckProvider, { value: MATCH_ACCOUNT }, children);
 
+const SELF_HOSTED = "https://self-hosted.example";
+
 function createMockApiClient(): ApiClient {
   return {
+    getEndpoint: vi.fn().mockReturnValue(SELF_HOSTED),
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn(),
   } as unknown as ApiClient;
+}
+
+/** A mock client whose endpoint the test can move, as setEndpoint would. */
+function createMovableApiClient() {
+  let endpoint = SELF_HOSTED;
+  const apiClient = {
+    getEndpoint: () => endpoint,
+    getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+    updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    listBorrowRequests: vi.fn().mockResolvedValue([]),
+    updateBorrowStatus: vi.fn().mockResolvedValue({}),
+  } as unknown as ApiClient;
+  return {
+    apiClient,
+    moveTo: (url: string) => {
+      endpoint = url;
+    },
+  };
 }
 
 function makeOptions(
@@ -183,11 +211,13 @@ describe("useBookSync", () => {
         expect.objectContaining({
           navigate: true,
           userId: "user-123",
-          apiClient: options.apiClient,
         }),
       );
-      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty(
-        "onProgress",
+      const passed = vi.mocked(syncBooks).mock.calls[0][0];
+      expect(passed).toHaveProperty("onProgress");
+      await passed.apiClient.getPersonalBooks("user-123");
+      expect(options.apiClient.getPersonalBooks).toHaveBeenCalledWith(
+        "user-123",
       );
       expect(result.current.lastSyncBooks).toEqual(mockBooks);
       expect(result.current.autoSyncDone).toBe(true);
@@ -360,11 +390,13 @@ describe("useBookSync", () => {
         expect.objectContaining({
           navigate: true,
           userId: "user-123",
-          apiClient: options.apiClient,
         }),
       );
-      expect(vi.mocked(syncBooks).mock.calls[0][0]).toHaveProperty(
-        "onProgress",
+      const passed = vi.mocked(syncBooks).mock.calls[0][0];
+      expect(passed).toHaveProperty("onProgress");
+      await passed.apiClient.getPersonalBooks("user-123");
+      expect(options.apiClient.getPersonalBooks).toHaveBeenCalledWith(
+        "user-123",
       );
     });
 
@@ -499,6 +531,108 @@ describe("useBookSync", () => {
 
       // Error should be cleared on second success
       expect(result.current.syncError).toBe("");
+    });
+  });
+
+  // #457: see the header → "Pinned when triggered".
+  describe("server pin", () => {
+    const OTHER_SERVER = "https://official.example";
+
+    /** The apiClient handed to syncBooks must refuse, and never reach the client. */
+    async function expectPassedClientRejects(apiClient: ApiClient) {
+      const passed = vi.mocked(syncBooks).mock.calls[0][0].apiClient;
+      await expect(passed.getPersonalBooks("user-123")).rejects.toBeInstanceOf(
+        SyncServerChangedError,
+      );
+      await expect(passed.listBorrowRequests("fam-1")).rejects.toBeInstanceOf(
+        SyncServerChangedError,
+      );
+      expect(apiClient.getPersonalBooks).not.toHaveBeenCalled();
+      expect(apiClient.listBorrowRequests).not.toHaveBeenCalled();
+    }
+
+    function wrapperWith(recheck: AccountCheck["recheck"]) {
+      const account: AccountCheck = { status: "match", recheck };
+      return ({ children }: { children: ReactNode }) =>
+        createElement(AccountCheckProvider, { value: account }, children);
+    }
+
+    it("manual sync stays on the server it was triggered on when the endpoint moves during recheck()", async () => {
+      const { apiClient, moveTo } = createMovableApiClient();
+      const recheck = vi.fn(async () => {
+        moveTo(OTHER_SERVER);
+        return "match" as const;
+      });
+      const { result } = renderHook(
+        () => useBookSync({ userId: "user-123", apiClient }),
+        { wrapper: wrapperWith(recheck) },
+      );
+
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      expect(recheck).toHaveBeenCalledOnce();
+      expect(syncBooks).toHaveBeenCalledOnce();
+      await expectPassedClientRejects(apiClient);
+    });
+
+    it("auto-sync stays on the server it was triggered on when the endpoint moves during canAutoSync()", async () => {
+      const { apiClient, moveTo } = createMovableApiClient();
+      vi.mocked(canAutoSync).mockImplementation(async () => {
+        moveTo(OTHER_SERVER);
+        return true;
+      });
+
+      renderHook(() => useBookSync({ userId: "user-123", apiClient }), {
+        wrapper,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(syncBooks).toHaveBeenCalledOnce();
+      await expectPassedClientRejects(apiClient);
+    });
+
+    it("auto-sync stays on the server it was triggered on when the endpoint moves during recheck()", async () => {
+      const { apiClient, moveTo } = createMovableApiClient();
+      vi.mocked(canAutoSync).mockResolvedValue(true);
+      const recheck = vi.fn(async () => {
+        moveTo(OTHER_SERVER);
+        return "match" as const;
+      });
+
+      renderHook(() => useBookSync({ userId: "user-123", apiClient }), {
+        wrapper: wrapperWith(recheck),
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(recheck).toHaveBeenCalledOnce();
+      expect(syncBooks).toHaveBeenCalledOnce();
+      await expectPassedClientRejects(apiClient);
+    });
+
+    it("a manual sync triggered after the move runs on the new server", async () => {
+      // The stop message tells the user to sync again; that retry must not be stopped too.
+      const { apiClient, moveTo } = createMovableApiClient();
+      const { result } = renderHook(
+        () => useBookSync({ userId: "user-123", apiClient }),
+        { wrapper },
+      );
+
+      moveTo(OTHER_SERVER);
+      await act(async () => {
+        await result.current.triggerManualSync();
+      });
+
+      const passed = vi.mocked(syncBooks).mock.calls[0][0].apiClient;
+      await expect(passed.getPersonalBooks("user-123")).resolves.toEqual({
+        data: null,
+      });
+      expect(apiClient.getPersonalBooks).toHaveBeenCalledWith("user-123");
     });
   });
 

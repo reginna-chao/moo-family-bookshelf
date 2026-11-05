@@ -1,7 +1,7 @@
 /** The steps of `syncBooks` (sync/syncBooks.ts) that write nothing — scrape, borrow-list fetch,
  *  id-change resolution and pruning of the merged list — kept apart so the orchestrator stays short. */
 
-import { ApiClient, BookEntry, BoolFlag, BorrowRequest } from "../api/client";
+import { BookEntry, BoolFlag, BorrowRequest } from "../api/client";
 import { readSyncArchived } from "../storage/syncArchived";
 import {
   scrapeLibrary,
@@ -10,6 +10,7 @@ import {
   type ScrapeResult,
 } from "../content/scraper";
 import { combineScrapeResults } from "../content/scrapeResult";
+import { SyncServerChangedError, type SyncApi } from "./pinnedSyncApi";
 import { pruneRemovedBooks, type PruneResult } from "./pruneBooks";
 import {
   deferRenameCandidates,
@@ -59,15 +60,17 @@ export async function scrapeForSync(
 /**
  * The family's borrow list, fetched ONCE per sync — reused by the id-change
  * resolution (lent books are kept) and the post-upload auto-return. null when
- * the fetch fails: both consumers are then skipped.
+ * the fetch fails: both consumers are then skipped. `SyncServerChangedError` is
+ * not a failed fetch: it propagates and stops the sync.
  */
 export async function fetchBorrowRequestsForSync(
-  apiClient: ApiClient,
+  apiClient: SyncApi,
   familyId: string,
 ): Promise<BorrowRequest[] | null> {
   try {
     return await apiClient.listBorrowRequests(familyId);
   } catch (err) {
+    if (err instanceof SyncServerChangedError) throw err;
     console.warn(
       "[syncBooks] Borrow list unavailable; skipping id-change resolution and auto-return:",
       err,

@@ -2,7 +2,6 @@
 // gets 409 BOOKS_CONFLICT, and the sync redoes the read-dependent steps (#249).
 
 import {
-  ApiClient,
   BookEntry,
   BorrowRequest,
   PersonalBooks,
@@ -20,6 +19,7 @@ import {
 import { autoShareContextFor, autoShareNewBooks } from "./autoShare";
 import { fitScrapeToFieldCaps, warnFieldCapFit } from "./fieldCaps";
 import { mergeBooks } from "./mergeBooks";
+import type { SyncApi } from "./pinnedSyncApi";
 import type { RemovedBook } from "./pruneBooks";
 import type { RenamedBook } from "./renamedBooks";
 import { loadSavedBooksForSync, type LoadSavedResult } from "./savedBooks";
@@ -32,7 +32,7 @@ export const MAX_SYNC_UPLOAD_ATTEMPTS = 3;
 const SYNC_UPLOAD_FAILED_MESSAGE = "同步書單失敗，請稍後再試";
 
 export interface SyncUploadContext {
-  apiClient: ApiClient;
+  apiClient: SyncApi;
   userId: string;
   familyId?: string;
   displayName: string;

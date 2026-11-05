@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ApiClient, BookEntry } from "../api/client";
 import { syncBooks, canAutoSync } from "../sync/syncBooks";
+import { pinSyncApi } from "../sync/pinnedSyncApi";
 import type { RenamedBook } from "../sync/renamedBooks";
 import { formatScrapeProgress } from "../content/scraper";
 import {
@@ -86,6 +87,8 @@ export function useBookSync({
     // Unconfirmed account: never upload without a click this page load.
     if (accountRef.current.status !== "match") return;
     autoSyncTriggered.current = true;
+    // Before any await: the sync stays on the server it was triggered on (#457).
+    const pinnedApi = pinSyncApi(apiClient);
 
     canAutoSync()
       .then(async (allowed) => {
@@ -101,7 +104,7 @@ export function useBookSync({
           const result = await syncBooks({
             navigate: true,
             userId,
-            apiClient,
+            apiClient: pinnedApi,
             familyId: familyIdRef.current,
             onProgress: (page, count) =>
               setProgressMessage(formatScrapeProgress(page, count)),
@@ -138,6 +141,8 @@ export function useBookSync({
 
   // Mechanism B: Manual sync (no rate limiting)
   const triggerManualSync = useCallback(async () => {
+    // Before any await: the sync stays on the server it was triggered on (#457).
+    const pinnedApi = pinSyncApi(apiClient);
     // Cancel the pending done→idle reset: firing mid-sync would re-enable the button, the only
     // guard against a second concurrent syncBooks().
     if (statusTimerRef.current !== null) clearTimeout(statusTimerRef.current);
@@ -157,7 +162,7 @@ export function useBookSync({
     const result = await syncBooks({
       navigate: true,
       userId,
-      apiClient,
+      apiClient: pinnedApi,
       familyId: familyIdRef.current,
       onProgress: (page, count) =>
         setProgressMessage(formatScrapeProgress(page, count)),

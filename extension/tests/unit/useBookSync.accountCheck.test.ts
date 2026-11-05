@@ -38,7 +38,9 @@ import {
 } from "@/dialog/AccountCheckContext";
 import type { AccountIdentity } from "@/content/accountIdentity";
 
-const apiClient = {} as ApiClient;
+const apiClient = {
+  getEndpoint: () => "https://self-hosted.example",
+} as ApiClient;
 
 function accountCheck(
   status: AccountStatus,

@@ -1,7 +1,8 @@
 /** Auto-detect returned books during a sync: an owned LENT book reappearing in the scrape is marked
  *  RETURNED (LENT < `minLentAgeMs` old is skipped). See docs/architecture.md → 書單同步. */
 
-import { ApiClient, BorrowRequest, BorrowStatus } from "../api/client";
+import { BorrowRequest, BorrowStatus } from "../api/client";
+import type { SyncApi } from "./pinnedSyncApi";
 
 const DEFAULT_MIN_LENT_AGE_MS = 30 * 60 * 1000;
 
@@ -34,7 +35,7 @@ export function detectReturnedRequests(
  * so callers can apply the same status change to their local state.
  */
 export async function applyAutoReturns(
-  apiClient: ApiClient,
+  apiClient: Pick<SyncApi, "updateBorrowStatus">,
   requests: BorrowRequest[],
 ): Promise<string[]> {
   const succeeded: string[] = [];
@@ -63,7 +64,7 @@ export async function applyAutoReturns(
  * the successfully-returned requestIds.
  */
 export async function runAutoReturn(
-  apiClient: ApiClient,
+  apiClient: Pick<SyncApi, "updateBorrowStatus">,
   requests: BorrowRequest[],
   ownerId: string,
   scrapedBookIds: Set<string>,

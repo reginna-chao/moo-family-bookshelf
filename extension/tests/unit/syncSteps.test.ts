@@ -15,6 +15,10 @@ import {
 } from "@/sync/syncSteps";
 import { scrapeLibrary, scrapeArchivedBooks } from "@/content/scraper";
 import {
+  SYNC_SERVER_CHANGED_MESSAGE,
+  SyncServerChangedError,
+} from "@/sync/pinnedSyncApi";
+import {
   BoolFlag,
   BorrowStatus,
   type ApiClient,
@@ -146,6 +150,46 @@ describe("fetchBorrowRequestsForSync", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const api = {
       listBorrowRequests: vi.fn().mockRejectedValue(new Error("down")),
+    } as unknown as ApiClient;
+
+    await expect(fetchBorrowRequestsForSync(api, "fam-1")).resolves.toBeNull();
+  });
+
+  it("warns that the list is unavailable when the fetch fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failure = new Error("down");
+    const api = {
+      listBorrowRequests: vi.fn().mockRejectedValue(failure),
+    } as unknown as ApiClient;
+
+    await fetchBorrowRequestsForSync(api, "fam-1");
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Borrow list unavailable"),
+      failure,
+    );
+  });
+
+  // #457: a changed server is not a failed fetch; the sync has to stop.
+  it("lets SyncServerChangedError through instead of returning null, without the warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const changed = new SyncServerChangedError();
+    const api = {
+      listBorrowRequests: vi.fn().mockRejectedValue(changed),
+    } as unknown as ApiClient;
+
+    await expect(fetchBorrowRequestsForSync(api, "fam-1")).rejects.toBe(
+      changed,
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("still returns null for another error carrying the same message", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = {
+      listBorrowRequests: vi
+        .fn()
+        .mockRejectedValue(new Error(SYNC_SERVER_CHANGED_MESSAGE)),
     } as unknown as ApiClient;
 
     await expect(fetchBorrowRequestsForSync(api, "fam-1")).resolves.toBeNull();
