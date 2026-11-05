@@ -11,12 +11,12 @@ import reactHooks from "eslint-plugin-react-hooks";
 // entry — split the file instead. Keys are relative to this directory.
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
-  "src/api/auth-refresh.ts": 331,
-  "src/api/client.ts": 718,
+  "src/api/auth-refresh.ts": 299,
+  "src/api/client.ts": 593,
   "src/content/index.ts": 400,
   "src/content/mobileLayout.ts": 257,
   "src/content/readmoo-lend.ts": 255,
-  "src/dialog/App.tsx": 468,
+  "src/dialog/App.tsx": 466,
   "src/dialog/BorrowTab.tsx": 456,
   "src/dialog/FamilyShelf.tsx": 214,
   "src/dialog/MemberList.tsx": 389,
@@ -26,9 +26,9 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/dialog/PersonalShelf.tsx": 384,
   "src/dialog/PublicShareDialog.tsx": 413,
   "src/dialog/VerificationPrompt.tsx": 205,
-  "src/dialog/onboardingFlow.ts": 402,
+  "src/dialog/onboardingFlow.ts": 387,
   "src/dialog/usePublicShelfActions.ts": 278,
-  "src/dialog/useVerificationPrompt.ts": 303,
+  "src/dialog/useVerificationPrompt.ts": 296,
 };
 
 export default tseslint.config(

@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
 import { clearFamilyStorage } from "../api/auth-refresh";
+import { storageMatches } from "../api/tokenBinding";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag, type ApiClient } from "../api/client";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
+import { STALE_SESSION_CODE, STALE_SESSION_MESSAGE } from "./verificationCodes";
 import {
   isVerificationError,
   useVerificationPrompt,
@@ -29,20 +31,38 @@ export interface UseReauthOptions {
   onSuccess?: () => void;
 }
 
+const STALE_SESSION_RESULT: VerificationAttemptResult = {
+  ok: false,
+  errorCode: STALE_SESSION_CODE,
+  errorMessage: STALE_SESSION_MESSAGE,
+};
+
 /** Re-join with the secret, flagged `recovery` (409 RECOVERY_NOT_MEMBER for a user no longer listed).
- *  Success persists and primes the token; failure returns the code for the prompt. */
+ *  Success persists and primes the token; failure returns the code for the prompt. `server` is where
+ *  the prompt opened: no secret leaves once the client has moved off it. */
 async function runReauthJoin(
   apiClient: ApiClient,
+  server: string,
   familyId: string,
   userId: string,
   displayName: string,
   verifySecret: string,
   onSuccess?: () => void,
 ): Promise<VerificationAttemptResult> {
+  if (apiClient.getEndpoint() !== server) return STALE_SESSION_RESULT;
   const res = await apiClient.joinFamily(familyId, userId, displayName, {
     verifySecret,
     recovery: BoolFlag.TRUE,
   });
+  // Before the response is read: a late token must not bind to the client's new server, and another
+  // tab's binding is neither overwritten nor torn down; the read comes first so a switch during it
+  // is caught too. docs/architecture.md → 重新驗證視窗.
+  if (
+    !(await storageMatches(server, familyId)) ||
+    apiClient.getEndpoint() !== server
+  ) {
+    return STALE_SESSION_RESULT;
+  }
   if (res.error) {
     return {
       ok: false,
@@ -105,6 +125,7 @@ export function useReauth(
 
   useEffect(() => {
     apiClient.onReauthRequired = (info) => {
+      const server = apiClient.getEndpoint();
       void (async () => {
         const stored = await safeStorageGet([
           USER_ID_KEY,
@@ -132,6 +153,7 @@ export function useReauth(
             retry: (verifySecret) =>
               runReauthJoin(
                 apiClient,
+                server,
                 familyId,
                 userId,
                 displayName,

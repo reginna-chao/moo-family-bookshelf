@@ -1,5 +1,7 @@
+import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { webcrypto } from "node:crypto";
+import browser from "webextension-polyfill";
 
 /**
  * Onboarding flow primitives in `src/dialog/onboardingFlow.ts`: performJoin,
@@ -10,10 +12,15 @@ import { webcrypto } from "node:crypto";
  *
  * `@host` adoption: pasting an `@host` sync code IS an explicit choice of that
  * endpoint, so the join path persists it through the same helper the Settings
- * confirmation uses: a DIRECT storage.local write (authoritative — a sleeping
- * Firefox background page can drop the message) plus a best-effort
- * SET_API_ENDPOINT message. It also clears any stale "declined family endpoint"
- * marker.
+ * confirmation uses: a DIRECT storage.local write. It also clears any stale
+ * "declined family endpoint" marker.
+ *
+ * `@host` adoption and the old token (#456): adopting another server removes the
+ * stored token first, because the join response may issue none, and a token left in
+ * place would then stay paired with the new endpoint for good. A storage failure
+ * makes performJoin throw before any credential is written, so a new token cannot
+ * end up paired with the old endpoint either. These cases run against the store from
+ * `tests/setup.ts` rather than the no-op writes the other suites install.
  *
  * An `@host` the endpoint validator refuses: a sync code's `@host` is
  * attacker-supplied text — whoever shares the code chooses where the joiner's
@@ -108,6 +115,7 @@ import {
   createNewFamily,
   CreateFamilyError,
 } from "@/dialog/onboardingFlow";
+import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
 import { decodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { validateEndpointUrl } from "@/api/client";
 import { REMOVED_JOIN_TEXT } from "moo-family-bookshelf-shared/unkick/messages";
@@ -122,6 +130,13 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   USER_ID_KEY,
 } from "@/constants";
+
+/** The store's own methods, taken before any suite below swaps in its no-op writes. */
+const storeSet = vi.mocked(chrome.storage.local.set).getMockImplementation()!;
+const storeGet = vi.mocked(chrome.storage.local.get).getMockImplementation()!;
+const storeRemove = vi
+  .mocked(chrome.storage.local.remove)
+  .getMockImplementation()!;
 
 function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   // Mirrors the real client: setEndpoint is what getEndpoint reports back, so
@@ -543,7 +558,7 @@ describe("performJoin", () => {
 
   // An `@host` code is an explicit choice: persisted by direct write + best-effort
   // message, declined marker cleared. See the header → "`@host` adoption".
-  it("adopts, persists, and broadcasts the endpoint when decoded.apiHost is set", async () => {
+  it("adopts and persists the endpoint when decoded.apiHost is set", async () => {
     vi.mocked(decodeSyncCode).mockReturnValue({
       familyId: "fam-join-1",
       apiHost: "https://custom.example.com",
@@ -568,15 +583,9 @@ describe("performJoin", () => {
     expect(chrome.storage.local.remove).toHaveBeenCalledWith([
       DECLINED_FAMILY_ENDPOINT_KEY,
     ]);
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: "https://custom.example.com",
-      }),
-    );
   });
 
-  it("leaves the endpoint alone when the sync code carries no @host", async () => {
+  it("pairs the token with the client's own server when the sync code carries no @host", async () => {
     vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
 
     const apiClient = createMockApiClient();
@@ -589,11 +598,17 @@ describe("performJoin", () => {
     });
 
     expect(apiClient.setEndpoint).not.toHaveBeenCalled();
-    expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
-      expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
+    const set = vi.mocked(chrome.storage.local.set);
+    const remove = vi.mocked(chrome.storage.local.remove);
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        [API_ENDPOINT_KEY]: DEFAULT_API_ENDPOINT,
+        [AUTH_TOKEN_KEY]: "tok",
+      }),
     );
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_API_ENDPOINT" }),
+    expect(remove).toHaveBeenCalledWith([API_ENDPOINT_KEY]);
+    expect(set.mock.invocationCallOrder[0]).toBeLessThan(
+      remove.mock.invocationCallOrder[0],
     );
   });
 
@@ -767,12 +782,6 @@ describe("performJoin", () => {
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [API_ENDPOINT_KEY]: "https://custom.example.com/api",
       });
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: "https://custom.example.com/api",
-        }),
-      );
     });
   });
 
@@ -820,9 +829,6 @@ describe("performJoin", () => {
         expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
           DECLINED_FAMILY_ENDPOINT_KEY,
         ]);
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-          expect.objectContaining({ type: "SET_API_ENDPOINT" }),
-        );
       },
     );
 
@@ -1369,5 +1375,220 @@ describe("createNewFamily — refused by the backend", () => {
     );
     expect((thrown as CreateFamilyError).code).toBe("VERIFICATION_LOCKED");
     expect((thrown as CreateFamilyError).retryAfter).toBe(120);
+  });
+});
+
+// See the header → "`@host` adoption and the old token". Runs last: it swaps the store back in.
+describe("performJoin and the token from the previous server", () => {
+  const OLD_ENDPOINT = "https://old.example.com";
+  const HOST_ENDPOINT = "https://custom.example.com";
+  const OLD_TOKEN = "a".repeat(64);
+  const ISSUED_TOKEN = "b".repeat(64);
+
+  const local = vi.mocked(chrome.storage.local);
+
+  async function storedRecord(): Promise<Record<string, unknown>> {
+    return (await browser.storage.local.get(null)) as Record<string, unknown>;
+  }
+
+  async function seedOldSession(): Promise<void> {
+    await browser.storage.local.set({
+      [API_ENDPOINT_KEY]: OLD_ENDPOINT,
+      [AUTH_TOKEN_KEY]: OLD_TOKEN,
+      [TOKEN_EXPIRES_AT_KEY]: 123,
+    });
+    local.set.mockClear();
+    local.remove.mockClear();
+  }
+
+  function join(apiClient: ApiClient) {
+    return performJoin({
+      syncCodeInput: `moo-fam-join-1@${HOST_ENDPOINT}`,
+      userId: "user-x",
+      displayName: "Name",
+      apiClient,
+    });
+  }
+
+  function clientAnswering(data: Record<string, unknown>): ApiClient {
+    const apiClient = createMockApiClient({
+      joinFamily: vi.fn().mockResolvedValue({ data }),
+    });
+    apiClient.setEndpoint(OLD_ENDPOINT);
+    return apiClient;
+  }
+
+  beforeEach(async () => {
+    local.set.mockImplementation(storeSet);
+    local.get.mockImplementation(storeGet);
+    local.remove.mockImplementation(storeRemove);
+    await browser.storage.local.clear();
+    vi.clearAllMocks();
+    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+    vi.mocked(decodeSyncCode).mockReturnValue({
+      familyId: "fam-join-1",
+      apiHost: HOST_ENDPOINT,
+    });
+  });
+
+  afterEach(async () => {
+    local.set.mockImplementation(storeSet);
+    local.remove.mockImplementation(storeRemove);
+    await browser.storage.local.clear();
+  });
+
+  it("leaves no old token behind when the response issues none", async () => {
+    await seedOldSession();
+
+    const result = await join(clientAnswering({}));
+
+    expect(result.ok).toBe(true);
+    const stored = await storedRecord();
+    expect(stored[AUTH_TOKEN_KEY]).toBeUndefined();
+    expect(stored[TOKEN_EXPIRES_AT_KEY]).toBeUndefined();
+    expect(stored[API_ENDPOINT_KEY]).toBe(HOST_ENDPOINT);
+    expect(stored[FAMILY_ID_KEY]).toBe("fam-join-1");
+  });
+
+  it("stores the token the new server issued, paired with its endpoint", async () => {
+    await seedOldSession();
+
+    await join(
+      clientAnswering({ authToken: ISSUED_TOKEN, expiresAt: 9999999999 }),
+    );
+
+    const stored = await storedRecord();
+    expect(stored[AUTH_TOKEN_KEY]).toBe(ISSUED_TOKEN);
+    expect(stored[TOKEN_EXPIRES_AT_KEY]).toBe(9999999999);
+    expect(stored[API_ENDPOINT_KEY]).toBe(HOST_ENDPOINT);
+  });
+
+  it("leaves the stored token alone when the sync code carries no @host", async () => {
+    await seedOldSession();
+    vi.mocked(decodeSyncCode).mockReturnValue({ familyId: "fam-join-1" });
+
+    await join(clientAnswering({}));
+
+    const stored = await storedRecord();
+    expect(stored[AUTH_TOKEN_KEY]).toBe(OLD_TOKEN);
+    expect(stored[API_ENDPOINT_KEY]).toBe(OLD_ENDPOINT);
+  });
+
+  const STORAGE_FAILURES = [
+    {
+      name: "the old token cannot be removed",
+      arm: () =>
+        local.remove.mockRejectedValueOnce(new Error("storage unavailable")),
+      tokenAfter: OLD_TOKEN,
+    },
+    {
+      name: "the endpoint cannot be written",
+      arm: () =>
+        local.set.mockRejectedValueOnce(new Error("storage unavailable")),
+      tokenAfter: undefined,
+    },
+  ];
+
+  it.each(STORAGE_FAILURES)(
+    "throws with no token or family written when $name",
+    async ({ arm, tokenAfter }) => {
+      await seedOldSession();
+      const apiClient = clientAnswering({
+        authToken: ISSUED_TOKEN,
+        expiresAt: 9999999999,
+      });
+      arm();
+
+      await expect(join(apiClient)).rejects.toThrow("storage unavailable");
+
+      const stored = await storedRecord();
+      expect(stored[AUTH_TOKEN_KEY]).toBe(tokenAfter);
+      expect(stored[FAMILY_ID_KEY]).toBeUndefined();
+      expect(stored[USER_ID_KEY]).toBeUndefined();
+      expect(stored[API_ENDPOINT_KEY]).toBe(OLD_ENDPOINT);
+      expect(apiClient.setAuthToken).not.toHaveBeenCalled();
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  // The real performJoin under the real prompt: its throw lands in useVerificationPrompt's catch.
+  describe("on the retry that carries the verification secret", () => {
+    function clientChallenging(): ApiClient {
+      const apiClient = createMockApiClient({
+        lookupUser: vi.fn().mockResolvedValue({
+          data: { existingFamilyId: null, memberCount: 0 },
+        }),
+        getVerifyMethod: vi
+          .fn()
+          .mockResolvedValue({ data: { method: "pin", prompted: 0 } }),
+        joinFamily: vi
+          .fn()
+          .mockResolvedValueOnce({
+            error: { code: "VERIFICATION_REQUIRED", message: "x" },
+          })
+          .mockResolvedValue({
+            data: { authToken: ISSUED_TOKEN, expiresAt: 9999999999 },
+          }),
+      });
+      apiClient.setEndpoint(OLD_ENDPOINT);
+      return apiClient;
+    }
+
+    async function reachPrompt(apiClient: ApiClient) {
+      const autoSetup = {
+        phase: "idle",
+        phaseMessage: "",
+        errorMessage: "",
+        scrapeProfile: vi.fn().mockResolvedValue({
+          email: "user@example.com",
+          displayName: "User",
+        }),
+        syncBooks: vi.fn().mockResolvedValue(true),
+        reset: vi.fn(),
+      } as unknown as ReturnType<typeof useAutoSetup>;
+      const onFamilyJoined = vi.fn();
+      const { result } = renderHook(() =>
+        useOnboardingFlow({ apiClient, onFamilyJoined, autoSetup }),
+      );
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      act(() => {
+        result.current.setSyncCodeInput(`moo-fam-join-1@${HOST_ENDPOINT}`);
+      });
+      await act(async () => {
+        await result.current.handleJoin();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+      return { result, onFamilyJoined };
+    }
+
+    it.each(STORAGE_FAILURES)(
+      "keeps the prompt with the generic error when $name, storing no endpoint",
+      async ({ arm }) => {
+        await seedOldSession();
+        const apiClient = clientChallenging();
+        const { result, onFamilyJoined } = await reachPrompt(apiClient);
+        arm();
+
+        await act(async () => {
+          await result.current.verify.submit("123456");
+        });
+
+        expect(result.current.state).toBe("verify-prompt");
+        expect(result.current.verify.active).toBe(true);
+        expect(result.current.verify.error).toBe("發生錯誤，請稍後再試");
+        expect(onFamilyJoined).not.toHaveBeenCalled();
+        const stored = await storedRecord();
+        expect(stored[API_ENDPOINT_KEY]).toBe(OLD_ENDPOINT);
+        expect(stored[FAMILY_ID_KEY]).toBeUndefined();
+
+        // Walking away hands the in-memory `@host` back too.
+        act(() => {
+          result.current.verify.cancel();
+        });
+        expect(apiClient.getEndpoint()).toBe(OLD_ENDPOINT);
+      },
+    );
   });
 });

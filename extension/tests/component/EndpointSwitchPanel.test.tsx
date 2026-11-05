@@ -289,4 +289,61 @@ describe("EndpointSwitchPanel", () => {
       expect(screen.queryByText("暫不切換")).not.toBeInTheDocument();
     });
   });
+
+  /** The client switched but a storage step failed: a reload returns to the old server after an early
+   *  failure and stays on the new one after a later one, so the user has to be told. */
+  describe("saveFailed notice", () => {
+    it("states the failure and announces it", () => {
+      renderPanel({ saveFailed: true });
+
+      const notice = screen.getByTestId("endpoint-switch-save-error");
+      expect(notice).toHaveAttribute("role", "alert");
+      expect(
+        screen.getByText("無法儲存切換結果，請重新整理頁面。"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-error"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("fires only onDismissConfirmError for 知道了", () => {
+      const { onConfirm, onDecline, onDismissConfirmError } = renderPanel({
+        saveFailed: true,
+      });
+
+      fireEvent.click(screen.getByText("知道了"));
+
+      expect(onDismissConfirmError).toHaveBeenCalledTimes(1);
+      expect(onConfirm).not.toHaveBeenCalled();
+      expect(onDecline).not.toHaveBeenCalled();
+    });
+
+    it("yields to confirmError when both are set", () => {
+      renderPanel({ confirmError: true, saveFailed: true });
+
+      expect(screen.getByTestId("endpoint-switch-error")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-save-error"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("takes precedence over a still-pending question", () => {
+      renderPanel({ pending: customSwitch, saveFailed: true });
+
+      expect(
+        screen.getByTestId("endpoint-switch-save-error"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      expect(screen.queryByText("確認切換")).not.toBeInTheDocument();
+    });
+
+    it("stays away when the prop is left out", () => {
+      renderPanel({ pending: customSwitch });
+
+      expect(
+        screen.queryByTestId("endpoint-switch-save-error"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("endpoint-switch")).toBeInTheDocument();
+    });
+  });
 });

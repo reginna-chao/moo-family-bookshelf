@@ -3,14 +3,14 @@ import browser from "webextension-polyfill";
 import { Inbox, Library, BookOpen, Settings } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
 import {
+  API_ENDPOINT_KEY,
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   HAS_COMPLETED_INITIAL_SETUP_KEY,
 } from "../constants";
 import { readFamilyId } from "../storage/familyId";
-import { readStoredApiEndpoint } from "../storage/familyEndpointChoice";
 import { safeStorageGet } from "../storage/safeStorage";
-import { applyStoredEndpoint } from "./applyStoredEndpoint";
+import { applyStoredSession } from "./applyStoredSession";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
 import { unmountFamilyTreeThenResetClient } from "./familyTreeTeardown";
 import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
@@ -116,19 +116,17 @@ export function App({
     const identityCheck = new AbortController();
     void (async () => {
       try {
-        const [familyId, storageResult, storedEndpoint] = await Promise.all([
+        const [familyId, storageResult] = await Promise.all([
           readFamilyId(),
-          browser.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]),
-          readStoredApiEndpoint(),
+          browser.storage.local.get([
+            USER_ID_KEY,
+            AUTH_TOKEN_KEY,
+            API_ENDPOINT_KEY,
+          ]),
         ]);
         if (cancelled || bootSupersededRef.current) return;
 
-        applyStoredEndpoint(apiClientRef.current, storedEndpoint);
-        if (storageResult[AUTH_TOKEN_KEY]) {
-          apiClientRef.current.setAuthToken(
-            storageResult[AUTH_TOKEN_KEY] as string,
-          );
-        }
+        applyStoredSession(apiClientRef.current, storageResult);
         if (familyId && storageResult[USER_ID_KEY]) {
           // Stays "loading" until the page's Readmoo account is checked (#271).
           const storedUserId = storageResult[USER_ID_KEY] as string;

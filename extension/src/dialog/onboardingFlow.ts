@@ -8,7 +8,7 @@ import {
   encodeSyncCode,
 } from "moo-family-bookshelf-shared/crypto/syncCode";
 import { DEFAULT_API_ENDPOINT, FAMILY_ID_KEY } from "../constants";
-import { persistAcceptedFamilyEndpoint } from "../storage/familyEndpointChoice";
+import { persistSwitchedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { removedJoinText } from "moo-family-bookshelf-shared/unkick/messages";
 import type { useAutoSetup } from "./useAutoSetup";
@@ -17,6 +17,7 @@ import { persistJoinCredentials } from "./persistJoinCredentials";
 
 // Re-exported so existing `./onboardingFlow` importers keep working.
 export { migratePersonalBooksCache };
+export { restoreApiEndpoint } from "./restoreApiEndpoint";
 
 export interface RecoveryResult {
   recovered: boolean;
@@ -71,6 +72,7 @@ export async function tryAutoRecovery(opts: {
     familyId: opts.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
+    endpoint: opts.apiClient.getEndpoint(),
   });
   // Overwrite stale familyId in sync storage so background reads stay consistent
   try {
@@ -142,6 +144,7 @@ export async function performSoloRecovery(opts: {
     familyId: opts.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
+    endpoint: opts.apiClient.getEndpoint(),
   });
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
@@ -238,6 +241,7 @@ export async function createNewFamily(opts: {
     familyId,
     authToken: data.authToken,
     expiresAt: data.expiresAt,
+    endpoint: opts.apiClient.getEndpoint(),
   });
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: familyId });
@@ -274,26 +278,6 @@ export interface PerformJoinFailure {
 }
 
 export type PerformJoinResult = PerformJoinSuccess | PerformJoinFailure;
-
-/**
- * Put the client back on `endpoint` after a join attempt ended without a join.
- *
- * Storage is deliberately untouched: performJoin persists a sync code's `@host`
- * only once the backend has accepted the join, so an abandoned attempt has
- * nothing durable to undo — only the in-memory client to hand back.
- */
-export function restoreApiEndpoint(
-  apiClient: ApiClient,
-  endpoint: string,
-): void {
-  try {
-    apiClient.setEndpoint(endpoint);
-  } catch (err) {
-    // Already validated (from getEndpoint()), but guarded: on an error path a throw would replace
-    // the failure the caller is reporting.
-    console.warn("[Onboarding] Failed to restore previous API endpoint", err);
-  }
-}
 
 /**
  * Decode a sync code, join the family on the backend, and persist the
@@ -370,7 +354,7 @@ export async function performJoin(opts: {
   // Joined: only now does the endpoint stick, via the confirm path's helper (direct storage.local
   // write; clears a stale decline). See docs/architecture.md → 同步碼位址的驗證與揭露.
   if (adoptedEndpoint !== null) {
-    await persistAcceptedFamilyEndpoint(adoptedEndpoint);
+    await persistSwitchedFamilyEndpoint(adoptedEndpoint);
   }
 
   const joinData = response.data;
@@ -386,6 +370,7 @@ export async function performJoin(opts: {
     familyId: decoded.familyId,
     authToken: joinData?.authToken,
     expiresAt: joinData?.expiresAt,
+    endpoint: opts.apiClient.getEndpoint(),
   });
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: decoded.familyId });
