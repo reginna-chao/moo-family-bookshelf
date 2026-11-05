@@ -94,7 +94,7 @@ const BINDING_BY_LIMIT: ReadonlyMap<number, RateLimitBindingName> = new Map([
   [60, "RATE_LIMIT_60_PER_MIN"],
   // 30/min — per-userId `bookshelf`, `borrow-update`
   [30, "RATE_LIMIT_30_PER_MIN"],
-  // 10/min — per-IP public tier, per-userId `borrow-create`
+  // 10/min — per-IP public tier, per-userId `borrow-create`, `verify-burst`, `verify-stepup-burst`
   [10, "RATE_LIMIT_10_PER_MIN"],
   // 3/min — per-IP sensitive tier, BOTH buckets (onboarding + lookup)
   [3, "RATE_LIMIT_3_PER_MIN"],
@@ -124,7 +124,8 @@ function bindingNameForWindow(
  *    tier's number was changed without adding its binding.
  *
  * Never throws: a missing binding must degrade to the KV counter, not 500 the
- * request.
+ * request. The one caller with no KV counter is {@link checkPerUserBurstLimit},
+ * which reads null as "not limited".
  */
 export function bindingForWindow(
   env: Env,
@@ -136,7 +137,7 @@ export function bindingForWindow(
   return env[name] ?? null;
 }
 
-/** Log `RATE_LIMIT_BINDING_MISSING` once per CHECK when a per-minute limit lands on KV (binding missing or
+/** Log `RATE_LIMIT_BINDING_MISSING` once per CHECK when a per-minute limit has no binding (missing or
  *  unmapped); hourly scopes stay silent. .claude/rules/backend.md → API Design (`bindingForWindow` null). */
 function warnMissingRateLimitBinding(max: number, windowSec: number): void {
   // Hourly is KV by design (silent); an unmapped 60s limit is a config mistake and must be as loud
@@ -430,6 +431,18 @@ export interface PerUserRateLimitReading {
   windowSec: number;
 }
 
+/** KV key and bucket index of the window `now` falls in: `ratelimit:user:{scope}:{userId}:{bucket}`. */
+function perUserWindowKey(
+  opts: { userId: string; scope: string; windowSec: number },
+  now: number,
+): { key: string; bucket: number } {
+  const bucket = Math.floor(now / (opts.windowSec * 1000));
+  return {
+    key: `${PER_USER_RATE_LIMIT_KEY_PREFIX}:${opts.scope}:${opts.userId}:${bucket}`,
+    bucket,
+  };
+}
+
 /**
  * Read a per-userId counter WITHOUT charging it, KV-only (no Hono `Context`).
  *
@@ -449,8 +462,7 @@ export async function peekPerUserRateLimit(
 ): Promise<PerUserRateLimitReading> {
   const windowMs = opts.windowSec * 1000;
   const now = Date.now();
-  const bucket = Math.floor(now / windowMs);
-  const key = `${PER_USER_RATE_LIMIT_KEY_PREFIX}:${opts.scope}:${opts.userId}:${bucket}`;
+  const { key, bucket } = perUserWindowKey(opts, now);
 
   const current = await kv.get(key);
   const count = current ? parseInt(current, 10) : 0;
@@ -478,18 +490,17 @@ export async function peekPerUserRateLimit(
  * future window under 30s would derive a TTL real KV rejects, turning an
  * admitted request into a 500 — and inside `chargeWrongGuess`'s `Promise.all`
  * (`services/verification.ts`) that throw would silently stop the verification
- * attempt ceiling from counting.
+ * attempt budgets from counting.
  *
  * Known limitation: KV get-then-put is not atomic, and the read happened in
  * {@link peekPerUserRateLimit}. Requests fired in parallel all observe the same
  * pre-write count, so a burst can exceed `max` by as much as the caller's own
  * concurrency — there is no fixed overshoot factor. This applies to every
- * counter still on KV: the hourly scopes (`verify`, `verify-write`,
- * `verify-set`, `put-books`, `family-prefs`, `new-book-default`,
- * `family-write`, `public-shelf`), the
- * verification attempt ceiling in `services/verification.ts`, and the
- * missing-binding fallback in {@link chargeIpCounterInKv}. The per-minute
- * scopes normally bypass this path entirely — see {@link bindingForWindow}.
+ * counter still on KV: the hourly scopes (`verify`, `verify-stepup`,
+ * `verify-write`, `verify-set`, `put-books`, `family-prefs`,
+ * `new-book-default`, `family-write`, `public-shelf`) and the missing-binding
+ * fallback in {@link chargeIpCounterInKv}. The per-minute scopes normally
+ * bypass this path entirely — see {@link bindingForWindow}.
  */
 export async function chargePerUserRateLimit(
   kv: KVNamespace,
@@ -498,6 +509,21 @@ export async function chargePerUserRateLimit(
   await kv.put(reading.key, String(reading.count + 1), {
     expirationTtl: Math.max(KV_MIN_TTL_SECONDS, reading.windowSec * 2),
   });
+}
+
+/**
+ * Delete the current window's counter of a per-userId scope, without reading it.
+ * Earlier windows expire on their own TTL.
+ *
+ * Side effect: deletes `ratelimit:user:{scope}:{userId}:{bucket}`. A KV failure
+ * propagates; the caller decides whether it may fail open.
+ */
+export async function deletePerUserRateLimitWindow(
+  kv: KVNamespace,
+  opts: { userId: string; scope: string; windowSec: number },
+): Promise<void> {
+  const { key } = perUserWindowKey(opts, Date.now());
+  await kv.delete(key);
 }
 
 /**
@@ -569,4 +595,47 @@ export async function enforcePerUserRateLimit(
   return jsonError(c, 429, "RATE_LIMITED", RATE_LIMITED_MESSAGE, {
     retryAfter: verdict.retryAfter,
   });
+}
+
+/**
+ * Per-minute per-userId check on the native binding ONLY — never KV, so it can
+ * neither fail on a KV write nor add a KV operation to the caller's request.
+ *
+ * Unlike {@link enforcePerUserRateLimit} it has no KV fallback: a get-then-put
+ * counter would not hold back parallel requests, which is this check's one job.
+ * Used by the verification gate (`validateVerification`), which has its own hourly
+ * budget on KV to stand behind it.
+ *
+ * - `DEV_MODE` ⇒ not limited.
+ * - No binding ⇒ logs `RATE_LIMIT_BINDING_MISSING`, not limited.
+ * - Binding throws ⇒ logs the event name only (the error may echo the key, which
+ *   carries the userId, #357), not limited.
+ * - Refused ⇒ `retryAfter` = the window, since the binding exposes no reset time.
+ *
+ * Same semantics as every binding path (per location, permissive): not a hard
+ * bound. See .claude/rules/backend.md → API Design.
+ */
+export async function checkPerUserBurstLimit(
+  env: Env,
+  opts: PerUserRateLimitOptions,
+): Promise<PerUserRateLimitVerdict> {
+  if (isDevMode(env)) return { limited: false };
+
+  const binding = bindingForWindow(env, opts.max, opts.windowSec);
+  if (!binding) {
+    warnMissingRateLimitBinding(opts.max, opts.windowSec);
+    return { limited: false };
+  }
+
+  try {
+    const { success } = await binding.limit({
+      key: `${PER_USER_RATE_LIMIT_KEY_PREFIX}:${opts.scope}:${opts.userId}`,
+    });
+    return success
+      ? { limited: false }
+      : { limited: true, retryAfter: opts.windowSec };
+  } catch {
+    console.error("PER_USER_BURST_CHECK_FAILED");
+    return { limited: false };
+  }
 }

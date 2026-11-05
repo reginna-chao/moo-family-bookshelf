@@ -14,11 +14,12 @@ import {
 import { VERIFY_SECRET_MAX_LENGTH } from "../utils/validation";
 import {
   chargePerUserRateLimit,
+  checkPerUserBurstLimit,
+  deletePerUserRateLimitWindow,
   getCallerIp,
   peekPerUserRateLimit,
   RATE_LIMITED_MESSAGE,
   type PerUserRateLimitReading,
-  type PerUserRateLimitVerdict,
 } from "../middleware/rateLimit";
 import { jsonError, type ErrorBody } from "../utils/errors";
 import { putVerifyRecord } from "../kv/verify";
@@ -46,8 +47,8 @@ function lockoutRetryAfterSeconds(lockedUntil: number): number {
 /** Error descriptor returned by {@link validateVerification} on failure. */
 export type VerificationError =
   | {
-      /** `VERIFICATION_LOCKED`: this caller burned its failure budget. `RATE_LIMITED`: a WRONG guess with the account's
-       *  ceiling spent — same shape as the rate-limit middleware's 429; never a correct secret. */
+      /** `VERIFICATION_LOCKED`: this caller burned its failure budget. `RATE_LIMITED`: the account's per-minute limit or
+       *  hourly budget is spent, whatever the secret — same shape as the rate-limit middleware's 429. */
       code: "VERIFICATION_LOCKED" | "RATE_LIMITED";
       message: string;
       status: 429;
@@ -78,6 +79,16 @@ export const VERIFICATION_REQUIRED_ERROR: VerificationError = {
   message: "此帳號需要驗證才能登入",
   status: 403,
 };
+
+/** The 429 of a spent per-minute limit or hourly budget, identical for a correct and a wrong secret. */
+function attemptLimitError(retryAfter: number): VerificationError {
+  return {
+    code: "RATE_LIMITED",
+    message: RATE_LIMITED_MESSAGE,
+    status: 429,
+    retryAfter,
+  };
+}
 
 /** The 503 for a record whose hash scheme this Worker cannot check (see {@link unverifiableHashReason}). */
 const VERIFY_UNAVAILABLE_ERROR: VerificationError = {
@@ -157,7 +168,7 @@ export function verifySecretFormatResponse(
  *
  * NOT an exact inverse of {@link validateVerification}'s pass-through set:
  * that function ALSO passes through a corrupted pin/pattern record (`method`
- * says pin/pattern but `hash`/`salt` are null — see {@link matchesSecret}),
+ * says pin/pattern but `hash`/`salt` are null — see {@link isCorruptedSecretRecord}),
  * which this probe reports as "configured". The mismatch is deliberate and
  * errs closed: such an account is asked for a secret it can never fail, one
  * extra round-trip, instead of having its membership disclosed unprompted.
@@ -201,7 +212,13 @@ async function hashForRecord(
   return hashSecretWithPepper(pepper, salt, secret);
 }
 
-/** Compare a secret with the verify record; `null` = corrupted pin/pattern (no hash/salt) ⇒ "not configured".
+/** A pin/pattern record with no hash or salt: nothing to compare against, so the gate treats it as "not configured". */
+function isCorruptedSecretRecord(record: VerifyRecord): boolean {
+  if (record.method !== "pin" && record.method !== "pattern") return false;
+  return !record.hash || !record.salt;
+}
+
+/** Compare a secret with the verify record. A corrupted record never matches: the gate passed it earlier.
  *  `consumeOtp` decides whether a `code` match deletes the OTP; read-only checks pass `false`. */
 async function matchesSecret(
   kv: KVNamespace,
@@ -209,9 +226,9 @@ async function matchesSecret(
   record: VerifyRecord,
   secret: string,
   opts: { consumeOtp: boolean; pepper: string | null },
-): Promise<boolean | null> {
+): Promise<boolean> {
   if (record.method === "pin" || record.method === "pattern") {
-    if (!record.hash || !record.salt) return null;
+    if (!record.hash || !record.salt) return false;
     const inputHash = await hashForRecord(
       record,
       record.salt,
@@ -276,53 +293,102 @@ function isFailStreakVoid(
   return failRecord.startedAt < verifyRecord.secretUpdatedAt;
 }
 
-/** Counter scope for the per-userId verification attempt ceiling. */
+/** Counter scope of the login attempt budget (lookup / create / join). */
 export const VERIFY_ATTEMPT_SCOPE = "verify";
-/** Max FAILED verification attempts per target userId per window, all callers summed. */
+/** Counter scope of the current-secret attempt budget ({@link enforceCurrentSecret}). */
+export const VERIFY_STEP_UP_ATTEMPT_SCOPE = "verify-stepup";
+/** Binding key scope of the login per-minute limit; never written to KV. */
+export const VERIFY_BURST_SCOPE = "verify-burst";
+/** Binding key scope of the current-secret per-minute limit; never written to KV. */
+export const VERIFY_STEP_UP_BURST_SCOPE = "verify-stepup-burst";
+/** Wrong guesses per target userId per window, all callers summed, for EACH hourly budget. Once spent, every secret is refused. */
 export const VERIFY_ATTEMPT_MAX = 10;
 /** Window for {@link VERIFY_ATTEMPT_MAX}: 1 hour, in seconds. */
 export const VERIFY_ATTEMPT_WINDOW_SECONDS = 3600;
+/** Secret-bearing requests per target userId per window, right or wrong; served by `RATE_LIMIT_10_PER_MIN`. */
+export const VERIFY_BURST_MAX = 10;
+/** Window for {@link VERIFY_BURST_MAX}: 1 minute, in seconds. */
+export const VERIFY_BURST_WINDOW_SECONDS = 60;
 
-/** Read the account's attempt ceiling without charging (`null` under DEV_MODE) via the shared `peekPerUserRateLimit`.
- *  Only {@link chargeWrongGuess} calls it, AFTER a wrong comparison: docs/architecture.md → 安全措施. */
+/** The hourly budget and per-minute limit a gate call is measured against. */
+interface VerifyAttemptBudget {
+  ceilingScope: string;
+  burstScope: string;
+}
+
+const LOGIN_ATTEMPT_BUDGET: VerifyAttemptBudget = {
+  ceilingScope: VERIFY_ATTEMPT_SCOPE,
+  burstScope: VERIFY_BURST_SCOPE,
+};
+
+const STEP_UP_ATTEMPT_BUDGET: VerifyAttemptBudget = {
+  ceilingScope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+  burstScope: VERIFY_STEP_UP_BURST_SCOPE,
+};
+
+/** Read one hourly attempt budget without charging (`null` under DEV_MODE). The gate reads it BEFORE comparing,
+ *  and {@link chargeWrongGuess} reuses this reading: docs/architecture.md → 安全措施. */
 async function peekAttemptCeiling(
   env: Env,
   userId: string,
+  scope: string,
 ): Promise<PerUserRateLimitReading | null> {
   if (isDevMode(env)) return null;
 
   return peekPerUserRateLimit(env.KV, {
     userId,
-    scope: VERIFY_ATTEMPT_SCOPE,
+    scope,
     max: VERIFY_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
 }
 
-/** Writes `ratelimit:user:verify:{userId}:{bucket}` only — no-op under DEV_MODE or with the window spent (a refused
- *  attempt must not extend it). The caller's streak is a different key ({@link chargeFailure}). */
+/** Writes the budget's `ratelimit:user:{scope}:{userId}:{bucket}` only — no-op under DEV_MODE (`reading` is `null`).
+ *  The caller's streak is a different key ({@link chargeFailure}). */
 async function chargeFailedAttempt(
   kv: KVNamespace,
   reading: PerUserRateLimitReading | null,
 ): Promise<void> {
-  if (!reading || reading.verdict.limited) return;
+  if (!reading) return;
   await chargePerUserRateLimit(kv, reading);
 }
 
-/** Charge a wrong guess to both brakes; `limited` ⇒ 429 `RATE_LIMITED`, else 403 `VERIFICATION_FAILED`. Two
- *  DIFFERENT keys, so one write per key holds: .claude/rules/backend.md → Service, middleware and KV invariants. */
+/** Charge a wrong guess to both brakes, reusing the reading taken before the comparison. Two DIFFERENT keys,
+ *  so one write per key holds: .claude/rules/backend.md → Service, middleware and KV invariants. */
 async function chargeWrongGuess(
-  env: Env,
-  userId: string,
+  kv: KVNamespace,
+  reading: PerUserRateLimitReading | null,
   failKey: string,
   failRecord: VerifyFailRecord | null,
-): Promise<PerUserRateLimitVerdict> {
-  const reading = await peekAttemptCeiling(env, userId);
+): Promise<void> {
   await Promise.all([
-    chargeFailedAttempt(env.KV, reading),
-    chargeFailure(env.KV, failKey, failRecord),
+    chargeFailedAttempt(kv, reading),
+    chargeFailure(kv, failKey, failRecord),
   ]);
-  return reading?.verdict ?? { limited: false };
+}
+
+/**
+ * Clear the current window of the login attempt budget, after the owner saved new
+ * verification settings: guesses against the old secret no longer mean anything.
+ * The step-up budget is deliberately left alone.
+ *
+ * Fail-open: the settings are already saved, so a KV error only logs the event name
+ * (its message may echo the key, which carries the userId, #357) and the counter
+ * stays until its window ends. See docs/architecture.md → 安全措施.
+ */
+export async function resetLoginAttemptCeiling(
+  kv: KVNamespace,
+  userId: string,
+): Promise<void> {
+  try {
+    await deletePerUserRateLimitWindow(kv, {
+      userId,
+      scope: VERIFY_ATTEMPT_SCOPE,
+      windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+    });
+  } catch {
+    console.error("VERIFY_CEILING_RESET_FAILED");
+  }
 }
 
 /**
@@ -335,82 +401,75 @@ async function chargeWrongGuess(
  * `DELETE /api/user/:id`. Accounts with no `verify:{userId}` record (or
  * `method: "none"`) pass through unchanged.
  *
- * Two independent brakes, deliberately keyed differently:
+ * Three independent brakes, deliberately keyed differently:
  *
  * 1. **Lockout — keyed on the CALLER** (`opts.callerKey`, normally the
  *    Cloudflare-supplied client IP, IPv6 bucketed per /64), in a TTL-backed
- *    `verifyfail:{userId}:{callerKey}` entry. Only the caller who submits wrong
- *    secrets gets locked, so a stranger can never lock the account owner out of
- *    PWA login.
- * 2. **Attempt ceiling — keyed on the TARGET userId** (`ratelimit:user:verify:…`,
- *    {@link VERIFY_ATTEMPT_MAX} per {@link VERIFY_ATTEMPT_WINDOW_SECONDS}),
- *    counted here rather than in the handlers so no current or future caller of
- *    this gate can forget it. Without it the caller-scoped lockout leaves no
- *    global bound at all: the shortest allowed pattern has only 9×8×7×6 = 3,024
- *    combinations, so ~605 rotated /64 prefixes — well inside a single /48
- *    allocation — would exhaust the space with 5 tries each. The counter is
- *    shared with the rate-limit middleware via `peekPerUserRateLimit` /
- *    `chargePerUserRateLimit`.
+ *    `verifyfail:{userId}:{callerKey}` entry. A caller's lockout never touches
+ *    another caller.
+ * 2. **Per-minute limit — keyed on the TARGET userId**, {@link VERIFY_BURST_MAX}
+ *    per {@link VERIFY_BURST_WINDOW_SECONDS} on the native binding, never KV
+ *    (`checkPerUserBurstLimit`). It counts every secret-bearing request, right or
+ *    wrong, and is skipped when the deployment has no binding or the binding fails.
+ * 3. **Hourly attempt budget — keyed on the TARGET userId**
+ *    ({@link VERIFY_ATTEMPT_MAX} per {@link VERIFY_ATTEMPT_WINDOW_SECONDS}, on KV).
+ *    Only a wrong guess charges it. Without a per-account brake the caller-scoped
+ *    lockout leaves no account-wide bound, and the shortest allowed pattern has
+ *    only 9×8×7×6 = 3,024 combinations.
  *
- * Brake 2 only ever measures a WRONG guess. The secret is compared FIRST; the
- * ceiling is read and charged solely on the failure branch. Consequences:
+ * Brakes 2 and 3 live here rather than in the handlers so no current or future
+ * caller of this gate can forget them. Both are consulted BEFORE the comparison,
+ * so a correct and a wrong answer take the same path once either is spent. A
+ * refused request calls no `matchesSecret`, reads no `otp:{userId}`, never hashes
+ * the submitted secret and writes nothing. Consequences:
  *
- * - A CORRECT secret is admitted regardless of the ceiling, and charges nothing.
- *   The account owner can always get in, even at a moment when the window is
- *   fully spent.
- * - A request with no secret (`VERIFICATION_REQUIRED`), a malformed one
- *   (rejected earlier, at the handler), and an account with nothing configured
- *   all cost nothing either — probing cannot burn the budget.
- * - A wrong guess made while the window is already spent is refused with
- *   `RATE_LIMITED` instead of `VERIFICATION_FAILED`, and does not extend the
- *   window.
+ * - With either limit spent, a CORRECT secret gets the same `429 RATE_LIMITED` as
+ *   a wrong one. A correct secret never charges the hourly budget.
+ * - A request with no secret (`VERIFICATION_REQUIRED`), a malformed one (rejected
+ *   earlier, at the handler), and an account with nothing configured cost neither
+ *   limit, so probing and silent recovery joins cannot spend them.
+ * - Neither limit is a hard bound: both hold for sequential traffic within one
+ *   Cloudflare location only (docs/architecture.md → 已接受的殘餘風險).
  *
- * The brute-force bound is unchanged by any of this: every guess an attacker
- * makes is wrong by definition, so {@link VERIFY_ATTEMPT_MAX} failures per
- * window still close the account to guessing.
- *
- * RESIDUAL RISK (bounded, and no longer owner-facing): brake 2 is keyed on the
- * TARGET userId, so a third party can still spend the window with wrong guesses.
- * What that buys them is only "no further GUESSING against this account until
- * the window rolls" — it does NOT keep the owner out, because a correct secret
- * is never measured against the ceiling. The counter is therefore a lever
- * against attackers, not against the account it protects. This is exactly
- * because it is charge-on-failure: a charge-EVERY-request counter keyed on the
- * target userId WOULD be owner-facing, since a third party could exhaust it with
- * requests that never even carry a secret. The join endpoint used to have such a
- * standalone per-userId counter (scope `"join"`); it was removed precisely
- * because it was charge-every-request (owner-facing) and redundant with this
- * ceiling, which now stands as the sole per-userId brake protecting join. This
- * ceiling does not contradict the caller-scoped lockout rule: that rule governs
- * who gets *locked*, not whether a global attempt ceiling may exist.
+ * ACCEPTED TRADE-OFF: brakes 2 and 3 are keyed on the TARGET userId, so a third
+ * party can spend them with wrong answers and block the owner's new-device login,
+ * window after window. They gain no data, and an account takeover is worse. A
+ * device whose login is still valid keeps working and can mint a QR Code, which
+ * needs no secret. Requests with no secret never count, which is what separates
+ * these limits from a charge-EVERY-request counter (join's removed `"join"` scope).
+ * The step-up has its own budget ({@link enforceCurrentSecret}). Rule:
+ * .claude/rules/security-ux-invariants.md → Invariant 6.
  *
  * Order of evaluation, and what each outcome costs (first match wins):
  *
- * | Situation                       | Result                    | KV writes           |
- * | ------------------------------- | ------------------------- | ------------------- |
- * | nothing configured              | valid                     | none                |
- * | locked caller                   | 429 VERIFICATION_LOCKED   | none                |
- * | unverifiable hash scheme³       | 503 VERIFY_UNAVAILABLE    | none                |
- * | no secret supplied              | 403 VERIFICATION_REQUIRED | none                |
- * | corrupted record (no hash/salt) | valid                     | none                |
- * | correct secret                  | valid                     | delete failKey¹     |
- * | wrong secret, ceiling available | 403 VERIFICATION_FAILED   | ceiling + failKey   |
- * | wrong secret, ceiling spent     | 429 RATE_LIMITED          | failKey only²       |
+ * | Situation                       | Result                    | KV writes         |
+ * | ------------------------------- | ------------------------- | ----------------- |
+ * | nothing configured              | valid                     | none              |
+ * | locked caller                   | 429 VERIFICATION_LOCKED   | none              |
+ * | unverifiable hash scheme²       | 503 VERIFY_UNAVAILABLE    | none              |
+ * | no secret supplied              | 403 VERIFICATION_REQUIRED | none              |
+ * | corrupted record (no hash/salt) | valid                     | none              |
+ * | per-minute limit spent          | 429 RATE_LIMITED (60)     | none              |
+ * | hourly budget spent             | 429 RATE_LIMITED (rest)³  | none              |
+ * | correct secret                  | valid                     | delete failKey¹   |
+ * | wrong secret                    | 403 VERIFICATION_FAILED   | counter + failKey |
  *
  * ¹ only when this caller has a failure record (or a void leftover) to clear.
- * ² the spent counter is not written again — a refused attempt must not extend
- *   the window.
- * ³ a pin/pattern record of v2 with no pepper configured or a different one
+ * ² a pin/pattern record of v2 with no pepper configured or a different one
  *   (`pepperId` mismatch), or of an unknown `version` — with or without a
  *   secret; logs `VERIFY_PEPPER_MISSING` / `VERIFY_PEPPER_MISMATCH` /
  *   `VERIFY_HASH_VERSION_UNSUPPORTED` (no identifiers) and charges nothing.
- *   It never falls through to the corrupted-record pass.
+ *   It never falls through to the corrupted-record pass. Its pepper fingerprint
+ *   does not involve the submitted secret.
+ * ³ `retryAfter` = the seconds left in the window.
  *
  * A correct v1 secret is NOT upgraded here: the create / join / lookup handlers
  * call {@link upgradeVerifyRecordHash} after their stale-record check.
  *
- * Under `DEV_MODE=1` the ceiling is skipped, exactly like every other limiter
+ * Under `DEV_MODE=1` both limits are skipped, exactly like every other limiter
  * (per-IP and per-userId), leaving lockout as the only brake.
+ *
+ * `opts.budget` (default {@link LOGIN_ATTEMPT_BUDGET}) names the two scopes.
  *
  * `opts.consumeOtp` (default `true`) decides whether a matching `code` secret is
  * spent. Read-only disclosure decisions pass `false`: `POST /api/auth/lookup`
@@ -446,6 +505,7 @@ export async function validateVerification(
     callerKey: string;
     consumeOtp?: boolean;
     record?: VerifyRecord | null;
+    budget?: VerifyAttemptBudget;
   },
 ): Promise<VerificationResult> {
   const kv = env.KV;
@@ -495,34 +555,40 @@ export async function validateVerification(
     return { valid: false, error: VERIFICATION_REQUIRED_ERROR };
   }
 
-  // Compare FIRST: the target-keyed ceiling must never refuse a correct secret, or any third party
-  // could lock the owner out (Inv-6). See docs/architecture.md → 安全措施.
+  // Corrupted record — treat as no verification
+  if (isCorruptedSecretRecord(record)) {
+    return { valid: true, record };
+  }
+
+  // Both limits come BEFORE the comparison, so both answers take one path once either is spent
+  // (Inv-6's sanctioned exception). See docs/architecture.md → 安全措施.
+  const budget = opts.budget ?? LOGIN_ATTEMPT_BUDGET;
+  const burst = await checkPerUserBurstLimit(env, {
+    userId,
+    scope: budget.burstScope,
+    max: VERIFY_BURST_MAX,
+    windowSec: VERIFY_BURST_WINDOW_SECONDS,
+  });
+  if (burst.limited) {
+    return { valid: false, error: attemptLimitError(burst.retryAfter) };
+  }
+
+  const reading = await peekAttemptCeiling(env, userId, budget.ceilingScope);
+  if (reading?.verdict.limited) {
+    return {
+      valid: false,
+      error: attemptLimitError(reading.verdict.retryAfter),
+    };
+  }
+
   const matched = await matchesSecret(kv, userId, record, secret, {
     consumeOtp: opts.consumeOtp ?? true,
     pepper,
   });
 
-  // Corrupted record — treat as no verification
-  if (matched === null) {
-    return { valid: true, record };
-  }
-
   if (!matched) {
-    // The only path touching the attempt ceiling. `chargeFailure` overwrites the whole entry, so
-    // a void leftover is replaced here, not deleted first.
-    const ceiling = await chargeWrongGuess(env, userId, failKey, failRecord);
-    if (ceiling.limited) {
-      // Hourly guessing budget spent: report the ceiling, so the caller learns to wait, not guess.
-      return {
-        valid: false,
-        error: {
-          code: "RATE_LIMITED",
-          message: RATE_LIMITED_MESSAGE,
-          status: 429,
-          retryAfter: ceiling.retryAfter,
-        },
-      };
-    }
+    // `chargeFailure` overwrites the whole entry, so a void leftover is replaced here, not deleted first.
+    await chargeWrongGuess(kv, reading, failKey, failRecord);
     return {
       valid: false,
       error: { code: "VERIFICATION_FAILED", message: "驗證失敗", status: 403 },
@@ -569,8 +635,12 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  *   key and the handler's record — byte-identical responses (`403
  *   VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429 VERIFICATION_LOCKED` /
  *   `RATE_LIMITED` + `retryAfter`, `503 VERIFY_UNAVAILABLE`). A step-up never
- *   upgrades a v1 hash (the caller rewrites or deletes the record next). A correct secret always passes and charges
- *   nothing (Invariant 6); the lockout key is shared with PWA login on purpose.
+ *   upgrades a v1 hash (the caller rewrites or deletes the record next). The lockout
+ *   key is shared with PWA login on purpose, but the two limits are this path's own
+ *   (`verify-stepup`, `verify-stepup-burst`), so public login traffic cannot spend
+ *   them. With either spent, a correct secret is refused too (Invariant 6): a token
+ *   holder who keeps guessing wrong blocks the owner's PIN change until manual rescue
+ *   (worker/DEPLOY.md → 使用者忘記登入驗證時).
  *
  * See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
  */
@@ -593,7 +663,7 @@ export async function enforceCurrentSecret(
     c.env,
     userId,
     currentSecret,
-    { callerKey: getCallerIp(c), record },
+    { callerKey: getCallerIp(c), record, budget: STEP_UP_ATTEMPT_BUDGET },
   );
   if (!verification.valid) {
     return verificationErrorResponse(c, verification.error);

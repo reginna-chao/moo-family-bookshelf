@@ -14,6 +14,7 @@ import { LandingPage } from "@/pages/LandingPage";
 import {
   buildRetryMessage,
   buildStaticRetryMessage,
+  QR_LOGIN_HINT,
 } from "@/utils/retryMessage";
 import type { RetryErrorCode } from "@/utils/retryMessage";
 import {
@@ -451,6 +452,77 @@ describe("LandingPage retry back-off", () => {
 
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(submitButton()).not.toBeDisabled();
+    });
+
+    describe("QR login hint", () => {
+      beforeEach(() => {
+        mockGetVerifyMethod.mockResolvedValue({
+          data: { method: "code" },
+        });
+      });
+
+      // The per-IP limit and the account budget share this code, so both show the hint.
+      it("shows the hint on the verification prompt while RATE_LIMITED counts down", async () => {
+        mockJoinFamily.mockResolvedValue({
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests",
+            retryAfter: 45,
+          },
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        login();
+        await waitForVerificationPrompt();
+        expect(screen.queryByText(QR_LOGIN_HINT)).not.toBeInTheDocument();
+
+        submitVerificationCode();
+        await waitForAlert();
+
+        expectCountdownNotice("RATE_LIMITED", 45);
+        expect(screen.getByText(QR_LOGIN_HINT)).toBeInTheDocument();
+      });
+
+      it("does not show the hint for VERIFICATION_LOCKED", async () => {
+        mockJoinFamily.mockResolvedValue({
+          error: {
+            code: "VERIFICATION_LOCKED",
+            message: "Too many attempts",
+            retryAfter: 90,
+          },
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        login();
+        await waitForVerificationPrompt();
+        submitVerificationCode();
+        await waitForAlert();
+
+        expectCountdownNotice("VERIFICATION_LOCKED", 90);
+        expect(screen.queryByText(QR_LOGIN_HINT)).not.toBeInTheDocument();
+      });
+
+      it("does not show the hint after an ordinary verification failure", async () => {
+        mockJoinFamily.mockResolvedValue({
+          error: {
+            code: "VERIFICATION_FAILED",
+            message: "Verification failed",
+          },
+        });
+
+        render(<LandingPage onAuth={mockOnAuth} />);
+
+        login();
+        await waitForVerificationPrompt();
+        submitVerificationCode();
+        await waitForAlert();
+
+        expect(screen.getByText("輸入驗證碼")).toBeInTheDocument();
+        expectStaticNotice("驗證失敗，請重新輸入。");
+        expect(screen.queryByText(QR_LOGIN_HINT)).not.toBeInTheDocument();
+      });
     });
   });
 

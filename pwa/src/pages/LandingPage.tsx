@@ -63,6 +63,7 @@ export function LandingPage({
     retryMessage,
     retryAnnouncement,
     retryBlocked,
+    rateLimited,
     clearRetryLock,
     completeJoin,
     handleVerifyComplete,
@@ -114,6 +115,7 @@ export function LandingPage({
           promptError={promptError}
           retryAnnouncement={retryAnnouncement}
           retryBlocked={retryBlocked}
+          showQrLoginHint={rateLimited}
           isSubmitting={isSubmitting}
           codeInput={codeInput}
           setCodeInput={setCodeInput}

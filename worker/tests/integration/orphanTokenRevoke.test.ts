@@ -8,6 +8,12 @@ import { readAuthRecord } from "../../src/services/authRecord";
 import { mintAuthToken, type IssuedToken } from "../../src/services/authTokens";
 import { hashAuthToken } from "../../src/utils/crypto";
 import { kvKeys } from "../../src/kv/schema";
+import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
+import {
+  VERIFY_ATTEMPT_MAX,
+  VERIFY_ATTEMPT_SCOPE,
+  VERIFY_ATTEMPT_WINDOW_SECONDS,
+} from "../../src/services/verification";
 
 /**
  * Revoke-all must reach an ORPHAN token (#431).
@@ -124,6 +130,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -171,9 +178,18 @@ describe("revoke-all — an orphan token left by two mints from one stale read",
   });
 
   it("lists the index before the new token's index is put, so only the new token survives a PIN save", async () => {
+    // Mid-hour pin: the budget key read below names the bucket the save deletes.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-01-01T00:30:00.000Z"));
     await joinOwnersFamily();
     const { orphan, current } = await mintOrphan();
     const joined = (await readAuthRecord(kv, USER_ID))!.tokens[0].hash;
+    const { key: loginBudgetKey } = await peekPerUserRateLimit(kv, {
+      userId: USER_ID,
+      scope: VERIFY_ATTEMPT_SCOPE,
+      max: VERIFY_ATTEMPT_MAX,
+      windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+    });
     const ops = watchKvOps(kv);
 
     const res = await request(
@@ -194,6 +210,7 @@ describe("revoke-all — an orphan token left by two mints from one stale read",
     expect([...trail].sort()).toEqual(
       [
         `put ${kvKeys.verify(USER_ID)}`,
+        `delete ${loginBudgetKey}`,
         listEntry,
         `delete ${kvKeys.otp(USER_ID)}`,
         ...[joined, orphanHash, currentHash].flatMap((h) => [

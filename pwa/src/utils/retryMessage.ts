@@ -4,6 +4,10 @@
 /** Error codes that can carry a `retryAfter` back-off hint. */
 export type RetryErrorCode = "VERIFICATION_LOCKED" | "RATE_LIMITED";
 
+/** Login-screen pointer to the way in that needs no secret while `RATE_LIMITED` is showing. */
+export const QR_LOGIN_HINT =
+  "如果還有已登入的電腦，可以在擴充功能的設定展開「手機登入與驗證」產生 QR Code，再用手機掃描登入。";
+
 /** 90 → 「1 分 30 秒」, 45 → 「45 秒」. Fractions and negatives are normalized. */
 export function formatRetryDelay(seconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(seconds));

@@ -11,6 +11,8 @@ export interface UseLandingRetryLockResult {
   retryMessage: string;
   retryAnnouncement: string | undefined;
   retryBlocked: boolean;
+  /** The showing notice is `RATE_LIMITED`; the per-IP limit and the account ceiling share that code. */
+  rateLimited: boolean;
   startRetryLock: (code: RetryErrorCode, retryAfter?: number) => void;
   clearRetryLock: () => void;
 }
@@ -30,6 +32,7 @@ export function useLandingRetryLock(): UseLandingRetryLockResult {
     retryCode === null ? undefined : buildStaticRetryMessage(retryCode);
   /** True only while a countdown is running — blocks submit/verify actions. */
   const retryBlocked = retryCode !== null && retryCountdown.remaining > 0;
+  const rateLimited = retryCode === "RATE_LIMITED";
 
   /** Show a back-off notice; a positive `retryAfter` starts the live countdown. */
   function startRetryLock(code: RetryErrorCode, retryAfter?: number) {
@@ -46,6 +49,7 @@ export function useLandingRetryLock(): UseLandingRetryLockResult {
     retryMessage,
     retryAnnouncement,
     retryBlocked,
+    rateLimited,
     startRetryLock,
     clearRetryLock,
   };

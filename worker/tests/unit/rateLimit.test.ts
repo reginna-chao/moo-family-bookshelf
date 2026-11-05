@@ -45,6 +45,11 @@
  * key, and `retryAfter` = the whole configured period because the binding
  * exposes no reset time.
  *
+ * checkPerUserBurstLimit: the binding-only sibling of the path above, with NO KV
+ * fallback, so a missing or throwing binding reads as "not limited" and every
+ * case also pins zero KV operations. The throwing case injects an error whose
+ * message carries the userId, because a log line must not repeat it (#357).
+ *
  * Caller key normalization: a residential IPv6 subscriber holds at least a /64
  * and privacy extensions let the client rotate its interface identifier at
  * will. Keying per-caller counters (rate limits, verification failure
@@ -77,6 +82,8 @@ import { Hono } from "hono";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   bindingForWindow,
+  checkPerUserBurstLimit,
+  deletePerUserRateLimitWindow,
   enforcePerUserRateLimit,
   getCallerIp,
   normalizeCallerIp,
@@ -479,6 +486,148 @@ const MAPPED_WINDOWS: {
   { label: "10/min", max: 10, windowSec: 60, name: "RATE_LIMIT_10_PER_MIN" },
   { label: "3/min", max: 3, windowSec: 60, name: "RATE_LIMIT_3_PER_MIN" },
 ];
+
+describe("checkPerUserBurstLimit", () => {
+  const BURST_OPTS = {
+    userId: "u1",
+    scope: "verify-burst",
+    max: 10,
+    windowSec: 60,
+  };
+
+  function envOf(extra: Partial<Env>): Env {
+    return { KV: kv, ...extra } as Env;
+  }
+
+  it("should not consult the binding under DEV_MODE", async () => {
+    const { bindings, calls } = createRateLimitBindings(() => false);
+    const ops = watchKvOps(kv);
+
+    const verdict = await checkPerUserBurstLimit(
+      envOf({ ...bindings, DEV_MODE: "1" }),
+      BURST_OPTS,
+    );
+
+    expect(verdict).toEqual({ limited: false });
+    expect(calls).toEqual([]);
+    expect(ops.getKeys()).toEqual([]);
+    expect(ops.writeTrail()).toEqual([]);
+  });
+
+  it.each([
+    { label: "admits", success: true, verdict: { limited: false } },
+    {
+      label: "refuses",
+      success: false,
+      verdict: { limited: true, retryAfter: 60 },
+    },
+  ])(
+    "should report the verdict when the binding $label, at zero KV cost",
+    async ({ success, verdict }) => {
+      const { bindings, calls } = createRateLimitBindings(() => success);
+      const ops = watchKvOps(kv);
+
+      expect(await checkPerUserBurstLimit(envOf(bindings), BURST_OPTS)).toEqual(
+        verdict,
+      );
+
+      expect(calls).toEqual([
+        {
+          name: "RATE_LIMIT_10_PER_MIN",
+          key: "ratelimit:user:verify-burst:u1",
+        },
+      ]);
+      expect(ops.getKeys()).toEqual([]);
+      expect(ops.writeTrail()).toEqual([]);
+      expect(errorSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      label: "the deployment carries no binding for the limit",
+      max: 10,
+      binding: "RATE_LIMIT_10_PER_MIN",
+    },
+    {
+      label: "the limit has no entry in the binding table",
+      max: 7,
+      binding: "<unmapped:7/min>",
+    },
+  ])(
+    "should log and report not limited, writing no KV, when $label",
+    async ({ max, binding }) => {
+      const ops = watchKvOps(kv);
+
+      const verdict = await checkPerUserBurstLimit(envOf({}), {
+        ...BURST_OPTS,
+        max,
+      });
+
+      expect(verdict).toEqual({ limited: false });
+      expect(errorSpy.mock.calls).toEqual([
+        ["RATE_LIMIT_BINDING_MISSING", { binding }],
+      ]);
+      expect(ops.getKeys()).toEqual([]);
+      expect(ops.writeTrail()).toEqual([]);
+    },
+  );
+
+  it("should log the event name alone and report not limited when the binding throws", async () => {
+    const { bindings } = createRateLimitBindings((_name, key) => {
+      throw new Error(`limit failed for ${key}`);
+    });
+    const ops = watchKvOps(kv);
+
+    const verdict = await checkPerUserBurstLimit(envOf(bindings), BURST_OPTS);
+
+    expect(verdict).toEqual({ limited: false });
+    expect(errorSpy.mock.calls).toEqual([["PER_USER_BURST_CHECK_FAILED"]]);
+    expect(ops.getKeys()).toEqual([]);
+    expect(ops.writeTrail()).toEqual([]);
+  });
+});
+
+describe("deletePerUserRateLimitWindow", () => {
+  const WINDOW_OPTS = { userId: "u1", scope: "verify", windowSec: 3600 };
+  const counterKey = (scope: string, userId: string, bucket: number) =>
+    `ratelimit:user:${scope}:${userId}:${bucket}`;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(BINDING_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should delete only the current window's key of that scope and user, without reading", async () => {
+    const current = counterKey("verify", "u1", BINDING_HOUR_BUCKET);
+    const survivors = [
+      counterKey("verify", "u1", BINDING_HOUR_BUCKET - 1),
+      counterKey("verify-stepup", "u1", BINDING_HOUR_BUCKET),
+      counterKey("verify", "u2", BINDING_HOUR_BUCKET),
+    ];
+    await Promise.all([current, ...survivors].map((key) => kv.put(key, "10")));
+    const ops = watchKvOps(kv);
+
+    await deletePerUserRateLimitWindow(kv, WINDOW_OPTS);
+
+    expect(ops.writeTrail()).toEqual([`delete ${current}`]);
+    expect(ops.getKeys()).toEqual([]);
+    expect(await kv.get(current)).toBeNull();
+    for (const key of survivors) expect(await kv.get(key)).toBe("10");
+  });
+
+  it("should let a KV failure reach the caller", async () => {
+    vi.spyOn(kv, "delete").mockRejectedValue(new Error("KV down"));
+
+    await expect(deletePerUserRateLimitWindow(kv, WINDOW_OPTS)).rejects.toThrow(
+      "KV down",
+    );
+  });
+});
 
 describe("bindingForWindow", () => {
   it.each(MAPPED_WINDOWS)(

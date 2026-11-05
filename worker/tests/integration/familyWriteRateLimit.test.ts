@@ -122,10 +122,10 @@ import { VERIFY_WRITE_LIMIT } from "../../src/routes/verify";
  * exists and is active.
  *
  * Routes left OUT: onboarding (create / join) is public and already bounded by
- * the sensitive per-IP tier plus the verification gate's charge-on-failure
- * attempt ceiling; putting it on a per-userId write counter would let a spent
- * window lock a user out of forming a family at all. The members list is a
- * read.
+ * the sensitive per-IP tier plus the verification gate's own per-account
+ * limits; putting it on a per-userId write counter would let any request, even
+ * one with no secret, lock a user out of forming a family at all. The members
+ * list is a read.
  *
  * Cross-scope isolation: "family-write" is deliberately its own scope,
  * distinct from the verify-domain write ceiling ("verify-write", same 30/hr

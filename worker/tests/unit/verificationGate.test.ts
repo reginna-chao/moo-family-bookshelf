@@ -42,7 +42,9 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  * Accounts with no verification record, or `method: "none"`, are unaffected.
  * This suite covers create + lookup, the OTP consumption contract between them,
  * the `verifySecret` format bound, the per-userId attempt ceiling, and join's
- * victim-facing flood resistance (no per-userId counter can block the owner).
+ * flood resistance (a request with no secret spends no per-userId counter).
+ * What the two limits do once spent, per entry point and per hash scheme, is in
+ * `tests/integration/verifyAttemptCeiling.test.ts`.
  *
  * Request helper options: `callerIp` is sent as `cf-connecting-ip` — the only
  * caller identity the Worker trusts (see `getCallerIp`); omit it to simulate a
@@ -69,8 +71,8 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  *    older or hand-edited KV entry could hold. The gate and the
  *    `isVerificationConfigured` probe classify it DIFFERENTLY on purpose (see
  *    the doc comment on that probe): the gate treats it as unconfigured rather
- *    than as an account nobody can ever unlock (see `matchesSecret`), while
- *    lookup's probe reports "configured", so the account is asked for a secret
+ *    than as an account nobody can ever unlock (see
+ *    `isCorruptedSecretRecord`), while lookup's probe reports "configured", so the account is asked for a secret
  *    it can never fail — one extra round-trip — instead of having its
  *    membership disclosed unprompted. The two cases using this fixture pin that
  *    asymmetry down.
@@ -117,27 +119,23 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  * instead of admitted.
  *
  * Per-userId verification attempt ceiling: the caller-scoped lockout alone
- * leaves no GLOBAL bound: the shortest allowed pattern has 9×8×7×6 = 3,024
- * combinations, so ~605 rotated /64 prefixes would exhaust the space at 5 tries
- * each. The ceiling (`ratelimit:user:verify:{userId}`, VERIFY_ATTEMPT_MAX per
- * window) closes that, and counts FAILED attempts only — a legitimate login
- * never spends the account's quota. The secret is compared BEFORE the ceiling
- * is read, so the ceiling only ever measures a wrong guess. That is what stops
- * a third party from spending the window and locking the account OWNER out of
- * their own onboarding: the ceiling is keyed on the TARGET userId, so a
- * correct secret is admitted no matter how spent the window is, and charges
- * nothing. A locked caller is refused by brake 1 (the caller-scoped lockout,
- * checked before the comparison) regardless of correctness, and that refusal,
- * too, charges nothing to the account's window. The last guess the window
- * still has room for is a PLAIN verification failure; the very next one is
- * refused by the ceiling instead — the boundary between the two refusals,
- * which differ in status AND in code. DEV_MODE skips the ceiling exactly like
- * every other limiter, leaving the caller-scoped lockout as the only brake;
- * local dev and E2E runs depend on it, production never sets it.
+ * leaves no account-wide bound. The ceiling (`ratelimit:user:verify:{userId}`,
+ * VERIFY_ATTEMPT_MAX per window) adds one, and counts FAILED attempts only — a
+ * legitimate login never spends the account's quota. It is read BEFORE the
+ * comparison: with the window spent, a correct and a wrong secret get the same
+ * `429 RATE_LIMITED`, nothing is compared and nothing is written. A third party
+ * can therefore block a new-device login until the window rolls, the accepted
+ * trade-off of Invariant 6's sanctioned exception. A locked caller is refused
+ * by brake 1 (the caller-scoped lockout, checked first) regardless of
+ * correctness, and that refusal, too, charges nothing to the account's window.
+ * The last guess the window still has room for is a PLAIN verification failure;
+ * the very next attempt is refused by the ceiling instead — the boundary between
+ * the two refusals, which differ in status AND in code. DEV_MODE skips the
+ * ceiling exactly like every other limiter, leaving the caller-scoped lockout as
+ * the only brake; local dev and E2E runs depend on it, production never sets it.
  *  - These cases run WITHOUT DEV_MODE, which every other suite sets: DEV_MODE
  *    short-circuits both limiters, so the ceiling would never fire. A fresh
- *    source address per request models precisely the attacker this ceiling
- *    exists to bound — and it is also what keeps the CALLER-scoped lockout
+ *    source address per request keeps the CALLER-scoped lockout
  *    (`verifyfail:{userId}:{caller}`) out of the way, so the verdict observed
  *    is the account-wide ceiling's. The per-IP tier is a Rate Limiting binding
  *    since #160 item 1 and `apiRequest` injects a stub that admits everything,
@@ -157,32 +155,24 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  *    cannot drift from the scope/window the gate uses. Pure read — peeking
  *    never charges.
  *  - `spendCeilingWithWrongGuesses` spends the account's whole window with
- *    wrong guesses, each from a source address never seen before — the
- *    rotating attacker the ceiling exists for. Every one of them is still a
- *    plain 403 while budget remains; only the next one is refused by the
- *    ceiling.
+ *    wrong guesses, each from a source address never seen before. Every one of
+ *    them is still a plain 403 while budget remains; only the next attempt is
+ *    refused by the ceiling.
  *
- * POST /api/family/:id/join — victim-facing per-userId flood resistance:
- * regression guard for the REMOVAL of the standalone per-userId "join" counter
- * (scope "join", 10/hour, charge-EVERY-request, keyed on the caller-supplied
- * body.userId). Because it charged on every join regardless of whether the
- * caller proved ownership, a third party who knows a victim's email-derived,
- * publicly guessable userId could fire ~10 unauthenticated joins from rotating
- * source addresses to fill `ratelimit:user:join:{victim}` — and thereby make
- * the victim's OWN correct-secret reconnect return 429 RATE_LIMITED before any
- * verification, locking the owner out of the only token-minting reconnect
- * path (security-UX Invariant 2). The join endpoint's sole surviving
- * per-userId brake is now the shared "verify" attempt ceiling inside
- * `validateVerification`, which is charge-on-FAILURE: a correct secret is
- * compared first and never measured against it, so the owner can always get
- * back in.
+ * POST /api/family/:id/join — per-userId flood resistance: regression guard for
+ * the REMOVAL of the standalone per-userId "join" counter (scope "join",
+ * 10/hour, charge-EVERY-request, keyed on the caller-supplied body.userId). It
+ * charged every join, even one with no secret at all, so requests that prove
+ * nothing could make the owner's OWN correct-secret reconnect return 429
+ * RATE_LIMITED. The join endpoint's per-userId brakes are now the gate's two
+ * limits inside `validateVerification`, and a request with no secret counts
+ * toward neither.
  *  - Runs WITHOUT DEV_MODE so any surviving per-userId brake is live, and uses
  *    a DISTINCT source IP per request so the per-IP sensitive tier (3/min)
  *    never trips — the whole point is that a 429 here could ONLY come from a
- *    per-userId ceiling (10/hour, summed across all IPs), which no longer
- *    exists. No-secret requests are the sharpest probe: they never charged the
- *    "verify" ceiling (only wrong guesses do) yet DID charge the removed "join"
- *    counter, so they isolate exactly the counter under test.
+ *    per-userId counter. No-secret requests are the sharpest probe: they never
+ *    charged the "verify" ceiling (only wrong guesses do) yet DID charge the
+ *    removed "join" counter, so they isolate exactly the counter under test.
  *  - `FLOOD_SIZE` (12) is comfortably past the removed counter's old ceiling
  *    (10/hour): after that many charge-every-request hits it would have been
  *    fully spent, so the reconnect that follows is exactly the request the old
@@ -546,7 +536,7 @@ describe("POST /api/family verification gate", () => {
 
   it("should treat a corrupted pin record as no verification at all", async () => {
     // The gate treats a hash-less `pin` record as unconfigured, not as an account nobody can
-    // ever unlock — see `matchesSecret`.
+    // ever unlock — see `isCorruptedSecretRecord`.
     await seedCorruptedVerification(USER_ID);
 
     const res = await createFamily(USER_ID, {
@@ -1031,7 +1021,7 @@ describe("Per-userId verification attempt ceiling", () => {
     expect(await attemptsCharged(USER_ID)).toBe(VERIFY_ATTEMPT_MAX);
   }
 
-  it("should refuse further wrong guesses once the ceiling is spent, however many source addresses the attacker rotates through", async () => {
+  it("should refuse further wrong guesses once the ceiling is spent, from however many source addresses", async () => {
     await spendCeilingWithWrongGuesses();
 
     const blocked = await lookup(USER_ID, {
@@ -1085,7 +1075,7 @@ describe("Per-userId verification attempt ceiling", () => {
     );
   });
 
-  it("should still charge the caller's own streak for a guess the spent ceiling refuses", async () => {
+  it("should write nothing for a guess the spent ceiling refuses", async () => {
     await spendCeilingWithWrongGuesses();
 
     const callerIp = freshSourceIp();
@@ -1096,35 +1086,46 @@ describe("Per-userId verification attempt ceiling", () => {
     });
     expect(res.status).toBe(429);
 
-    // The account-wide window is NOT extended by a refusal...
+    // Neither the account-wide window nor this caller's own streak moves: nothing was compared.
     expect(await attemptsCharged(USER_ID)).toBe(VERIFY_ATTEMPT_MAX);
-    // ...but the guess still counts against THIS caller's lockout streak, so a
-    // refused attacker cannot keep guessing for free once the window rolls.
-    const fail = (await kv.get(
-      kvKeys.verifyFail(USER_ID, normalizeCallerIp(callerIp)),
-      "json",
-    )) as VerifyFailRecord | null;
-    expect(fail?.failCount).toBe(1);
+    expect(
+      await kv.get(kvKeys.verifyFail(USER_ID, normalizeCallerIp(callerIp))),
+    ).toBeNull();
   });
 
   it.each(GATE_ENDPOINTS)(
-    "should admit the correct secret at $endpoint even when the ceiling is spent",
-    async ({ call, prepare, successStatus }) => {
-      // Why the comparison precedes the ceiling: it is keyed on the TARGET userId, so reading it
-      // first would let any third party spend the window and lock the owner out.
+    "should refuse the correct secret at $endpoint like a wrong one once the ceiling is spent",
+    async ({ call, prepare }) => {
       await prepare?.();
       await spendCeilingWithWrongGuesses();
 
       const callerIp = freshSourceIp();
-      const res = await call(USER_ID, {
+      const wrong = await call(USER_ID, {
+        verifySecret: WRONG_PIN,
+        callerIp,
+        devMode: false,
+      });
+      const before = await snapshotKeys();
+      const correct = await call(USER_ID, {
         verifySecret: CORRECT_PIN,
         callerIp,
         devMode: false,
       });
 
-      expect(res.status).toBe(successStatus);
-      // ...and it consumes nothing: the ceiling is never even read on the
-      // success path, and this caller has no failure streak to leave behind.
+      expect(correct.status).toBe(429);
+      expect(correct.status).toBe(wrong.status);
+      const correctBody = await correct.text();
+      expect(correctBody).toBe(await wrong.text());
+      expect(correct.headers.get("Retry-After")).toBe(
+        wrong.headers.get("Retry-After"),
+      );
+
+      // No credential, no membership: nothing about the account moved, and neither did a counter.
+      const json = JSON.parse(correctBody) as Json;
+      expect(json.error.code).toBe("RATE_LIMITED");
+      expect(json.data).toBeUndefined();
+      expect(await snapshotKeys()).toEqual(before);
+      expect(await kv.get(kvKeys.member(USER_ID))).toBeNull();
       expect(await attemptsCharged(USER_ID)).toBe(VERIFY_ATTEMPT_MAX);
       expect(
         await kv.get(kvKeys.verifyFail(USER_ID, normalizeCallerIp(callerIp))),
@@ -1277,8 +1278,8 @@ describe("Per-userId verification attempt ceiling", () => {
   });
 });
 
-// --- POST /api/family/:id/join — victim-facing per-userId flood resistance ---
-// See the header → "POST /api/family/:id/join — victim-facing per-userId flood resistance".
+// --- POST /api/family/:id/join — per-userId flood resistance ---
+// See the header → "POST /api/family/:id/join — per-userId flood resistance".
 
 describe("POST /api/family/:id/join per-userId flood resistance", () => {
   /** Distinct TEST-NET-2 source, one per request, so the per-IP tier never trips. */
@@ -1290,14 +1291,14 @@ describe("POST /api/family/:id/join per-userId flood resistance", () => {
   // follows is exactly the request the old code refused.
   const FLOOD_SIZE = 12;
 
-  it("should not lock a member out of their own correct-secret reconnect when a distributed flood targets their userId", async () => {
+  it("should not lock a member out of their own correct-secret reconnect when a flood of no-secret joins targets their userId", async () => {
     // An existing member reconnecting from a new device (the path Invariant 2 protects), with a
     // real PIN so the victim's own correct secret genuinely matches at the gate.
     await seedFamily([OWNER_ID, USER_ID]);
     await setPin(USER_ID, CORRECT_PIN);
 
-    // A distributed no-secret flood, each from a fresh source: every one stays a plain 403, never
-    // a 429. See the header → "POST /api/family/:id/join — victim-facing per-userId flood resistance".
+    // A no-secret flood, each from a fresh source: every one stays a plain 403, never a 429.
+    // See the header → "POST /api/family/:id/join — per-userId flood resistance".
     for (let i = 1; i <= FLOOD_SIZE; i++) {
       const flood = await joinFamily(USER_ID, {
         callerIp: distinctSourceIp(i),
