@@ -9,6 +9,7 @@ import {
   useAuth,
   type AuthState,
 } from "@/hooks/useAuth";
+import { REAUTH_PENDING_KEY } from "@/utils/reauthPendingKey";
 
 /**
  * useRecoveryJoin (PWA, #364): the silent recovery join moved out of App, now storing the token's
@@ -25,6 +26,13 @@ import {
  * build a new ApiClient and reload every page (#256). The harness wires it exactly as App does, with
  * the real `useAuth`, and observes both the callback and the session client.
  *
+ * Session binding. A client re-acquires a token only for the session it belongs to, and a session is
+ * `userId` + `familyId` + `apiHost` (token and expiry do not count). The cases below keep a request
+ * unanswered, replace the session, and only then answer 401: nothing may go out for the replaced
+ * session, and the current session must stay exactly as it was. The join answers are real replies on
+ * purpose, so a refresh that did run would change the session rather than just fail. The positive
+ * control proves the same wiring does refresh while the session is still current.
+ *
  * The join's failure branches are unchanged by the move and stay covered in
  * tests/component/App.test.tsx; `fetch` is the only mock here.
  */
@@ -36,6 +44,19 @@ const NEW_TOKEN = "2".repeat(64);
 const OLD_EXPIRES_AT = 1_700_000_000_000;
 const NEW_EXPIRES_AT = 1_900_000_000_000;
 
+const USER_B = "b".repeat(64);
+const TOKEN_B = "3".repeat(64);
+const HOST_A = "https://server-a.example.com";
+const HOST_B = "https://server-b.example.com";
+const SESSION_A: AuthState = {
+  userId: USER,
+  familyId: FAMILY,
+  apiHost: HOST_A,
+  authToken: OLD_TOKEN,
+};
+const NO_PREFS = { hidden: [], favorites: [] };
+const PREFS_PATH = `/api/user/${USER}/family-prefs`;
+
 const mockFetch = vi.fn();
 
 function joinReply(data: Record<string, unknown>) {
@@ -44,6 +65,38 @@ function joinReply(data: Record<string, unknown>) {
     status: 200,
     json: () => Promise.resolve({ data: { ok: true, ...data } }),
   };
+}
+
+function errorReply(status: number, code: string) {
+  return {
+    ok: false,
+    status,
+    json: () => Promise.resolve({ error: { code, message: code } }),
+  };
+}
+
+function prefsReply() {
+  return joinReply(NO_PREFS);
+}
+
+/** A fetch answer the test releases later. */
+function deferredReply() {
+  let resolve!: (reply: unknown) => void;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function fetchCall(index: number) {
+  return mockFetch.mock.calls.at(index) as [
+    string,
+    RequestInit & { headers: Record<string, string> },
+  ];
+}
+
+function isJoinUrl(url: string): boolean {
+  return new URL(url).pathname.endsWith("/join");
 }
 
 function seedSession(): void {
@@ -80,6 +133,7 @@ function renderRecovery(onLogin = vi.fn()) {
     const client = useSessionApiClient(authApi.auth, join);
     return {
       auth: authApi.auth,
+      login,
       logout: authApi.logout,
       join,
       client,
@@ -87,6 +141,37 @@ function renderRecovery(onLogin = vi.fn()) {
       onLogin,
     };
   });
+}
+
+/** Sends A's request, replaces A with `next`, and only then answers that request with a 401. */
+async function answer401AfterReplacingSession(
+  result: ReturnType<typeof renderRecovery>["result"],
+  next: AuthState,
+  joinAnswer: unknown,
+) {
+  act(() => {
+    result.current.login(SESSION_A);
+  });
+  const clientA = result.current.client;
+  const reply = deferredReply();
+  mockFetch.mockImplementation((url: string) =>
+    isJoinUrl(url) ? Promise.resolve(joinAnswer) : reply.promise,
+  );
+  const pending = clientA.updateFamilyPrefs(USER, NO_PREFS);
+
+  act(() => {
+    result.current.logout();
+  });
+  act(() => {
+    result.current.login(next);
+  });
+
+  let response!: Awaited<typeof pending>;
+  await act(async () => {
+    reply.resolve(errorReply(401, "UNAUTHORIZED"));
+    response = await pending;
+  });
+  return { clientA, response };
 }
 
 describe("useRecoveryJoin", () => {
@@ -112,7 +197,7 @@ describe("useRecoveryJoin", () => {
 
     let token: string | null = null;
     await act(async () => {
-      token = await result.current.join();
+      token = await result.current.join(result.current.auth!);
     });
 
     expect(token).toBe(NEW_TOKEN);
@@ -154,7 +239,7 @@ describe("useRecoveryJoin", () => {
       const { result, unmount } = renderRecovery();
 
       await act(async () => {
-        await result.current.join();
+        await result.current.join(result.current.auth!);
       });
 
       const written = result.current.onLogin.mock.calls[0][0] as AuthState;
@@ -184,7 +269,7 @@ describe("useRecoveryJoin", () => {
     expect(result.current.join).toBe(firstJoin);
 
     await act(async () => {
-      await result.current.join();
+      await result.current.join(result.current.auth!);
     });
     // The swap really re-rendered with the new token.
     expect(result.current.auth?.authToken).toBe(NEW_TOKEN);
@@ -228,6 +313,95 @@ describe("useRecoveryJoin", () => {
     expect(result.current.onLogin).not.toHaveBeenCalled();
     expect(result.current.auth).toBeNull();
     expect(localStorage.getItem(USER_ID_KEY)).toBeNull();
+    unmount();
+  });
+
+  it.each<{ label: string; next: AuthState }>([
+    {
+      label: "apiHost",
+      next: { ...SESSION_A, apiHost: HOST_B, authToken: TOKEN_B },
+    },
+    {
+      label: "familyId",
+      next: { ...SESSION_A, familyId: "fam-other", authToken: TOKEN_B },
+    },
+    {
+      label: "userId",
+      next: { ...SESSION_A, userId: USER_B, authToken: TOKEN_B },
+    },
+  ])(
+    "does not refresh for a session that has been replaced by one with another $label",
+    async ({ next }) => {
+      const { result, unmount } = renderRecovery();
+
+      const { clientA, response } = await answer401AfterReplacingSession(
+        result,
+        next,
+        joinReply({ authToken: NEW_TOKEN, expiresAt: NEW_EXPIRES_AT }),
+      );
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(response.error?.code).toBe("UNAUTHORIZED");
+      expect(result.current.auth).toEqual(next);
+
+      mockFetch.mockResolvedValueOnce(prefsReply());
+      await clientA.updateFamilyPrefs(USER, NO_PREFS);
+      expect(fetchCall(-1)[1].headers["Authorization"]).toBe(
+        `Bearer ${OLD_TOKEN}`,
+      );
+      unmount();
+    },
+  );
+
+  it("does not sign out the current session when a replaced session's request gets a 401", async () => {
+    const { result, unmount } = renderRecovery();
+    const next = { ...SESSION_A, apiHost: HOST_B, authToken: TOKEN_B };
+
+    await answer401AfterReplacingSession(
+      result,
+      next,
+      errorReply(403, "VERIFICATION_REQUIRED"),
+    );
+
+    expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+    expect(result.current.auth).toEqual(next);
+    expect(result.current.landingError).toBe("");
+    unmount();
+  });
+
+  it("refreshes and resends through the same client while its session is current", async () => {
+    const { result, unmount } = renderRecovery();
+    act(() => {
+      result.current.login(SESSION_A);
+    });
+    const clientA = result.current.client;
+    mockFetch
+      .mockResolvedValueOnce(errorReply(401, "UNAUTHORIZED"))
+      .mockResolvedValueOnce(
+        joinReply({ authToken: NEW_TOKEN, expiresAt: NEW_EXPIRES_AT }),
+      )
+      .mockResolvedValueOnce(prefsReply());
+
+    let response!: Awaited<ReturnType<typeof clientA.updateFamilyPrefs>>;
+    await act(async () => {
+      response = await clientA.updateFamilyPrefs(USER, NO_PREFS);
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const joinUrl = new URL(fetchCall(1)[0]);
+    expect(joinUrl.origin).toBe(HOST_A);
+    expect(joinUrl.pathname).toBe(`/api/family/${FAMILY}/join`);
+    const [resendUrl, resendInit] = fetchCall(2);
+    expect(new URL(resendUrl).origin).toBe(HOST_A);
+    expect(new URL(resendUrl).pathname).toBe(PREFS_PATH);
+    expect(resendInit.headers["Authorization"]).toBe(`Bearer ${NEW_TOKEN}`);
+    expect(response.error).toBeUndefined();
+    expect(result.current.client).toBe(clientA);
+    expect(result.current.auth).toEqual({
+      ...SESSION_A,
+      authToken: NEW_TOKEN,
+      expiresAt: NEW_EXPIRES_AT,
+    });
     unmount();
   });
 });
