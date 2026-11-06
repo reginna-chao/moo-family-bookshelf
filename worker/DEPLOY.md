@@ -330,13 +330,14 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 **握有他 token 的人持續猜錯時，要由你撤銷登入。** 改驗證設定要先通過目前密鑰的確認，這道確認有自己的額度（每帳號每小時 10 次），用完之後本人知道 PIN 也改不了，就沒辦法靠換 PIN 撤銷對方的登入。下面的步驟會撤銷這個帳號全部的登入，包括本人的裝置，之後也沒有 QR Code 可以用，所以要先和他約好時間。確認是本人之後，依序做：
 
 1. 照上面第 1 到 4 步寫入臨時 PIN。
-2. 列出這個帳號的 token 雜湊：
+2. 從兩個地方列出這個帳號的 token 雜湊，把結果合併、去掉重複。第一個指令印出的 `tokens[].hash` 是登入清單，第二個指令列出的 `tokenidx:<userId>:<hash>` 尾端是索引。兩邊都要查：較早登入的裝置可能只在清單上，沒有索引；漏掉的那一把在清單刪除後還能讀資料，也能換發新的登入。
 
    ```bash
+   pnpm exec wrangler kv key get "auth:<userId>" --namespace-id <正式 namespace ID> --remote
    pnpm exec wrangler kv key list --prefix "tokenidx:<userId>:" --namespace-id <正式 namespace ID> --remote
    ```
 
-3. 對列出的每一筆 `tokenidx:<userId>:<hash>`，先刪 token，再刪索引：
+3. 對合併後的每一個 `<hash>`，先刪 token，再刪索引（沒有索引的那幾把，第二行刪不到東西，不影響結果）：
 
    ```bash
    pnpm exec wrangler kv key delete "token:<hash>" --namespace-id <正式 namespace ID> --remote
@@ -349,7 +350,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key delete "auth:<userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-5. 再列一次第 2 步的 `tokenidx:`。對方可能在這段時間又產生了新的登入，有新的就照第 3 步補刪。
+5. 再列一次第 2 步的 `tokenidx:`（登入清單已經刪了，不用再查）。對方可能在這段時間又產生了新的登入，新的登入都有索引，有新的就照第 3 步補刪。
 6. 等約 60 秒，讓其他節點不再接受舊的 token，再照上面第 6 步刪除兩個計數器。
 7. 照上面第 5 步把臨時 PIN 回信給他，請他馬上登入，再設定新的 PIN 或圖形。
 
