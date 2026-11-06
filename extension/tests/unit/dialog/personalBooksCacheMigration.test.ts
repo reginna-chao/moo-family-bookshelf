@@ -19,10 +19,15 @@ import { encodePersonalBooksCache } from "@/dialog/personalBooksCache";
  * cache and never rejects, so the next attempt — onboarding's first book sync
  * (`useAutoSetup.syncBooks`) — can retry it. The cache is removed only after a
  * successful upload or when the server already holds a record.
+ *
+ * #471: the calls stay on the endpoint read at entry. Once the client has moved
+ * to another server the upload is not sent, and the cache is kept.
  */
 
 const USER_ID = "user-abc";
 const OTHER_USER_ID = "user-xyz";
+const SERVER = "https://api.example.test";
+const OTHER_SERVER = "https://other.example.test";
 const CACHED = [
   {
     bookId: "210000000000001",
@@ -47,6 +52,7 @@ function makeApi(
   updateResponse: unknown | Error = { data: { ok: true } },
 ): ApiClient {
   return {
+    getEndpoint: vi.fn(() => SERVER),
     getPersonalBooks: settle(getResponse),
     updatePersonalBooks: settle(updateResponse),
   } as unknown as ApiClient;
@@ -130,6 +136,23 @@ describe("migratePersonalBooksCache", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("resolves, sends no upload and keeps the cache when the endpoint changes during the read (#471)", async () => {
+    const api = makeApi({ data: null });
+    vi.mocked(api.getEndpoint).mockImplementation(() =>
+      vi.mocked(api.getPersonalBooks).mock.calls.length > 0
+        ? OTHER_SERVER
+        : SERVER,
+    );
+
+    await expect(
+      migratePersonalBooksCache(USER_ID, api),
+    ).resolves.toBeUndefined();
+
+    expect(api.getPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+    expect(await cacheStillThere()).toBe(true);
+  });
 
   // #328: see the header.
   describe("a failed upload while the server has no record (#328)", () => {
