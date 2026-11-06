@@ -30,9 +30,9 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * response/result Promise keyed by message type / storage key — there is no Chrome callback argument.
  * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT a
  * background message, so familyId is seeded into BOTH storage areas, and the storage mocks are
- * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY])` each
- * get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
- * reads it with a DIRECT `readStoredApiEndpoint()` and no longer sends GET_API_ENDPOINT (unreliable
+ * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY])`
+ * each get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
+ * reads it in the same DIRECT `get` as the token and no longer sends GET_API_ENDPOINT (unreliable
  * on Firefox's sleeping background event page). The background no longer answers that message at
  * all (#366); the boot test still asserts it is never sent, as a regression guard.
  *
@@ -137,8 +137,8 @@ function setupChromeMessages(options: {
   familyId?: string | null;
   userId?: string | null;
   authToken?: string | null;
-  /** Accepted API endpoint, seeded into storage.local: boot reads it directly via
-   *  `readStoredApiEndpoint()`, never via the background. See the file header, "Browser mocks". */
+  /** Accepted API endpoint, seeded into storage.local: boot reads it directly with the token,
+   *  never via the background. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -642,6 +642,33 @@ describe("App", () => {
     warn.mockRestore();
   });
 
+  it("keeps the token off the client and drops it when the stored endpoint is unusable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
+    const { instances, restore } = await captureApiClients();
+    setupChromeMessages({
+      familyId: "fam-1",
+      userId: "user-1",
+      authToken: "tok",
+      apiEndpoint: "http://evil.example.com",
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+    });
+
+    expect(setAuthToken).not.toHaveBeenCalled();
+    expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+      expect.arrayContaining([AUTH_TOKEN_KEY]),
+    );
+
+    setAuthToken.mockRestore();
+    restore();
+    warn.mockRestore();
+  });
+
   // A dead token recoverable only by the PWA-login secret must NOT drop the user to onboarding
   // (Invariant 2): VerificationPrompt overlays the still-mounted main view.
   describe("re-verification overlay", () => {
@@ -872,16 +899,15 @@ describe("App", () => {
       });
     });
 
-    // The endpoint read is best-effort (safeStorageGet): a failure falls back to the official default
-    // instead of failing the boot read, which would drop a member who HAS a family into onboarding.
-    it("a failing endpoint read does not block the main view", async () => {
+    // Token and endpoint come from one read (#456), so a failure leaves neither on the client: the
+    // boot takes its existing catch, which is onboarding, with nothing to send anywhere.
+    it("a failing boot read sets no token and falls back to onboarding", async () => {
       const localStore: Record<string, unknown> = {
         [USER_ID_KEY]: "user-ff",
         [AUTH_TOKEN_KEY]: "tok",
         [FAMILY_ID_KEY]: "fam-ff",
         [API_ENDPOINT_KEY]: "https://custom.workers.dev",
       };
-      // Only the endpoint read rejects; the familyId/userId reads still resolve.
       vi.mocked(chrome.storage.local.get).mockImplementation(((
         keys: unknown,
       ) =>
@@ -894,16 +920,24 @@ describe("App", () => {
         Promise.resolve(
           pickKeys({ [FAMILY_ID_KEY]: "fam-ff" }, keys),
         )) as typeof chrome.storage.sync.get);
+      const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
 
       const { instances, restore } = await captureApiClients();
       render(<App />);
 
       await waitFor(() => {
-        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
       });
-      expect(screen.queryByTestId("onboarding")).not.toBeInTheDocument();
+      // The rejecting read really is the one that asks for the token.
+      expect(chrome.storage.local.get).toHaveBeenCalledWith([
+        USER_ID_KEY,
+        AUTH_TOKEN_KEY,
+        API_ENDPOINT_KEY,
+      ]);
+      expect(setAuthToken).not.toHaveBeenCalled();
       expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
 
+      setAuthToken.mockRestore();
       restore();
     });
   });
@@ -994,19 +1028,6 @@ describe("App", () => {
             DECLINED_FAMILY_ENDPOINT_KEY,
           ]),
         );
-      });
-
-      restore();
-    });
-
-    it("tells the background to revert as well", async () => {
-      const { restore } = await leaveFromCustomEndpoint();
-
-      await waitFor(() => {
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: null,
-        });
       });
 
       restore();

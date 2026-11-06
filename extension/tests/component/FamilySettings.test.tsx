@@ -160,6 +160,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     // out of unrelated tests; "family endpoint switch confirmation" overrides this pair.
     getEndpoint: vi.fn().mockReturnValue(DEFAULT_API_ENDPOINT),
     setEndpoint: vi.fn(),
+    setAuthToken: vi.fn(),
     updateFamilyEndpoint: vi
       .fn()
       .mockResolvedValue({ data: { familyId: "fam-123", apiEndpoint: null } }),
@@ -2110,7 +2111,7 @@ describe("FamilySettings", () => {
       expect(within(panel).getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
       expect(
         within(panel).getByText(
-          "切換後，你的認證資訊與完整書單（包含未開放的書籍）都會傳送到新的伺服器。請確認你信任這個位址再切換。",
+          "切換後要重新加入家庭：你的 PIN 或圖形驗證（如果有設定）與完整書單（包含未開放的書籍）都會傳送到新的伺服器。請確認你信任這個位址再切換。如果你用的是隨機驗證碼，請先改成 PIN 或圖形驗證再切換，否則可能無法重新加入。",
         ),
       ).toBeInTheDocument();
       expect(
@@ -2206,10 +2207,6 @@ describe("FamilySettings", () => {
           DECLINED_FAMILY_ENDPOINT_KEY,
         ]);
       });
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: FAMILY_ENDPOINT,
-      });
       // Accepting must never leave a refusal behind.
       expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2238,9 +2235,6 @@ describe("FamilySettings", () => {
       expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
         expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
       );
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
-      );
     });
 
     it("does not ask again for an endpoint the user already declined", async () => {
@@ -2268,6 +2262,32 @@ describe("FamilySettings", () => {
 
       const panel = getEndpointSwitchPanel();
       expect(within(panel).getByText(FAMILY_ENDPOINT)).toBeInTheDocument();
+    });
+
+    it("drops the in-memory token on confirm and states a failed storage write", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+      const apiClient = await renderSettledEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      fireEvent.click(within(getEndpointSwitchPanel()).getByText("確認切換"));
+
+      expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
+      const notice = await screen.findByTestId("endpoint-switch-save-error");
+      expect(
+        within(notice).getByText("無法儲存切換結果，請重新整理頁面。"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(within(notice).getByText("知道了"));
+
+      expect(
+        screen.queryByTestId("endpoint-switch-save-error"),
+      ).not.toBeInTheDocument();
+      warn.mockRestore();
     });
 
     it("keeps the current endpoint when the client rejects the family endpoint", async () => {

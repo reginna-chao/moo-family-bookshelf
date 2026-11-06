@@ -6,21 +6,14 @@ import { isFamilyGoneError } from "../api/auth-refresh";
 import type { ApiClient } from "../api/client";
 import type { VerifyMethod } from "../api/types";
 import { useRetryCountdown } from "./useRetryCountdown";
+import { attemptFailureText, isVerificationError } from "./verificationCodes";
 import {
   rateLimitedMessage,
   verificationLockedMessage,
 } from "./verificationMessages";
 
-const VERIFICATION_CODES = new Set([
-  "VERIFICATION_REQUIRED",
-  "VERIFICATION_FAILED",
-  "VERIFICATION_LOCKED",
-]);
-
-/** True when a join errorCode is one the verification prompt should handle. */
-export function isVerificationError(code: string | undefined): boolean {
-  return code !== undefined && VERIFICATION_CODES.has(code);
-}
+// Re-exported so existing `./useVerificationPrompt` importers keep working.
+export { isVerificationError };
 
 export interface VerificationAttemptResult {
   ok: boolean;
@@ -277,7 +270,7 @@ export function useVerificationPrompt(
         return;
       }
       clearCountdown();
-      setError("發生錯誤，請稍後再試");
+      setError(attemptFailureText(result.errorCode));
     },
     [locked, applyCode, reset, updateSubmitting, syncCountdown, clearCountdown],
   );

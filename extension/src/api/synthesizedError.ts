@@ -1,4 +1,4 @@
-/** Provenance marker for client-built error envelopes, used by `ApiClient` (`api/client.ts`). */
+/** Provenance marker for client-built error envelopes, used by `api/client.ts` and `api/unauthorizedResponse.ts`. */
 
 import type { ApiErrorPayload } from "./types";
 

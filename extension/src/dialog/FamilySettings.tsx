@@ -99,6 +99,7 @@ export function FamilySettings({
       <EndpointSwitchPanel
         pending={endpointSwitch.pending}
         confirmError={endpointSwitch.confirmError}
+        saveFailed={endpointSwitch.confirmSaveFailed}
         onConfirm={endpointSwitch.confirm}
         onDecline={endpointSwitch.decline}
         onDismissConfirmError={endpointSwitch.dismissConfirmError}

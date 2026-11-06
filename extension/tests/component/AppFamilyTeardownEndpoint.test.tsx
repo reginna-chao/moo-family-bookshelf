@@ -49,7 +49,7 @@ import { familyPrefRef } from "moo-family-bookshelf-shared/familyShelf/prefRefs"
  * `tests/setup.ts` already provides. Unlike tests/component/App.test.tsx, no module is mocked.
  *
  * Reaching the client: App keeps it in a private ref, so a pass-through spy on
- * `ApiClient.prototype.setEndpoint` reads it off the boot call (`applyStoredEndpoint`) as
+ * `ApiClient.prototype.setEndpoint` reads it off the boot call (`applyStoredSession`) as
  * `mock.contexts[0]`. `markAccountConfirmed` skips the 1.5 s `#/me` hash navigation at boot.
  *
  * Timers are real: the teardown lands inside the debounce window, and RTL waiters cannot see a
@@ -86,12 +86,13 @@ import { familyPrefRef } from "moo-family-bookshelf-shared/familyShelf/prefRefs"
  *
  * The failed-save resend: `detach()` also resends a save that already failed, so the toggle waits out
  * the real debounce and fails BEFORE `prepare()`, while the family shelf and its notice are on screen.
- * A 500 keeps the refresh flow out of it. When that resend gets a 401 instead, the client's refresh
- * reads storage after the endpoint switch, and only the cleared family binding stops it from posting
- * to the official server. Leaving clears storage inside its own handler; the removal route's real
- * caller (`clearFamilyAndNotify`) clears it before `onFamilyRemoved`, which `clearStorageFirst` mirrors
- * since `run` calls the handler directly. The storage read with the refresh's exact keys is the signal
- * that the refresh really ran and stopped there, so the empty-official-server assertion is not vacuous.
+ * A 500 keeps the refresh flow out of it. When that resend gets a 401 instead, it answers for a server
+ * the client has already left, so the client hands the 401 back and refreshes nowhere (#456). Leaving
+ * clears storage inside its own handler; the removal route's real caller (`clearFamilyAndNotify`) clears
+ * it before `onFamilyRemoved`, which `clearStorageFirst` mirrors since `run` calls the handler directly.
+ * Two saves on the family's server show the 401 was really sent, and no refresh on any server plus an
+ * empty official server show it stopped there. The positive companion for that URL filter is the
+ * "starts no bookshelf or borrow load" case, whose refresh does run.
  */
 
 const SELF_HOSTED = "https://selfhost.example";
@@ -499,25 +500,17 @@ describe("App family teardown and the API endpoint", () => {
       await screen.findByText(SYNC_FAILED_NOTICE, undefined, WAIT);
       await prepare();
       await clearStorageFirst();
-      vi.mocked(chrome.storage.local.get).mockClear();
 
       await run(client);
-
-      // See the header → "The failed-save resend".
-      await waitFor(
-        () =>
-          expect(chrome.storage.local.get).toHaveBeenCalledWith([
-            USER_ID_KEY,
-            FAMILY_ID_KEY,
-            AUTH_TOKEN_KEY,
-          ]),
-        WAIT,
-      );
       await drainContinuations();
 
+      // See the header → "The failed-save resend".
       expect(prefsCallsTo(calls, SELF_HOSTED).filter(isPrefsSave)).toHaveLength(
         2,
       );
+      expect(
+        calls.filter(({ url }) => url.endsWith("/api/auth/refresh")),
+      ).toEqual([]);
       expect(callsTo(calls, DEFAULT_API_ENDPOINT)).toEqual([]);
     },
   );

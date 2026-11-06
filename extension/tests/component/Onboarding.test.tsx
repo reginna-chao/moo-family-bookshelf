@@ -665,9 +665,8 @@ describe("Onboarding", () => {
   });
 
   describe("handleJoin with custom API endpoint", () => {
-    /** An `@host` sync code is an explicit server choice: joining persists it to storage.local (authoritative —
-     *  Firefox's sleeping background page can drop the message) AND still broadcasts SET_API_ENDPOINT. */
-    it("persists and broadcasts the endpoint when the sync code contains @host", async () => {
+    /** An `@host` sync code is an explicit server choice: joining persists it with a direct storage.local write. */
+    it("persists the endpoint when the sync code contains @host", async () => {
       const onFamilyJoined = vi.fn();
       const mockApi = createMockApiClient({
         joinFamily: vi.fn().mockResolvedValue({
@@ -708,13 +707,6 @@ describe("Onboarding", () => {
         expect(chrome.storage.local.set).toHaveBeenCalledWith({
           [API_ENDPOINT_KEY]: "https://custom.api.dev",
         });
-        // Verify SET_API_ENDPOINT was sent to chrome.runtime
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-          expect.objectContaining({
-            type: "SET_API_ENDPOINT",
-            apiEndpoint: "https://custom.api.dev",
-          }),
-        );
         // Also verify the API client endpoint was updated
         expect(mockApi.setEndpoint).toHaveBeenCalledWith(
           "https://custom.api.dev",
@@ -778,9 +770,6 @@ describe("Onboarding", () => {
       expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
         DECLINED_FAMILY_ENDPOINT_KEY,
       ]);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
-      );
     });
   });
 

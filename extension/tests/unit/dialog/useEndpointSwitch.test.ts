@@ -12,8 +12,12 @@ import {
 import { ApiClient, validateEndpointUrl } from "@/api/client";
 import {
   API_ENDPOINT_KEY,
+  AUTH_TOKEN_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
+  FAMILY_ID_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 
 /**
@@ -65,6 +69,14 @@ import {
  * leave the member on the endpoint they already trust. `tests/setup.ts` backs
  * `browser.storage.local` with an in-memory store, so these tests assert on
  * stored values rather than on call shapes where possible.
+ *  - A confirmed switch and the old token (#456): `confirm` moves the client and
+ *    drops the in-memory token synchronously, so a refresh in flight is already
+ *    discarded by the time storage is touched, and nothing a late response does can
+ *    reach storage. The storage half runs afterwards and may fail: then the client
+ *    stays on the new server with no token (a 401 there refuses to refresh, because
+ *    storage still pairs the token with the old server), `confirmSaveFailed` tells
+ *    the user, and `adoptedEndpoint` goes back to what storage says. The rejoin that
+ *    follows a confirm is pinned in tests/unit/api/tokenBinding.test.ts.
  *  - `adoptedEndpoint` is the endpoint THIS device actually uses, surfaced as
  *    React state because `apiClient.setEndpoint()` mutates without re-rendering.
  *    The sync code / invite / QR are built from it, never from the family
@@ -467,6 +479,13 @@ describe("computePendingSwitch", () => {
 describe("useEndpointSwitch", () => {
   /** Plain HTTP on a public host — rejected by ApiClient.setEndpoint. */
   const UNSAFE_ENDPOINT = "http://evil.example.com";
+  /** The shared store's own writers, which a case wraps to land an interleaving inside a write. */
+  const realStoreSet = vi
+    .mocked(browser.storage.local.set)
+    .getMockImplementation()!;
+  const realStoreRemove = vi
+    .mocked(browser.storage.local.remove)
+    .getMockImplementation()!;
 
   interface HookProps {
     familyEndpoint: string | undefined;
@@ -550,7 +569,7 @@ describe("useEndpointSwitch", () => {
     });
   });
 
-  it("confirm switches the client, stores the endpoint, and notifies the background", async () => {
+  it("confirm switches the client and stores the endpoint", async () => {
     const apiClient = new ApiClient(DEFAULT_API_ENDPOINT);
     const { result } = renderSwitch(apiClient, {
       familyEndpoint: FAMILY_CUSTOM,
@@ -565,10 +584,6 @@ describe("useEndpointSwitch", () => {
     expect(result.current.pending).toBeNull();
     await waitFor(async () => {
       await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
-    });
-    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: FAMILY_CUSTOM,
     });
   });
 
@@ -589,10 +604,6 @@ describe("useEndpointSwitch", () => {
     expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
     await waitFor(async () => {
       await expect(readStored(API_ENDPOINT_KEY)).resolves.toBeUndefined();
-    });
-    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: null,
     });
   });
 
@@ -691,10 +702,6 @@ describe("useEndpointSwitch", () => {
     await waitFor(async () => {
       await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
     });
-    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: FAMILY_CUSTOM,
-    });
   });
 
   it("decline remembers the CANONICAL value, so the same endpoint stops re-prompting however it is spelled", async () => {
@@ -775,9 +782,6 @@ describe("useEndpointSwitch", () => {
     expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
     expect(result.current.confirmError).toBe(true);
     await expect(readStored(API_ENDPOINT_KEY)).resolves.toBeUndefined();
-    expect(browser.runtime.sendMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "SET_API_ENDPOINT" }),
-    );
 
     warn.mockRestore();
   });
@@ -945,6 +949,314 @@ describe("useEndpointSwitch", () => {
 
       expect(result.current.pending).toBeNull();
       expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
+    });
+  });
+
+  // See the header → "A confirmed switch and the old token".
+  describe("a confirmed switch and the old token", () => {
+    const OLD_TOKEN = "a".repeat(64);
+    const HOSTILE_TOKEN = "c".repeat(64);
+    const USER_ID = "1".repeat(64);
+    const originalFetch = globalThis.fetch;
+
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    }
+
+    async function seedOldSession(): Promise<void> {
+      await browser.storage.local.set({
+        [USER_ID_KEY]: USER_ID,
+        [FAMILY_ID_KEY]: "fam-1",
+        [API_ENDPOINT_KEY]: CURRENT_CUSTOM,
+        [AUTH_TOKEN_KEY]: OLD_TOKEN,
+        [TOKEN_EXPIRES_AT_KEY]: 123,
+      });
+      vi.clearAllMocks();
+    }
+
+    async function askedSwitch() {
+      const apiClient = new ApiClient(CURRENT_CUSTOM);
+      apiClient.setAuthToken(OLD_TOKEN);
+      const hook = renderSwitch(apiClient, {
+        familyEndpoint: FAMILY_CUSTOM,
+        membersReady: true,
+      });
+      await waitFor(() => expect(hook.result.current.pending).not.toBeNull());
+      return { apiClient, ...hook };
+    }
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      vi.mocked(browser.storage.local.set).mockImplementation(realStoreSet);
+      vi.mocked(browser.storage.local.remove).mockImplementation(
+        realStoreRemove,
+      );
+    });
+
+    it("moves the client, drops the token and closes the panel before any storage write lands", async () => {
+      await seedOldSession();
+      const { apiClient, result } = await askedSwitch();
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: { books: [] } }),
+      });
+      globalThis.fetch = fetchMock;
+      const firstRemoval = deferred<void>();
+      vi.mocked(browser.storage.local.remove).mockImplementationOnce(
+        () => firstRemoval.promise,
+      );
+
+      act(() => result.current.confirm());
+
+      expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+      expect(result.current.pending).toBeNull();
+      expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      await apiClient.getPersonalBooks(USER_ID);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url.startsWith(FAMILY_CUSTOM)).toBe(true);
+      expect(
+        (init.headers as Record<string, string>).Authorization,
+      ).toBeUndefined();
+
+      // Dropped, not just withheld: a move back to its issuer finds no token either.
+      apiClient.setEndpoint(CURRENT_CUSTOM);
+      await apiClient.getPersonalBooks(USER_ID);
+      const [, initAfterReturn] = fetchMock.mock.calls[1] as [
+        string,
+        RequestInit,
+      ];
+      expect(
+        (initAfterReturn.headers as Record<string, string>).Authorization,
+      ).toBeUndefined();
+
+      await act(async () => {
+        firstRemoval.resolve();
+        await firstRemoval.promise;
+      });
+    });
+
+    it("leaves storage with the new endpoint and no old token", async () => {
+      await seedOldSession();
+      const { result } = await askedSwitch();
+
+      act(() => result.current.confirm());
+      await act(async () => {});
+
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readStored(TOKEN_EXPIRES_AT_KEY)).resolves.toBeUndefined();
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+      expect(result.current.confirmSaveFailed).toBe(false);
+    });
+
+    it("drops a refresh token that lands while the storage write is running", async () => {
+      await seedOldSession();
+      const { apiClient, result } = await askedSwitch();
+      const refresh = deferred<unknown>();
+      globalThis.fetch = vi.fn((input: unknown) =>
+        String(input).endsWith("/api/auth/refresh")
+          ? refresh.promise
+          : Promise.resolve({
+              ok: false,
+              status: 401,
+              json: () =>
+                Promise.resolve({
+                  error: { code: "UNAUTHORIZED", message: "x" },
+                }),
+            }),
+      ) as unknown as typeof fetch;
+
+      const pendingRequest = apiClient.getPersonalBooks(USER_ID);
+      await waitFor(() =>
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          expect.stringContaining("/api/auth/refresh"),
+          expect.anything(),
+        ),
+      );
+
+      // The refresh answers during the first removal: before the endpoint write.
+      const storeRemove = realStoreRemove;
+      vi.mocked(browser.storage.local.remove).mockImplementationOnce(
+        async (keys) => {
+          await storeRemove(keys);
+          refresh.resolve({
+            ok: true,
+            status: 200,
+            json: () =>
+              Promise.resolve({
+                data: { token: HOSTILE_TOKEN, expiresAt: 9_999_999_999_999 },
+              }),
+          });
+          await pendingRequest;
+        },
+      );
+
+      act(() => result.current.confirm());
+      await act(async () => {
+        await pendingRequest;
+      });
+      await act(async () => {});
+
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+    });
+
+    it("clears a token another tab wrote back during the endpoint write", async () => {
+      await seedOldSession();
+      const { result } = await askedSwitch();
+      vi.mocked(browser.storage.local.set).mockImplementationOnce(
+        async (items) => {
+          await realStoreSet({ [AUTH_TOKEN_KEY]: OLD_TOKEN });
+          await realStoreSet(items);
+        },
+      );
+
+      act(() => result.current.confirm());
+      await act(async () => {});
+
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+    });
+
+    const SAVE_FAILURES = [
+      {
+        name: "the token removal fails",
+        arm: () =>
+          vi
+            .mocked(browser.storage.local.remove)
+            .mockRejectedValueOnce(new Error("storage unavailable")),
+        storedAfter: OLD_TOKEN,
+      },
+      {
+        name: "the endpoint write fails",
+        arm: () =>
+          vi
+            .mocked(browser.storage.local.set)
+            .mockRejectedValueOnce(new Error("storage unavailable")),
+        storedAfter: undefined,
+      },
+    ];
+
+    it.each(SAVE_FAILURES)(
+      "reports the failure and sends no message when $name",
+      async ({ arm, storedAfter }) => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await seedOldSession();
+        const { apiClient, result } = await askedSwitch();
+        arm();
+
+        act(() => result.current.confirm());
+        await act(async () => {});
+
+        expect(result.current.confirmSaveFailed).toBe(true);
+        expect(result.current.confirmError).toBe(false);
+        expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+        await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(
+          CURRENT_CUSTOM,
+        );
+        await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBe(storedAfter);
+        // The client stays where the confirm put it, holding no token.
+        expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+
+        warn.mockRestore();
+      },
+    );
+
+    it("sends the new server nothing of the old session on a 401 after a failed save", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await seedOldSession();
+      const { apiClient, result } = await askedSwitch();
+      vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+      act(() => result.current.confirm());
+      await act(async () => {});
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () =>
+          Promise.resolve({ error: { code: "UNAUTHORIZED", message: "x" } }),
+      });
+      globalThis.fetch = fetchMock;
+
+      const response = await apiClient.getPersonalBooks(USER_ID);
+
+      expect(response.error?.code).toBe("UNAUTHORIZED");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url.startsWith(FAMILY_CUSTOM)).toBe(true);
+      expect(
+        (init.headers as Record<string, string>).Authorization,
+      ).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it("clears confirmSaveFailed through dismissConfirmError", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await seedOldSession();
+      const { result } = await askedSwitch();
+      vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+      act(() => result.current.confirm());
+      await act(async () => {});
+      expect(result.current.confirmSaveFailed).toBe(true);
+
+      act(() => result.current.dismissConfirmError());
+
+      expect(result.current.confirmSaveFailed).toBe(false);
+      warn.mockRestore();
+    });
+
+    it("clears confirmSaveFailed when a fresh question appears", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await seedOldSession();
+      const { result, rerender } = await askedSwitch();
+      vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+      act(() => result.current.confirm());
+      await act(async () => {});
+      expect(result.current.confirmSaveFailed).toBe(true);
+
+      rerender({
+        familyEndpoint: "https://moved.example",
+        membersReady: true,
+      });
+
+      await waitFor(() =>
+        expect(result.current.pending?.targetEndpoint).toBe(
+          "https://moved.example",
+        ),
+      );
+      expect(result.current.confirmSaveFailed).toBe(false);
+      warn.mockRestore();
+    });
+
+    it("does not raise confirmSaveFailed when the client refuses the value", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await seedOldSession();
+      const apiClient = new ApiClient(CURRENT_CUSTOM);
+      apiClient.setAuthToken(OLD_TOKEN);
+      const { result } = renderSwitch(apiClient, {
+        familyEndpoint: UNSAFE_ENDPOINT,
+        membersReady: true,
+      });
+      await waitFor(() => expect(result.current.pending).not.toBeNull());
+
+      act(() => result.current.confirm());
+      await act(async () => {});
+
+      expect(result.current.confirmError).toBe(true);
+      expect(result.current.confirmSaveFailed).toBe(false);
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBe(OLD_TOKEN);
+      warn.mockRestore();
     });
   });
 
