@@ -36,11 +36,16 @@
  * runs on the PUBLIC read path, so each must fail CLOSED (empty list ⇒ the
  * liveness guard answers 404) rather than throw a TypeError that surfaces as a
  * 500 to a stranger.
+ *
+ * keepCurrentlySharedBooks — the read-side filter (#461): its decision table as
+ * a pure function. What the public read does with its answer, end to end, is in
+ * `worker/tests/integration/publicShelfCurrentSharing.test.ts`.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
+  keepCurrentlySharedBooks,
   type PublicShelvesSource,
 } from "../../src/services/publicShelf";
 import {
@@ -405,5 +410,116 @@ describe("resolvePublicShelves", () => {
 
     expect(pointer).toEqual({ shelves: [POINTER_SHELF] });
     expect(legacy).toEqual({ publicSharing: { shelves: [LEGACY_SHELF] } });
+  });
+});
+
+// --- keepCurrentlySharedBooks — the read-side filter ---
+// See the header → "keepCurrentlySharedBooks — the read-side filter".
+
+describe("keepCurrentlySharedBooks", () => {
+  /** A record entry whose `isShared` did not survive as a BoolFlag (type forced on purpose). */
+  function withIsShared(bookId: string, isShared: unknown): BookEntry {
+    return { ...makeBook(bookId, BoolFlag.TRUE), isShared } as BookEntry;
+  }
+
+  const SNAPSHOT = [
+    makeBook("book1", BoolFlag.TRUE),
+    makeBook("book2", BoolFlag.TRUE),
+  ];
+
+  const CASES: { label: string; current: BookEntry[]; kept: string[] }[] = [
+    {
+      label: "keeps a book the record still shares",
+      current: [
+        makeBook("book1", BoolFlag.TRUE),
+        makeBook("book2", BoolFlag.TRUE),
+      ],
+      kept: ["book1", "book2"],
+    },
+    {
+      label: "drops a book the record has un-shared",
+      current: [
+        makeBook("book1", BoolFlag.FALSE),
+        makeBook("book2", BoolFlag.TRUE),
+      ],
+      kept: ["book2"],
+    },
+    {
+      label: "drops a book whose isShared is missing",
+      current: [
+        withIsShared("book1", undefined),
+        makeBook("book2", BoolFlag.TRUE),
+      ],
+      kept: ["book2"],
+    },
+    {
+      label: "drops a book whose isShared is the boolean true",
+      current: [withIsShared("book1", true), makeBook("book2", BoolFlag.TRUE)],
+      kept: ["book2"],
+    },
+    {
+      label: "drops a book the record no longer has",
+      current: [makeBook("book2", BoolFlag.TRUE)],
+      kept: ["book2"],
+    },
+    {
+      label: "never adds a book shared only in the record",
+      current: [
+        makeBook("book1", BoolFlag.TRUE),
+        makeBook("book2", BoolFlag.TRUE),
+        makeBook("book3", BoolFlag.TRUE),
+      ],
+      kept: ["book1", "book2"],
+    },
+    {
+      label: "returns nothing for an empty record",
+      current: [],
+      kept: [],
+    },
+  ];
+
+  it.each(CASES)("$label", ({ current, kept }) => {
+    const result = keepCurrentlySharedBooks(SNAPSHOT, current);
+
+    expect(result.map((b) => b.bookId)).toEqual(kept);
+  });
+
+  it("returns nothing for an empty snapshot", () => {
+    expect(
+      keepCurrentlySharedBooks([], [makeBook("book1", BoolFlag.TRUE)]),
+    ).toEqual([]);
+  });
+
+  it("keeps the snapshot's order, not the record's", () => {
+    const result = keepCurrentlySharedBooks(SNAPSHOT, [
+      makeBook("book2", BoolFlag.TRUE),
+      makeBook("book1", BoolFlag.TRUE),
+    ]);
+
+    expect(result.map((b) => b.bookId)).toEqual(["book1", "book2"]);
+  });
+
+  it("takes every field from the snapshot, not the record", () => {
+    const stored = {
+      ...makeBook("book1", BoolFlag.TRUE),
+      title: "As published",
+    };
+
+    const result = keepCurrentlySharedBooks(
+      [stored],
+      [{ ...makeBook("book1", BoolFlag.TRUE), title: "Since renamed" }],
+    );
+
+    expect(result).toEqual([stored]);
+  });
+
+  it("leaves both inputs untouched", () => {
+    const snapshot = [makeBook("book1", BoolFlag.TRUE)];
+    const current = [makeBook("book1", BoolFlag.FALSE)];
+
+    keepCurrentlySharedBooks(snapshot, current);
+
+    expect(snapshot).toEqual([makeBook("book1", BoolFlag.TRUE)]);
+    expect(current).toEqual([makeBook("book1", BoolFlag.FALSE)]);
   });
 });

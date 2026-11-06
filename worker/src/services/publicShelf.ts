@@ -1,5 +1,5 @@
-/** Public-shelf snapshot writes + list resolver, shared by the `user` and `publicShelf` routes.
- *  Rationale: .claude/rules/backend.md → KV Key Patterns (public shelves). */
+/** Public-shelf snapshot writes + list resolver + read-side current-sharing filter, shared by the `user`
+ *  and `publicShelf` routes. Rationale: .claude/rules/backend.md → KV Key Patterns (public shelves). */
 import {
   kvKeys,
   BoolFlag,
@@ -28,8 +28,10 @@ export interface ResolvedPublicShelves {
 /**
  * Single source of truth for the lazy-migration fallback rule. PURE on purpose:
  * callers fetch the two KV values themselves, so a caller that needs both can
- * read them in parallel while the public read path can stay pointer-first and
- * touch `user:{userId}` only on a pointer miss.
+ * read them in parallel while the public read path can stay pointer-first:
+ * resolving its list touches `user:{userId}` only on a pointer miss. A migrated
+ * owner's record is read separately for the current-sharing filter, and only
+ * once the list check has passed.
  *
  * A non-null pointer record is ALWAYS authoritative — including when its
  * `shelves` array is empty, which means "migrated, all shelves deleted". Never
@@ -61,6 +63,20 @@ export function resolvePublicShelves(
 
 function sharedBooks(books: BookEntry[]): BookEntry[] {
   return books.filter((b) => b.isShared === BoolFlag.TRUE);
+}
+
+/**
+ * Read-side filter of `GET /api/public/:shareToken` (#461): a snapshot book is served only while the
+ * owner's current record has that bookId shared. Keeps the snapshot's order and its own fields; a book
+ * shared only in the current record stays out until the next save rebuilds the snapshot.
+ * Rationale: docs/architecture.md → 公開書櫃的寫入與撤銷.
+ */
+export function keepCurrentlySharedBooks(
+  snapshotBooks: BookEntry[],
+  currentBooks: BookEntry[],
+): BookEntry[] {
+  const sharedIds = new Set(sharedBooks(currentBooks).map((b) => b.bookId));
+  return snapshotBooks.filter((b) => sharedIds.has(b.bookId));
 }
 
 /** Remaining lifetime in seconds, `undefined` = never expires; under `KV_MIN_TTL_SECONDS` ⇒ 0 (expired),
