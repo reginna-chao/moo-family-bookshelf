@@ -79,7 +79,21 @@ describe("unmountFamilyTreeThenResetClient", () => {
     expect(mounts()).toBe(2);
   });
 
-  it.each<View>(["onboarding", "loading", "account-mismatch"])(
+  it("moves the onboarding view to loading, unmounting what it held, and still resets the client", () => {
+    const { setView, mounts, log } = renderViewTree("onboarding");
+    const clientLog: string[] = [];
+
+    act(() =>
+      unmountFamilyTreeThenResetClient(recordingClient(clientLog), setView),
+    );
+
+    expect(screen.getByTestId("view")).toHaveTextContent("loading");
+    expect(log).toEqual(["cleanup:onboarding"]);
+    expect(mounts()).toBe(2);
+    expect(clientLog).toEqual(CLIENT_RESET_LOG);
+  });
+
+  it.each<View>(["loading", "account-mismatch"])(
     "leaves the %s view mounted and still resets the client",
     (view) => {
       const { setView, mounts, log } = renderViewTree(view);
