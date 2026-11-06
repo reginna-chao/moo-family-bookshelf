@@ -1,6 +1,7 @@
 // Wires Onboarding's state machine, handlers and business state. Sub-hooks run unconditionally in a fixed
 // order: state/refs/effects, navigation, verification bridge, attempts, start/create/join, recovery views.
 
+import { useCallback, useEffect, useRef } from "react";
 import { useVerificationPrompt } from "./useVerificationPrompt";
 import type {
   UseOnboardingFlowOptions,
@@ -21,10 +22,30 @@ export type {
   UseOnboardingFlowResult,
 } from "./onboardingFlowTypes";
 
+// An instance a family teardown has remounted (familyTreeTeardown.ts) must not enter the main view (#476).
+function useOnFamilyJoinedWhileMounted(
+  onFamilyJoined: UseOnboardingFlowOptions["onFamilyJoined"],
+): UseOnboardingFlowOptions["onFamilyJoined"] {
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return useCallback(
+    (familyId, userId) => {
+      if (mountedRef.current) onFamilyJoined(familyId, userId);
+    },
+    [onFamilyJoined],
+  );
+}
+
 export function useOnboardingFlow(
   opts: UseOnboardingFlowOptions,
 ): UseOnboardingFlowResult {
-  const { apiClient, onFamilyJoined, autoSetup } = opts;
+  const { apiClient, autoSetup } = opts;
+  const onFamilyJoined = useOnFamilyJoinedWhileMounted(opts.onFamilyJoined);
 
   const verify = useVerificationPrompt(apiClient);
   // Stable reference for hook deps (verify.begin is useCallback-memoized).

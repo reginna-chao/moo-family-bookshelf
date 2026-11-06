@@ -11,6 +11,7 @@ import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
 import { verifyAccountIdentity } from "./accountIdentityCheck";
 import { ACCOUNT_UNCONFIRMED_SYNC_MESSAGE } from "./AccountCheckContext";
 import { DISPLAY_NAME_KEY, LAST_SYNC_AT_KEY } from "../constants";
+import { SyncServerChangedError } from "../sync/pinnedSyncApi";
 import { booksSaveErrorText } from "moo-family-bookshelf-shared/personal/saveErrors";
 
 export type AutoSetupPhase =
@@ -113,6 +114,15 @@ export function useAutoSetup(): UseAutoSetupReturn {
       resetScrapeWarnings();
 
       try {
+        // A fresh Onboarding instance can put an unaccepted @host on this shared client
+        // during the scrape (#476); the sync must not follow it to that server.
+        const serverAtStart = apiClient.getEndpoint();
+        const assertSameServer = (): void => {
+          if (apiClient.getEndpoint() !== serverAtStart) {
+            throw new SyncServerChangedError();
+          }
+        };
+
         const scrapedBooks = await navigateAndRun("#/library", () =>
           scrapeBooks({
             onProgress: (page, count) =>
@@ -132,10 +142,12 @@ export function useAutoSetup(): UseAutoSetupReturn {
           return false;
         }
 
+        assertSameServer();
         // Retry a cache kept by a failed create/join upload BEFORE the first upload
         // creates an all-unshared record; with no cache this is one local read.
         await migratePersonalBooksCache(userId, apiClient);
 
+        assertSameServer();
         const uploadError = await uploadOnboardingBooks({
           apiClient,
           userId,

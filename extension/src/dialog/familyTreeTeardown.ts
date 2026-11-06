@@ -13,11 +13,13 @@ import type { View } from "./App";
  * that request is sent, so the save must leave before the reset to reach the family's own
  * server, not the default.
  *
- * Only `main` mounts `FamilyDataProvider`, so every other view is left alone and Onboarding is
- * not remounted. `finally` is purely defensive: on React 19.3 neither an unmount-cleanup error
- * nor an updater error is rethrown out of `flushSync` (both go to the root's uncaught-error
- * path). Were one to surface, the client must still leave the old server, token included, or
- * the next join would go there.
+ * `main` unmounts so its family tree flushes. `onboarding` unmounts so the flow left behind
+ * cannot carry on as the live instance (#476). `loading` and `account-mismatch` are left alone.
+ *
+ * `finally` is purely defensive: on React 19.3 neither an unmount-cleanup error nor an updater
+ * error is rethrown out of `flushSync` (both go to the root's uncaught-error path). Were one to
+ * surface, the client must still leave the old server, token included, or the next join would
+ * go there.
  *
  * Callers must be outside React's lifecycle, where `flushSync` cannot flush; all current ones
  * run after an await.
@@ -27,7 +29,9 @@ export function unmountFamilyTreeThenResetClient(
   setView: Dispatch<SetStateAction<View>>,
 ): void {
   try {
-    flushSync(() => setView((v) => (v === "main" ? "loading" : v)));
+    flushSync(() =>
+      setView((v) => (v === "main" || v === "onboarding" ? "loading" : v)),
+    );
   } finally {
     client.setAuthToken(null);
     client.setEndpoint(DEFAULT_API_ENDPOINT);
