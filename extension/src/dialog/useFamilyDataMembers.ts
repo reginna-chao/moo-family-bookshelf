@@ -73,6 +73,8 @@ export function useFamilyDataRefreshMembers({
     setFamilyEndpoint,
   } = setters;
   return useCallback(async () => {
+    // Unmounted: send nothing, the client may already point at another server (#464).
+    if (!mountedRef.current) return;
     setMembersState((prev) => (prev === "ready" ? prev : "loading"));
     setMembersError("");
     try {
