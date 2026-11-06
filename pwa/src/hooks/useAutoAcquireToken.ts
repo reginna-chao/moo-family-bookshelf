@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { AuthState } from "./useAuth";
+import type { SessionTokenRefresher } from "./useSessionApiClient";
 
 /** Auto-acquire an auth token once when the session has none (e.g., QR code entry); true while it runs. */
 export function useAutoAcquireToken(
   auth: AuthState | null,
-  acquireNewToken: () => Promise<string | null>,
+  acquireNewToken: SessionTokenRefresher,
 ): boolean {
   const [acquiringToken, setAcquiringToken] = useState(false);
   const tokenAcquired = useRef(false);
@@ -13,7 +14,7 @@ export function useAutoAcquireToken(
     tokenAcquired.current = true;
     setAcquiringToken(true);
 
-    void acquireNewToken().finally(() => setAcquiringToken(false));
+    void acquireNewToken(auth).finally(() => setAcquiringToken(false));
   }, [auth, acquireNewToken]);
   return acquiringToken;
 }
