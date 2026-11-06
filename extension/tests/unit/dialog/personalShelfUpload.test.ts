@@ -51,6 +51,7 @@ function client(overrides: Partial<Record<keyof ApiClient, unknown>> = {}) {
     getPersonalBooks: vi.fn(),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
     patchPersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    getEndpoint: vi.fn(() => "https://test.workers.dev"),
     ...overrides,
   } as unknown as ApiClient;
 }
