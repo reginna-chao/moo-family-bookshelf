@@ -34,6 +34,7 @@ import {
 } from "../helpers/auth";
 import { BoolFlag, kvKeys, type RawFamilyRecord } from "../../src/kv/schema";
 import { USER1, USER2, USER3, USER4 } from "../helpers/ids";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -352,6 +353,8 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
 
     expect((await deleteAccount(USER2, memberToken)).status).toBe(200);
 
+    // The token:deleted: mark (#462) answers the deleting token's own retry; no join ever reads it.
+    const mark = kvKeys.accountDeleted(await hashAuthToken(memberToken));
     const trail = ops.writeTrail();
     expect(trail[0]).toBe(`put ${kvKeys.family(familyId)}`);
     expect(asSet(trail.slice(1))).toEqual(
@@ -362,6 +365,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.verify(USER2)}`,
         `delete ${kvKeys.otp(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
+        `put ${mark}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
@@ -371,6 +375,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         kvKeys.family(familyId),
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
+        mark,
         await authTokenKey(ownerToken),
         await authTokenIndexKey(USER1, ownerToken),
       ]),

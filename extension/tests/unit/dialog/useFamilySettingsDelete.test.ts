@@ -7,6 +7,7 @@ import type { VerifyMethod } from "@/api/types";
 import { useFamilySettingsDelete } from "@/dialog/useFamilySettingsDelete";
 import { isSelfDepartureActive } from "@/storage/selfDeparture";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
+import { ACCOUNT_DELETED_ERROR_CODE } from "moo-family-bookshelf-shared/api/accountDeleted";
 import {
   CURRENT_PATTERN_WRONG_MESSAGE,
   CURRENT_PIN_WRONG_MESSAGE,
@@ -26,9 +27,21 @@ import {
  * with the method's wrong-secret copy on the entry; `VERIFICATION_REQUIRED` re-reads the method and
  * stays in the confirm step; a failed method read leaves `requiredMethod` null and the delete goes out
  * without a secret. The secret is a call argument only — never written to `browser.storage.local`.
+ *
+ * Already deleted (#462): the Worker answers `401 ACCOUNT_DELETED` when an earlier delete finished but
+ * its response was lost, and the hook counts that as success. "Called once" below counts `deleteAccount`
+ * calls, not network requests: the real 401 path inside the client also posts a refresh. A plain
+ * `UNAUTHORIZED` on both sends must keep today's failure, so the rewrite cannot swallow it.
  */
 
 type DeleteRes = ApiResponse<{ ok: boolean }>;
+
+const ALREADY_DELETED: DeleteRes = {
+  error: { code: "ACCOUNT_DELETED", message: "這個帳戶已經移除" },
+};
+const TOKEN_REFUSED: DeleteRes = {
+  error: { code: "UNAUTHORIZED", message: "revoked" },
+};
 
 function setup(deleteAccount: () => Promise<DeleteRes>) {
   const seen = { send: [] as boolean[] };
@@ -42,9 +55,9 @@ function setup(deleteAccount: () => Promise<DeleteRes>) {
   const hook = renderHook(() =>
     useFamilySettingsDelete({ userId: "user-1", apiClient, onLeave }),
   );
-  const confirmDelete = async () => {
+  const confirmDelete = async (currentSecret?: string) => {
     await act(async () => {
-      await hook.result.current.handleDeleteConfirm();
+      await hook.result.current.handleDeleteConfirm(currentSecret);
     });
   };
   return { hook, send, onLeave, seen, confirmDelete };
@@ -174,6 +187,71 @@ describe("useFamilySettingsDelete", () => {
     expect(seen.send).toEqual([true, false]);
     expect(onLeave).toHaveBeenCalledTimes(1);
     expect(await isSelfDepartureActive()).toBe(false);
+  });
+
+  it("uses the code the production constant names", () => {
+    expect(ALREADY_DELETED.error?.code).toBe(ACCOUNT_DELETED_ERROR_CODE);
+  });
+
+  it.each<[string, string | undefined]>([
+    ["without a secret", undefined],
+    ["with the current secret", "482913"],
+  ])(
+    "counts ACCOUNT_DELETED as success %s, with deleteAccount called once",
+    async (_label, secret) => {
+      const { hook, send, onLeave, seen, confirmDelete } = setup(
+        async () => ALREADY_DELETED,
+      );
+
+      await confirmDelete(secret);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("user-1", secret);
+      expect(seen.send).toEqual([true]);
+      expect(chrome.storage.local.clear).toHaveBeenCalledTimes(1);
+      expect(onLeave).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.deleteError).toBe("");
+      expect(hook.result.current.secretError).toBe("");
+      expect(await chrome.storage.local.get(null)).toEqual({});
+      expect(await isSelfDepartureActive()).toBe(false);
+    },
+  );
+
+  it("counts ACCOUNT_DELETED on the resend as success, with deleteAccount called twice", async () => {
+    const responses: DeleteRes[] = [TOKEN_REFUSED, ALREADY_DELETED];
+    const { hook, send, onLeave, seen, confirmDelete } = setup(async () =>
+      responses.shift()!,
+    );
+
+    await confirmDelete();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(seen.send).toEqual([true, false]);
+    expect(chrome.storage.local.clear).toHaveBeenCalledTimes(1);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBe("");
+    expect(await chrome.storage.local.get(null)).toEqual({});
+    expect(await isSelfDepartureActive()).toBe(false);
+  });
+
+  it("resends once and shows the failure when both sends come back UNAUTHORIZED", async () => {
+    const { hook, send, onLeave, seen, confirmDelete } = setup(
+      async () => TOKEN_REFUSED,
+    );
+
+    await confirmDelete();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(seen.send).toEqual([true, false]);
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(chrome.storage.local.clear).not.toHaveBeenCalled();
+    expect(hook.result.current.deleteError).toBe("revoked");
+    expect(hook.result.current.deleteState).toBe("idle");
+    expect(await isSelfDepartureActive()).toBe(false);
+    // Local data survives a refused deletion.
+    expect((await chrome.storage.local.get(USER_ID_KEY))[USER_ID_KEY]).toBe(
+      "user-1",
+    );
   });
 });
 

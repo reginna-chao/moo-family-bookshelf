@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app, { isAllowedOrigin } from "../../src/index";
 import {
+  accountDeleteTargetUserId,
   isPublicRoute,
   isSensitivePublicRoute,
   sensitiveBucketFor,
@@ -331,6 +332,37 @@ describe("isPublicRoute", () => {
 
 const ONBOARDING_BUCKET = "onboarding";
 const LOOKUP_BUCKET = "lookup";
+
+describe("accountDeleteTargetUserId", () => {
+  const ID = "ab".repeat(32);
+
+  it.each<[string, string, string, string | null]>([
+    ["the account route", "DELETE", `/api/user/${ID}`, ID],
+    ["a trailing slash", "DELETE", `/api/user/${ID}/`, ID],
+    ["two trailing slashes", "DELETE", `/api/user/${ID}//`, null],
+    ["GET on the same path", "GET", `/api/user/${ID}`, null],
+    ["PUT on the same path", "PUT", `/api/user/${ID}`, null],
+    ["POST on the same path", "POST", `/api/user/${ID}`, null],
+    ["a lower-case method", "delete", `/api/user/${ID}`, null],
+    ["an upper-case id", "DELETE", `/api/user/${ID.toUpperCase()}`, null],
+    ["a mixed-case id", "DELETE", `/api/user/A${ID.slice(1)}`, null],
+    ["a 63-character id", "DELETE", `/api/user/${ID.slice(1)}`, null],
+    ["a 65-character id", "DELETE", `/api/user/${ID}a`, null],
+    ["a non-hex id", "DELETE", `/api/user/${"g".repeat(64)}`, null],
+    ["an empty id", "DELETE", "/api/user/", null],
+    ["the books sub-path", "DELETE", `/api/user/${ID}/books`, null],
+    [
+      "a public-shelf sub-path",
+      "DELETE",
+      `/api/user/${ID}/public-shelf/x`,
+      null,
+    ],
+    ["a family member path", "DELETE", `/api/family/x/member/${ID}`, null],
+    ["a prefixed path", "DELETE", `/v2/api/user/${ID}`, null],
+  ])("handles %s", (_label, method, path, expected) => {
+    expect(accountDeleteTargetUserId(method, path)).toBe(expected);
+  });
+});
 
 describe("sensitiveBucketFor", () => {
   it.each([
