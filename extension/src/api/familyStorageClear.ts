@@ -2,7 +2,12 @@
  *  auth-refresh.ts, which re-exports it. */
 
 import browser from "webextension-polyfill";
-import { FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY } from "../constants";
+import {
+  AUTH_TOKEN_KEY,
+  FAMILY_ID_KEY,
+  STORE_PAGE_INDEX_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+} from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
 
 /**
@@ -18,7 +23,8 @@ import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
  *
  * The store-page chip index (family members' names + book ids) goes with the
  * family id: it must not outlive the membership. The chip switch itself is the
- * user's and stays.
+ * user's and stays. The family's auth token and its expiry go with it too: the
+ * endpoint reset below would otherwise pair that token with the official default.
  *
  * The endpoint reset drops BOTH the accepted endpoint and the declined marker,
  * for the same reason `resetFamilyEndpointChoice` gives for a voluntary leave:
@@ -36,7 +42,12 @@ import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
  * caller's business, and the two callers do it at different moments.
  */
 export async function clearFamilyStorage(): Promise<void> {
-  await browser.storage.local.remove([FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]);
+  await browser.storage.local.remove([
+    FAMILY_ID_KEY,
+    STORE_PAGE_INDEX_KEY,
+    AUTH_TOKEN_KEY,
+    TOKEN_EXPIRES_AT_KEY,
+  ]);
   try {
     await browser.storage.sync.remove([FAMILY_ID_KEY]);
   } catch {

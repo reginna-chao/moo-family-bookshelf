@@ -1,8 +1,15 @@
-/** Storage for the "switch to the family's API endpoint?" decision (accept / decline / read / reset),
- *  all via DIRECT storage access. See docs/architecture.md → 端點切換確認. */
+/** Storage for the "switch to the family's API endpoint?" decision (confirmed switch / decline /
+ *  reset), all via DIRECT storage access, never a background message. See docs/architecture.md →
+ *  端點切換確認. */
 
 import browser from "webextension-polyfill";
-import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "../constants";
+import {
+  API_ENDPOINT_KEY,
+  AUTH_TOKEN_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  RECOVERY_COOLDOWN_UNTIL_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+} from "../constants";
 import { safeStorageGet } from "./safeStorage";
 
 /**
@@ -32,25 +39,6 @@ export async function readDeclinedFamilyEndpoint(): Promise<DeclinedFamilyEndpoi
   return parseDeclined(result[DECLINED_FAMILY_ENDPOINT_KEY]);
 }
 
-/**
- * Read the API endpoint this device has accepted, or `null` when there is none
- * (i.e. the official default is in effect).
- *
- * Best-effort like readDeclinedFamilyEndpoint: an unreadable store degrades to
- * `null`, which falls back to the default endpoint rather than throwing.
- *
- * URL validation is deliberately NOT done here — ApiClient.setEndpoint owns it,
- * and duplicating the rules in storage would let the two drift. A non-string or
- * blank stored value is "nothing stored".
- */
-export async function readStoredApiEndpoint(): Promise<string | null> {
-  const result = await safeStorageGet([API_ENDPOINT_KEY]);
-  const stored = result[API_ENDPOINT_KEY];
-  if (typeof stored !== "string") return null;
-  const trimmed = stored.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 /** Record a refused endpoint switch so the same value stops re-prompting. */
 export async function saveDeclinedFamilyEndpoint(
   declined: DeclinedFamilyEndpoint,
@@ -67,48 +55,55 @@ export async function saveDeclinedFamilyEndpoint(
   }
 }
 
+/** `null` reverts to the official default: the key is removed rather than storing the default URL.
+ *  Throws when storage refuses. */
+async function writeAcceptedEndpoint(target: string | null): Promise<void> {
+  if (target === null) {
+    await browser.storage.local.remove([
+      API_ENDPOINT_KEY,
+      DECLINED_FAMILY_ENDPOINT_KEY,
+    ]);
+  } else {
+    await browser.storage.local.set({ [API_ENDPOINT_KEY]: target });
+    await browser.storage.local.remove([DECLINED_FAMILY_ENDPOINT_KEY]);
+  }
+}
+
 /**
- * Persist an ACCEPTED endpoint switch. `target` is the family record's custom
- * endpoint, or `null` to revert to the official default (which removes the key
- * rather than storing the default URL — mirrors handleSetApiEndpoint).
+ * Persist the endpoint, swallowing storage failures so they cannot abort a
+ * teardown: what resetFamilyEndpointChoice needs. `target` is a custom endpoint,
+ * or `null` to revert to the official default.
  *
- * The direct storage write is authoritative; the background message that
- * follows is a best-effort secondary so the change also travels the path the
- * rest of the extension uses. A background failure (asleep, or an unexpected
- * storage error) leaves the already-written local value intact. Its validation
- * is no longer a second source of divergence: handleSetApiEndpoint now runs the
- * same shared `validateEndpointUrl` as the ApiClient, so a LAN endpoint this
- * function accepts is one the background accepts too.
- *
- * Also used by the sync-code join path (dialog/onboardingFlow.ts): pasting a
- * code that carries an `@host` is an explicit acceptance of that endpoint, so
- * it persists identically — declined marker cleared included.
+ * A confirmed switch and the sync-code join path adopt a server the stored token
+ * did not come from, so they go through persistSwitchedFamilyEndpoint instead.
  */
 export async function persistAcceptedFamilyEndpoint(
   target: string | null,
 ): Promise<void> {
   try {
-    if (target === null) {
-      await browser.storage.local.remove([
-        API_ENDPOINT_KEY,
-        DECLINED_FAMILY_ENDPOINT_KEY,
-      ]);
-    } else {
-      await browser.storage.local.set({ [API_ENDPOINT_KEY]: target });
-      await browser.storage.local.remove([DECLINED_FAMILY_ENDPOINT_KEY]);
-    }
+    await writeAcceptedEndpoint(target);
   } catch (err) {
     console.warn("[familyEndpointChoice] Failed to persist endpoint", err);
   }
+}
 
-  try {
-    await browser.runtime.sendMessage({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: target,
-    });
-  } catch {
-    // Background unavailable — the direct write above already persisted.
-  }
+/** Adopt an endpoint on another server: the token the old server issued is removed first.
+ *  Rejects, with nothing written, when that removal fails; a failure at a later step rejects too.
+ *
+ *  The recovery cooldown goes with the token: it is the old server's 429, and would block the join
+ *  on the new one. The last removal catches a token another tab's refresh wrote back before the
+ *  endpoint write; once the endpoint is written that refresh no longer owns storage.
+ *  See docs/architecture.md → 端點切換確認. */
+export async function persistSwitchedFamilyEndpoint(
+  target: string | null,
+): Promise<void> {
+  await browser.storage.local.remove([
+    AUTH_TOKEN_KEY,
+    TOKEN_EXPIRES_AT_KEY,
+    RECOVERY_COOLDOWN_UNTIL_KEY,
+  ]);
+  await writeAcceptedEndpoint(target);
+  await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
 }
 
 /**
@@ -126,8 +121,8 @@ export async function persistAcceptedFamilyEndpoint(
  * the next one.
  *
  * Delegates to persistAcceptedFamilyEndpoint(null): reverting to the default is
- * exactly the "remove both keys, then tell the background" write this needs, and
- * a second copy of it here would be one more place to drift.
+ * exactly the "remove both keys" write this needs, and a second copy of it here
+ * would be one more place to drift.
  */
 export async function resetFamilyEndpointChoice(): Promise<void> {
   await persistAcceptedFamilyEndpoint(null);

@@ -2,28 +2,19 @@
 // both directions; a refused confirm fails closed. See docs/architecture.md → 端點切換確認.
 
 import { useCallback, useEffect, useState } from "react";
-import { ApiClient, validateEndpointUrl } from "../api/client";
-import { DEFAULT_API_ENDPOINT } from "../constants";
+import type { ApiClient } from "../api/client";
 import {
-  persistAcceptedFamilyEndpoint,
+  persistSwitchedFamilyEndpoint,
   readDeclinedFamilyEndpoint,
   saveDeclinedFamilyEndpoint,
   type DeclinedFamilyEndpoint,
 } from "../storage/familyEndpointChoice";
+import {
+  computePendingSwitch,
+  type PendingEndpointSwitch,
+} from "./pendingEndpointSwitch";
 
-export interface PendingEndpointSwitch {
-  /** Endpoint the ApiClient is using right now. */
-  current: string;
-  /** Canonicalised target from the family record; `null` = the official default. */
-  target: string | null;
-  /** Resolved target URL (DEFAULT_API_ENDPOINT when `target` is `null`). */
-  targetEndpoint: string;
-  /** True when the switch reverts to the official default endpoint. */
-  isDefaultTarget: boolean;
-  /** False when the record's value fails the client's URL validation (`confirm` will refuse it); the
-   *  panel must not print it as a legitimate destination. */
-  targetValid: boolean;
-}
+export { computePendingSwitch, type PendingEndpointSwitch };
 
 export interface UseEndpointSwitchOptions {
   apiClient: ApiClient;
@@ -39,6 +30,10 @@ export interface UseEndpointSwitchResult {
   /** True when the last `confirm` was refused by the client's URL validation: nothing switched, and
    *  the user has not been told yet. */
   confirmError: boolean;
+  /** True when the last `confirm` switched the client but storage did not take all of it. First
+   *  removal or endpoint write failed: a reload returns to the old server and asks again. A later
+   *  step failed: the reload stays on the new server and does not ask again. */
+  confirmSaveFailed: boolean;
   /** The endpoint THIS device uses; sync code / invite / QR come from it, never the record. State, as
    *  setEndpoint() does not re-render. See docs/architecture.md → 端點切換確認. */
   adoptedEndpoint: string;
@@ -46,61 +41,8 @@ export interface UseEndpointSwitchResult {
   confirm: () => void;
   /** Keep the current endpoint and remember the refusal. */
   decline: () => void;
-  /** Acknowledge the refusal notice. */
+  /** Acknowledge the refusal or save-failure notice. */
   dismissConfirmError: () => void;
-}
-
-/** Boundary guard: a non-string or blank record value means "no endpoint" (the official-default
- *  direction), never a target to switch to. */
-function normalizeFamilyEndpoint(raw: string | undefined): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
-/** A record endpoint put in the client's comparison space, plus its verdict. */
-interface CanonicalTarget {
-  value: string | null;
-  valid: boolean;
-}
-
-/** Canonicalize the record's value like the client's endpoint (no trailing-slash false switch); a
- *  refused value stays verbatim with `valid: false`, which keeps the panel from printing it. */
-function canonicalizeTarget(raw: string | null): CanonicalTarget {
-  if (raw === null) return { value: null, valid: true };
-  try {
-    return { value: validateEndpointUrl(raw), valid: true };
-  } catch {
-    return { value: raw, valid: false };
-  }
-}
-
-/**
- * Pure: decide whether the family record asks for an endpoint the user has not
- * yet agreed to. Returns `null` when the target is already in effect, or when
- * this exact target was previously declined.
- *
- * The returned `target` is canonical, so it is also what confirm/decline
- * persist — matching what the sync-code join path stores for the same endpoint.
- */
-export function computePendingSwitch(params: {
-  current: string;
-  familyEndpoint: string | undefined;
-  declined: DeclinedFamilyEndpoint | null;
-}): PendingEndpointSwitch | null {
-  const { value: target, valid: targetValid } = canonicalizeTarget(
-    normalizeFamilyEndpoint(params.familyEndpoint),
-  );
-  const targetEndpoint = target ?? DEFAULT_API_ENDPOINT;
-  if (targetEndpoint === params.current) return null;
-  if (params.declined && params.declined.value === target) return null;
-  return {
-    current: params.current,
-    target,
-    targetEndpoint,
-    isDefaultTarget: target === null,
-    targetValid,
-  };
 }
 
 export function useEndpointSwitch({
@@ -112,8 +54,9 @@ export function useEndpointSwitch({
   const [declined, setDeclined] = useState<DeclinedFamilyEndpoint | null>(null);
   const [declinedLoaded, setDeclinedLoaded] = useState(false);
   const [confirmError, setConfirmError] = useState(false);
-  // Where this device actually is. Seeded from the client (boot already applied
-  // any stored endpoint) and advanced only by a successful confirm below.
+  const [confirmSaveFailed, setConfirmSaveFailed] = useState(false);
+  // Where this device actually is. Seeded from the client (boot already applied any stored
+  // endpoint), advanced by a confirm below, and rolled back when that confirm's save fails.
   const [adoptedEndpoint, setAdoptedEndpoint] = useState<string>(() =>
     apiClient.getEndpoint(),
   );
@@ -143,7 +86,10 @@ export function useEndpointSwitch({
     setPending(next);
     // Only a fresh question clears a stale refusal notice: a failed confirm's decline re-runs this
     // with `next === null`, and clearing then would wipe the notice unseen.
-    if (next) setConfirmError(false);
+    if (next) {
+      setConfirmError(false);
+      setConfirmSaveFailed(false);
+    }
   }, [apiClient, declined, declinedLoaded, familyEndpoint, membersReady]);
 
   const rememberDecline = useCallback((target: string | null) => {
@@ -160,6 +106,7 @@ export function useEndpointSwitch({
 
   const confirm = useCallback(() => {
     if (!pending) return;
+    const previous = apiClient.getEndpoint();
     try {
       apiClient.setEndpoint(pending.targetEndpoint);
     } catch (err) {
@@ -170,19 +117,30 @@ export function useEndpointSwitch({
       rememberDecline(pending.target);
       return;
     }
+    // The old server's token goes nowhere: dropped here, and the new server's join issues its own.
+    apiClient.setAuthToken(null);
     setDeclined(null);
     setPending(null);
     // Mirror the client's ACTUAL value (canonicalised), not the requested one, so the sync code
     // shows what the client will really call.
     setAdoptedEndpoint(apiClient.getEndpoint());
-    void persistAcceptedFamilyEndpoint(pending.target);
+    // React state only on failure: a teardown may already have moved the client, so it stays put.
+    void persistSwitchedFamilyEndpoint(pending.target).catch((err) => {
+      console.warn("[useEndpointSwitch] Could not store the switch", err);
+      setConfirmSaveFailed(true);
+      setAdoptedEndpoint(previous);
+    });
   }, [apiClient, pending, rememberDecline]);
 
-  const dismissConfirmError = useCallback(() => setConfirmError(false), []);
+  const dismissConfirmError = useCallback(() => {
+    setConfirmError(false);
+    setConfirmSaveFailed(false);
+  }, []);
 
   return {
     pending,
     confirmError,
+    confirmSaveFailed,
     adoptedEndpoint,
     confirm,
     decline,

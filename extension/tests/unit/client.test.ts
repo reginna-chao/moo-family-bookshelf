@@ -7,6 +7,7 @@ import {
   validateEndpointUrl,
 } from "@/api/client";
 import {
+  API_ENDPOINT_KEY,
   USER_ID_KEY,
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
@@ -130,16 +131,17 @@ const MOCK_ENDPOINT = "https://test.workers.dev";
 const NEW_TOKEN = "d".repeat(64);
 const RECOVERED_TOKEN = "e".repeat(64);
 
-/** Re-key a logical storage-read object to the production `moo:` keys, so the
- *  mocked chrome.storage.local.get returns what auth-refresh.ts actually reads. */
+/** Logical storage-read names → the production `moo:` keys, so the mocked
+ *  chrome.storage.local.get returns what auth-refresh.ts actually reads. */
 const STORAGE_KEY_ALIAS: Record<string, string> = {
   userId: USER_ID_KEY,
   familyId: FAMILY_ID_KEY,
   authToken: AUTH_TOKEN_KEY,
   tokenExpiresAt: TOKEN_EXPIRES_AT_KEY,
 };
+/** The endpoint names the client's own server: a refresh runs only for its issuer. */
 function toStorageKeys(data: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = { [API_ENDPOINT_KEY]: MOCK_ENDPOINT };
   for (const [k, v] of Object.entries(data)) {
     out[STORAGE_KEY_ALIAS[k] ?? k] = v;
   }
@@ -1691,74 +1693,6 @@ describe("ApiClient", () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
-    it("does not propagate a rejected SET_API_ENDPOINT sendMessage when recovery fails", async () => {
-      const fetchMock = vi
-        .fn()
-        // Original request → 401
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          json: () =>
-            Promise.resolve({
-              error: { code: "UNAUTHORIZED", message: "Expired" },
-            }),
-        })
-        // Refresh request → REFRESH_FAILED
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          json: () =>
-            Promise.resolve({
-              error: { code: "REFRESH_FAILED", message: "Removed" },
-            }),
-        })
-        // joinFamily recovery → fails
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          json: () =>
-            Promise.resolve({
-              error: { code: "FAMILY_NOT_FOUND", message: "Not found" },
-            }),
-        });
-      globalThis.fetch = fetchMock;
-
-      vi.mocked(chrome.storage.local.get).mockImplementation(
-        (
-          keys: unknown,
-          callback?: (result: Record<string, unknown>) => void,
-        ) => {
-          const result = toStorageKeys({
-            userId: "u1",
-            familyId: "fam-1",
-            displayName: "Test",
-          });
-          if (typeof callback === "function") callback(result);
-          return Promise.resolve(result) as unknown as void;
-        },
-      );
-
-      // The polyfill rejects with no listener / an invalidated context; this fails the
-      // endpoint reset's SET_API_ENDPOINT, and the recovery-failure path must still resolve.
-      vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
-        new Error(
-          "Could not establish connection. Receiving end does not exist.",
-        ),
-      );
-
-      const result = await client.getPersonalBooks("u1");
-
-      // The rejected sendMessage must not propagate out of the refresh flow:
-      // the original request still resolves to its 401 error envelope.
-      expect(result.error?.code).toBe("UNAUTHORIZED");
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: null,
-        }),
-      );
-    });
-
     it("clears token then family data on REFRESH_FAILED when recovery fails", async () => {
       const fetchMock = vi
         .fn()
@@ -1817,6 +1751,8 @@ describe("ApiClient", () => {
       expect(chrome.storage.local.remove).toHaveBeenCalledWith([
         FAMILY_ID_KEY,
         STORE_PAGE_INDEX_KEY,
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
       ]);
     });
 

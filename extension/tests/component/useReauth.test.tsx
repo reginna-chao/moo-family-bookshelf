@@ -12,6 +12,7 @@ import {
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
   STORE_PAGE_INDEX_KEY,
+  DEFAULT_API_ENDPOINT,
 } from "@/constants";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 
@@ -54,13 +55,21 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * ex-family's custom @host — the value the NEXT boot restores, which a later join with a plain
  * (no-@host) sync code never overwrites — and the new family's traffic goes to the old family's
  * server. In that case a family-gone join short-circuits runReauthJoin before its cooldown remove, so
- * the FIRST storage.local.remove is the `[FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]` clear inside clearFamilyStorage, which the
+ * the FIRST storage.local.remove is the `CLEARED_FAMILY_KEYS` clear inside clearFamilyStorage, which the
  * rejection aborts before its own endpoint reset.
  * `mockRejectedValueOnce` fails only that call; later removes resolve through the shared setup mock.
  * Exactly two clears, in order (the failed familyId one, then the recovery reset), distinguish the
  * catch-block reset from the one inside clearFamilyStorage — before the fix there was only ever
  * call #1.
  */
+
+/** What clearFamilyStorage removes in its first call: the binding, its chip index, and its token. */
+const CLEARED_FAMILY_KEYS = [
+  FAMILY_ID_KEY,
+  STORE_PAGE_INDEX_KEY,
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+];
 
 function seedStorage(
   data: Record<string, unknown> = {
@@ -84,6 +93,8 @@ function createApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     }),
     setAuthToken: vi.fn(),
     clearReauthPending: vi.fn(),
+    // seedStorage holds no endpoint key, which resolves to this default: the storage check matches.
+    getEndpoint: vi.fn(() => DEFAULT_API_ENDPOINT),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -384,10 +395,9 @@ describe("useReauth", () => {
 
         // Dropped from BOTH storage areas — a synced familyId left behind would
         // let another device hand the local one back and resume rejoining.
-        expect(chrome.storage.local.remove).toHaveBeenCalledWith([
-          FAMILY_ID_KEY,
-          STORE_PAGE_INDEX_KEY,
-        ]);
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+          CLEARED_FAMILY_KEYS,
+        );
         expect(chrome.storage.sync.remove).toHaveBeenCalledWith([
           FAMILY_ID_KEY,
         ]);
@@ -399,10 +409,6 @@ describe("useReauth", () => {
             DECLINED_FAMILY_ENDPOINT_KEY,
           ]),
         );
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: null,
-        });
         // The dead token goes, the reauth latch is released (a stale one mutes every later 401), and
         // the dialog falls back naming the refusal, so onboarding can explain itself.
         expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
@@ -466,7 +472,7 @@ describe("useReauth", () => {
     it("resets the endpoint choice and finishes the handover even when the storage clear rejects", async () => {
       seedStorage();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      // The FIRST storage.local.remove here is clearFamilyStorage's `[FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]` clear;
+      // The FIRST storage.local.remove here is clearFamilyStorage's `CLEARED_FAMILY_KEYS` clear;
       // fail only that call. See the file header, "Storage-clear rejection".
       vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
         new Error("Extension context invalidated"),
@@ -481,10 +487,9 @@ describe("useReauth", () => {
       });
 
       // The clear really was attempted and really did fail.
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith([
-        FAMILY_ID_KEY,
-        STORE_PAGE_INDEX_KEY,
-      ]);
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+        CLEARED_FAMILY_KEYS,
+      );
       // ...and every step after it still ran. Releasing the latch is the one
       // that must not be skipped, or re-auth is muted for the whole session.
       expect(apiClient.clearReauthPending).toHaveBeenCalledTimes(1);
@@ -505,15 +510,11 @@ describe("useReauth", () => {
           DECLINED_FAMILY_ENDPOINT_KEY,
         ]),
       );
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
       // Exactly two clears, in order: the failed familyId one, then the recovery reset — this sequence
       // separates the catch-block reset from the one that never ran (before the fix: call #1 only).
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
       expect(removeCalls).toHaveLength(2);
-      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]);
+      expect(removeCalls[0][0]).toEqual(CLEARED_FAMILY_KEYS);
       expect(removeCalls[1][0]).toEqual(
         expect.arrayContaining([
           API_ENDPOINT_KEY,
@@ -548,9 +549,9 @@ describe("useReauth", () => {
           await result.current.submit("0000");
         });
 
-        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith([
-          FAMILY_ID_KEY,
-        ]);
+        expect(chrome.storage.local.remove).not.toHaveBeenCalledWith(
+          CLEARED_FAMILY_KEYS,
+        );
         expect(chrome.storage.sync.remove).not.toHaveBeenCalled();
         expect(apiClient.onFamilyRemoved).not.toHaveBeenCalled();
         // The endpoint survives too — the retry the user is about to make has to
@@ -561,10 +562,6 @@ describe("useReauth", () => {
             DECLINED_FAMILY_ENDPOINT_KEY,
           ]),
         );
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: null,
-        });
         // The user can still correct the secret / wait out the window.
         expect(result.current.active).toBe(true);
       },

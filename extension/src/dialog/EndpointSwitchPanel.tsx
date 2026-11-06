@@ -22,6 +22,8 @@ export interface EndpointSwitchPanelProps {
   pending: PendingEndpointSwitch | null;
   /** True when the last confirmation was refused by the client's validation. */
   confirmError: boolean;
+  /** True when the client switched but storage did not take it. */
+  saveFailed?: boolean;
   onConfirm: () => void;
   onDecline: () => void;
   onDismissConfirmError: () => void;
@@ -30,6 +32,7 @@ export interface EndpointSwitchPanelProps {
 export function EndpointSwitchPanel({
   pending,
   confirmError,
+  saveFailed = false,
   onConfirm,
   onDecline,
   onDismissConfirmError,
@@ -47,6 +50,26 @@ export function EndpointSwitchPanel({
         <div className="moo-endpoint-switch__error-text">
           此位址無法使用（需為 HTTPS，或本機／私人網路的
           HTTP），已略過此次切換。
+        </div>
+        <button
+          onClick={onDismissConfirmError}
+          className="moo-button moo-button--ghost moo-button--sm moo-endpoint-switch__error-dismiss"
+        >
+          知道了
+        </button>
+      </div>
+    );
+  }
+
+  if (saveFailed) {
+    return (
+      <div
+        role="alert"
+        data-testid="endpoint-switch-save-error"
+        className="moo-endpoint-switch moo-endpoint-switch--error"
+      >
+        <div className="moo-endpoint-switch__error-text">
+          無法儲存切換結果，請重新整理頁面。
         </div>
         <button
           onClick={onDismissConfirmError}
@@ -86,8 +109,11 @@ export function EndpointSwitchPanel({
           ⚠️ 此位址無效或不安全，無法切換，請向家庭管理者確認
         </div>
       )}
+      {/* JSX collapses this wrap into one space: "…你的 PIN 或圖形驗證…". */}
       <div className="moo-endpoint-switch__body">
-        切換後，你的認證資訊與完整書單（包含未開放的書籍）都會傳送到新的伺服器。請確認你信任這個位址再切換。
+        切換後要重新加入家庭：你的 PIN
+        或圖形驗證（如果有設定）與完整書單（包含未開放的書籍）都會傳送到新的伺服器。請確認你信任這個位址再切換。如果你用的是隨機驗證碼，請先改成
+        PIN 或圖形驗證再切換，否則可能無法重新加入。
       </div>
       <div className="moo-endpoint-switch__row">
         <button

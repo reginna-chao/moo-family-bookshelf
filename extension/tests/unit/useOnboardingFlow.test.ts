@@ -121,8 +121,8 @@ import { webcrypto } from "node:crypto";
  * production performJoin's in-memory adoption: it applies the `@host` to the
  * client BEFORE the request and, on failure, deliberately leaves it applied —
  * releasing it is handleJoin's job. That production behaviour is pinned in
- * tests/unit/onboardingFlow.test.ts → "adopts, persists, and broadcasts the
- * endpoint when decoded.apiHost is set" / "keeps the adopted endpoint in memory
+ * tests/unit/onboardingFlow.test.ts → "adopts and persists the endpoint when
+ * decoded.apiHost is set" / "keeps the adopted endpoint in memory
  * when the backend refuses the join".
  *
  * Sync-code pre-fill from a storage.sync REMNANT: on mount, when this device has
@@ -1879,9 +1879,6 @@ describe("useOnboardingFlow", () => {
       // durable to undo — and must not invent a write of its own.
       expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
         expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
-      );
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_API_ENDPOINT" }),
       );
     });
 
