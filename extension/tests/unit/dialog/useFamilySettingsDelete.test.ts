@@ -51,7 +51,10 @@ function setup(deleteAccount: () => Promise<DeleteRes>) {
     return deleteAccount();
   });
   const onLeave = vi.fn();
-  const apiClient = { deleteAccount: send } as unknown as ApiClient;
+  const apiClient = {
+    deleteAccount: send,
+    getEndpoint: () => "https://api.example",
+  } as unknown as ApiClient;
   const hook = renderHook(() =>
     useFamilySettingsDelete({ userId: "user-1", apiClient, onLeave }),
   );
@@ -273,7 +276,11 @@ function setupStepUp(
     (userId: string, secret?: string) => Promise<DeleteRes>
   >(async () => responses.shift()!);
   const onLeave = vi.fn();
-  const apiClient = { getVerifyMethod, deleteAccount } as unknown as ApiClient;
+  const apiClient = {
+    getVerifyMethod,
+    deleteAccount,
+    getEndpoint: () => "https://api.example",
+  } as unknown as ApiClient;
   const hook = renderHook(() =>
     useFamilySettingsDelete({ userId: "user-1", apiClient, onLeave }),
   );
