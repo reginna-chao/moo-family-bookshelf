@@ -264,7 +264,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 - 未經驗證的垃圾流量即使全部被 401 拒絕，仍會以每分鐘最多 60 次的速度消耗寫入額度——**約 17 分鐘即可耗盡當日額度**，之後所有需要寫入 KV 的操作（儲存書單、建立家庭、換發 token，乃至速率限制本身）都會失敗到隔日額度重置。
 - 內建的 per-userId 上限（例如公開書櫃寫入合計每帳號每小時 30 次）只能限制「單一帳號」的消耗速度，無法阻擋上述未驗證流量。
 
-設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`、`verify-stepup`）仍記在 KV，而它們都需要通過身分驗證才會被計數。**唯一的例外是 PWA 登入驗證的猜錯上限**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該帳號的嘗試計數（`ratelimit:user:verify:{userId}:{bucket}`）與該來源的失敗紀錄（`verifyfail:{userId}:{caller}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
+設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`）與依 token 分開計算的 `verify-stepup` 仍記在 KV，而它們都需要通過身分驗證才會被計數。**唯一的例外是 PWA 登入驗證的猜錯上限**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該帳號的嘗試計數（`ratelimit:user:verify:{userId}:{bucket}`）與該來源的失敗紀錄（`verifyfail:{userId}:{caller}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
 
 若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致——真正需要硬上限時仍得評估 Durable Objects。
 
@@ -278,13 +278,13 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 ## 使用者忘記登入驗證時
 
-家人忘了自己設的 PIN 或圖形時，就算手邊還有一台電腦的擴充功能仍在登入狀態，也沒辦法自己重設：改驗證設定和刪除帳號都要先輸入目前的 PIN 或圖形。如果他其實還記得，只是在手機上連續打錯被鎖住，請他在擴充功能設定裡輸入目前的 PIN 或圖形後重新設定，或等 15 分鐘鎖定解除，不需要管理者介入。鎖定是依連線來源的對外 IP 計算，而且與手機版登入共用：電腦和手機若在同一個對外 IP 之後（例如同一個家用網路），手機上連續打錯 5 次造成的 15 分鐘鎖定也會擋住電腦上的這次輸入，要等鎖定解除後再重新設定。
+家人忘了自己設的 PIN 或圖形時，就算手邊還有一台電腦的擴充功能仍在登入狀態，也沒辦法自己重設：改驗證設定和刪除帳號都要先輸入目前的 PIN 或圖形。如果他其實還記得，只是在手機上連續打錯被鎖住，請他在擴充功能設定裡輸入目前的 PIN 或圖形後重新設定，或等 15 分鐘鎖定解除，不需要管理者介入。鎖定依連線來源的對外 IP 計算，但確認目前 PIN 或圖形與手機版登入分開計算：電腦和手機就算在同一個對外 IP 之後（例如同一個家用網路），手機上連續打錯 5 次造成的 15 分鐘鎖定也不會擋住電腦上的這次輸入。
 
 真的忘了的話（不論還有沒有裝置在登入），就需要管理者介入：把他的驗證設定改寫成一組臨時 PIN，再把臨時 PIN 告訴他。伺服器無法替你確認對方是不是本人，這一步完全依賴你自己的判斷，確認是本人之後再做。原因與目前的政策見 `docs/architecture.md` → PWA 登入驗證機制 → 忘記驗證方式時。
 
 官方伺服器的受理方式：申請會從回報表單進來。使用者在登入驗證畫面或設定頁點「填寫救援申請」，在表單上選問題類型「忘記登入驗證方式」，並填上讀墨註冊 Email。表單是公開的，任何知道那個 Email 的人都填得出來，所以**先確認、再寫入**：收到申請後，先回信到表單上的讀墨註冊 Email（不回到申請人另外給的任何聯絡方式），請信箱主人回信確認是他提出的申請；收到從那個信箱寄出的確認之後，才開始下面的第 1 步。沒有確認就不要動他的驗證設定，否則任何人都能替別人的帳號觸發一次改寫。處理完之後，請刪除那筆表單回覆，以及你寄出的信的備份。自架伺服器的畫面不會出現這個連結，只會請家人直接找你。
 
-帳號被接管時也用同樣的方式處理（握有他 token 的人持續猜錯、讓他換不了 PIN 時，另見下方的人工撤銷步驟）：有人在伺服器資料還沒同步到各節點的空窗內，用舊的 token 改掉了他的驗證設定，或把換密鑰之前的驗證設定寫了回去（`docs/architecture.md` → PWA 登入驗證機制 → 安全措施，其中的已接受殘餘風險）。握有他目前 token 但不知道 PIN 的人，在只有驗證設定還沒同步的節點上改驗證設定或刪除帳號，都會被拒絕；要接管，那個節點上的 token 紀錄也得還是舊的。這時讀到的若還是 PIN 或圖形，要同時握有舊的 token 和舊的 PIN 或圖形；讀到的若是「不驗證」、驗證碼或沒有驗證設定（例如他第一次設定 PIN，就是想把握有 token 的人趕出去），只用舊的 token 就能改掉他的驗證設定或刪除帳號，這段空窗並沒有縮小。被接管之後，或換密鑰之前的驗證設定被寫回之後（不論寫回的是哪一種驗證方式），他改驗證設定會被拒絕，用自己的 PIN 或圖形也登入不了，手上的裝置救不回來。照下面的步驟改寫成臨時 PIN；接管者在每一台裝置上的登入，都要等他用臨時 PIN 登入、再改成自己的 PIN 或圖形之後才會失效（設定新的 PIN 或圖形會撤銷該帳號的全部登入，不在清單上的也一起撤銷；只有設定前約 60 秒內剛建立（通常在別的節點）而伺服器還列不到的登入可能漏掉（登入紀錄異常多時另見下一段），這種登入不能續期，最多再 90 天失效，見 `docs/architecture.md` → PWA 登入驗證機制 的已接受殘餘風險）。
+帳號被接管時也用同樣的方式處理（有人持續猜測，或要立刻讓對方的登入失效時，改走下方的「救援連結」）：有人在伺服器資料還沒同步到各節點的空窗內，用舊的 token 改掉了他的驗證設定，或把換密鑰之前的驗證設定寫了回去（`docs/architecture.md` → PWA 登入驗證機制 → 安全措施，其中的已接受殘餘風險）。握有他目前 token 但不知道 PIN 的人，在只有驗證設定還沒同步的節點上改驗證設定或刪除帳號，都會被拒絕；要接管，那個節點上的 token 紀錄也得還是舊的。這時讀到的若還是 PIN 或圖形，要同時握有舊的 token 和舊的 PIN 或圖形；讀到的若是「不驗證」、驗證碼或沒有驗證設定（例如他第一次設定 PIN，就是想把握有 token 的人趕出去），只用舊的 token 就能改掉他的驗證設定或刪除帳號，這段空窗並沒有縮小。被接管之後，或換密鑰之前的驗證設定被寫回之後（不論寫回的是哪一種驗證方式），他改驗證設定會被拒絕，用自己的 PIN 或圖形也登入不了，手上的裝置救不回來。照下面的步驟改寫成臨時 PIN；接管者在每一台裝置上的登入，都要等他用臨時 PIN 登入、再改成自己的 PIN 或圖形之後才會失效（設定新的 PIN 或圖形會撤銷該帳號的全部登入，不在清單上的也一起撤銷；只有設定前約 60 秒內剛建立（通常在別的節點）而伺服器還列不到的登入可能漏掉（登入紀錄異常多時另見下一段），這種登入不能續期，最多再 90 天失效，見 `docs/architecture.md` → PWA 登入驗證機制 的已接受殘餘風險）。
 
 不要直接刪除他的驗證設定。刪除會留下一段沒有驗證的空窗，知道他 Email 和同步碼的家人可以在這段時間搶先登入；直到他設定新的 PIN 或圖形之前，對方都能看到他的完整書單、修改他的開放設定。設定新的 PIN 或圖形會撤銷該帳號的全部登入（包括不在清單上的孤兒登入），只有做這次設定的那台會拿到新的登入（KV 傳播期間除外：設定前約 60 秒內剛建立（通常在別的節點）、還列不到的孤兒登入可能漏掉，它不能續期，最多再 90 天失效）。設定 PIN 時若日誌出現 `AUTH_TOKEN_INDEX_CAPPED`，表示該帳號有異常多的登入紀錄，這次只撤銷了前 400 個，再儲存一次驗證設定就會繼續清。若出現 `AUTH_TOKEN_INDEX_LIST_FAILED`，表示那次撤銷只刪到清單上的登入、孤兒登入沒有被找出來，在補救前它們都還能用。這個事件不分原因（KV 拒絕、額度用完、回應格式不對都記同一個名字），請先看那一行帶的錯誤內容並查 KV 用量：若是當天的 KV list 額度用完（免費方案每天 1,000 次，整個 Cloudflare 帳號共用，dev 環境和備份也會用到），等額度重置後再請他儲存一次驗證設定；若是其他原因，先排除原因，再儘快請他重存一次，不要等隔天。改寫成臨時 PIN 就沒有空窗。臨時 PIN 你自己也知道，在他改掉之前你等於能登入他的帳號，所以請他登入後立刻改掉。
 
@@ -300,7 +300,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key get "verify:<上一步的 userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`，其中的 `secretUpdatedAt` 取自你這台電腦的時間。先確認本機時鐘正確：它要比對方最後一次換密鑰的時間晚，否則臨時 PIN 登入會一直被要求重新驗證。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡。這行產生的是舊格式（v1）的紀錄，伺服器設了 pepper 也照樣能用，他用臨時 PIN 登入後會自動升級，你不必自己算 HMAC：
+3. 產生臨時 PIN 的驗證紀錄。PIN 要 6 到 12 位數字，自己挑一組，不要用例子裡的；這行會把它寫進 `temp-verify.json`，其中的 `secretUpdatedAt` 取自你這台電腦的時間。先確認本機時鐘正確：它要比對方最後一次換密鑰的時間晚，否則臨時 PIN 登入會一直被要求重新驗證。臨時 PIN 和第 1 步的 Email 一樣會留在終端機的歷史紀錄裡。這行產生的是舊格式（v1）的紀錄，伺服器設了 pepper 也照樣能用，你不必自己算 HMAC。他用臨時 PIN 登入或換掉 PIN 之後才是新格式；走救援連結不帶密鑰，要等他換 PIN：
 
    ```bash
    node -e "const c=require('crypto');const pin=process.argv[1];const salt=c.randomBytes(16).toString('hex');const hash=c.createHash('sha256').update(salt+pin).digest('hex');require('fs').writeFileSync('temp-verify.json',JSON.stringify({method:'pin',hash,salt,prompted:0,secretUpdatedAt:Date.now()}))" "246813"
@@ -315,7 +315,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 5. **只把臨時 PIN 回信到表單上那個讀墨註冊 Email**，不寄到申請人另外給的任何聯絡方式。收得到那個信箱的信，是唯一能證明本人的方式。自架伺服器沒有這個表單，可以一樣寄到他的讀墨註冊 Email，或用其他家人看不到的管道告訴他。請他用同步碼加臨時 PIN 重新登入，登入後立刻改成自己的 PIN 或圖形：電腦上在擴充功能設定裡改，改之前會先要求輸入這組臨時 PIN；只有手機的話，PWA 登入後會跳出提示，選擇更改後先輸入臨時 PIN，再設定新的 PIN 或圖形。他的個人書櫃與分享設定都還在，不受影響。
 
-6. 如果他用臨時 PIN 仍然看到「嘗試次數過多」，可能是這個帳號這一小時的額度已經用完，改寫驗證設定不會清掉它。先列出兩個計數器，再把列出的 key 逐一刪除。沒有列出，就是別的限制（每分鐘的上限），請他等一分鐘再試：
+6. 如果他用臨時 PIN 仍然看到「嘗試次數過多」，可能是這個帳號這一小時的額度已經用完，改寫驗證設定不會清掉它。這一步用在沒有人持續猜測、只是額度滿了的情況。先列出兩種計數器（第二行會列出確認 PIN 的每一份額度），再把列出的 key 逐一刪除。沒有列出，就是別的限制（每分鐘的上限），請他等一分鐘再試：
 
    ```bash
    pnpm exec wrangler kv key list --prefix "ratelimit:user:verify:<userId>:" --namespace-id <正式 namespace ID> --remote
@@ -323,11 +323,11 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key delete "<key>" --namespace-id <正式 namespace ID> --remote
    ```
 
-   其他節點可能還有約 60 秒的舊讀取，這段時間內他可能仍被擋，請他等一下再試。刪除後過了這段時間又很快用完，才表示有人持續在猜。這時救援不保證成功，因為臨時 PIN 走同一道閘門。先用 WAF 規則擋下來源（見 `docs/architecture.md` →「運維層的補強」），再和他約好時間，刪除計數器後請他馬上登入。
+   其他節點可能還有約 60 秒的舊讀取，這段時間內他可能仍被擋，請他等一下再試。刪除後過了這段時間又很快用完，表示有人持續在猜，改走下方的「救援連結」。
 
 寫入時的 `secretUpdatedAt` 會讓舊 PIN 累積的鎖定紀錄（`verifyfail:`）立刻失效，不必另外清除，也不用等 15 分鐘。如果之後從備份還原 KV，備份裡舊的驗證設定會跟著回來（見「KV 每日備份與還原演練」→ 還原）。
 
-**握有他 token 的人持續猜錯時，要由你撤銷登入。** 改驗證設定要先通過目前密鑰的確認，這道確認有自己的額度（每帳號每小時 10 次），用完之後本人知道 PIN 也改不了，就沒辦法靠換 PIN 撤銷對方的登入。下面的步驟會撤銷這個帳號全部的登入，包括本人的裝置，之後也沒有 QR Code 可以用，所以要先和他約好時間。確認是本人之後，依序做：
+**握有他 token 的人持續猜錯時，全部被擋才需要你。** 改驗證設定要先通過目前密鑰的確認，這道確認的額度（每份每小時 5 次）與鎖定依登入分開：對方用完自己那一把的額度，本人其他用 PIN 或圖形登入的裝置不受影響，可以照常換 PIN，換 PIN 就會撤銷對方的登入。用 QR Code 登入的裝置和對方換發的登入共用一份。本人的裝置全部被擋時，走下方的「救援連結」，它會用到下面的撤銷步驟。這些步驟會撤銷這個帳號全部的登入，包括本人的裝置，之後也沒有 QR Code 可以用，所以要先和他約好時間。確認是本人之後，依序做：
 
 1. 照上面第 1 到 4 步寫入臨時 PIN。
 2. 從兩個地方列出這個帳號的 token 雜湊，把結果合併、去掉重複。第一個指令印出的 `tokens[].hash` 是登入清單，第二個指令列出的 `tokenidx:<userId>:<hash>` 尾端是索引。兩邊都要查：較早登入的裝置可能只在清單上，沒有索引；漏掉的那一把在清單刪除後還能讀資料，也能換發新的登入。
@@ -350,9 +350,83 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
    pnpm exec wrangler kv key delete "auth:<userId>" --namespace-id <正式 namespace ID> --remote
    ```
 
-5. 再列一次第 2 步的 `tokenidx:`（登入清單已經刪了，不用再查）。對方可能在這段時間又產生了新的登入，新的登入都有索引，有新的就照第 3 步補刪。
-6. 等約 60 秒，讓其他節點不再接受舊的 token，再照上面第 6 步刪除兩個計數器。
-7. 照上面第 5 步把臨時 PIN 回信給他，請他馬上登入，再設定新的 PIN 或圖形。
+5. 等約 60 秒，讓其他節點不再接受舊的 token。不需要刪計數器：救援換到的 token 有自己的額度與鎖定。
+6. 再跑一次第 2 步的兩個指令，這時兩邊都應該是空的。對方可能在等待期間又產生或續期了登入，有新的就照第 3、4 步補刪，再回到第 5 步。
+7. 照下方「救援連結」第 4 步起產生連結，做完那裡第 8 步的最後檢查，才把連結與臨時 PIN 一起寄給他，請他馬上登入，再設定新的 PIN 或圖形。
+
+### 救援連結
+
+有人持續猜測，連臨時 PIN 都登入不了，或帳號被接管時用這個方法。救援連結是你手動寫進 KV 的一筆一次性紀錄，本人開啟後直接登入，不用輸入密鑰，也不受登入額度影響；公開 API 不會寫出這種紀錄。連結等同登入憑證，只放在寄給本人的信裡，不要貼到工單或聊天。
+
+1. 先完成上面的信箱確認。沒有確認就不要產生連結。
+2. 照「使用者忘記登入驗證時」的第 1 到 4 步寫入臨時 PIN。
+3. **一律撤銷全部登入**：照上面撤銷步驟的第 2 到 6 步做。沒有撤銷的話，握有 token 的人可以再次離開家庭，連救援換到的 token 一起撤銷。本人其他裝置要重新登入，反正換 PIN 時也會全部登出。
+4. 確認他的家庭。第一行印出 `familyId`，第二行應該印出家庭紀錄：
+
+   ```bash
+   pnpm exec wrangler kv key get "member:<userId>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key get "family:<familyId>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+   第一行回「not found」時，請本人提供舊的同步碼（`moo-` 後面就是 `familyId`）。第二行回「not found」，或本人也沒有舊同步碼時，照下方「家庭已解散或換手時」重建。
+
+   接著回信請本人確認這是不是他原本的家庭：問他舊的同步碼、家庭裡有誰，以及他原本是不是管理者（畫面上的稱呼，就是下面的擁有者），再和第二行印出的 `familyId`、`members`、`ownerId` 比對。同步碼對得上、成員他都認得，而且他原本是管理者時 `ownerId` 仍是 `<userId>`，才沿用這個家庭。其他情況，包括他不確定，一律照下方重建：家庭可能已換手，也可能是別人把他加入的家庭；留在裡面的話，他開放的書會繼續給對方看，對方也能再把他移出。
+
+5. 產生連結 token `<R>`。一定要 64 字元 hex，base64 的 `+` 在連結裡會被解成空白：
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+6. 寫入救援紀錄，保存一小時。這行先把紀錄寫進 `temp-rescue.json`，寫入 KV 後刪掉檔案：
+
+   ```bash
+   node -e "require('fs').writeFileSync('temp-rescue.json',JSON.stringify({userId:process.argv[1],rescue:1}))" "<userId>"
+   pnpm exec wrangler kv key put "qr:<R>" --path temp-rescue.json --ttl 3600 --namespace-id <正式 namespace ID> --remote
+   rm temp-rescue.json
+   ```
+
+7. 等約 60 秒，讓其他節點讀得到這筆紀錄。
+8. 寄出之前做最後檢查。前兩行應該都是空的（列不出任何索引，`auth:` 回「not found」）。第三行的 `method` 要是 `pin`，把它印出的 `salt` 和臨時 PIN 代進第四行，算出來要等於它印出的 `hash`，才表示驗證設定還是你寫的臨時 PIN。最後兩行要和第 4 步確認的結果一致：沿用舊家庭時，`member:` 還是同一個 `familyId`，`ownerId` 與成員都沒變；重建時，`member:` 回「not found」，`family:` 是連結要用的新紀錄：
+
+   ```bash
+   pnpm exec wrangler kv key list --prefix "tokenidx:<userId>:" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key get "auth:<userId>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key get "verify:<userId>" --namespace-id <正式 namespace ID> --remote
+   node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1]+process.argv[2]).digest('hex'))" "<salt>" "<臨時 PIN>"
+   pnpm exec wrangler kv key get "member:<userId>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key get "family:<連結要用的 familyId>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+   列出新的登入時，照上面撤銷步驟的第 3、4 步刪掉（先刪 token，再刪索引）。驗證設定被改過時，照「使用者忘記登入驗證時」的第 3、4 步再寫一次臨時 PIN。家庭狀態變了，回到第 4 步重新判斷，連結要用的同步碼也可能跟著換。其他情況處理過任何一項，都回到第 7 步再等一次，再做這一步，全部乾淨才寄。約 60 秒是 KV 傳播時間的估計，不是保證。萬一還是有登入漏過，本人換 PIN 時會一起撤銷（換 PIN 前約 60 秒內才建立、還列不到的除外，見「使用者忘記登入驗證時」）。
+
+9. 把連結與臨時 PIN 只寄到確認過的讀墨 Email。信裡請本人把連結複製到平常用的瀏覽器開啟：信件 App 的內建瀏覽器會把登入留在那裡，也可能先把一次性連結用掉。信裡也要寫明：先開連結，開之前不要在任何舊裝置輸入臨時 PIN，舊裝置跳出重新驗證視窗時先關掉。連結格式如下，同步碼是 `moo-<familyId>`，自架伺服器是 `moo-<familyId>@<host>`：
+
+   ```text
+   <PWA 網址>/#code=<同步碼>&uid=<userId>&qrt=<R>
+   ```
+
+10. 請本人開連結，立刻換掉臨時 PIN：換 PIN 時要輸入這組臨時 PIN，換好之後才是他自己的。
+
+**家庭已解散或換手時**：`family:<舊 familyId>` 不存在，或帳號被接管時家庭已換手（上面第 4 步的判斷）、連結回 `MEMBER_REMOVED`，都**一律用全新的 `familyId`**，不沿用舊同步碼：解散家庭的人和現在的擁有者都知道舊碼，沿用的話，前者能用新的 Email 加入，看到本人開放的書，後者能再把他移出家庭。先產生一組符合 `^[a-z0-9]{4}-[a-z0-9]{4}$` 的隨機值，確認它在 KV 裡不存在（第二行要回「not found」），再寫入家庭紀錄，然後刪掉檔案。`<暱稱>` 由本人決定，`<ISO 時間>` 例如 `2026-11-06T00:00:00.000Z`：
+
+```bash
+node -e "const c=require('crypto');const a='abcdefghijklmnopqrstuvwxyz0123456789';const p=()=>Array.from({length:4},()=>a[c.randomInt(36)]).join('');console.log(p()+'-'+p())"
+pnpm exec wrangler kv key get "family:<新 familyId>" --namespace-id <正式 namespace ID> --remote
+node -e "const [familyId,userId,displayName,createdAt]=process.argv.slice(1);require('fs').writeFileSync('temp-family.json',JSON.stringify({familyId,ownerId:userId,members:[{userId,displayName,canLend:1}],maxMembers:2,createdAt}))" "<新 familyId>" "<userId>" "<暱稱>" "<ISO 時間>"
+pnpm exec wrangler kv key put "family:<新 familyId>" --path temp-family.json --namespace-id <正式 namespace ID> --remote
+rm temp-family.json
+```
+
+舊家庭還在，而第 4 步第一行印出的還是舊的 `familyId` 時，再刪掉他的 `member:` 指向，否則連結會因為他還在舊家庭而回 `ALREADY_IN_FAMILY`。刪掉之後，他的書不會出現在舊家庭的書櫃。他仍列在舊家庭的成員名單上，所以如果他先在舊裝置輸入臨時 PIN，會接回舊家庭，書也會回到舊書櫃；這時再刪一次 `member:` 就能繼續用同一個連結，開連結之後舊家庭就接不回去了：
+
+```bash
+pnpm exec wrangler kv key delete "member:<userId>" --namespace-id <正式 namespace ID> --remote
+```
+
+連結帶新的同步碼。本人走重新連線的路徑，`member:` 會自動補回。個人書櫃與開放設定都在。家庭已解散時，借閱紀錄已隨解散刪除，舊同步碼不再能用；家庭換手時，舊家庭和它的借閱紀錄留在原處，舊同步碼屬於對方，不要再給本人用。
+
+**連結失效時**：開過一次、過期、畫面顯示已被移除（`MEMBER_REMOVED`）、家庭已滿（`FAMILY_FULL`）都會讓這個連結作廢，解決原因後從第 5 步重新產生一筆。解決方式：`MEMBER_REMOVED` 要等 6 小時，或請家庭擁有者解除；帳號被接管時不要等，擁有者可能已經不是本人，一律照上面「家庭已解散或換手時」改用全新的 `familyId` 重建。`FAMILY_FULL` 要等家庭騰出名額，或改用全新的 `familyId` 重建。畫面顯示已在其他家庭（`ALREADY_IN_FAMILY`）或家庭不存在（`FAMILY_NOT_FOUND`）時，連結還沒被用掉，處理完（前者刪掉 `member:<userId>`）之後，一小時內可以繼續用同一個連結。
 
 ## 更新
 
@@ -364,6 +438,8 @@ pnpm deploy
 ```
 
 設了 `VERIFY_PEPPER` 之後，如果回退到不認得 pepper 的舊版 Worker，已升級（`version: 2`）的帳號輸入正確的 PIN 也會被當成打錯，要再更新回新版才會恢復。回退期間這些「打錯」照樣計數：同一來源 5 次就鎖 15 分鐘，換回新版後被鎖的人最多還要再等 15 分鐘；第三方也能在這段期間用錯誤的 PIN 把該帳號每小時 10 次的猜測上限用完，讓本人暫時進不來。
+
+回退到不認得 QR 登入標記的舊版 Worker 時，任何一次登入都會洗掉這些標記；升回新版之後，這些登入算未標記（各有獨立額度、能發略過驗證的 QR Code），最多 180 天。回退過就請本人換 PIN，或由管理者撤銷他的全部登入（「使用者忘記登入驗證時」的撤銷步驟）。
 
 更新到含 #432 的版本後，還沒改存成雜湊的登入會失效：直接從 v1.7.2 或更早的版本升上來的伺服器，所有裝置都要重新登入一次；已經跑過含 #425 的版本一段時間的伺服器，只有那段期間沒有續期或重新登入過的裝置要重新登入。擴充功能與 PWA 會自動重新連線，帳號設了 PIN／圖形的要再輸入一次；同一個網路下同一分鐘內有超過 3 台裝置重新連線時，多出來的要等約 1 分鐘才會自動再試。
 

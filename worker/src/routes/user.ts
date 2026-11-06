@@ -1044,6 +1044,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     verifyRecord,
     currentSecret,
     presented.auth,
+    presented.presentedHash,
   );
   if (stepUpResponse) return stepUpResponse;
 

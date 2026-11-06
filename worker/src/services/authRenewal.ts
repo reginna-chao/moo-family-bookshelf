@@ -15,7 +15,7 @@ import {
 import { getVerifyRecord } from "../kv/verify";
 import { timingSafeEqual } from "../utils/crypto";
 import { readPresentedAuth } from "./authRecord";
-import { mintAuthToken, type IssuedToken } from "./authTokens";
+import { mintDerivedAuthToken, type IssuedToken } from "./authTokens";
 
 /** Sliding 90 days, capped 180 days after `createdAt` — except on a `code` account (one extra read, cap only). */
 async function renewalTarget(
@@ -67,7 +67,8 @@ async function slideListedToken(
  * Refresh (#425): renews only the PRESENTED token. `null` (→ 401 REFRESH_FAILED)
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
  * past the 180-day cap (PIN / pattern / none accounts). A TTL gap (no record, empty
- * list) mints a new token. Every path that writes `token:{hash}` puts that token's
+ * list) mints a new `derived` token: the presented one proved no secret here and its
+ * origin is unknown. Every path that writes `token:{hash}` puts that token's
  * `tokenidx:` key first, with the same TTL (#431).
  */
 export async function renewPresentedAuthToken(
@@ -82,7 +83,7 @@ export async function renewPresentedAuthToken(
   );
   if (!current || presentedHash === null) return null;
   if (auth === null || auth.tokens.length === 0) {
-    return mintAuthToken(kv, userId, auth);
+    return mintDerivedAuthToken(kv, userId, auth);
   }
   const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, presentedHash));
   if (!entry) return null;

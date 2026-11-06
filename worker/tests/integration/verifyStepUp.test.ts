@@ -12,8 +12,10 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_MAX,
   VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
  * Current-secret step-up on `PUT /api/user/:id/verify` (#396).
@@ -21,16 +23,17 @@ import {
  * When the stored record is a configured PIN / pattern, every PUT — whatever
  * the target method — must carry the CURRENT secret as `currentSecret`.
  * Missing ⇒ `403 VERIFICATION_REQUIRED`, wrong ⇒ `403 VERIFICATION_FAILED`
- * (the gate's own answers, charging the caller's `verifyfail:{userId}:{ip}`
- * streak and the account's `verify-stepup` budget), correct ⇒ the save goes on
- * as before (rotation for a new PIN / pattern). A refused PUT leaves the record
- * and the session byte-identical. `none` / `code` / no record need nothing and
- * ignore a supplied secret; a corrupted PIN record (no hash / salt) behaves
- * like the gate: no secret ⇒ 403, any secret ⇒ pass.
+ * (the gate's own answers, charging this token's `verifyfail:{userId}:{ip}:{hash}`
+ * streak and its `verify-stepup` budget), correct ⇒ the save goes on as before
+ * (rotation for a new PIN / pattern). A refused PUT leaves the record and the
+ * session byte-identical. `none` / `code` / no record need nothing and ignore a
+ * supplied secret; a corrupted PIN record (no hash / salt) behaves like the gate:
+ * no secret ⇒ 403, any secret ⇒ pass.
  *
- * The step-up has its OWN budget: public login traffic spending `verify` does
- * not stop the owner's save, and with `verify-stepup` spent a correct and a
- * wrong secret both answer 429 and nothing is saved.
+ * The step-up has its OWN budget per token: public login traffic spending `verify`
+ * does not stop the owner's save, and with this token's `verify-stepup` spent a
+ * correct and a wrong secret both answer 429 and nothing is saved. How budgets
+ * divide between tokens is in `loginRecoveryScenarios.test.ts`.
  *
  * Stale record: when `auth:{userId}.secretAt` is newer than the record's
  * `secretUpdatedAt`, this colo has not seen the owner's latest secret; the
@@ -60,7 +63,6 @@ const WINDOW_MS = VERIFY_ATTEMPT_WINDOW_SECONDS * 1000;
 const PINNED_NOW =
   Math.floor(Date.parse("2026-01-01T00:00:00.000Z") / WINDOW_MS) * WINDOW_MS +
   WINDOW_MS / 2;
-const FAIL_KEY = kvKeys.verifyFail(USER_ID, CALLER_IP);
 
 async function send(
   body: unknown,
@@ -94,18 +96,34 @@ async function errorCode(res: Response): Promise<string> {
   return ((await res.json()) as Json).error.code as string;
 }
 
-async function budgetKey(scope: string): Promise<string> {
+async function loginCounterKey(): Promise<string> {
   const reading = await peekPerUserRateLimit(kv, {
     userId: USER_ID,
-    scope,
+    scope: VERIFY_ATTEMPT_SCOPE,
     max: VERIFY_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
   return reading.key;
 }
 
-const attemptCounterKey = () => budgetKey(VERIFY_STEP_UP_ATTEMPT_SCOPE);
-const loginCounterKey = () => budgetKey(VERIFY_ATTEMPT_SCOPE);
+/** `token`'s own step-up budget key, via the production builder. */
+async function attemptCounterKey(token: string): Promise<string> {
+  const reading = await peekPerUserRateLimit(kv, {
+    userId: `${USER_ID}:${await hashAuthToken(token)}`,
+    scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+    max: VERIFY_STEP_UP_ATTEMPT_MAX,
+    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+  });
+  return reading.key;
+}
+
+/** `token`'s own failure streak at this file's source address. */
+async function failKey(token: string): Promise<string> {
+  return kvKeys.verifyFail(
+    USER_ID,
+    `${CALLER_IP}:${await hashAuthToken(token)}`,
+  );
+}
 
 async function setCounterKey(): Promise<string> {
   return (
@@ -159,12 +177,13 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
 
     expect(res.status).toBe(403);
     expect(await errorCode(res)).toBe("VERIFICATION_FAILED");
+    const fail = await failKey(token);
     expect([...ops.writeTrail()].sort()).toEqual(
-      [`put ${await attemptCounterKey()}`, `put ${FAIL_KEY}`].sort(),
+      [`put ${await attemptCounterKey(token)}`, `put ${fail}`].sort(),
     );
     expect(await kv.get(await setCounterKey())).toBeNull();
     expect(await kv.get(await loginCounterKey())).toBeNull();
-    expect(((await kv.get(FAIL_KEY, "json")) as Json).failCount).toBe(1);
+    expect(((await kv.get(fail, "json")) as Json).failCount).toBe(1);
     expect(await snapshot(token)).toEqual(before);
   });
 
@@ -174,7 +193,8 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
       { method: "pin", secret: NEW_PIN, currentSecret: WRONG_PIN },
       token,
     );
-    expect(await kv.get(FAIL_KEY)).not.toBeNull();
+    const fail = await failKey(token);
+    expect(await kv.get(fail)).not.toBeNull();
 
     const res = await send(
       { method: "pin", secret: NEW_PIN, currentSecret: PIN },
@@ -185,14 +205,14 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
     const rotated = ((await res.json()) as Json).data.authToken as string;
     expect(rotated).not.toBe(token);
     expect(await tokenOwner(kv, token)).toBeNull();
-    expect(await kv.get(FAIL_KEY)).toBeNull();
+    expect(await kv.get(fail)).toBeNull();
     expect(await kv.get(await setCounterKey())).toBe("1");
   });
 
   it("with the step-up budget spent, answers a wrong and the correct secret alike with 429, saving nothing", async () => {
     const token = await setUp("pin", PIN);
-    const stepUpKey = await attemptCounterKey();
-    await kv.put(stepUpKey, String(VERIFY_ATTEMPT_MAX));
+    const stepUpKey = await attemptCounterKey(token);
+    await kv.put(stepUpKey, String(VERIFY_STEP_UP_ATTEMPT_MAX));
     const before = await snapshot(token);
     const ops = watchKvOps(kv);
 
@@ -211,7 +231,7 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
     expect(typeof error.retryAfter).toBe("number");
     expect(ops.writeTrail()).toEqual([]);
     expect(await snapshot(token)).toEqual(before);
-    expect(await kv.get(stepUpKey)).toBe(String(VERIFY_ATTEMPT_MAX));
+    expect(await kv.get(stepUpKey)).toBe(String(VERIFY_STEP_UP_ATTEMPT_MAX));
   });
 
   it("with the login budget spent, still saves with the correct secret, charging no budget", async () => {
@@ -226,7 +246,7 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
       "json",
     )) as VerifyRecord;
     expect(record.method).toBe("none");
-    expect(await kv.get(await attemptCounterKey())).toBeNull();
+    expect(await kv.get(await attemptCounterKey(token))).toBeNull();
   });
 
   it.each([
@@ -291,10 +311,11 @@ describe("PUT /api/user/:id/verify — accounts with nothing to step up on", () 
       );
 
       expect(withSecret.status).toBe(200);
-      expect(ops.getKeys()).not.toContain(FAIL_KEY);
-      expect(ops.writeTrail()).not.toContain(`put ${FAIL_KEY}`);
-      expect(await kv.get(FAIL_KEY)).toBeNull();
-      expect(await kv.get(await attemptCounterKey())).toBeNull();
+      const fail = await failKey(token);
+      expect(ops.getKeys()).not.toContain(fail);
+      expect(ops.writeTrail()).not.toContain(`put ${fail}`);
+      expect(await kv.get(fail)).toBeNull();
+      expect(await kv.get(await attemptCounterKey(token))).toBeNull();
       const record = (await kv.get(
         kvKeys.verify(USER_ID),
         "json",
@@ -343,8 +364,8 @@ describe("PUT /api/user/:id/verify — a stale verify record", () => {
     expect(res.status).toBe(403);
     expect(await errorCode(res)).toBe("VERIFICATION_REQUIRED");
     expect(ops.writeTrail()).toEqual([]);
-    expect(ops.getKeys()).not.toContain(FAIL_KEY);
-    expect(await kv.get(await attemptCounterKey())).toBeNull();
+    expect(ops.getKeys()).not.toContain(await failKey(token));
+    expect(await kv.get(await attemptCounterKey(token))).toBeNull();
     expect(await snapshot(token)).toEqual(before);
   });
 });

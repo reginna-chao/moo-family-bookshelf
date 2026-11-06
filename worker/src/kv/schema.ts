@@ -1,5 +1,5 @@
 /** KV key builders (`kvKeys`), record types and TTL constants. Key → value → TTL: .claude/rules/backend.md
- *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s): docs/architecture.md → KV Key 設計. */
+ *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s; an operator-written rescue record 3600s): docs/architecture.md → KV Key 設計. */
 import { MAX_BOOK_ID_LENGTH } from "moo-family-bookshelf-shared/api/bookId";
 
 /** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
@@ -410,9 +410,13 @@ export interface AuthTokenRecord {
 export interface AuthTokenEntry {
   hash: string;
   createdAt: string;
+  /** `BoolFlag.TRUE`: this token was obtained through another token and proved no secret when minted (QR redeem,
+   *  TTL-gap refresh). OPTIONAL (added after release): absent ⇒ unmarked, as every record written before it. */
+  derived?: BoolFlag;
 }
 
-/** `auth:{userId}` as stored (#425): the account's tokens, at most `MAX_AUTH_TOKENS_PER_USER`. */
+/** `auth:{userId}` as stored (#425): the account's tokens. `MAX_AUTH_TOKENS_PER_USER` is the mint's target; a race
+ *  can leave the list briefly over it, and the next secret-proven mint brings it back. */
 export interface StoredAuthRecord {
   tokens: AuthTokenEntry[];
   /** Epoch ms of the `verify:{userId}.secretUpdatedAt` the PIN/pattern rotation was written for (#378); a join
@@ -430,7 +434,7 @@ export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
 /** Absolute token age cap: 180 days from `createdAt` (`code` accounts exempt). */
 export const TOKEN_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
-/** Tokens one account may hold at once (one per device); the next mint evicts dead, then oldest, entries. */
+/** Tokens one account may hold at once (one per device); eviction order: `evictForNewToken`, `services/authTokens.ts`. */
 export const MAX_AUTH_TOKENS_PER_USER = 5;
 
 /** Refresh writes nothing when its target expiry is within this of the stored `expiresAt` (1 hour). */
@@ -439,7 +443,7 @@ export const TOKEN_RENEW_SKIP_WINDOW_MS = 60 * 60 * 1000;
 /** OTP TTL: 5 minutes in seconds. */
 export const OTP_TTL_SECONDS = 5 * 60;
 
-/** QR token TTL: 5 minutes in seconds. */
+/** QR token TTL: 5 minutes in seconds. An operator-written rescue record sets its own, 3600s (worker/DEPLOY.md). */
 export const QR_TOKEN_TTL_SECONDS = 5 * 60;
 
 export interface QrTokenRecord {
@@ -448,6 +452,9 @@ export interface QrTokenRecord {
    *  (added after release): absent, or an older `qr:`-salted value, matches no entry ⇒ never bypasses
    *  verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
   tokenHash?: string;
+  /** `BoolFlag.TRUE`: an operator-issued rescue link, which skips verification (`passJoinVerificationGate`,
+   *  `routes/family.ts`). Only written by hand into KV (worker/DEPLOY.md → 救援連結); `POST /qr-token` never writes it. */
+  rescue?: BoolFlag;
 }
 
 /** Verification method for PWA login. */
