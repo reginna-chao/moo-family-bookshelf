@@ -14,6 +14,7 @@ import {
   type PatchChange,
 } from "moo-family-bookshelf-shared/personal/saveStrategy";
 import { dropResolvedLegacyBooks } from "../sync/legacyBooks";
+import { pinSyncApi } from "../sync/pinnedSyncApi";
 import { loadSavedBooks } from "../sync/savedBooks";
 
 /** Backend rejects PATCH `changes` arrays longer than this; fall back to PUT. */
@@ -53,12 +54,14 @@ function parseSavedShelf(data: unknown): FullPutRead<BookEntry> {
 async function putShelf(
   p: PersonalShelfUploadParams,
 ): Promise<PersonalShelfUploadResult> {
+  // Before the first await: the full book list stays on the server held at Save (#463).
+  const api = pinSyncApi(p.apiClient);
   const result = await putBooksRebasingOnConflict({
     books: p.books,
     dirtyBookIds: p.dirtyBookIds,
     raw: p.raw,
     put: ({ raw, books, expectedLastUpdated }) =>
-      p.apiClient.updatePersonalBooks(p.userId, {
+      api.updatePersonalBooks(p.userId, {
         ...raw,
         schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
         userId: p.userId,
@@ -68,7 +71,7 @@ async function putShelf(
         // Undefined is dropped by JSON.stringify, so no precondition is sent.
         expectedLastUpdated,
       }),
-    get: () => p.apiClient.getPersonalBooks(p.userId),
+    get: () => api.getPersonalBooks(p.userId),
     parse: parseSavedShelf,
   });
   if (!result.ok) return result;
@@ -87,6 +90,11 @@ async function putShelf(
  * — when a partial update can't be safe — a full PUT that re-reads and rebases
  * on `BOOKS_CONFLICT` (`putBooksRebasingOnConflict`). Writes nothing locally;
  * a thrown request propagates.
+ *
+ * A full PUT stays on the server the client held when this was called: once the
+ * endpoint differs, its next call rejects with `SyncServerChangedError` without
+ * being sent. Call this synchronously when Save is pressed. A PATCH is one call
+ * with no await before it, so it is not pinned.
  */
 export async function uploadPersonalShelf(
   p: PersonalShelfUploadParams,

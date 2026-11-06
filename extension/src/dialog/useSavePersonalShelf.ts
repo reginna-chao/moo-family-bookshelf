@@ -12,6 +12,7 @@ import {
   PERSONAL_BOOKS_CACHE_KEY,
   PERSONAL_SHELF_SAVED_AT_KEY,
 } from "../constants";
+import { SyncServerChangedError } from "../sync/pinnedSyncApi";
 import { encodePersonalBooksCache } from "./personalBooksCache";
 import { settleSavedShelf } from "./syncedShelf";
 import { uploadPersonalShelf, type LandedSave } from "./personalShelfUpload";
@@ -20,6 +21,14 @@ export type PersonalBooksStatus =
   "loading" | "ready" | "saving" | "saved" | "error";
 
 const SAVE_FAILED_MESSAGE = "儲存失敗，請稍後再試";
+const SAVE_SERVER_CHANGED_MESSAGE =
+  "伺服器已更換，這次儲存已停止。請先同步書櫃，再按一次儲存。";
+
+function saveFailureText(err: unknown): string {
+  if (err instanceof SyncServerChangedError) return SAVE_SERVER_CHANGED_MESSAGE;
+  if (err instanceof Error) return err.message;
+  return "儲存失敗";
+}
 
 export interface UseSavePersonalShelfParams {
   userId: string;
@@ -170,7 +179,7 @@ export function useSavePersonalShelf(
         syncNow !== syncAtStart ? syncNow : null,
       );
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "儲存失敗");
+      setErrorMessage(saveFailureText(err));
       setStatus("error");
     }
   }, [

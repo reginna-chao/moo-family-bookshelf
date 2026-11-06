@@ -1,8 +1,9 @@
-// Keeps one book sync on the server it was triggered on (#457) — docs/architecture.md → 書單同步.
+// Keeps one book sync (#457), or one manual Save's full PUT (#463), on the server it was
+// triggered on — docs/architecture.md → 書單同步.
 
 import type { ApiClient } from "../api/client";
 
-/** The API calls a book sync makes. */
+/** The API calls a book sync makes; a manual Save's full PUT uses the two book-list ones. */
 export type SyncApi = Pick<
   ApiClient,
   | "getPersonalBooks"
@@ -34,6 +35,9 @@ export class SyncServerChangedError extends Error {
  * left, so the call gets a 401 and writes nothing; after a rejoin the write goes
  * to the user's own record. The client's internal token-refresh request does not
  * pass through here and is out of scope.
+ *
+ * The manual Save's full PUT and its 409 re-read use it the same way (#463,
+ * `uploadPersonalShelf`): pinned when Save is pressed, stopped on the same terms.
  */
 export function pinSyncApi(
   apiClient: SyncApi & Pick<ApiClient, "getEndpoint">,
