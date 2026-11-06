@@ -22,6 +22,15 @@ export function isPublicRoute(method: string, path: string): boolean {
   return false;
 }
 
+/** The `:id` of a `DELETE /api/user/:id` request, or `null` for any other route or a malformed id. */
+export function accountDeleteTargetUserId(
+  method: string,
+  path: string,
+): string | null {
+  if (method !== "DELETE") return null;
+  return /^\/api\/user\/([a-f0-9]{64})\/?$/.exec(path)?.[1] ?? null;
+}
+
 /**
  * Counter buckets on the sensitive tier.
  *

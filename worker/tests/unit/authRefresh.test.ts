@@ -10,9 +10,10 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * familyId membership check, and the #425 renewal — the presented token comes
  * back as the same string with its `token:{hash}` slid to 90 days, and
  * `auth:{userId}` is not rewritten. A TTL gap (no `auth:` record) mints a
- * new listed token. Seeded tokens are 10 days old: old enough that the slide
- * writes, young enough to be far from the 180-day cap (whose edges live in
- * `renewPresentedAuthToken.test.ts`).
+ * new listed token, unless the token carries a `token:deleted:` mark (#462),
+ * which answers REFRESH_FAILED. Seeded tokens are 10 days old: old enough that
+ * the slide writes, young enough to be far from the 180-day cap (whose edges
+ * live in `renewPresentedAuthToken.test.ts`).
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -313,6 +314,28 @@ describe("POST /api/auth/refresh", () => {
     expect(authRecord.tokens.map((e: Json) => e.hash)).toEqual([hash]);
     const tokenRecord = (await kv.get(kvKeys.authToken(hash), "json")) as Json;
     expect(tokenRecord.userId).toBe(VALID_USER_ID);
+  });
+
+  it("should answer 401 REFRESH_FAILED and mint nothing in a TTL gap when the token has a deleted mark", async () => {
+    const token = "f".repeat(64);
+    await seedAuthToken(kv, VALID_USER_ID, { token });
+    await kv.delete(kvKeys.auth(VALID_USER_ID));
+    await kv.put(
+      kvKeys.accountDeleted(await hashAuthToken(token)),
+      VALID_USER_ID,
+    );
+    const putSpy = vi.spyOn(kv, "put");
+
+    const res = await request("POST", "/api/auth/refresh", {
+      body: JSON.stringify({ userId: VALID_USER_ID }),
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as Json;
+    expect(json.error.code).toBe("REFRESH_FAILED");
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(await kv.get(kvKeys.auth(VALID_USER_ID))).toBeNull();
   });
 
   it("should return same token on consecutive refreshes with same auth", async () => {

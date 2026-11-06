@@ -25,7 +25,7 @@ moo-family-bookshelf/
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
 │   │   ├── account/            # Email shape rule shared by the Extension scraper / cookie parser and the PWA login form
-│   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf / personal-books / verify-method payload validation + issued-credential check (auth token / expiry) + the shared envelope reader + hex-id assertion
+│   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf / personal-books / verify-method payload validation + issued-credential check (auth token / expiry) + the shared envelope reader + hex-id assertion + the already-deleted account error code
 │   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── crypto/             # deriveUserId / sha256Hex + sync code encode/decode

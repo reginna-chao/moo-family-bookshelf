@@ -8,7 +8,8 @@ import { SELF_DEPARTURE_UNTIL_KEY } from "../constants";
 /** Backstop lifetime of the mark (60 s) when its cleanup never runs. */
 export const SELF_DEPARTURE_TTL_MS = 60_000;
 
-/** The code every Worker 401 carries; it is answered before any handler work. */
+/** The 401 code for a missing or invalid token, answered before any departure write. The other
+ *  departure 401, `ACCOUNT_DELETED`, means an earlier delete already finished: it is not resent. */
 const UNAUTHORIZED_CODE = "UNAUTHORIZED";
 
 /**
@@ -20,11 +21,14 @@ const UNAUTHORIZED_CODE = "UNAUTHORIZED";
  * replaced elsewhere, and the mark blocked the recovery join), the mark is
  * ended and the request is resent ONCE, so the client's normal 401 → recovery
  * join → resend path runs; whatever that returns is settled like any other
- * response. Safe: a 401 means the server never processed the departure, so a
- * recovery join has nothing to undo yet, and once the departure lands an
+ * response. Safe: `UNAUTHORIZED` means the server did not process this request,
+ * so a recovery join has nothing to undo yet, and once the departure lands an
  * updated server refuses a recovery join from a user who is no longer listed
- * (`recovery: 1` → 409 RECOVERY_NOT_MEMBER). Mirrors
- * `pwa/src/utils/selfDeparture.ts`.
+ * (`recovery: 1` → 409 RECOVERY_NOT_MEMBER).
+ *
+ * `ACCOUNT_DELETED` is a 401 too, but an earlier delete already finished, so it
+ * is never resent: the delete hooks turn it into success inside `send`
+ * (`treatAccountDeletedAsSuccess`). Mirrors `pwa/src/utils/selfDeparture.ts`.
  */
 export async function runGuardedDeparture<T>(
   send: () => Promise<ApiResponse<T>>,
