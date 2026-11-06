@@ -182,6 +182,35 @@ describe("useSessionApiClient", () => {
     expect(authHeaderOfCall()).toBe("Bearer token-a");
     view.unmount();
   });
+
+  // Hook-level contract: App does not hand its client out while logged out,
+  // so production has no known path to this order.
+  it("does not refresh for a logged-out client whose 401 arrives after a session started", async () => {
+    const refresher = vi.fn().mockResolvedValue(null);
+    const { result, rerender } = renderSession(null, refresher);
+    const loggedOut = result.current;
+    let answer!: (reply: unknown) => void;
+    mockFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const pending = loggedOut.getPersonalBooks(USER_A);
+
+    rerender({ auth: SESSION_A });
+    answer({
+      ok: false,
+      status: 401,
+      json: () =>
+        Promise.resolve({
+          error: { code: "UNAUTHORIZED", message: "no token" },
+        }),
+    });
+    await pending;
+
+    expect(refresher).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 // #258: the in-flight refresh guard keys a session on the same fields as the hook.

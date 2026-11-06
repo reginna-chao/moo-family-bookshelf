@@ -872,8 +872,9 @@ PWA 首頁 → 輸入同步碼 + 輸入讀墨 Email
 
 #### 背景自動復原的防護
 
-背景自動復原指 401 時的 token refresher（`pwa/src/hooks/useRecoveryJoin.ts` 回傳、`pwa/src/App.tsx` 命名為 `acquireNewToken` 的函式）在背景帶 `recovery: 1` 重新加入家庭。要不要送出由 `pwa/src/hooks/recoveryJoinGate.ts` 判斷：429 冷卻中、使用者自己的離開／刪除帳號請求仍在進行、或工作階段已結束時都不送。
+背景自動復原指 401 時的 token refresher（`pwa/src/hooks/useRecoveryJoin.ts` 回傳、`pwa/src/App.tsx` 命名為 `acquireNewToken` 的函式）在背景帶 `recovery: 1` 重新加入家庭。要不要送出，先比對發出請求的 client 所屬的工作階段是否仍是當下的工作階段（`userId`、`familyId`、伺服器位址，`pwa/src/hooks/useRecoveryJoin.ts`），不同就不送；相同才由 `pwa/src/hooks/recoveryJoinGate.ts` 判斷後面三種情況：429 冷卻中、使用者自己的離開／刪除帳號請求仍在進行、或工作階段已結束時都不送。
 
+- **refresher 綁定 client 所屬的工作階段**（`pwa/src/hooks/useSessionApiClient.ts`）：每個 client 的 refresher 綁定建立它的工作階段。工作階段以 `userId`、`familyId`、伺服器位址三者為準，token 與到期時間不算，同三者重新登入視為同一個工作階段。當下的工作階段和 client 所屬的不同時，不送加入、不取新 token、不重送，也不動當下的工作階段，原本的 401 回給呼叫者；登出狀態的 client 不掛 refresher。
 - **429 冷卻**（`pwa/src/utils/recoveryCooldown.ts`，對應 Extension `extension/src/api/recoveryCooldown.ts` 的冷卻函式；Extension 存在 `browser.storage.local`，PWA 只在瀏覽器執行，等價的儲存是 `localStorage`）：
   - key `moo:recoveryCooldownUntil` 是全域的、不分使用者：它節流的是 Worker 的 per-IP 敏感端點額度（每分鐘 3 次），同一台裝置上所有帳號共用這份額度。
   - 只有自動復原會查看冷卻；使用者手動發起的加入絕不能被它擋下。手動加入成功（`App.tsx` 傳給 `LandingPage` 的 `onAuth`）會清除殘留的冷卻：這次成功證明憑證可用，下一次背景復原不該被舊冷卻擋住（與 Extension `extension/src/dialog/useReauth.ts` 相同）。

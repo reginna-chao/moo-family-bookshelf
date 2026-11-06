@@ -20,6 +20,11 @@ export function isLiveSession(a: AuthState | null, b: AuthState): boolean {
   return isSameSession(a, b) && localStorage.getItem(USER_ID_KEY) === b.userId;
 }
 
+/** Re-acquires a token for `session`; refuses unless `session` (userId, familyId, apiHost) is still the live one. */
+export type SessionTokenRefresher = (
+  session: AuthState,
+) => Promise<string | null>;
+
 /**
  * One `ApiClient` per login session (#256). A token swap inside the session
  * (401 refresh, QR auto-acquire) keeps the SAME instance — a new one would
@@ -30,10 +35,13 @@ export function isLiveSession(a: AuthState | null, b: AuthState): boolean {
  * instance and the previous one is left untouched, token included, so the
  * unmounting subtree's cleanup flush (e.g. the family-shelf prefs `detach()`)
  * still authenticates. A new instance only ever receives the current token.
+ *
+ * Each client's refresher is bound to that client's session, see
+ * docs/architecture.md → 背景自動復原的防護.
  */
 export function useSessionApiClient(
   auth: AuthState | null,
-  tokenRefresher: () => Promise<string | null>,
+  tokenRefresher: SessionTokenRefresher,
 ): ApiClient {
   const apiHost = auth?.apiHost;
   const userId = auth?.userId;
@@ -42,10 +50,12 @@ export function useSessionApiClient(
 
   const apiClient = useMemo(() => {
     const client = new ApiClient(apiHost);
-    client.setTokenRefresher(tokenRefresher);
+    // Each client refreshes only for its own session; a logged-out client never does.
+    if (userId !== undefined && familyId !== undefined) {
+      const session: AuthState = { userId, familyId, apiHost };
+      client.setTokenRefresher(() => tokenRefresher(session));
+    }
     return client;
-    // userId / familyId only key the session: a new login gets a new client, the old keeps its token.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiHost, userId, familyId, tokenRefresher]);
 
   useLayoutEffect(() => {
