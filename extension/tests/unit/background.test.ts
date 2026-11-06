@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import browser, { type Runtime } from "webextension-polyfill";
-import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
-  API_ENDPOINT_KEY,
   PERSONAL_BOOKS_CACHE_KEY,
   USER_EMAIL_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
@@ -38,17 +36,6 @@ import {
  * unrelated to storage keys. Only storage reads/writes use the `moo:`-prefixed
  * key constants.
  *
- * SET_API_ENDPOINT: the handler runs the SHARED `validateEndpointUrl` — the same
- * rules the ApiClient and the Dialog's own storage write use. It used to keep a
- * private, stricter copy, which made the background a third opinion on what a
- * safe endpoint is: it refused the private/LAN addresses the rest of the client
- * happily adopts, so a self-hoster's broadcast silently diverged from the
- * authoritative local write that had already landed. Expectations are derived
- * FROM the validator rather than hard-coded (`refusalMessageFor` takes the exact
- * refusal from the validator's own throw, and fails loudly if `raw` is accepted,
- * which would make a "refuses …" case silently vacuous), so the handler and the
- * shared rules cannot drift apart while staying green.
- *
  * Store-page chip (#313): `@/background/storePageScript` is mocked with a stable spy, so these cases
  * pin only the WIRING (which event re-runs the reconcile) and stay independent of the reconcile's own
  * async storage work — the synchronous `remove` count in "runtime.onInstalled" would otherwise depend
@@ -66,17 +53,6 @@ type MessageListener = (
 ) => Promise<unknown> | undefined;
 
 let listener: MessageListener;
-
-/** The validator's own refusal for `raw` (tracks production copy); throws if `raw`
- *  is accepted, so no "refuses …" case passes vacuously. */
-function refusalMessageFor(raw: string): string {
-  try {
-    validateEndpointUrl(raw);
-  } catch (err) {
-    return err instanceof Error ? err.message : "Invalid API endpoint";
-  }
-  throw new Error(`Expected validateEndpointUrl to refuse ${raw}`);
-}
 
 function sendMessage(message: unknown): Promise<Record<string, unknown>> {
   return Promise.resolve(
@@ -188,115 +164,6 @@ describe("background service worker", () => {
     });
   });
 
-  // The SHARED `validateEndpointUrl`, never a private copy; expectations derive
-  // from it. See the header → "SET_API_ENDPOINT".
-  describe("SET_API_ENDPOINT", () => {
-    it("writes apiEndpoint to local storage only", async () => {
-      const response = await sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: "https://custom.workers.dev",
-      });
-
-      expect(response).toEqual({ ok: 1 });
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [API_ENDPOINT_KEY]: "https://custom.workers.dev",
-      });
-      expect(browser.storage.sync.set).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      ["a private-LAN HTTP endpoint", "http://192.168.1.10:8787"],
-      ["a 10/8 LAN endpoint", "http://10.0.0.5:8787"],
-      ["an mDNS NAS endpoint", "http://nas.local:8787"],
-      ["a localhost dev endpoint", "http://localhost:8787"],
-    ])("accepts %s, like every other endpoint writer", async (_label, raw) => {
-      const response = await sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: raw,
-      });
-
-      expect(response).toEqual({ ok: 1 });
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [API_ENDPOINT_KEY]: validateEndpointUrl(raw),
-      });
-    });
-
-    it.each([
-      ["a trailing slash", "https://custom.workers.dev/"],
-      ["an upper-case host", "https://CUSTOM.Workers.DEV"],
-      ["an explicit default port", "https://custom.workers.dev:443"],
-      ["a sub-path with a trailing slash", "https://custom.workers.dev/api/"],
-      [
-        "a query string the client never sends",
-        "https://custom.workers.dev/?x=1",
-      ],
-    ])(
-      "stores the canonical form, not the raw string, for %s",
-      async (_label, raw) => {
-        const canonical = validateEndpointUrl(raw);
-        // Guard the case itself: a row whose raw value is already canonical would
-        // pass without proving anything.
-        expect(canonical).not.toBe(raw);
-
-        const response = await sendMessage({
-          type: "SET_API_ENDPOINT",
-          apiEndpoint: raw,
-        });
-
-        expect(response).toEqual({ ok: 1 });
-        // Two spellings of one endpoint in storage would make "is the family's
-        // endpoint the one I'm on?" answer wrong, so only the canonical form lands.
-        expect(browser.storage.local.set).toHaveBeenCalledWith({
-          [API_ENDPOINT_KEY]: canonical,
-        });
-      },
-    );
-
-    it.each([
-      ["a userinfo masquerade", "https://real.example@evil.com"],
-      ["embedded user:password credentials", "https://user:pass@evil.com"],
-      ["plain HTTP on a public host", "http://evil.example.com"],
-      ["a non-HTTP scheme", "ftp://files.example.com"],
-      ["a bare host with no scheme", "my-worker.example.com"],
-    ])("refuses %s and writes nothing", async (_label, raw) => {
-      const response = await sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: raw,
-      });
-
-      expect(response).toEqual({
-        ok: 0,
-        error: refusalMessageFor(raw),
-      });
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-      expect(browser.storage.local.remove).not.toHaveBeenCalled();
-    });
-
-    it("clears the stored endpoint when apiEndpoint is null", async () => {
-      const response = await sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
-
-      expect(response).toEqual({ ok: 1 });
-      expect(browser.storage.local.remove).toHaveBeenCalledWith(
-        API_ENDPOINT_KEY,
-      );
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-    });
-
-    it("refuses a non-string payload without touching storage", async () => {
-      const response = await sendMessage({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: 42,
-      });
-
-      expect(response).toEqual({ ok: 0, error: "Invalid endpoint value" });
-      expect(browser.storage.local.set).not.toHaveBeenCalled();
-      expect(browser.storage.local.remove).not.toHaveBeenCalled();
-    });
-  });
-
   describe("unhandled message types", () => {
     // Retired types (moved to direct storage.local access, or removed with no sender, #366),
     // non-object messages and prototype-chain names are all ignored by the listener.
@@ -341,6 +208,17 @@ describe("background service worker", () => {
         message: { type: "GET_API_ENDPOINT" },
       },
       {
+        name: "SET_API_ENDPOINT (removed), reverting",
+        message: { type: "SET_API_ENDPOINT", apiEndpoint: null },
+      },
+      {
+        name: "SET_API_ENDPOINT (removed), with a URL",
+        message: {
+          type: "SET_API_ENDPOINT",
+          apiEndpoint: "https://custom.workers.dev",
+        },
+      },
+      {
         name: "SET_SYNC_ERROR_BADGE (removed)",
         message: { type: "SET_SYNC_ERROR_BADGE" },
       },
@@ -379,12 +257,12 @@ describe("background service worker", () => {
 
     it("still answers a registered message type (positive companion)", async () => {
       const response = listener(
-        { type: "SET_API_ENDPOINT", apiEndpoint: null },
+        { type: "CLEAR_FAMILY_ID" },
         {} as Runtime.MessageSender,
       );
 
       expect(response).toBeInstanceOf(Promise);
-      await expect(response).resolves.toEqual({ ok: 1 });
+      await expect(response).resolves.toEqual({ ok: true });
       expect(browser.storage.local.remove).toHaveBeenCalled();
     });
   });

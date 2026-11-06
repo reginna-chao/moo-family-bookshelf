@@ -157,9 +157,8 @@ import {
  *  - Order is binding → endpoint: resetting the endpoint while the family
  *    binding still stands would leave a bound client talking to the wrong
  *    server.
- *  - `resetFamilyEndpointChoice` swallows its own storage failures (and a
- *    rejected SET_API_ENDPOINT message), so it can never abort the teardown it
- *    was added to: the familyId removal has already happened, and App's own
+ *  - `resetFamilyEndpointChoice` swallows its own storage failures, so it can
+ *    never abort the teardown it was added to: the familyId removal has already happened, and App's own
  *    handler still puts the LIVE client back on the default.
  */
 
@@ -199,6 +198,12 @@ function makeDeps(
   return {
     request: makeRequest(outcome),
     setAuthToken: vi.fn(),
+    // The session this suite runs in always matches the seed; losing that match has its own
+    // suite, through a real client: tests/unit/api/tokenBinding.test.ts.
+    beginSession: vi.fn(() => ({
+      endpoint: SEEDED_ENDPOINT,
+      isLive: () => true,
+    })),
     onFamilyRemoved: vi.fn(),
     onReauthRequired: vi.fn(),
     isReauthPending: vi.fn(isReauthPending),
@@ -614,10 +619,6 @@ describe("doRefreshToken", () => {
       // The family's endpoint goes with the membership (else the NEXT create/join
       // leaks to the ex-family's server). See the header → "Family-scoped endpoint".
       expect(await storedEndpointChoice()).toEqual({});
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
       // A removal is not a verification problem — never prompt for a secret.
       expect(deps.onReauthRequired).not.toHaveBeenCalled();
     });
@@ -719,6 +720,7 @@ describe("doRefreshToken", () => {
         join: { error: { code: "VERIFICATION_REQUIRED", message: "x" } },
       }),
       setAuthToken: vi.fn(),
+      beginSession: () => ({ endpoint: SEEDED_ENDPOINT, isLive: () => true }),
       onFamilyRemoved: null,
       onReauthRequired: null,
       isReauthPending: () => false,
@@ -832,6 +834,7 @@ describe("doRefreshToken", () => {
         [USER_ID_KEY]: "u1",
         [FAMILY_ID_KEY]: "fam-1",
         [AUTH_TOKEN_KEY]: "old-token",
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
         [RECOVERY_COOLDOWN_UNTIL_KEY]: activeUntil,
       });
       const deps = makeDeps({
@@ -901,6 +904,7 @@ describe("doRefreshToken", () => {
             [USER_ID_KEY]: "u1",
             [FAMILY_ID_KEY]: "fam-1",
             [AUTH_TOKEN_KEY]: "old-token",
+            [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
             [RECOVERY_COOLDOWN_UNTIL_KEY]: FIXED_NOW + c.storedOffsetMs,
           });
           const deps = makeDeps({
@@ -930,6 +934,7 @@ describe("doRefreshToken", () => {
           [USER_ID_KEY]: "u1",
           [FAMILY_ID_KEY]: "fam-1",
           [AUTH_TOKEN_KEY]: "old-token",
+          [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
           [RECOVERY_COOLDOWN_UNTIL_KEY]: FIXED_NOW + 240 * HOUR_MS,
         });
         const deps = makeDeps({
@@ -952,6 +957,7 @@ describe("doRefreshToken", () => {
           [USER_ID_KEY]: "u1",
           [FAMILY_ID_KEY]: "fam-1",
           [AUTH_TOKEN_KEY]: "old-token",
+          [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
           // Corrupted/legacy value — must not be treated as an active cooldown.
           [RECOVERY_COOLDOWN_UNTIL_KEY]: String(FIXED_NOW + 60_000),
         });
@@ -972,6 +978,7 @@ describe("doRefreshToken", () => {
         [USER_ID_KEY]: "u1",
         [FAMILY_ID_KEY]: "fam-1",
         [AUTH_TOKEN_KEY]: "old-token",
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
         [RECOVERY_COOLDOWN_UNTIL_KEY]: FIXED_NOW - 1_000, // already expired
       });
       const deps = makeDeps({
@@ -1243,21 +1250,17 @@ describe("clearFamilyStorage", () => {
       expect(local).toEqual({});
     });
 
-    it("tells the background to revert to the official default as well", async () => {
-      await clearFamilyStorage();
-
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
-    });
-
     it("resets the endpoint only after the family binding is gone", async () => {
       await clearFamilyStorage();
 
       // Order is binding → endpoint. See the header → "clearFamilyStorage".
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
-      expect(removeCalls[0][0]).toEqual([FAMILY_ID_KEY, STORE_PAGE_INDEX_KEY]);
+      expect(removeCalls[0][0]).toEqual([
+        FAMILY_ID_KEY,
+        STORE_PAGE_INDEX_KEY,
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
+      ]);
       expect(removeCalls[1][0]).toEqual(
         expect.arrayContaining([
           API_ENDPOINT_KEY,
@@ -1284,6 +1287,8 @@ describe("clearFamilyStorage", () => {
         expect(remove).toHaveBeenCalledWith([
           FAMILY_ID_KEY,
           STORE_PAGE_INDEX_KEY,
+          AUTH_TOKEN_KEY,
+          TOKEN_EXPIRES_AT_KEY,
         ]);
         // Swallowed, not silenced — the failure stays on the record.
         expect(warn).toHaveBeenCalled();
@@ -1296,35 +1301,21 @@ describe("clearFamilyStorage", () => {
     });
   });
 
-  it("leaves the rest of the record alone (userId, auth token)", async () => {
+  it("removes the family's token and expiry and keeps the userId", async () => {
+    await chrome.storage.local.set({ [TOKEN_EXPIRES_AT_KEY]: 123 });
+
     await clearFamilyStorage();
 
-    // Only the family binding is this helper's business; what else to tear down
-    // is the caller's decision (Invariant 5 — personal data outlives a family).
-    const local = await chrome.storage.local.get([USER_ID_KEY, AUTH_TOKEN_KEY]);
+    // The endpoint reset would pair a surviving token with the official default (#456); the userId
+    // is the user's own and outlives the family (Invariant 5).
+    const local = await chrome.storage.local.get([
+      USER_ID_KEY,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+    ]);
     expect(local[USER_ID_KEY]).toBe("u1");
-    expect(local[AUTH_TOKEN_KEY]).toBe("old-token");
-  });
-
-  it("still resolves and clears when the SET_API_ENDPOINT message is rejected", async () => {
-    // The polyfill REJECTS when nothing listens; the catch at `familyEndpointChoice.ts:109`
-    // swallows it. The teardown itself no longer sends a message.
-    vi.mocked(chrome.runtime.sendMessage).mockRejectedValueOnce(
-      new Error(
-        "Could not establish connection. Receiving end does not exist.",
-      ),
-    );
-
-    await expect(clearFamilyStorage()).resolves.toBeUndefined();
-
-    // The rejected message is the endpoint reset's — the only one the teardown causes.
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledOnce();
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_API_ENDPOINT",
-      apiEndpoint: null,
-    });
-    const local = await chrome.storage.local.get(FAMILY_ID_KEY);
-    expect(local[FAMILY_ID_KEY]).toBeUndefined();
+    expect(local[AUTH_TOKEN_KEY]).toBeUndefined();
+    expect(local[TOKEN_EXPIRES_AT_KEY]).toBeUndefined();
   });
 
   it("still clears locally when sync storage is unavailable", async () => {

@@ -1,13 +1,11 @@
-/** Background message handlers: one per type, only that message's storage access + validation,
+/** Background message handlers: one per type, only that message's work,
  *  RETURNING the response (polyfill convention); dispatch wiring lives in index.ts. */
 
 import browser from "webextension-polyfill";
-import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
-  API_ENDPOINT_KEY,
 } from "../constants";
 
 /** Keys that are synced across devices via browser.storage.sync */
@@ -16,15 +14,13 @@ const SYNCED_KEYS = [FAMILY_ID_KEY] as const;
 /**
  * Discriminated union of all incoming background messages, keyed by `type`.
  *
- * Payload fields are typed as their BROAD input type (string, number,
- * string | null) — NOT the validated literal unions — because these values
- * are untrusted input that the handlers validate at runtime. Narrowing here
- * would turn those runtime guards into dead code.
+ * Payload fields are typed as their BROAD input type (a plain string), NOT a
+ * validated literal union: these values are untrusted input, and a narrower
+ * type here would claim a check nothing has made.
  */
 export type BackgroundMessage =
   | { type: "SET_FAMILY_ID"; familyId: string }
   | { type: "CLEAR_FAMILY_ID" }
-  | { type: "SET_API_ENDPOINT"; apiEndpoint: string | null }
   | { type: "OPEN_OPTIONS_PAGE" };
 
 /** Message type discriminant union (the `type` field of every message). */
@@ -80,35 +76,6 @@ async function handleClearFamilyId(): Promise<unknown> {
   return { ok: true };
 }
 
-async function handleSetApiEndpoint(
-  message: Extract<BackgroundMessage, { type: "SET_API_ENDPOINT" }>,
-): Promise<unknown> {
-  const endpoint = message.apiEndpoint;
-  if (endpoint === null || endpoint === undefined) {
-    // Clear: remove custom endpoint, revert to default
-    await browser.storage.local.remove(API_ENDPOINT_KEY);
-    return { ok: 1 };
-  }
-  if (typeof endpoint === "string") {
-    // The shared validator the ApiClient and Dialog use — never a local copy (a stricter one here once
-    // rejected LAN hosts the rest adopts). docs/architecture.md → 背景 Service Worker 與訊息.
-    let normalized: string;
-    try {
-      normalized = validateEndpointUrl(endpoint);
-    } catch (err) {
-      return {
-        ok: 0,
-        error: err instanceof Error ? err.message : "Invalid API endpoint",
-      };
-    }
-    // Store the canonical form, not the raw string, so this path and the
-    // Dialog's direct write cannot leave two spellings of the same endpoint.
-    await browser.storage.local.set({ [API_ENDPOINT_KEY]: normalized });
-    return { ok: 1 };
-  }
-  return { ok: 0, error: "Invalid endpoint value" };
-}
-
 /** The Dialog asks for the options page when the store-page chip still needs its host permission. */
 async function handleOpenOptionsPage(): Promise<unknown> {
   await browser.runtime.openOptionsPage();
@@ -119,6 +86,5 @@ async function handleOpenOptionsPage(): Promise<unknown> {
 export const messageHandlers: MessageHandlerMap = {
   SET_FAMILY_ID: handleSetFamilyId,
   CLEAR_FAMILY_ID: handleClearFamilyId,
-  SET_API_ENDPOINT: handleSetApiEndpoint,
   OPEN_OPTIONS_PAGE: handleOpenOptionsPage,
 };

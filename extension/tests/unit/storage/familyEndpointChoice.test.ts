@@ -2,20 +2,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import {
   persistAcceptedFamilyEndpoint,
+  persistSwitchedFamilyEndpoint,
   readDeclinedFamilyEndpoint,
-  readStoredApiEndpoint,
   resetFamilyEndpointChoice,
   saveDeclinedFamilyEndpoint,
 } from "@/storage/familyEndpointChoice";
-import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "@/constants";
+import {
+  API_ENDPOINT_KEY,
+  AUTH_TOKEN_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+  RECOVERY_COOLDOWN_UNTIL_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+} from "@/constants";
 
 /**
  * Storage effects behind the "switch to the family's API endpoint?" decision.
  *
- * ACCEPT must persist through a DIRECT storage.local write (authoritative, so
- * the choice survives Firefox's sleeping background page) and only then send
- * the best-effort SET_API_ENDPOINT message. DECLINE must record the refused
- * target so the same value stops re-prompting, while an unreadable store
+ * ACCEPT persists through a DIRECT storage.local write, the only path: the
+ * background has no endpoint handler any more, so nothing is sent to it (the
+ * retired message is pinned in tests/unit/background.test.ts). DECLINE must record
+ * the refused target so the same value stops re-prompting, while an unreadable store
  * degrades to "nothing declined" — one extra confirmation, never an
  * unconfirmed switch.
  *
@@ -26,11 +32,13 @@ import { API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY } from "@/constants";
  * declined" so the confirmation prompt reappears instead of a stale marker
  * silently suppressing it.
  *
- * readStoredApiEndpoint: the dialog boots on this value. App reads it DIRECTLY
- * (dialog/App.tsx) — the background round-trip has the same Firefox
- * failure mode as the write, where a sleeping background page would silently
- * boot a member who accepted a custom endpoint onto the official default
- * instead.
+ * persistSwitchedFamilyEndpoint (#456): adopting another server must not leave the
+ * old server's token paired with the new endpoint, so the token goes first, and a
+ * storage failure rejects instead of being swallowed. `recordedOps` reads the shared
+ * store's own spies, so the order is the one PRODUCTION took and the store contents
+ * stay real. A failing last removal rejects with the endpoint already stored. The
+ * interleaving with another tab's write-back lands inside the endpoint write, between
+ * the two removals.
  *
  * resetFamilyEndpointChoice: leaving a family drops this device's endpoint state
  * entirely. The endpoint is FAMILY-scoped — the owner picks it, every member
@@ -118,84 +126,6 @@ describe("familyEndpointChoice storage", () => {
     });
   });
 
-  // The dialog boots on this value, read DIRECTLY (no Firefox-fragile round-trip).
-  // See the header → "readStoredApiEndpoint".
-  describe("readStoredApiEndpoint", () => {
-    it("returns null when this device has accepted no custom endpoint", async () => {
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
-    });
-
-    it("returns the endpoint an accepted switch persisted", async () => {
-      await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);
-
-      await expect(readStoredApiEndpoint()).resolves.toBe(CUSTOM_ENDPOINT);
-    });
-
-    it("returns null again after a revert to the official default", async () => {
-      await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);
-      await persistAcceptedFamilyEndpoint(null);
-
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
-    });
-
-    it("trims surrounding whitespace off a stored endpoint", async () => {
-      await browser.storage.local.set({
-        [API_ENDPOINT_KEY]: `  ${CUSTOM_ENDPOINT}  `,
-      });
-
-      await expect(readStoredApiEndpoint()).resolves.toBe(CUSTOM_ENDPOINT);
-    });
-
-    // "Nothing stored" is the only safe reading of a value that is not a usable
-    // URL string — the caller then stays on the official default.
-    const unusable: Array<[string, unknown]> = [
-      ["an empty string", ""],
-      ["a whitespace-only string", "   "],
-      ["a number", 42],
-      ["a boolean", true],
-      ["null", null],
-      ["an object", { url: CUSTOM_ENDPOINT }],
-      ["an array", [CUSTOM_ENDPOINT]],
-    ];
-
-    it.each(unusable)(
-      "returns null when the stored value is %s",
-      async (_label, raw) => {
-        await browser.storage.local.set({ [API_ENDPOINT_KEY]: raw });
-
-        await expect(readStoredApiEndpoint()).resolves.toBeNull();
-      },
-    );
-
-    // URL validation belongs to ApiClient.setEndpoint; duplicating the rules
-    // here would let the two drift. The boot caller guards the throw instead.
-    it("hands back a stored string verbatim without judging the URL", async () => {
-      await browser.storage.local.set({
-        [API_ENDPOINT_KEY]: "http://evil.example.com",
-      });
-
-      await expect(readStoredApiEndpoint()).resolves.toBe(
-        "http://evil.example.com",
-      );
-    });
-
-    it("does not mistake a recorded decline for an accepted endpoint", async () => {
-      await saveDeclinedFamilyEndpoint({ value: CUSTOM_ENDPOINT });
-
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
-    });
-
-    it("returns null when the storage read fails outright", async () => {
-      const getSpy = vi
-        .spyOn(browser.storage.local, "get")
-        .mockRejectedValue(new Error("Extension context invalidated"));
-
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
-
-      getSpy.mockRestore();
-    });
-  });
-
   describe("saveDeclinedFamilyEndpoint", () => {
     it("writes the refused target under the declined-endpoint key", async () => {
       await saveDeclinedFamilyEndpoint({ value: CUSTOM_ENDPOINT });
@@ -233,7 +163,7 @@ describe("familyEndpointChoice storage", () => {
   });
 
   describe("persistAcceptedFamilyEndpoint", () => {
-    it("writes a custom endpoint, clears the declined marker, and notifies the background", async () => {
+    it("writes a custom endpoint and clears the declined marker", async () => {
       await saveDeclinedFamilyEndpoint({ value: CUSTOM_ENDPOINT });
 
       await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);
@@ -242,10 +172,6 @@ describe("familyEndpointChoice storage", () => {
       await expect(
         readRaw(DECLINED_FAMILY_ENDPOINT_KEY),
       ).resolves.toBeUndefined();
-      expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: CUSTOM_ENDPOINT,
-      });
     });
 
     it("REMOVES the endpoint key when reverting to the official default", async () => {
@@ -258,7 +184,7 @@ describe("familyEndpointChoice storage", () => {
       await persistAcceptedFamilyEndpoint(null);
 
       // Reverting stores no URL at all — an absent key is what makes the client
-      // fall back to DEFAULT_API_ENDPOINT (mirrors handleSetApiEndpoint).
+      // fall back to DEFAULT_API_ENDPOINT.
       await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBeUndefined();
       await expect(
         readRaw(DECLINED_FAMILY_ENDPOINT_KEY),
@@ -266,46 +192,193 @@ describe("familyEndpointChoice storage", () => {
       expect(browser.storage.local.set).not.toHaveBeenCalledWith(
         expect.objectContaining({ [API_ENDPOINT_KEY]: expect.anything() }),
       );
-      expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
     });
 
-    it("keeps the direct write authoritative when the background message rejects (Firefox asleep)", async () => {
-      vi.mocked(browser.runtime.sendMessage).mockImplementation((() =>
-        Promise.reject(
-          new Error("Could not establish connection."),
-        )) as typeof browser.runtime.sendMessage);
-
-      await expect(
-        persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT),
-      ).resolves.toBeUndefined();
+    it("sends no background message: the direct write is the only path", async () => {
+      await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);
 
       await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(CUSTOM_ENDPOINT);
-
-      // Restore the shared spy to its inert setup.ts state for sibling tests.
-      vi.mocked(browser.runtime.sendMessage).mockReset();
+      expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("still notifies the background when the direct write fails", async () => {
+    it("resolves, warns and sends no message when the direct write fails", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const setSpy = vi
         .spyOn(browser.storage.local, "set")
         .mockRejectedValue(new Error("storage unavailable"));
 
-      await expect(
-        persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT),
-      ).resolves.toBeUndefined();
+      try {
+        await expect(
+          persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT),
+        ).resolves.toBeUndefined();
 
-      expect(warn).toHaveBeenCalled();
-      expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: CUSTOM_ENDPOINT,
+        expect(warn).toHaveBeenCalledWith(
+          "[familyEndpointChoice] Failed to persist endpoint",
+          expect.any(Error),
+        );
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+      } finally {
+        setSpy.mockRestore();
+        warn.mockRestore();
+      }
+    });
+  });
+
+  // See the header → "persistSwitchedFamilyEndpoint".
+  describe("persistSwitchedFamilyEndpoint", () => {
+    const OLD_ENDPOINT = "https://old.example";
+    const OLD_TOKEN = "a".repeat(64);
+    const FIRST_REMOVAL = [
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+      RECOVERY_COOLDOWN_UNTIL_KEY,
+    ];
+    const SECOND_REMOVAL = [AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY];
+
+    async function seedOldSession(): Promise<void> {
+      await browser.storage.local.set({
+        [API_ENDPOINT_KEY]: OLD_ENDPOINT,
+        [AUTH_TOKEN_KEY]: OLD_TOKEN,
+        [TOKEN_EXPIRES_AT_KEY]: 123,
+        [RECOVERY_COOLDOWN_UNTIL_KEY]: Date.now() + 60_000,
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: CUSTOM_ENDPOINT },
+      });
+      vi.clearAllMocks();
+    }
+
+    /** Every storage write in call order, as `remove:<keys>` / `set:<keys>`. */
+    function recordedOps(): string[] {
+      const named = (name: string, spy: unknown) =>
+        vi
+          .mocked(spy as (arg: unknown) => unknown)
+          .mock.calls.map((call, index) => ({
+            order: vi.mocked(spy as (arg: unknown) => unknown).mock
+              .invocationCallOrder[index],
+            label: describeOp(name, call[0]),
+          }));
+      return [
+        ...named("remove", browser.storage.local.remove),
+        ...named("set", browser.storage.local.set),
+      ]
+        .sort((a, b) => a.order - b.order)
+        .map(({ label }) => label);
+    }
+
+    function describeOp(name: string, arg: unknown): string {
+      const keys = Array.isArray(arg)
+        ? (arg as string[])
+        : Object.keys(arg as object);
+      return `${name}:${keys.join(",")}`;
+    }
+
+    const ENDPOINT_WRITE = `set:${API_ENDPOINT_KEY}`;
+    const DECLINE_CLEAR = `remove:${DECLINED_FAMILY_ENDPOINT_KEY}`;
+
+    it("removes the token and cooldown, writes the endpoint, removes the token again, and sends no message", async () => {
+      await seedOldSession();
+
+      await persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT);
+
+      expect(recordedOps()).toEqual([
+        `remove:${FIRST_REMOVAL.join(",")}`,
+        ENDPOINT_WRITE,
+        DECLINE_CLEAR,
+        `remove:${SECOND_REMOVAL.join(",")}`,
+      ]);
+      await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(TOKEN_EXPIRES_AT_KEY)).resolves.toBeUndefined();
+      await expect(
+        readRaw(RECOVERY_COOLDOWN_UNTIL_KEY),
+      ).resolves.toBeUndefined();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(CUSTOM_ENDPOINT);
+      await expect(
+        readRaw(DECLINED_FAMILY_ENDPOINT_KEY),
+      ).resolves.toBeUndefined();
+      expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("removes the endpoint key on a switch back to the official default", async () => {
+      await seedOldSession();
+
+      await persistSwitchedFamilyEndpoint(null);
+
+      expect(recordedOps()).toEqual([
+        `remove:${FIRST_REMOVAL.join(",")}`,
+        `remove:${API_ENDPOINT_KEY},${DECLINED_FAMILY_ENDPOINT_KEY}`,
+        `remove:${SECOND_REMOVAL.join(",")}`,
+      ]);
+      await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBeUndefined();
+      expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("clears a token another tab wrote back between the first removal and the endpoint write", async () => {
+      await seedOldSession();
+      const realSet = vi.mocked(browser.storage.local.set);
+      const storeWrite = realSet.getMockImplementation()!;
+      realSet.mockImplementationOnce(async (items) => {
+        await storeWrite({ [AUTH_TOKEN_KEY]: OLD_TOKEN });
+        await storeWrite(items);
       });
 
-      setSpy.mockRestore();
-      warn.mockRestore();
+      await persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT);
+
+      await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(CUSTOM_ENDPOINT);
+    });
+
+    it("rejects with nothing written when the first removal fails", async () => {
+      await seedOldSession();
+      vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+
+      await expect(
+        persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT),
+      ).rejects.toThrow("storage unavailable");
+
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(OLD_ENDPOINT);
+    });
+
+    it("rejects when the endpoint write fails, with the token already gone", async () => {
+      await seedOldSession();
+      vi.mocked(browser.storage.local.set).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+
+      await expect(
+        persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT),
+      ).rejects.toThrow("storage unavailable");
+
+      await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(OLD_ENDPOINT);
+    });
+
+    it("rejects when the last removal fails, with the endpoint written", async () => {
+      await seedOldSession();
+      const realRemove = vi.mocked(browser.storage.local.remove);
+      const storeRemove = realRemove.getMockImplementation()!;
+      realRemove.mockImplementation(async (keys) => {
+        if (
+          Array.isArray(keys) &&
+          keys.length === SECOND_REMOVAL.length &&
+          keys.includes(AUTH_TOKEN_KEY)
+        ) {
+          throw new Error("storage unavailable");
+        }
+        await storeRemove(keys);
+      });
+
+      try {
+        await expect(
+          persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT),
+        ).rejects.toThrow("storage unavailable");
+
+        await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(CUSTOM_ENDPOINT);
+      } finally {
+        realRemove.mockImplementation(storeRemove);
+      }
     });
   });
 
@@ -330,20 +403,17 @@ describe("familyEndpointChoice storage", () => {
 
       await resetFamilyEndpointChoice();
 
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBeUndefined();
       await expect(readDeclinedFamilyEndpoint()).resolves.toBeNull();
     });
 
-    it("tells the background to revert too", async () => {
+    it("reverts by removing the key, storing no URL", async () => {
       await persistAcceptedFamilyEndpoint(CUSTOM_ENDPOINT);
       vi.clearAllMocks();
 
       await resetFamilyEndpointChoice();
 
-      expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBeUndefined();
       // Reverting stores no URL at all — the absent key is what makes the
       // client fall back to DEFAULT_API_ENDPOINT.
       expect(browser.storage.local.set).not.toHaveBeenCalled();
@@ -354,7 +424,7 @@ describe("familyEndpointChoice storage", () => {
     it("is a no-op when this device had no endpoint state", async () => {
       await expect(resetFamilyEndpointChoice()).resolves.toBeUndefined();
 
-      await expect(readStoredApiEndpoint()).resolves.toBeNull();
+      await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBeUndefined();
       await expect(readDeclinedFamilyEndpoint()).resolves.toBeNull();
     });
 
@@ -367,12 +437,6 @@ describe("familyEndpointChoice storage", () => {
       await expect(resetFamilyEndpointChoice()).resolves.toBeUndefined();
 
       expect(warn).toHaveBeenCalled();
-      // The background message is still sent, so the rest of the extension
-      // reverts even when the local write could not.
-      expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_API_ENDPOINT",
-        apiEndpoint: null,
-      });
 
       removeSpy.mockRestore();
       warn.mockRestore();

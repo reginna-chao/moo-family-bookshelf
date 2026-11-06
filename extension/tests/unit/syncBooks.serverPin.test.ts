@@ -40,6 +40,7 @@ import {
   type BorrowRequest,
 } from "@/api/client";
 import {
+  API_ENDPOINT_KEY,
   AUTH_TOKEN_KEY,
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
@@ -261,6 +262,8 @@ describe("syncBooks on a pinned server", () => {
       [USER_ID_KEY]: USER_ID,
       [FAMILY_ID_KEY]: FAMILY_ID,
       [AUTH_TOKEN_KEY]: OLD_TOKEN,
+      // A refresh aborts unless storage names the client's server (#456).
+      [API_ENDPOINT_KEY]: SELF_HOSTED,
     });
     client = new ApiClient(SELF_HOSTED);
     client.setAuthToken(OLD_TOKEN);

@@ -1,12 +1,13 @@
 /** Token refresh and recovery logic, extracted from ApiClient. */
 
 import browser from "webextension-polyfill";
-import { BoolFlag, type ApiResponse } from "./types";
+import type { ApiResponse } from "./types";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  API_ENDPOINT_KEY,
 } from "../constants";
 import { clearFamilyStorage } from "./familyStorageClear";
 import { isSelfDepartureActive } from "../storage/selfDeparture";
@@ -19,6 +20,12 @@ import {
   getActiveRecoveryCooldown,
   setRecoveryCooldown,
 } from "./recoveryCooldown";
+import { attemptJoinRecovery } from "./joinRecovery";
+import {
+  resolveStoredEndpoint,
+  sessionStillOwnsStorage,
+  type RefreshSession,
+} from "./tokenBinding";
 
 /** Join codes meaning "member exists, supply the PWA-login secret (PIN/pattern/OTP)". Mirrors
  *  `dialog/useVerificationPrompt.ts`, kept local so the api layer never imports the dialog layer. */
@@ -109,6 +116,8 @@ interface RefreshDeps {
     skipRefresh?: boolean,
   ) => Promise<ApiResponse<T>>;
   setAuthToken: (token: string | null) => void;
+  /** Captures this client's server and session; a refresh acts only while the session is live. */
+  beginSession: () => RefreshSession;
   /** Invoked when the family is genuinely gone — clears local family data. */
   onFamilyRemoved: ((info: FamilyRemovedInfo) => void) | null;
   /** Invoked when recovery needs a PWA-login verification secret (re-verify). */
@@ -116,14 +125,6 @@ interface RefreshDeps {
   /** True while an earlier 401 wave's re-verification prompt is pending, so the silent join is
    *  skipped. See docs/architecture.md → 認證更新與冷卻. */
   isReauthPending: () => boolean;
-}
-
-interface RecoveryResult {
-  recovered: boolean;
-  /** Backend error code when the recovery join failed. */
-  errorCode?: string;
-  /** Seconds to wait before retrying, present on rate-limit (429) failures. */
-  retryAfter?: number;
 }
 
 /**
@@ -160,20 +161,35 @@ export interface RefreshOutcome {
  * sensitive tier — 3/min), so an active cooldown suppresses the auto-join
  * entirely — but never a manual, user-initiated join (onboarding / re-verify),
  * which live outside this module.
+ *
+ * Nothing above happens unless this client's server is the one the stored token
+ * belongs to, and every response is dropped, success and failure alike, once
+ * that stops being true (docs/architecture.md → 認證更新與冷卻).
  */
 export async function doRefreshToken(
   deps: RefreshDeps,
 ): Promise<RefreshOutcome> {
   try {
+    const session = deps.beginSession();
     const storage = await browser.storage.local.get([
       USER_ID_KEY,
       FAMILY_ID_KEY,
       AUTH_TOKEN_KEY,
+      API_ENDPOINT_KEY,
     ]);
     const userId = storage[USER_ID_KEY] as string | undefined;
     const familyId = storage[FAMILY_ID_KEY] as string | undefined;
     const storedToken = storage[AUTH_TOKEN_KEY] as string | undefined;
     if (!userId || !familyId) return { refreshed: false };
+
+    // The stored token belongs to another server: send nothing, touch nothing, call nothing.
+    if (
+      !session.isLive() ||
+      resolveStoredEndpoint(storage[API_ENDPOINT_KEY]) !== session.endpoint
+    ) {
+      return { refreshed: false };
+    }
+    const stillOwns = () => sessionStillOwnsStorage(session, familyId);
 
     // Ensure the current token is set before calling the protected refresh endpoint.
     // This covers edge cases where the in-memory token was cleared but storage still has it.
@@ -186,6 +202,7 @@ export async function doRefreshToken(
       { method: "POST", body: JSON.stringify({ userId, familyId }) },
       true,
     );
+    if (!(await stillOwns())) return { refreshed: false };
 
     // A token or expiry in the wrong shape counts as not issued (docs/architecture.md →
     // 伺服器回傳資料的檢查): a bad token takes the failure branch below.
@@ -225,7 +242,11 @@ export async function doRefreshToken(
       };
     }
 
-    const recovery = await attemptJoinRecovery(deps);
+    const recovery = await attemptJoinRecovery(
+      deps,
+      { userId, familyId },
+      stillOwns,
+    );
     if (recovery.recovered) {
       await clearRecoveryCooldown();
       return { refreshed: true };
@@ -275,57 +296,4 @@ async function clearFamilyAndNotify(
 ): Promise<void> {
   await clearFamilyStorage();
   deps.onFamilyRemoved?.({ errorCode });
-}
-
-async function attemptJoinRecovery(deps: RefreshDeps): Promise<RecoveryResult> {
-  const recoveryStorage = await browser.storage.local.get([
-    FAMILY_ID_KEY,
-    USER_ID_KEY,
-  ]);
-  const familyId = recoveryStorage[FAMILY_ID_KEY] as string | undefined;
-  const userId = recoveryStorage[USER_ID_KEY] as string | undefined;
-
-  if (!familyId || !userId) return { recovered: false };
-
-  // Omit displayName so the backend keeps the member's chosen name; `recovery`
-  // lets it refuse a user no longer listed (409 RECOVERY_NOT_MEMBER).
-  const joinBody = { userId, recovery: BoolFlag.TRUE };
-
-  const joinResult = await deps.request<{
-    familyId: string;
-    ownerId: string;
-    members: Array<{ userId: string; displayName: string }>;
-    maxMembers: number;
-    createdAt: string;
-    authToken?: unknown;
-    expiresAt?: unknown;
-  }>(
-    `/api/family/${familyId}/join`,
-    {
-      method: "POST",
-      body: JSON.stringify(joinBody),
-    },
-    true,
-  );
-
-  // Same rule as the refresh above: a token in the wrong shape is a failed recovery.
-  const authToken = joinResult.data?.authToken;
-  if (isAuthToken(authToken)) {
-    deps.setAuthToken(authToken);
-    const recoveryUpdate: Record<string, unknown> = {
-      [AUTH_TOKEN_KEY]: authToken,
-    };
-    const expiresAt = joinResult.data?.expiresAt;
-    if (isExpiresAt(expiresAt)) {
-      recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = expiresAt;
-    }
-    await browser.storage.local.set(recoveryUpdate);
-    return { recovered: true };
-  }
-
-  return {
-    recovered: false,
-    errorCode: joinResult.error?.code,
-    retryAfter: joinResult.error?.retryAfter,
-  };
 }
