@@ -34,6 +34,7 @@ import {
 import {
   writePublicSnapshot,
   resolvePublicShelves,
+  keepCurrentlySharedBooks,
 } from "../services/publicShelf";
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -63,6 +64,17 @@ function authGuard(
   return null;
 }
 
+function publicShelfNotFound(
+  c: Context<{ Bindings: Env }>,
+): Response & TypedResponse<ErrorBody, 404, "json"> {
+  return jsonError(
+    c,
+    404,
+    "PUBLIC_SHELF_NOT_FOUND",
+    "Public shelf not found or expired",
+  );
+}
+
 /** The single call site of `putPublicShelves`: `publicshelves:{userId}` has one writer domain, the four
  *  handlers below. Rationale: .claude/rules/backend.md → KV Key Patterns (single-writer domain). */
 async function writePublicShelves(
@@ -74,16 +86,33 @@ async function writePublicShelves(
   await putPublicShelves(kv, userId, record);
 }
 
-/** Shelf list for the list-only paths (public read, list, DELETE): pointer key, else `user:{userId}`.
- *  See docs/architecture.md → 公開書櫃的寫入與撤銷. */
+/** Shelf list: pointer key, else `user:{userId}`, whose record is handed back so the public read's filter
+ *  never reads it twice. `fallbackRecord` is null on a pointer hit (and on a miss with no record). */
+async function readPublicShelvesWithFallback(
+  kv: KVNamespace,
+  userId: string,
+): Promise<{ shelves: PublicShelf[]; fallbackRecord: UserBooksRecord | null }> {
+  const pointer = await getPublicShelves(kv, userId);
+  if (pointer) {
+    return {
+      shelves: resolvePublicShelves(pointer, null).shelves,
+      fallbackRecord: null,
+    };
+  }
+  const record = await getUserBooksRecord(kv, userId);
+  return {
+    shelves: resolvePublicShelves(null, record).shelves,
+    fallbackRecord: record,
+  };
+}
+
+/** Shelf list for the list-only paths (list, DELETE). See docs/architecture.md → 公開書櫃的寫入與撤銷. */
 async function readPublicShelves(
   kv: KVNamespace,
   userId: string,
 ): Promise<PublicShelf[]> {
-  const pointer = await getPublicShelves(kv, userId);
-  if (pointer) return resolvePublicShelves(pointer, null).shelves;
-  const record = await getUserBooksRecord(kv, userId);
-  return resolvePublicShelves(null, record).shelves;
+  const { shelves } = await readPublicShelvesWithFallback(kv, userId);
+  return shelves;
 }
 
 interface ShelfLookup {
@@ -121,13 +150,12 @@ function snapshotOutlivesShelf(
 }
 
 /** Live = the owner's shelf list still has `shelfId` with THIS token and the snapshot does not outlive it
- *  (monotonic). Read-only. Rationale: .claude/rules/backend.md → KV Key Patterns (read-side guard). */
-async function isSnapshotLive(
-  kv: KVNamespace,
+ *  (monotonic). Rationale: .claude/rules/backend.md → KV Key Patterns (read-side guard). */
+function isSnapshotLive(
   snapshot: PublicShelfSnapshot,
   shareToken: string,
-): Promise<boolean> {
-  const shelves = await readPublicShelves(kv, snapshot.userId);
+  shelves: PublicShelf[],
+): boolean {
   const shelf = shelves.find((s) => s.shelfId === snapshot.shelfId);
   if (!shelf) return false;
   return (
@@ -520,48 +548,42 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
   const { shareToken } = c.req.valid("param");
 
   const snapshot = await getPublicSnapshot(c.env.KV, shareToken);
-  if (!snapshot) {
-    return jsonError(
-      c,
-      404,
-      "PUBLIC_SHELF_NOT_FOUND",
-      "Public shelf not found or expired",
-    );
-  }
+  if (!snapshot) return publicShelfNotFound(c);
 
-  // Guards in order: snapshot miss / KV TTL → expiresAt backstop → liveness; each answers like a miss.
-  // Rationale: .claude/rules/backend.md → KV Key Patterns; cost: docs/architecture.md → 公開書櫃的寫入與撤銷.
+  // Guards in order: snapshot miss / KV TTL → expiresAt backstop → list check → record read; each answers
+  // like a miss. Rationale: .claude/rules/backend.md → KV Key Patterns; cost: docs/architecture.md → 公開書櫃的寫入與撤銷.
   if (snapshot.expiresAt !== null && snapshot.expiresAt <= Date.now()) {
-    return jsonError(
-      c,
-      404,
-      "PUBLIC_SHELF_NOT_FOUND",
-      "Public shelf not found or expired",
-    );
+    return publicShelfNotFound(c);
   }
 
   // Side-effect-free: a dead orphan is never deleted here. A rotated token can 404 for ~60s on a colo
   // caching the old list. See docs/architecture.md → 公開書櫃的寫入與撤銷.
-  const isLive = await isSnapshotLive(c.env.KV, snapshot, shareToken);
-  if (!isLive) {
-    return jsonError(
-      c,
-      404,
-      "PUBLIC_SHELF_NOT_FOUND",
-      "Public shelf not found or expired",
-    );
+  const { shelves, fallbackRecord } = await readPublicShelvesWithFallback(
+    c.env.KV,
+    snapshot.userId,
+  );
+  if (!isSnapshotLive(snapshot, shareToken, shelves)) {
+    return publicShelfNotFound(c);
   }
+
+  // Sequential, after the list check: a migrated owner's dead token never pays to parse a large record,
+  // and an un-migrated owner's record (null only when the list check already failed) is read exactly once.
+  const record =
+    fallbackRecord ?? (await getUserBooksRecord(c.env.KV, snapshot.userId));
+  if (!record || !Array.isArray(record.books)) return publicShelfNotFound(c);
 
   return c.json({
     data: {
       title: snapshot.title,
       // Read-side twin of the scrub for pre-whitelist snapshots; response transform only, no KV write.
       // Rationale: .claude/rules/backend.md → KV Key Patterns (public-shelf paragraph).
-      books: snapshot.books.map((b) => ({
-        ...b,
-        coverUrl: sanitizeCoverUrl(b.coverUrl),
-        readmooUrl: sanitizeReadmooUrl(b.readmooUrl),
-      })),
+      books: keepCurrentlySharedBooks(snapshot.books, record.books).map(
+        (b) => ({
+          ...b,
+          coverUrl: sanitizeCoverUrl(b.coverUrl),
+          readmooUrl: sanitizeReadmooUrl(b.readmooUrl),
+        }),
+      ),
       createdAt: snapshot.createdAt,
       expiresAt: snapshot.expiresAt,
     },

@@ -51,9 +51,11 @@
  * pointer key and leaves `user:{id}` untouched, so the legacy field survives
  * as exactly the stale list a racing save would otherwise restore.
  *
- * Read-cost tripwires: on the public read path `user:{id}` is seeded and would
- * satisfy the guard on its own, so only the read trail catches a handler that
- * keeps consulting it — one needless KV read on every public hit. The DELETE
+ * Read-cost tripwires: on the public read path a migrated owner's `user:{id}`
+ * is read once, AFTER the list check, for the current-sharing filter (#461). Its
+ * seeded legacy field would satisfy the guard on its own, so only the read trail
+ * catches a handler that goes back to consulting it for the list — a second KV
+ * read on every public hit. The DELETE
  * counterpart (§8): `user:{id}` IS seeded and its legacy field would resolve
  * the same shelf, so only the read trail catches a handler that goes back to
  * requiring the books record.
@@ -510,8 +512,8 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
     },
   );
 
-  it("reads the snapshot and the pointer key only for a migrated owner", async () => {
-    // Read-cost tripwire: `user:{id}` is seeded, so only the read trail catches it.
+  it("reads the snapshot, the pointer key and user:{id} once each for a migrated owner", async () => {
+    // Read-cost tripwire: the filter's `user:{id}` read comes last and only once.
     // See the header → "Read-cost tripwires".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedPointer([shelf(SHELF_ID, LIVE_TOKEN)]);
@@ -524,13 +526,14 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(LIVE_TOKEN),
       kvKeys.publicShelves(USER),
+      kvKeys.user(USER),
     ]);
     // Strictly side-effect free: a stranger can never drive a KV write.
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
   });
 
-  it("adds exactly one user:{id} read for an un-migrated owner", async () => {
+  it("reads user:{id} exactly once for an un-migrated owner, the same trail as a migrated one", async () => {
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedSnapshot(shelf(SHELF_ID, LIVE_TOKEN));
     const ops = watchKvOps(kv);

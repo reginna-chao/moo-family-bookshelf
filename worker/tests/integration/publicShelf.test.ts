@@ -122,9 +122,11 @@ import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
  * today can produce this state — only a snapshot minted before the whitelist
  * shipped carries it. The pointer key is seeded alongside it because the
  * liveness guard 404s any snapshot the owner's CURRENT shelf list does not
- * back; without it the request would stop at that guard and never reach the
- * scrub, passing the "no beacon / phishing host in the body" assertions for
- * entirely the wrong reason. Anti-tautology anchor: the response is clean
+ * back, and a `user:{id}` record holding those same books as shared because the
+ * current-sharing filter 404s a missing record and hides a book the record does
+ * not share (#461); without both the request would never reach the scrub for
+ * these books, passing the "no beacon / phishing host in the body" assertions
+ * for entirely the wrong reason. Anti-tautology anchor: the response is clean
  * because THIS handler scrubbed it, not because something rewrote KV first. A
  * lazy repair write would also hand an anonymous stranger a key to have
  * written. (DEV_MODE elides the per-IP counter put — see the scope caveat in
@@ -178,8 +180,9 @@ import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
  * Every case in that suite seeds the shelf list through the LEGACY
  * `user:{userId}.publicSharing` field and writes NO pointer key, so the whole
  * describe doubles as the un-migrated owner's coverage: their links must keep
- * resolving through the fallback, at the documented cost of one extra
- * `user:{userId}` read per hit.
+ * resolving through the fallback, whose one `user:{userId}` read also feeds the
+ * current-sharing filter (#461), so a hit costs the same three reads as a
+ * migrated owner's.
  *
  * Liveness fixtures: `convertedShelfEntry` is the SAME shelf after the owner
  * converted it to time-limited — identical shelfId and share token, only a
@@ -210,9 +213,10 @@ import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
  * API, not hand-seeded, so a handler that stopped rewriting the snapshot
  * fails. That owner IS migrated (the create handler wrote the pointer key), so
  * the guard resolves the shelf list from `publicshelves:{id}` alone and never
- * falls back to the books record — the guard now runs for a time-limited
- * snapshot too, and the pinned read trail is what it costs. The old guard
- * skipped time-limited snapshots entirely; it now validates every surviving
+ * falls back to the books record; `user:{id}` is read once AFTER the guard, for
+ * the current-sharing filter (#461). The guard now runs for a time-limited
+ * snapshot too, and the pinned three-key read trail is what the hit costs. The
+ * old guard skipped time-limited snapshots entirely; it now validates every surviving
  * one: with the un-migrated owner's list seeded and LIVE, the answer is still
  * 200 and only the read trail shows the guard ran. A deliberately pinned
  * behaviour change: a time-limited snapshot with a live deadline and no shelf
@@ -319,6 +323,19 @@ async function seedUserWithShelves(userId: string, shelves?: PublicShelf[]) {
     books: sampleBooks(),
     lastUpdated: new Date().toISOString(),
     publicSharing: shelves ? { shelves } : undefined,
+  };
+  await kv.put(kvKeys.user(userId), JSON.stringify(record));
+}
+
+/** Seed `user:{userId}` holding exactly these books, for a hand-seeded snapshot.
+ *  See the header → "Read-side fixtures". */
+async function seedBooksRecord(userId: string, books: BookEntry[]) {
+  const record: UserBooksRecord = {
+    schemaVersion: 1,
+    userId,
+    displayName: "Test User",
+    books,
+    lastUpdated: new Date().toISOString(),
   };
   await kv.put(kvKeys.user(userId), JSON.stringify(record));
 }
@@ -826,8 +843,8 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
     ];
   }
 
-  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key backing it.
-   *  See the header → "Read-side fixtures". */
+  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key and books record
+   *  backing it. See the header → "Read-side fixtures". */
   async function seedPoisonedSnapshot(): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
@@ -853,6 +870,7 @@ describe("GET /api/public/:shareToken — coverUrl read-side scrub", () => {
       ],
     };
     await kv.put(kvKeys.publicShelves(USER_ID), JSON.stringify(pointer));
+    await seedBooksRecord(USER_ID, storedBooks());
   }
 
   /** The anonymous read, RAW body kept — a host leaks through any field. */
@@ -1122,8 +1140,8 @@ describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
     ];
   }
 
-  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key backing it.
-   *  See the header → "Read-side fixtures". */
+  /** Seed the poisoned PERMANENT snapshot DIRECTLY, plus the pointer key and books record
+   *  backing it. See the header → "Read-side fixtures". */
   async function seedPoisonedSnapshot(): Promise<void> {
     const snapshot: PublicShelfSnapshot = {
       userId: USER_ID,
@@ -1149,6 +1167,7 @@ describe("GET /api/public/:shareToken — readmooUrl read-side scrub", () => {
       ],
     };
     await kv.put(kvKeys.publicShelves(USER_ID), JSON.stringify(pointer));
+    await seedBooksRecord(USER_ID, storedBooks());
   }
 
   /** The anonymous read, RAW body kept — a host leaks through any field. */
@@ -2155,11 +2174,12 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     const json = (await res.json()) as Json;
     expect(json.data.title).toBe("我的公開書櫃");
     expect(json.data.expiresAt).toBe(snapshot.expiresAt);
-    // Migrated owner: the guard reads `publicshelves:{id}` alone — its whole cost.
+    // Migrated owner: the guard reads `publicshelves:{id}` alone, the filter then `user:{id}`.
     // See the header → "Liveness, migrated and time-limited".
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(shareToken),
       kvKeys.publicShelves(USER_ID),
+      kvKeys.user(USER_ID),
     ]);
   });
 
@@ -2176,8 +2196,8 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     const res = await request("GET", `/api/public/${TIMED_TOKEN}`);
 
     expect(res.status).toBe(200);
-    // Pointer key first, `user:{id}` only because this owner has not migrated —
-    // that second read disappears on their first public-shelf write.
+    // Pointer key first, then `user:{id}`, which here resolves the list AND feeds
+    // the filter; a first public-shelf write only moves that read after the guard.
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(TIMED_TOKEN),
       kvKeys.publicShelves(USER_ID),
