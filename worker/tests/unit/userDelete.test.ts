@@ -317,6 +317,6 @@ describe("DELETE /api/user/:id", () => {
     expect(await kv.get(kvKeys.otp(USER2))).toBeNull();
 
     // Verify the auth token reverse-lookup is also deleted
-    // (We can't easily check without knowing the token, but revokeAllAuthTokens handles it)
+    // (We can't easily check without knowing the token, but deleteAccountKeys handles it)
   });
 });

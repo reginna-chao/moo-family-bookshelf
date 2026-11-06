@@ -15,24 +15,11 @@ import {
   getFamilyRecord,
   putFamilyRecord,
   getMemberFamilyId,
-  deleteMemberFamilyId,
 } from "../kv/families";
-import {
-  getUserBooksRecord,
-  putUserBooksRecord,
-  deleteUserBooksRecord,
-} from "../kv/users";
-import {
-  getPublicShelves,
-  deletePublicShelves,
-  deletePublicSnapshot,
-} from "../kv/publicShelves";
-import { readNewBookDefault, deleteNewBookDefault } from "../kv/newBookDefault";
-import {
-  getVerifyRecord,
-  deleteVerifyRecord,
-  deleteOtpRecord,
-} from "../kv/verify";
+import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
+import { getPublicShelves } from "../kv/publicShelves";
+import { readNewBookDefault } from "../kv/newBookDefault";
+import { getVerifyRecord } from "../kv/verify";
 import {
   writePublicSnapshot,
   resolvePublicShelves,
@@ -63,7 +50,7 @@ import {
   getPresentedAuthToken,
 } from "../middleware/auth";
 import { readPresentedAuth } from "../services/authRecord";
-import { revokeAllAuthTokens } from "../services/authTokens";
+import { deleteAccountKeys } from "../services/accountDeletion";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
@@ -996,7 +983,9 @@ const deleteUserRoute = createRoute({
     400: jsonRes(
       "Invalid user ID, or a malformed body (INVALID_JSON / INVALID_PAYLOAD / INVALID_VERIFY_SECRET)",
     ),
-    401: jsonRes("Unauthorized"),
+    401: jsonRes(
+      "Unauthorized, or ACCOUNT_DELETED: this token already deleted the account",
+    ),
     403: jsonRes("Forbidden, or current secret required or wrong"),
     429: jsonRes("Rate limited"),
     503: jsonRes(
@@ -1035,7 +1024,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     getVerifyRecord(c.env.KV, userId),
     readPresentedAuth(c.env.KV, userId, presentedToken),
   ]);
-  if (!presented.current) {
+  if (!presented.current || presented.presentedHash === null) {
     return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
   }
   const stepUpResponse = await enforceCurrentSecret(
@@ -1110,21 +1099,11 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     userRecord,
   ).shelves.map((s) => s.shareToken);
 
-  // Delete all user data in parallel
-  await Promise.all([
-    deleteUserBooksRecord(c.env.KV, userId),
-    deletePublicShelves(c.env.KV, userId),
-    deleteNewBookDefault(c.env.KV, userId),
-    deleteVerifyRecord(c.env.KV, userId),
-    deleteOtpRecord(c.env.KV, userId),
-    deleteMemberFamilyId(c.env.KV, userId),
-    // Every device's token from the `auth:` record read above, plus the presented hash, which
-    // covers an `auth:` gap.
-    revokeAllAuthTokens(c.env.KV, userId, presented.auth, [
-      presented.presentedHash,
-    ]),
-    ...publicTokens.map((token) => deletePublicSnapshot(c.env.KV, token)),
-  ]);
+  await deleteAccountKeys(c.env.KV, userId, {
+    publicTokens,
+    auth: presented.auth,
+    presentedHash: presented.presentedHash,
+  });
 
   return c.json({ data: { ok: true } });
 });

@@ -77,11 +77,11 @@
  *  - The single-importer case asserts EXACTLY one importer, as equality, so the
  *    "zero" failure mode (a renamed accessor the detector no longer sees) is
  *    caught too; a wildcard binding of the DAL anywhere under `src/` lands
- *    there as well. The whole-account teardown in `routes/user.ts` is a wipe,
- *    not a list write — it can resurrect nothing, so it is the one sanctioned
- *    non-publicShelf toucher; its negative half runs the full detector, because
- *    a namespace import there would hand the books hot path the put without
- *    ever naming it.
+ *    there as well. The whole-account teardown in `services/accountDeletion.ts`
+ *    is a wipe, not a list write — it can resurrect nothing, so it is the one
+ *    sanctioned non-publicShelf toucher; its negative half runs the full
+ *    detector, because a namespace import there would hand the teardown the put
+ *    without ever naming it.
  *
  * THE FIXTURES (positive companions, kept as STRINGS — nothing is written to
  * disk and nothing under `src/` is touched). `VIOLATING_ROUTE_FIXTURE` is one
@@ -343,6 +343,8 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
       "getAuthTokenRecord",
       "putAuthTokenRecord",
       "deleteAuthTokenKey",
+      "putAccountDeletedMark",
+      "getAccountDeletedMark",
       "putAuthTokenIndex",
       "deleteAuthTokenIndex",
       "listAuthTokenIndexPage",
@@ -398,7 +400,7 @@ function putImporters(files: ScannedFile[]): string[] {
 }
 
 const PUBLIC_SHELF_ROUTE = "routes/publicShelf.ts";
-const USER_ROUTE = "routes/user.ts";
+const ACCOUNT_DELETION_SERVICE = "services/accountDeletion.ts";
 
 // Wildcard-half companion: every spelling that grants the put, plus controls that must NOT fire.
 // See the header → "THE FIXTURES".
@@ -442,7 +444,7 @@ describe("publicshelves:{userId} single-writer invariant", () => {
     const paths = SRC_FILES.map((file) => file.path);
     expect(paths).toContain("kv/publicShelves.ts");
     expect(paths).toContain(PUBLIC_SHELF_ROUTE);
-    expect(paths).toContain(USER_ROUTE);
+    expect(paths).toContain(ACCOUNT_DELETION_SERVICE);
   });
 
   it("finds an injected extra importer (detector companion)", () => {
@@ -486,8 +488,10 @@ describe("publicshelves:{userId} single-writer invariant", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("lets routes/user.ts DELETE the pointer list but never write it", () => {
-    const module = SRC_FILES.find((file) => file.path === USER_ROUTE);
+  it("lets services/accountDeletion.ts DELETE the pointer list but never write it", () => {
+    const module = SRC_FILES.find(
+      (file) => file.path === ACCOUNT_DELETION_SERVICE,
+    );
     expect(module).toBeDefined();
 
     // The account teardown is a wipe (the one sanctioned non-publicShelf toucher); the negative
@@ -530,7 +534,7 @@ describe("newbookdefault:{userId} single-writer invariant", () => {
   });
 
   it("is imported by routes/userNewBookDefault.ts and by nothing else", () => {
-    // Equality, so the books routes (readers / the account wipe) can never gain the put.
+    // Equality, so neither the books routes (readers) nor the account wipe can gain the put.
     expect(newBookDefaultPutImporters(SRC_FILES)).toEqual([
       NEW_BOOK_DEFAULT_ROUTE,
     ]);

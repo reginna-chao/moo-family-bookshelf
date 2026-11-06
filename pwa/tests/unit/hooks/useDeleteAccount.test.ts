@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { ACCOUNT_DELETED_ERROR_CODE } from "moo-family-bookshelf-shared/api/accountDeleted";
 import type { ApiResponse } from "moo-family-bookshelf-shared/api/types";
 import type { ApiClient } from "@/api/client";
 import { useDeleteAccount } from "@/hooks/useDeleteAccount";
@@ -16,11 +17,23 @@ import {
  * gone afterwards in every branch. Twin:
  * `extension/tests/unit/dialog/useFamilySettingsDelete.test.ts`. The current-secret step-up
  * (#396) is covered in useDeleteAccount.stepUp.test.ts.
+ *
+ * Already deleted (#462): the Worker answers `401 ACCOUNT_DELETED` when an earlier delete finished but
+ * its response was lost, and the hook counts that as success. "Called once" below counts `deleteAccount`
+ * calls, not network requests: the real 401 path inside the client also posts a refresh. A plain
+ * `UNAUTHORIZED` on both sends must keep today's failure, so the rewrite cannot swallow it.
  */
 
 type DeleteRes = ApiResponse<{ ok: boolean }>;
 
 const USER_ID = "a".repeat(64);
+
+const ALREADY_DELETED: DeleteRes = {
+  error: { code: "ACCOUNT_DELETED", message: "這個帳戶已經移除" },
+};
+const TOKEN_REFUSED: DeleteRes = {
+  error: { code: "UNAUTHORIZED", message: "revoked" },
+};
 
 function setup(deleteAccount: () => Promise<DeleteRes>) {
   const seen = { send: [] as boolean[], settle: [] as boolean[] };
@@ -39,9 +52,12 @@ function setup(deleteAccount: () => Promise<DeleteRes>) {
   return { hook, send, onForceLogout, seen };
 }
 
-async function confirmDelete(hook: ReturnType<typeof setup>["hook"]) {
+async function confirmDelete(
+  hook: ReturnType<typeof setup>["hook"],
+  currentSecret?: string,
+) {
   await act(async () => {
-    await hook.result.current.handleDeleteAccount();
+    await hook.result.current.handleDeleteAccount(currentSecret);
   });
 }
 
@@ -130,6 +146,62 @@ describe("useDeleteAccount", () => {
     expect(seen.send).toEqual([true, false]);
     expect(onForceLogout).toHaveBeenCalledTimes(1);
     expect(seen.settle).toEqual([true]);
+    expect(isSelfDepartureActive()).toBe(false);
+  });
+
+  it("uses the code the production constant names", () => {
+    expect(ALREADY_DELETED.error?.code).toBe(ACCOUNT_DELETED_ERROR_CODE);
+  });
+
+  it.each<[string, string | undefined]>([
+    ["without a secret", undefined],
+    ["with the current secret", "482913"],
+  ])(
+    "counts ACCOUNT_DELETED as success %s, with deleteAccount called once",
+    async (_label, secret) => {
+      const { hook, send, onForceLogout, seen } = setup(
+        async () => ALREADY_DELETED,
+      );
+
+      await confirmDelete(hook, secret);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(USER_ID, secret);
+      expect(onForceLogout).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual({ send: [true], settle: [true] });
+      expect(hook.result.current.deleteError).toBeNull();
+      expect(hook.result.current.secretError).toBe("");
+      expect(isSelfDepartureActive()).toBe(false);
+    },
+  );
+
+  it("counts ACCOUNT_DELETED on the resend as success, with deleteAccount called twice", async () => {
+    const responses: DeleteRes[] = [TOKEN_REFUSED, ALREADY_DELETED];
+    const { hook, send, onForceLogout, seen } = setup(async () =>
+      responses.shift()!,
+    );
+
+    await confirmDelete(hook);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(seen).toEqual({ send: [true, false], settle: [true] });
+    expect(onForceLogout).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBeNull();
+    expect(isSelfDepartureActive()).toBe(false);
+  });
+
+  it("resends once and shows the failure when both sends come back UNAUTHORIZED", async () => {
+    const { hook, send, onForceLogout, seen } = setup(
+      async () => TOKEN_REFUSED,
+    );
+
+    await confirmDelete(hook);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(seen.send).toEqual([true, false]);
+    expect(onForceLogout).not.toHaveBeenCalled();
+    expect(hook.result.current.deleteError).toBe("revoked");
+    expect(hook.result.current.deleteState).toBe("idle");
     expect(isSelfDepartureActive()).toBe(false);
   });
 });

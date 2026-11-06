@@ -3,6 +3,7 @@ import browser from "webextension-polyfill";
 import type { ApiClient } from "../api/client";
 import type { ApiErrorPayload, ApiResponse, VerifyMethod } from "../api/types";
 import { runGuardedDeparture } from "../storage/selfDeparture";
+import { treatAccountDeletedAsSuccess } from "moo-family-bookshelf-shared/api/accountDeleted";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { readVerifyMethod, recoverStepUp } from "./stepUp";
 
@@ -104,7 +105,10 @@ export function useFamilySettingsDelete({
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the PWA's leave / delete hooks.
       await runGuardedDeparture(
-        () => apiClient.deleteAccount(userId, currentSecret),
+        () =>
+          apiClient
+            .deleteAccount(userId, currentSecret)
+            .then(treatAccountDeletedAsSuccess),
         (response) => {
           refused.error = response.error;
           return settleDelete(response);

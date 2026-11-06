@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { treatAccountDeletedAsSuccess } from "moo-family-bookshelf-shared/api/accountDeleted";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type {
   ApiErrorPayload,
@@ -96,7 +97,10 @@ export function useDeleteAccount({
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the Extension's leave / delete hooks.
       await runGuardedDeparture(
-        () => apiClient.deleteAccount(userId, currentSecret),
+        () =>
+          apiClient
+            .deleteAccount(userId, currentSecret)
+            .then(treatAccountDeletedAsSuccess),
         (res) => {
           refused.error = res.error;
           settleDelete(res);

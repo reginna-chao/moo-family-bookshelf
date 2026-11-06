@@ -122,6 +122,8 @@ export const kvKeys = {
   auth: (userId: string) => `auth:${userId}`,
   // `tokenHash` = `hashAuthToken(token)`.
   authToken: (tokenHash: string) => `token:${tokenHash}`,
+  // Under the `token:` prefix on purpose: the KV backup already ignores it (`IGNORED`, scripts/kv-backup/format.mjs).
+  accountDeleted: (tokenHash: string) => `token:deleted:${tokenHash}`,
   // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
   authTokenIndex: (userId: string, tokenHash: string) =>
     `tokenidx:${userId}:${tokenHash}`,
@@ -283,8 +285,8 @@ export interface PublicShelf {
  * revoked share token back to life and re-publish a snapshot the owner had
  * just deleted. Only the four public-shelf write handlers write THIS key, so
  * no books/family-prefs save can ever roll it back. (Account deletion in
- * `routes/user.ts` additionally `delete`s it as part of whole-account
- * teardown — a wipe, not a list write.)
+ * `services/accountDeletion.ts` additionally `delete`s it as part of
+ * whole-account teardown — a wipe, not a list write.)
  *
  * Lazy migration: absent key ⇒ fall back to the legacy
  * `UserBooksRecord.publicSharing` field; the next public-shelf write handler
@@ -429,6 +431,9 @@ export const TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 /** Absolute token age cap: 180 days from `createdAt` (`code` accounts exempt). */
 export const TOKEN_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+
+/** How long `token:deleted:{tokenHash}` answers a retried account deletion and refuses a TTL-gap refresh: 1 day (#462). */
+export const ACCOUNT_DELETED_MARK_TTL_SECONDS = 24 * 60 * 60;
 
 /** Tokens one account may hold at once (one per device); the next mint evicts dead, then oldest, entries. */
 export const MAX_AUTH_TOKENS_PER_USER = 5;

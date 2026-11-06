@@ -354,6 +354,44 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 6. 等約 60 秒，讓其他節點不再接受舊的 token，再照上面第 6 步刪除兩個計數器。
 7. 照上面第 5 步把臨時 PIN 回信給他，請他馬上登入，再設定新的 PIN 或圖形。
 
+## 帳號刪除卡住時
+
+家人回報「移除帳戶一直失敗」，或移除之後重新使用時一直被要求一組他產生不了的驗證時，看這一節。下面只有兩種情況可以動 KV，其他情況一律不動。背景見 `docs/architecture.md` → 已接受的殘餘風險（#462 以前留下的半刪除帳號、帳號刪除在 `member:` 刪除之後失敗那兩列）。
+
+**先確認是本人，再讀 KV。** 回報的人只要知道 Email 就能說「刪除卡住」，而這兩種清除都會讓這個帳號變成沒有驗證。對一個還在使用的帳號這麼做，等於把帳號交給回報的人：對方接著用那個 Email 登入，就能看到完整書單、改掉開放設定。所以照「使用者忘記登入驗證時」→ 官方伺服器的受理方式 做回信確認：回信到他的讀墨註冊 Email（不回到對方另外給的聯絡方式），收到從那個信箱寄出的確認之後才繼續。自架伺服器一樣用這個信箱確認，或用其他家人看不到的管道確認。
+
+確認之後，照「使用者忘記登入驗證時」的第 1 步算出 userId，然後在 `worker/` 目錄讀這五把 key（只讀不寫，回「not found」代表不存在；剛發生過寫入時，等約 60 秒再讀）：
+
+```bash
+pnpm exec wrangler kv key get "verify:<userId>" --namespace-id <正式 namespace ID> --remote
+pnpm exec wrangler kv key get "auth:<userId>" --namespace-id <正式 namespace ID> --remote
+pnpm exec wrangler kv key get "user:<userId>" --namespace-id <正式 namespace ID> --remote
+pnpm exec wrangler kv key get "member:<userId>" --namespace-id <正式 namespace ID> --remote
+pnpm exec wrangler kv key get "publicshelves:<userId>" --namespace-id <正式 namespace ID> --remote
+```
+
+依讀到的結果選一種。兩種都不符合，就不要刪任何 key：
+
+- **情況一：`verify:` 不存在，`auth:` 存在而且內容有 `secretAt`。** 這是 #462 以前的刪除半途失敗留下的狀態，重試會一直回 `403 VERIFICATION_REQUIRED`。`user:`、`member:`、`publicshelves:` 有任何一把還在時，不要清 `auth:`：照「使用者忘記登入驗證時」寫入臨時 PIN（第 2 步回 not found 在這裡是預期的），請他用臨時 PIN 登入後再按移除。三把都不存在才清 `auth:`，其他 key 都不動：
+
+  ```bash
+  pnpm exec wrangler kv key delete "auth:<userId>" --namespace-id <正式 namespace ID> --remote
+  ```
+
+  清除之後這個帳號沒有驗證，所以先和他約好時間。等約 60 秒，請他馬上再按一次移除；手上沒有登入的裝置時，先重新登入再移除。
+
+- **情況二：`verify:` 存在，`user:`、`member:`、`publicshelves:` 三把都不存在。** 帳號資料已經刪完，只剩驗證設定擋住他重新使用（設成驗證碼的帳號手上沒有登入的裝置時，產生不了驗證碼）。先照「握有他 token 的人持續猜錯時，要由你撤銷登入」的第 2 到 4 步清掉殘留的登入與 `auth:`，再清 `verify:`。順序不能反過來：`auth:` 帶 `secretAt` 時先刪 `verify:`，就會變成情況一。
+
+  ```bash
+  pnpm exec wrangler kv key delete "verify:<userId>" --namespace-id <正式 namespace ID> --remote
+  ```
+
+  這和上一節「不要直接刪除他的驗證設定」不衝突：那條是怕別人趁空窗看到書單、改開放設定，這裡已經沒有資料可看。清完後等約 60 秒，再請他重新使用。
+
+**三把裡有任何一把存在，這就是還在使用的帳號，停下來，不要清 `verify:`。** 他如果是忘了驗證，走「使用者忘記登入驗證時」的臨時 PIN；如果是要刪除帳號，用臨時 PIN 登入後，在設定裡再按一次移除。`verify:` 不存在、`auth:` 也不存在或沒有 `secretAt` 時，沒有東西擋著他，不用清，請他重新登入後再按一次移除。
+
+處理完之後，請刪除那筆回報和你寄出的信的備份。
+
 ## 更新
 
 ```bash
