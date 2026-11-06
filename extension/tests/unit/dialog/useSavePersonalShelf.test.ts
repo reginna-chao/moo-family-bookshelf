@@ -9,6 +9,7 @@ import {
   BOOKS_SAVE_CONFLICT_MESSAGE,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
 import { MAX_SAVE_PUT_ATTEMPTS } from "moo-family-bookshelf-shared/personal/fullPutConflict";
+import { SYNC_SERVER_CHANGED_MESSAGE } from "@/sync/pinnedSyncApi";
 
 /**
  * #259 (P0 privacy): a personal-shelf Save that takes a full
@@ -90,6 +91,8 @@ class FakeServer {
   stored: StoredRecord;
   readonly puts: PutLog[] = [];
   writes = 0;
+  /** What the client's `getEndpoint` answers; only the #463 cases change it. */
+  endpoint = "https://test.workers.dev";
   private putCalls = 0;
   private release: (() => void) | null = null;
   readonly client: ApiClient;
@@ -111,6 +114,7 @@ class FakeServer {
         this.put(clone(data) as WireBody),
       ),
       patchPersonalBooks: vi.fn(async () => ({ data: { ok: true } })),
+      getEndpoint: vi.fn(() => this.endpoint),
     } as unknown as ApiClient;
   }
 
@@ -526,6 +530,85 @@ describe("useSavePersonalShelf (via usePersonalBooks) — full-PUT save over a l
     expect(result.current.dirtyBookIds.size).toBe(BATCH.length);
     expect(flagOf(result.current.books, N0)).toBe(BoolFlag.TRUE);
     expect(lastCachedBooks()).toBeUndefined();
+  });
+});
+
+// #463: what a thrown save shows. The server-change case runs the real pin end to end;
+// where each request goes is in personalShelfUpload.serverPin.test.ts.
+describe("useSavePersonalShelf (via usePersonalBooks) — a save that throws", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await chrome.storage.local.clear();
+  });
+
+  afterEach(async () => {
+    await chrome.storage.local.clear();
+  });
+
+  it("stops with the Save wording and changes nothing when the server changes mid-save", async () => {
+    const server = new FakeServer(serverShelf(), { holdPut: 0 });
+    const { result } = await renderShelf(server);
+    // The held PUT is judged on release: this makes it answer 409.
+    server.otherDeviceSets(A, BoolFlag.FALSE, L1);
+    batchSet(result, BoolFlag.TRUE);
+    const booksBefore = result.current.books;
+    const baselineBefore = result.current.originalBooks.current;
+    vi.mocked(chrome.storage.local.set).mockClear();
+
+    let pending: Promise<void> = Promise.resolve();
+    await act(async () => {
+      pending = result.current.handleSave();
+    });
+    expect(server.client.updatePersonalBooks).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe("saving");
+
+    server.endpoint = "https://another-server.example";
+    await act(async () => {
+      server.releasePut();
+      await pending;
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe(
+      "伺服器已更換，這次儲存已停止。請先同步書櫃，再按一次儲存。",
+    );
+    expect(result.current.errorMessage).not.toBe(SYNC_SERVER_CHANGED_MESSAGE);
+    // The load read only: the 409 re-read and the second PUT were never sent.
+    expect(server.client.getPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(server.client.updatePersonalBooks).toHaveBeenCalledTimes(1);
+    expect(result.current.dirtyBookIds.size).toBe(BATCH.length);
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.books).toBe(booksBefore);
+    expect(result.current.originalBooks.current).toBe(baselineBefore);
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "an Error shows its own message",
+      rejection: new Error("offline"),
+      shown: "offline",
+    },
+    {
+      name: "a non-Error shows the bare failure copy",
+      rejection: "not an Error",
+      shown: "儲存失敗",
+    },
+  ])("$name", async ({ rejection, shown }) => {
+    const server = new FakeServer(serverShelf());
+    const { result } = await renderShelf(server);
+    vi.mocked(server.client.updatePersonalBooks).mockRejectedValueOnce(
+      rejection,
+    );
+    batchSet(result, BoolFlag.TRUE);
+
+    await save(result);
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe(shown);
+    // Its superstring, for a refused save rather than a thrown one.
+    expect(result.current.errorMessage).not.toBe("儲存失敗，請稍後再試");
+    expect(result.current.dirtyBookIds.size).toBe(BATCH.length);
   });
 });
 
