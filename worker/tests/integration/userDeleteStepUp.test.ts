@@ -10,8 +10,8 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
 import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
 import {
   VERIFY_ATTEMPT_MAX,
-  VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
 
 /**
@@ -135,11 +135,11 @@ function secretBody(currentSecret: unknown): string {
   return JSON.stringify({ currentSecret });
 }
 
-/** The account's `verify` guess-ceiling key, via the production builder. */
+/** The account's `verify-stepup` guess-budget key, via the production builder. */
 async function attemptCounterKey(): Promise<string> {
   const reading = await peekPerUserRateLimit(kv, {
     userId: USER_ID,
-    scope: VERIFY_ATTEMPT_SCOPE,
+    scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
     max: VERIFY_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });

@@ -1254,8 +1254,8 @@ async function passJoinVerificationGate(
 
   // Verify PWA login verification (PIN / pattern / OTP) if user has it set.
   // Users with no verification record (method: "none") pass automatically.
-  // Lockout charged to the CALLER (IP, IPv6 per /64), never the target; wrong guesses also hit the
-  // charge-on-failure "verify" ceiling. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
+  // Lockout charged to the CALLER (IP, IPv6 per /64); the account-wide per-minute limit and "verify"
+  // budget refuse any secret once spent. See docs/architecture.md → PWA 登入驗證機制 → 安全措施.
   const verification = await validateVerification(c.env, userId, verifySecret, {
     callerKey: getCallerIp(c),
   });

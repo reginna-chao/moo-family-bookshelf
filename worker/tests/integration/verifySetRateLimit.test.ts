@@ -14,6 +14,7 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
 
 /**
@@ -23,12 +24,13 @@ import {
  * current-secret step-up — so a request refused by any of them (400 / 401 /
  * 403) costs no slot, and on a PIN / pattern account only someone who knows
  * the secret can spend the owner's 30 changes an hour. A wrong `currentSecret`
- * is a guess: it charges the gate's `verify` ceiling, never `verify-set`.
+ * is a guess: it charges the step-up's `verify-stepup` budget, never `verify-set`
+ * and never the public login budget `verify`.
  *
  * Separate scopes: PUT no longer charges the `verify-write` scope shared by
  * OTP / prompted / qr-token, so a spent `verify-write` window does not block a
  * PUT with the correct secret, and a spent `verify-set` window does not block
- * an OTP. The three counter prefixes must not alias each other.
+ * an OTP. The four counter prefixes must not alias each other.
  *
  * Requests run without DEV_MODE (DEV_MODE skips every ceiling) and carry the
  * binding stubs, so only the hourly KV counters are written; setup goes
@@ -95,14 +97,16 @@ async function counterKey(limit: Limit): Promise<string> {
   return (await peekPerUserRateLimit(kv, { userId: USER_ID, ...limit })).key;
 }
 
-const ATTEMPT_LIMIT: Limit = {
-  scope: VERIFY_ATTEMPT_SCOPE,
+const STEP_UP_LIMIT: Limit = {
+  scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
   max: VERIFY_ATTEMPT_MAX,
   windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
 };
+const LOGIN_LIMIT: Limit = { ...STEP_UP_LIMIT, scope: VERIFY_ATTEMPT_SCOPE };
 const setKey = () => counterKey(VERIFY_SET_LIMIT);
 const writeKey = () => counterKey(VERIFY_WRITE_LIMIT);
-const attemptKey = () => counterKey(ATTEMPT_LIMIT);
+const attemptKey = () => counterKey(STEP_UP_LIMIT);
+const loginKey = () => counterKey(LOGIN_LIMIT);
 
 async function count(key: string): Promise<number | null> {
   const raw = await kv.get(key);
@@ -130,15 +134,19 @@ afterEach(() => {
 });
 
 describe("verify-set ceiling — charged only after the step-up", () => {
-  it("is its own scope, under a prefix that aliases neither verify-write nor verify", async () => {
+  it("is its own scope, under a prefix that aliases none of verify-write, verify and verify-stepup", async () => {
     expect(VERIFY_SET_LIMIT).toEqual({
       scope: "verify-set",
       max: 30,
       windowSec: 3600,
     });
-    const prefixes = [await setKey(), await writeKey(), await attemptKey()].map(
-      (k) => k.slice(0, k.indexOf(USER_ID)),
-    );
+    const prefixes = [
+      await setKey(),
+      await writeKey(),
+      await attemptKey(),
+      await loginKey(),
+    ].map((k) => k.slice(0, k.indexOf(USER_ID)));
+    expect(new Set(prefixes).size).toBe(prefixes.length);
     for (const a of prefixes) {
       for (const b of prefixes)
         if (a !== b) expect(a.startsWith(b)).toBe(false);
@@ -193,13 +201,25 @@ describe("verify-set ceiling — charged only after the step-up", () => {
     },
   );
 
-  it("charges a wrong currentSecret to the gate's verify ceiling, not to verify-set", async () => {
+  it("charges a wrong currentSecret to the step-up budget, not to verify-set or the login budget", async () => {
     const token = await setUp("pin", PIN);
 
     await putVerify(token, { method: "none", currentSecret: WRONG_PIN });
 
     expect(await count(await attemptKey())).toBe(1);
     expect(await count(await setKey())).toBeNull();
+    expect(await count(await loginKey())).toBeNull();
+  });
+
+  it("refuses the correct secret with the step-up budget spent before charging verify-set", async () => {
+    const token = await setUp("pin", PIN);
+    await spend(await attemptKey(), VERIFY_ATTEMPT_MAX);
+
+    const res = await putVerify(token, { method: "none", currentSecret: PIN });
+
+    expect(res.status).toBe(429);
+    expect(await count(await setKey())).toBeNull();
+    expect(await count(await attemptKey())).toBe(VERIFY_ATTEMPT_MAX);
   });
 
   it.each([
@@ -263,6 +283,8 @@ describe("verify-set ceiling — once spent", () => {
 
     expect(missing.status).toBe(403);
     expect(wrong.status).toBe(403);
+    expect(await count(await attemptKey())).toBe(1);
+    expect(await count(await setKey())).toBe(VERIFY_SET_LIMIT.max);
   });
 
   it("does not block an OTP, which stays on verify-write", async () => {

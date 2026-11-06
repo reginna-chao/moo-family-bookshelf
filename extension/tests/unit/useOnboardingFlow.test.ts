@@ -178,6 +178,7 @@ vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
 
 import { waitFor } from "@testing-library/react";
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
+import { rateLimitedMessage } from "@/dialog/verificationMessages";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import {
@@ -1417,6 +1418,60 @@ describe("useOnboardingFlow", () => {
 
       expect(result.current.state).toBe("verify-prompt");
       expect(result.current.verify.error).toBe("驗證失敗，請重新輸入");
+    });
+
+    // Runs the real tryAutoRecovery, so the 429 enters as the join's envelope rather than an injected
+    // result. See the header → "Mock shapes" for why it is mocked everywhere else.
+    it("lookup-gate bridge: a 429 RATE_LIMITED join after a verified lookup keeps the prompt open with the countdown", async () => {
+      const lookupUser = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            existingFamilyId: null,
+            memberCount: 0,
+            requiresVerification: BoolFlag.TRUE,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: { existingFamilyId: "fam-existing", memberCount: 2 },
+        });
+      const joinFamily = vi.fn().mockResolvedValue({
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests",
+          retryAfter: 90,
+        },
+      });
+      const actual = await vi.importActual<
+        typeof import("@/dialog/onboardingFlow")
+      >("@/dialog/onboardingFlow");
+      vi.mocked(tryAutoRecovery).mockImplementationOnce(actual.tryAutoRecovery);
+      const { result } = renderFlow(
+        createMockApiClient({ lookupUser, joinFamily }),
+      );
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(lookupUser).toHaveBeenNthCalledWith(2, expect.any(String), {
+        verifySecret: "123456",
+      });
+      expect(joinFamily).toHaveBeenCalledWith(
+        "fam-existing",
+        expect.any(String),
+        "User",
+        { verifySecret: "123456" },
+      );
+      expect(result.current.state).toBe("verify-prompt");
+      expect(result.current.verify.active).toBe(true);
+      expect(result.current.verify.error).toBe(rateLimitedMessage(null));
+      expect(result.current.verify.countdownSeconds).toBe(90);
+      expect(result.current.verify.locked).toBe(false);
+      expect(result.current.verify.submitting).toBe(false);
     });
 
     it("solo-recovery bridge: a wrong secret returns to verify-prompt, not 'recovering'", async () => {

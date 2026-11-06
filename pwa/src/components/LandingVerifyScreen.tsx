@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { classifySyncCodeApiHost } from "moo-family-bookshelf-shared/api/syncCodeHost";
 import type { VerifyMethod } from "@/api/client";
 import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { QR_LOGIN_HINT } from "@/utils/retryMessage";
 import { PinInput } from "@/components/PinInput";
 import { PatternLock } from "@/components/PatternLock";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -15,6 +16,7 @@ interface LandingVerifyScreenProps {
   promptError: string;
   retryAnnouncement: string | undefined;
   retryBlocked: boolean;
+  showQrLoginHint: boolean;
   isSubmitting: boolean;
   /** The typed one-time code (`code` method only); state stays in the page. */
   codeInput: string;
@@ -34,6 +36,7 @@ export function LandingVerifyScreen({
   promptError,
   retryAnnouncement,
   retryBlocked,
+  showQrLoginHint,
   isSubmitting,
   codeInput,
   setCodeInput,
@@ -112,6 +115,11 @@ export function LandingVerifyScreen({
             取消
           </button>
         </div>
+      )}
+      {showQrLoginHint && (
+        <p className="mt-4 text-center text-xs text-gray-500">
+          {QR_LOGIN_HINT}
+        </p>
       )}
       <ForgotSecretHint official={official} />
     </>

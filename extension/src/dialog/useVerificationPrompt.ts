@@ -263,7 +263,7 @@ export function useVerificationPrompt(
         return;
       }
       if (result.errorCode === "RATE_LIMITED") {
-        // 429 (per-IP sensitive tier, or the verify ceiling on a wrong secret): keep the prompt open
+        // 429 (per-IP sensitive tier, or the account's verify limits, right or wrong secret): keep the prompt open
         // with a specific message so the user retries once the window clears.
         setError(rateLimitedMessage(null));
         syncCountdown(result.retryAfter);

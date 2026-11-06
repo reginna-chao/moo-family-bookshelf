@@ -23,6 +23,12 @@ import {
   type QrTokenRecord,
   type VerifyRecord,
 } from "../../src/kv/schema";
+import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
+import {
+  VERIFY_ATTEMPT_MAX,
+  VERIFY_ATTEMPT_SCOPE,
+  VERIFY_ATTEMPT_WINDOW_SECONDS,
+} from "../../src/services/verification";
 
 /**
  * Auth-token rotation on `PUT /api/user/:id/verify` (#378), and the paths
@@ -55,6 +61,9 @@ import {
  * still opens the account. `failPutFor` makes ONE key's put throw (the wrapper
  * from `kickedTombstone.test.ts`) and returns the plain mock, which the test
  * reads afterwards; `beforeEach` builds a fresh mock, so nothing is restored.
+ * Right after the record write, every method's save also deletes the current
+ * window of the login attempt budget (`loginBudgetKey`); that behaviour is in
+ * `verifyAttemptCeiling.test.ts`, the trails here only place it in the sequence.
  *
  * Stale colo: KV is eventually consistent, so a colo that has not seen the
  * rotation's delete can still accept the revoked token. Modelled by re-seeding
@@ -197,6 +206,17 @@ function join(extra: Record<string, unknown>): Promise<Response> {
     userId: USER_ID,
     ...extra,
   });
+}
+
+/** The current window's `verify` budget key. Reads KV, so call it before {@link watchKvOps}. */
+async function loginBudgetKey(): Promise<string> {
+  const { key } = await peekPerUserRateLimit(kv, {
+    userId: USER_ID,
+    scope: VERIFY_ATTEMPT_SCOPE,
+    max: VERIFY_ATTEMPT_MAX,
+    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+  });
+  return key;
 }
 
 /** Hex SHA-256 of a token: its `auth:` list hash, `token:` key tail and QR binding. See the header → "QR binding". */
@@ -508,15 +528,20 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
 
   it("writes the verify record before swapping the token pair", async () => {
     const oldToken = await seedAuthToken(kv, USER_ID);
+    const budgetKey = await loginBudgetKey();
     const ops = watchKvOps(kv);
 
     const newToken = await setPin(oldToken);
 
     const trail = ops.writeTrail();
-    expect(trail[0]).toBe(`put ${kvKeys.verify(USER_ID)}`);
+    expect(trail.slice(0, 2)).toEqual([
+      `put ${kvKeys.verify(USER_ID)}`,
+      `delete ${budgetKey}`,
+    ]);
     expect([...trail].sort()).toEqual(
       [
         `put ${kvKeys.verify(USER_ID)}`,
+        `delete ${budgetKey}`,
         `list ${kvKeys.authTokenIndex(USER_ID, "")}`,
         `delete ${keyOf(oldToken)}`,
         `delete ${kvKeys.otp(USER_ID)}`,
@@ -550,9 +575,10 @@ describe("PUT /api/user/:id/verify — token rotation on a new secret", () => {
 
 describe("PUT /api/user/:id/verify — methods none and code keep the session", () => {
   it.each(SESSION_KEEPING_METHODS)(
-    "answers exactly { method, prompted } for $method and writes only the verify record",
+    "answers exactly { method, prompted } for $method, writing the verify record then clearing the login budget",
     async ({ method }) => {
       const token = await seedAuthToken(kv, USER_ID);
+      const budgetKey = await loginBudgetKey();
       const ops = watchKvOps(kv);
 
       const res = await putVerify(token, { method });
@@ -562,7 +588,10 @@ describe("PUT /api/user/:id/verify — methods none and code keep the session", 
         method,
         prompted: 0,
       });
-      expect(ops.writeTrail()).toEqual([`put ${kvKeys.verify(USER_ID)}`]);
+      expect(ops.writeTrail()).toEqual([
+        `put ${kvKeys.verify(USER_ID)}`,
+        `delete ${budgetKey}`,
+      ]);
     },
   );
 

@@ -12,6 +12,7 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
 
 /**
@@ -21,11 +22,15 @@ import {
  * the target method — must carry the CURRENT secret as `currentSecret`.
  * Missing ⇒ `403 VERIFICATION_REQUIRED`, wrong ⇒ `403 VERIFICATION_FAILED`
  * (the gate's own answers, charging the caller's `verifyfail:{userId}:{ip}`
- * streak and the account's `verify` guess ceiling), correct ⇒ the save goes on
+ * streak and the account's `verify-stepup` budget), correct ⇒ the save goes on
  * as before (rotation for a new PIN / pattern). A refused PUT leaves the record
  * and the session byte-identical. `none` / `code` / no record need nothing and
  * ignore a supplied secret; a corrupted PIN record (no hash / salt) behaves
  * like the gate: no secret ⇒ 403, any secret ⇒ pass.
+ *
+ * The step-up has its OWN budget: public login traffic spending `verify` does
+ * not stop the owner's save, and with `verify-stepup` spent a correct and a
+ * wrong secret both answer 429 and nothing is saved.
  *
  * Stale record: when `auth:{userId}.secretAt` is newer than the record's
  * `secretUpdatedAt`, this colo has not seen the owner's latest secret; the
@@ -36,7 +41,7 @@ import {
  * values and the KV read budget are in `verifyStepUpBudget.test.ts`.
  *
  * Requests run without DEV_MODE (binding stubs keep the per-IP tier off KV),
- * so the `verify` ceiling is really charged; setup goes through DEV_MODE.
+ * so the `verify-stepup` budget is really charged; setup goes through DEV_MODE.
  * `Date` is pinned mid-window so no counter bucket rolls over.
  */
 
@@ -89,15 +94,18 @@ async function errorCode(res: Response): Promise<string> {
   return ((await res.json()) as Json).error.code as string;
 }
 
-async function attemptCounterKey(): Promise<string> {
+async function budgetKey(scope: string): Promise<string> {
   const reading = await peekPerUserRateLimit(kv, {
     userId: USER_ID,
-    scope: VERIFY_ATTEMPT_SCOPE,
+    scope,
     max: VERIFY_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
   return reading.key;
 }
+
+const attemptCounterKey = () => budgetKey(VERIFY_STEP_UP_ATTEMPT_SCOPE);
+const loginCounterKey = () => budgetKey(VERIFY_ATTEMPT_SCOPE);
 
 async function setCounterKey(): Promise<string> {
   return (
@@ -155,6 +163,7 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
       [`put ${await attemptCounterKey()}`, `put ${FAIL_KEY}`].sort(),
     );
     expect(await kv.get(await setCounterKey())).toBeNull();
+    expect(await kv.get(await loginCounterKey())).toBeNull();
     expect(((await kv.get(FAIL_KEY, "json")) as Json).failCount).toBe(1);
     expect(await snapshot(token)).toEqual(before);
   });
@@ -180,25 +189,44 @@ describe("PUT /api/user/:id/verify — step-up on a PIN account", () => {
     expect(await kv.get(await setCounterKey())).toBe("1");
   });
 
-  it("with the guess ceiling spent, answers a wrong secret 429 and still admits the correct one uncharged", async () => {
+  it("with the step-up budget spent, answers a wrong and the correct secret alike with 429, saving nothing", async () => {
     const token = await setUp("pin", PIN);
-    const ceilingKey = await attemptCounterKey();
-    await kv.put(ceilingKey, String(VERIFY_ATTEMPT_MAX));
+    const stepUpKey = await attemptCounterKey();
+    await kv.put(stepUpKey, String(VERIFY_ATTEMPT_MAX));
     const before = await snapshot(token);
+    const ops = watchKvOps(kv);
 
     const wrong = await send(
       { method: "none", currentSecret: WRONG_PIN },
       token,
     );
+    const right = await send({ method: "none", currentSecret: PIN }, token);
+
     expect(wrong.status).toBe(429);
-    const { error } = (await wrong.json()) as Json;
+    expect(right.status).toBe(429);
+    const wrongBody = await wrong.text();
+    expect(await right.text()).toBe(wrongBody);
+    const { error } = JSON.parse(wrongBody) as Json;
     expect(error.code).toBe("RATE_LIMITED");
     expect(typeof error.retryAfter).toBe("number");
+    expect(ops.writeTrail()).toEqual([]);
     expect(await snapshot(token)).toEqual(before);
+    expect(await kv.get(stepUpKey)).toBe(String(VERIFY_ATTEMPT_MAX));
+  });
 
-    const right = await send({ method: "none", currentSecret: PIN }, token);
-    expect(right.status).toBe(200);
-    expect(await kv.get(ceilingKey)).toBe(String(VERIFY_ATTEMPT_MAX));
+  it("with the login budget spent, still saves with the correct secret, charging no budget", async () => {
+    const token = await setUp("pin", PIN);
+    await kv.put(await loginCounterKey(), String(VERIFY_ATTEMPT_MAX));
+
+    const res = await send({ method: "none", currentSecret: PIN }, token);
+
+    expect(res.status).toBe(200);
+    const record = (await kv.get(
+      kvKeys.verify(USER_ID),
+      "json",
+    )) as VerifyRecord;
+    expect(record.method).toBe("none");
+    expect(await kv.get(await attemptCounterKey())).toBeNull();
   });
 
   it.each([

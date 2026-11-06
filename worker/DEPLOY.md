@@ -47,7 +47,7 @@ preview_id = "你的 Preview ID"
 
 ### 5. 加上速率限制 Binding
 
-Worker 的「每分鐘」限制——per-IP 的 60／10／3 次，以及家庭書櫃與借閱的每帳號上限——交由 Cloudflare 原生的 Rate Limiting binding 計數，不再寫入 KV。`wrangler.toml` 已內含四組設定（dev 與 production 各一份），**你只需要把 `namespace_id` 換成自己的編號**：
+Worker 的「每分鐘」限制——per-IP 的 60／10／3 次，以及家庭書櫃、借閱與登入驗證的每帳號上限——交由 Cloudflare 原生的 Rate Limiting binding 計數，不再寫入 KV。`wrangler.toml` 已內含四組設定（dev 與 production 各一份），**你只需要把 `namespace_id` 換成自己的編號**：
 
 ```toml
 [[ratelimits]]
@@ -62,7 +62,7 @@ simple = { limit = 60, period = 60 }
 - 這是官方文件現行的 `[[ratelimits]]` 寫法，**需要 wrangler 4**：本專案的 `package.json` 已改用 wrangler 4，在 repo 內跑 `pnpm install` 就會裝好，`pnpm deploy` 也會直接用它。若你堅持用自己的 wrangler 3 部署，它只會印一行 `Unexpected fields found in top-level field: "ratelimits"` 的警告，然後照常部署，但 binding 根本不會建立，Worker 只能退回 KV 計數——這種情況請把每一段改寫成 `[[unsafe.bindings]]` 並加上一行 `type = "ratelimit"`。
 - 你的方案是否支援這項功能，**以 `wrangler deploy` 的結果為準**（官方文件未載明方案限制）。部署成功時，輸出的 bindings 清單會列出這四個名稱。
 
-**不設定也能跑**：找不到 binding 時，Worker 會自動退回原本的 KV 計數器，限制數字完全一樣，代價是每個請求多一次 KV 讀 + 一次 KV 寫（見下方「免費方案額度與濫用防護」），並且每道每分鐘的限流檢查都會輸出一行 `RATE_LIMIT_BINDING_MISSING` 錯誤 log——家庭書櫃與借閱路由同時受 per-IP 與 per-userId 兩道每分鐘檢查，因此單一請求最多兩行。
+**不設定也能跑**：找不到 binding 時，Worker 會自動退回原本的 KV 計數器，限制數字完全一樣（登入驗證的每分鐘上限例外：沒有 binding 就沒有這道限制，每小時 10 次的額度仍在），代價是每個請求多一次 KV 讀 + 一次 KV 寫（見下方「免費方案額度與濫用防護」），並且每道每分鐘的限流檢查都會輸出一行 `RATE_LIMIT_BINDING_MISSING` 錯誤 log——家庭書櫃與借閱路由同時受 per-IP 與 per-userId 兩道每分鐘檢查，因此單一請求最多兩行。
 
 ### 6. 部署
 
@@ -264,7 +264,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 - 未經驗證的垃圾流量即使全部被 401 拒絕，仍會以每分鐘最多 60 次的速度消耗寫入額度——**約 17 分鐘即可耗盡當日額度**，之後所有需要寫入 KV 的操作（儲存書單、建立家庭、換發 token，乃至速率限制本身）都會失敗到隔日額度重置。
 - 內建的 per-userId 上限（例如公開書櫃寫入合計每帳號每小時 30 次）只能限制「單一帳號」的消耗速度，無法阻擋上述未驗證流量。
 
-設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`）仍記在 KV，而它們都需要通過身分驗證才會被計數。**唯一的例外是 PWA 登入驗證的猜錯上限**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該帳號的嘗試計數（`ratelimit:user:verify:{userId}:{bucket}`）與該來源的失敗紀錄（`verifyfail:{userId}:{caller}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
+設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`、`verify-stepup`）仍記在 KV，而它們都需要通過身分驗證才會被計數。**唯一的例外是 PWA 登入驗證的猜錯上限**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該帳號的嘗試計數（`ratelimit:user:verify:{userId}:{bucket}`）與該來源的失敗紀錄（`verifyfail:{userId}:{caller}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
 
 若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致——真正需要硬上限時仍得評估 Durable Objects。
 
@@ -284,7 +284,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 官方伺服器的受理方式：申請會從回報表單進來。使用者在登入驗證畫面或設定頁點「填寫救援申請」，在表單上選問題類型「忘記登入驗證方式」，並填上讀墨註冊 Email。表單是公開的，任何知道那個 Email 的人都填得出來，所以**先確認、再寫入**：收到申請後，先回信到表單上的讀墨註冊 Email（不回到申請人另外給的任何聯絡方式），請信箱主人回信確認是他提出的申請；收到從那個信箱寄出的確認之後，才開始下面的第 1 步。沒有確認就不要動他的驗證設定，否則任何人都能替別人的帳號觸發一次改寫。處理完之後，請刪除那筆表單回覆，以及你寄出的信的備份。自架伺服器的畫面不會出現這個連結，只會請家人直接找你。
 
-帳號被接管時也用同樣的方式處理：有人在伺服器資料還沒同步到各節點的空窗內，用舊的 token 改掉了他的驗證設定，或把換密鑰之前的驗證設定寫了回去（`docs/architecture.md` → PWA 登入驗證機制 → 安全措施，其中的已接受殘餘風險）。握有他目前 token 但不知道 PIN 的人，在只有驗證設定還沒同步的節點上改驗證設定或刪除帳號，都會被拒絕；要接管，那個節點上的 token 紀錄也得還是舊的。這時讀到的若還是 PIN 或圖形，要同時握有舊的 token 和舊的 PIN 或圖形；讀到的若是「不驗證」、驗證碼或沒有驗證設定（例如他第一次設定 PIN，就是想把握有 token 的人趕出去），只用舊的 token 就能改掉他的驗證設定或刪除帳號，這段空窗並沒有縮小。被接管之後，或換密鑰之前的驗證設定被寫回之後（不論寫回的是哪一種驗證方式），他改驗證設定會被拒絕，用自己的 PIN 或圖形也登入不了，手上的裝置救不回來。照下面的步驟改寫成臨時 PIN；接管者在每一台裝置上的登入，都要等他用臨時 PIN 登入、再改成自己的 PIN 或圖形之後才會失效（設定新的 PIN 或圖形會撤銷該帳號的全部登入，不在清單上的也一起撤銷；只有設定前約 60 秒內剛建立（通常在別的節點）而伺服器還列不到的登入可能漏掉（登入紀錄異常多時另見下一段），這種登入不能續期，最多再 90 天失效，見 `docs/architecture.md` → PWA 登入驗證機制 的已接受殘餘風險）。
+帳號被接管時也用同樣的方式處理（握有他 token 的人持續猜錯、讓他換不了 PIN 時，另見下方的人工撤銷步驟）：有人在伺服器資料還沒同步到各節點的空窗內，用舊的 token 改掉了他的驗證設定，或把換密鑰之前的驗證設定寫了回去（`docs/architecture.md` → PWA 登入驗證機制 → 安全措施，其中的已接受殘餘風險）。握有他目前 token 但不知道 PIN 的人，在只有驗證設定還沒同步的節點上改驗證設定或刪除帳號，都會被拒絕；要接管，那個節點上的 token 紀錄也得還是舊的。這時讀到的若還是 PIN 或圖形，要同時握有舊的 token 和舊的 PIN 或圖形；讀到的若是「不驗證」、驗證碼或沒有驗證設定（例如他第一次設定 PIN，就是想把握有 token 的人趕出去），只用舊的 token 就能改掉他的驗證設定或刪除帳號，這段空窗並沒有縮小。被接管之後，或換密鑰之前的驗證設定被寫回之後（不論寫回的是哪一種驗證方式），他改驗證設定會被拒絕，用自己的 PIN 或圖形也登入不了，手上的裝置救不回來。照下面的步驟改寫成臨時 PIN；接管者在每一台裝置上的登入，都要等他用臨時 PIN 登入、再改成自己的 PIN 或圖形之後才會失效（設定新的 PIN 或圖形會撤銷該帳號的全部登入，不在清單上的也一起撤銷；只有設定前約 60 秒內剛建立（通常在別的節點）而伺服器還列不到的登入可能漏掉（登入紀錄異常多時另見下一段），這種登入不能續期，最多再 90 天失效，見 `docs/architecture.md` → PWA 登入驗證機制 的已接受殘餘風險）。
 
 不要直接刪除他的驗證設定。刪除會留下一段沒有驗證的空窗，知道他 Email 和同步碼的家人可以在這段時間搶先登入；直到他設定新的 PIN 或圖形之前，對方都能看到他的完整書單、修改他的開放設定。設定新的 PIN 或圖形會撤銷該帳號的全部登入（包括不在清單上的孤兒登入），只有做這次設定的那台會拿到新的登入（KV 傳播期間除外：設定前約 60 秒內剛建立（通常在別的節點）、還列不到的孤兒登入可能漏掉，它不能續期，最多再 90 天失效）。設定 PIN 時若日誌出現 `AUTH_TOKEN_INDEX_CAPPED`，表示該帳號有異常多的登入紀錄，這次只撤銷了前 400 個，再儲存一次驗證設定就會繼續清。若出現 `AUTH_TOKEN_INDEX_LIST_FAILED`，表示那次撤銷只刪到清單上的登入、孤兒登入沒有被找出來，在補救前它們都還能用。這個事件不分原因（KV 拒絕、額度用完、回應格式不對都記同一個名字），請先看那一行帶的錯誤內容並查 KV 用量：若是當天的 KV list 額度用完（免費方案每天 1,000 次，整個 Cloudflare 帳號共用，dev 環境和備份也會用到），等額度重置後再請他儲存一次驗證設定；若是其他原因，先排除原因，再儘快請他重存一次，不要等隔天。改寫成臨時 PIN 就沒有空窗。臨時 PIN 你自己也知道，在他改掉之前你等於能登入他的帳號，所以請他登入後立刻改掉。
 
@@ -315,7 +315,44 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 5. **只把臨時 PIN 回信到表單上那個讀墨註冊 Email**，不寄到申請人另外給的任何聯絡方式。收得到那個信箱的信，是唯一能證明本人的方式。自架伺服器沒有這個表單，可以一樣寄到他的讀墨註冊 Email，或用其他家人看不到的管道告訴他。請他用同步碼加臨時 PIN 重新登入，登入後立刻改成自己的 PIN 或圖形：電腦上在擴充功能設定裡改，改之前會先要求輸入這組臨時 PIN；只有手機的話，PWA 登入後會跳出提示，選擇更改後先輸入臨時 PIN，再設定新的 PIN 或圖形。他的個人書櫃與分享設定都還在，不受影響。
 
+6. 如果他用臨時 PIN 仍然看到「嘗試次數過多」，可能是這個帳號這一小時的額度已經用完，改寫驗證設定不會清掉它。先列出兩個計數器，再把列出的 key 逐一刪除。沒有列出，就是別的限制（每分鐘的上限），請他等一分鐘再試：
+
+   ```bash
+   pnpm exec wrangler kv key list --prefix "ratelimit:user:verify:<userId>:" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key list --prefix "ratelimit:user:verify-stepup:<userId>:" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key delete "<key>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+   其他節點可能還有約 60 秒的舊讀取，這段時間內他可能仍被擋，請他等一下再試。刪除後過了這段時間又很快用完，才表示有人持續在猜。這時救援不保證成功，因為臨時 PIN 走同一道閘門。先用 WAF 規則擋下來源（見 `docs/architecture.md` →「運維層的補強」），再和他約好時間，刪除計數器後請他馬上登入。
+
 寫入時的 `secretUpdatedAt` 會讓舊 PIN 累積的鎖定紀錄（`verifyfail:`）立刻失效，不必另外清除，也不用等 15 分鐘。如果之後從備份還原 KV，備份裡舊的驗證設定會跟著回來（見「KV 每日備份與還原演練」→ 還原）。
+
+**握有他 token 的人持續猜錯時，要由你撤銷登入。** 改驗證設定要先通過目前密鑰的確認，這道確認有自己的額度（每帳號每小時 10 次），用完之後本人知道 PIN 也改不了，就沒辦法靠換 PIN 撤銷對方的登入。下面的步驟會撤銷這個帳號全部的登入，包括本人的裝置，之後也沒有 QR Code 可以用，所以要先和他約好時間。確認是本人之後，依序做：
+
+1. 照上面第 1 到 4 步寫入臨時 PIN。
+2. 從兩個地方列出這個帳號的 token 雜湊，把結果合併、去掉重複。第一個指令印出的 `tokens[].hash` 是登入清單，第二個指令列出的 `tokenidx:<userId>:<hash>` 尾端是索引。兩邊都要查：較早登入的裝置可能只在清單上，沒有索引；漏掉的那一把在清單刪除後還能讀資料，也能換發新的登入。
+
+   ```bash
+   pnpm exec wrangler kv key get "auth:<userId>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key list --prefix "tokenidx:<userId>:" --namespace-id <正式 namespace ID> --remote
+   ```
+
+3. 對合併後的每一個 `<hash>`，先刪 token，再刪索引（沒有索引的那幾把，第二行刪不到東西，不影響結果）：
+
+   ```bash
+   pnpm exec wrangler kv key delete "token:<hash>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key delete "tokenidx:<userId>:<hash>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+4. 全部刪完後，刪除他的登入清單：
+
+   ```bash
+   pnpm exec wrangler kv key delete "auth:<userId>" --namespace-id <正式 namespace ID> --remote
+   ```
+
+5. 再列一次第 2 步的 `tokenidx:`（登入清單已經刪了，不用再查）。對方可能在這段時間又產生了新的登入，新的登入都有索引，有新的就照第 3 步補刪。
+6. 等約 60 秒，讓其他節點不再接受舊的 token，再照上面第 6 步刪除兩個計數器。
+7. 照上面第 5 步把臨時 PIN 回信給他，請他馬上登入，再設定新的 PIN 或圖形。
 
 ## 更新
 

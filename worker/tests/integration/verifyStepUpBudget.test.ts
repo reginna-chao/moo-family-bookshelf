@@ -8,6 +8,11 @@ import { ALICE } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
 import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
 import { VERIFY_SET_LIMIT } from "../../src/routes/verify";
+import {
+  VERIFY_ATTEMPT_MAX,
+  VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_SCOPE,
+} from "../../src/services/verification";
 import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
 
 /**
@@ -21,9 +26,10 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  *
  * Read budget: the handler reads `verify:{userId}` ONCE and hands it to the
  * gate, so the step-up never re-reads it. Against the pre-#396 PUT
- * (`token:`, `auth:`, `verify:`, the hourly counter), the only read added is the
- * caller's `verifyfail:` entry, and only on a PIN / pattern account; a `none`
- * account reads the same number of keys (the counter is now `verify-set`).
+ * (`token:`, `auth:`, `verify:`, the hourly counter), the only reads added are
+ * the caller's `verifyfail:` entry and the `verify-stepup` budget, and only on a
+ * PIN / pattern account; a `none` account reads the same number of keys (the
+ * counter is now `verify-set`).
  *
  * Requests run without DEV_MODE, with the binding stubs, so the hourly counter
  * read is real and the per-IP tier stays off KV; setup goes through DEV_MODE.
@@ -116,9 +122,15 @@ describe("PUT /api/user/:id/verify — currentSecret format", () => {
 });
 
 describe("PUT /api/user/:id/verify — read budget", () => {
-  it("reads verify:{userId} once and adds only the caller's verifyfail read on a PIN account", async () => {
+  it("reads verify:{userId} once and adds only the caller's verifyfail and the step-up budget reads on a PIN account", async () => {
     const token = await setUp("pin", PIN);
     const setKey = await setCounterKey();
+    const { key: stepUpKey } = await peekPerUserRateLimit(kv, {
+      userId: USER_ID,
+      scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+      max: VERIFY_ATTEMPT_MAX,
+      windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+    });
     const ops = watchKvOps(kv);
 
     const res = await send({ method: "none", currentSecret: PIN }, token);
@@ -130,6 +142,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
         kvKeys.auth(USER_ID),
         kvKeys.verify(USER_ID),
         FAIL_KEY,
+        stepUpKey,
         setKey,
       ].sort(),
     );
