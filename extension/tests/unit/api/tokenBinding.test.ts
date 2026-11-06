@@ -11,6 +11,7 @@ import {
 import browser from "webextension-polyfill";
 import { ApiClient, validateEndpointUrl } from "@/api/client";
 import { resolveStoredEndpoint, storageMatches } from "@/api/tokenBinding";
+import { AUTH_REFRESH_RATE_LIMITED } from "@/api/types";
 import { saveVerifyMethod } from "@/dialog/saveVerifyMethod";
 import { useEndpointSwitch } from "@/dialog/useEndpointSwitch";
 import {
@@ -70,6 +71,18 @@ import {
  * Decision on a confirmed switch (`after a confirmed switch`): the old token is
  * dropped and the user rejoins on the new server, so that block drives the real
  * `useEndpointSwitch` and then sends a request.
+ *
+ * Token replaced during a refresh (`a token replaced during a refresh`): a PIN change
+ * rotates the token on this server, which ends the session and so discards the refresh
+ * running under it. The request that got the 401 then retries once with the token the
+ * client holds now, as long as that token differs from the one it sent and the client
+ * is still on that server.
+ *
+ * The move rows of that block (`MOVES`): in the order production uses, endpoint first
+ * and then token, the old server holds no token any more, so the binding alone already
+ * stops the retry and that row cannot go red on the `server === baseUrl` check. The
+ * other two rows leave a token bound to the old server, and only that check stops it
+ * being sent there.
  */
 
 const OLD_SERVER = "https://old.example";
@@ -867,6 +880,251 @@ describe("ApiClient token binding", () => {
 
       await client.getPersonalBooks(USER);
       expect(calls[calls.length - 1].token).toBe(HOSTILE_TOKEN);
+    });
+  });
+
+  // See the header → "Token replaced during a refresh".
+  describe("a token replaced during a refresh", () => {
+    const ROTATED_TOKEN = "f".repeat(64);
+    const ISSUED = ok({ token: HOSTILE_TOKEN, expiresAt: EXPIRES_AT });
+
+    async function rotateToken(client: ApiClient): Promise<void> {
+      client.setAuthToken(ROTATED_TOKEN);
+      await browser.storage.local.set({ [AUTH_TOKEN_KEY]: ROTATED_TOKEN });
+    }
+
+    async function seedClientWithCooldown(): Promise<ApiClient> {
+      await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+      await browser.storage.local.set({
+        [RECOVERY_COOLDOWN_UNTIL_KEY]: Date.now() + 600_000,
+      });
+      return clientOn(OLD_SERVER);
+    }
+
+    it.each([
+      { reply: "a failure", answer: REFRESH_FAILED },
+      { reply: "a token of its own", answer: ISSUED },
+    ])(
+      "retries once with the rotated token when the refresh answers $reply",
+      async ({ answer }) => {
+        const refresh = held();
+        const calls = fakeNetwork(
+          deadTokenRoute(OLD_SERVER, { refresh: refresh.promise }),
+        );
+        await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+        const client = clientOn(OLD_SERVER);
+
+        const pending = client.getPersonalBooks(USER);
+        await drain();
+        await rotateToken(client);
+        refresh.release(answer);
+        const result = await pending;
+        await drain();
+
+        expect(result.error).toBeUndefined();
+        expect(result.data).toMatchObject({ userId: USER, books: [] });
+        expect(
+          calls.map(({ origin, path, token }) => [origin, path, token]),
+        ).toEqual([
+          [OLD_SERVER, BOOKS_PATH, OLD_TOKEN],
+          [OLD_SERVER, REFRESH_PATH, OLD_TOKEN],
+          [OLD_SERVER, BOOKS_PATH, ROTATED_TOKEN],
+        ]);
+        expect(await storedToken()).toBe(ROTATED_TOKEN);
+        expectNoCallback(client);
+      },
+    );
+
+    it.each([
+      {
+        name: "another tab moved storage to another server",
+        discard: () =>
+          replaceStorage({
+            server: NEW_SERVER,
+            token: NEW_TOKEN,
+            familyId: NEW_FAMILY,
+          }),
+      },
+      {
+        name: "the client left the server and came back",
+        discard: async (client: ApiClient) => {
+          client.setEndpoint(NEW_SERVER);
+          client.setEndpoint(OLD_SERVER);
+        },
+      },
+    ])(
+      "returns the original 401 with no retry when $name and the token never changed",
+      async ({ discard }) => {
+        const refresh = held();
+        const calls = fakeNetwork(
+          deadTokenRoute(OLD_SERVER, { refresh: refresh.promise }),
+        );
+        await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+        const client = clientOn(OLD_SERVER);
+
+        const pending = client.getPersonalBooks(USER);
+        await drain();
+        await discard(client);
+        refresh.release(ISSUED);
+        const result = await pending;
+        await drain();
+
+        expect(result.error?.code).toBe("UNAUTHORIZED");
+        expect(callsOn(calls, REFRESH_PATH)).toHaveLength(1);
+        expect(callsOn(calls, BOOKS_PATH)).toHaveLength(1);
+        expect(JSON.stringify(calls)).not.toContain(HOSTILE_TOKEN);
+        expectNoCallback(client);
+      },
+    );
+
+    it("retries instead of reporting the rate limit when the token was replaced", async () => {
+      const calls = fakeNetwork(deadTokenRoute(OLD_SERVER, {}));
+      const client = await seedClientWithCooldown();
+      duringReadOf(RECOVERY_COOLDOWN_UNTIL_KEY, () => rotateToken(client));
+
+      const result = await client.getPersonalBooks(USER);
+
+      expect(result.error).toBeUndefined();
+      expect(result.data).toMatchObject({ userId: USER, books: [] });
+      expect(calls.map(({ path, token }) => [path, token])).toEqual([
+        [BOOKS_PATH, OLD_TOKEN],
+        [REFRESH_PATH, OLD_TOKEN],
+        [BOOKS_PATH, ROTATED_TOKEN],
+      ]);
+    });
+
+    it("still reports the rate limit when no token was replaced", async () => {
+      const calls = fakeNetwork(deadTokenRoute(OLD_SERVER, {}));
+      const client = await seedClientWithCooldown();
+
+      const result = await client.getPersonalBooks(USER);
+
+      expect(result.error?.code).toBe(AUTH_REFRESH_RATE_LIMITED);
+      expect(callsOn(calls, BOOKS_PATH)).toHaveLength(1);
+      expect(callsOn(calls, "/join")).toEqual([]);
+    });
+
+    // See the header → "The move rows of that block".
+    const MOVES = [
+      {
+        name: "the new server's token set after the endpoint",
+        move: (client: ApiClient) => {
+          client.setEndpoint(NEW_SERVER);
+          client.setAuthToken(NEW_TOKEN);
+        },
+        nextToken: NEW_TOKEN,
+      },
+      {
+        name: "the new server's token set before the endpoint",
+        move: (client: ApiClient) => {
+          client.setAuthToken(NEW_TOKEN);
+          client.setEndpoint(NEW_SERVER);
+        },
+        nextToken: undefined,
+      },
+      {
+        name: "a token rotated on the old server just before the move",
+        move: (client: ApiClient) => {
+          client.setAuthToken(ROTATED_TOKEN);
+          client.setEndpoint(NEW_SERVER);
+        },
+        nextToken: undefined,
+      },
+    ];
+
+    it.each(MOVES)(
+      "returns the original 401 and resends nothing to the old server, with $name",
+      async ({ move, nextToken }) => {
+        const refresh = held();
+        const calls = fakeNetwork(
+          deadTokenRoute(OLD_SERVER, { refresh: refresh.promise }),
+        );
+        await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+        const client = clientOn(OLD_SERVER);
+
+        const pending = client.getPersonalBooks(USER);
+        await drain();
+        move(client);
+        refresh.release(ISSUED);
+        const result = await pending;
+        await drain();
+
+        expect(result.error?.code).toBe("UNAUTHORIZED");
+        expect(
+          callsTo(calls, OLD_SERVER).map(({ path, token }) => [path, token]),
+        ).toEqual([
+          [BOOKS_PATH, OLD_TOKEN],
+          [REFRESH_PATH, OLD_TOKEN],
+        ]);
+        expect(callsTo(calls, NEW_SERVER)).toHaveLength(0);
+        expect(await storedToken()).toBe(OLD_TOKEN);
+        expectNoCallback(client);
+
+        await client.getPersonalBooks(USER);
+        expect(callsTo(calls, OLD_SERVER)).toHaveLength(2);
+        const onNewServer = callsTo(calls, NEW_SERVER);
+        expect(onNewServer).toHaveLength(1);
+        expect(onNewServer[0].token).toBe(nextToken);
+      },
+    );
+
+    it.each([
+      {
+        name: "the rotated token",
+        answer: REFRESH_FAILED,
+        rotates: true,
+        retriedWith: ROTATED_TOKEN,
+      },
+      {
+        name: "a refreshed token",
+        answer: ok({ token: FRESH_TOKEN, expiresAt: EXPIRES_AT }),
+        rotates: false,
+        retriedWith: FRESH_TOKEN,
+      },
+    ])(
+      "ends with an error and no second refresh when the retry with $name gets a 401",
+      async ({ answer, rotates, retriedWith }) => {
+        const refresh = held();
+        const calls = fakeNetwork((call) =>
+          call.path === REFRESH_PATH ? refresh.promise : UNAUTHORIZED,
+        );
+        await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+        const client = clientOn(OLD_SERVER);
+
+        const pending = client.getPersonalBooks(USER);
+        await drain();
+        if (rotates) await rotateToken(client);
+        refresh.release(answer);
+        const result = await pending;
+        await drain();
+
+        expect(result.error?.code).toBe("UNAUTHORIZED");
+        expect(calls.map(({ path, token }) => [path, token])).toEqual([
+          [BOOKS_PATH, OLD_TOKEN],
+          [REFRESH_PATH, OLD_TOKEN],
+          [BOOKS_PATH, retriedWith],
+        ]);
+        expect(await storedToken()).toBe(retriedWith);
+        expectNoCallback(client);
+      },
+    );
+
+    it("returns the original 401 with no retry when a failed refresh nulled the token", async () => {
+      const calls = fakeNetwork(deadTokenRoute(OLD_SERVER, {}));
+      await seedStorage({ server: OLD_SERVER, token: OLD_TOKEN });
+      const client = clientOn(OLD_SERVER);
+
+      const result = await client.getPersonalBooks(USER);
+      await drain();
+
+      expect(result.error?.code).toBe("UNAUTHORIZED");
+      expect(calls.map(({ path }) => path)).toEqual([
+        BOOKS_PATH,
+        REFRESH_PATH,
+        JOIN_PATH,
+      ]);
+      expect(await storedToken()).toBeUndefined();
+      expectNoCallback(client);
     });
   });
 

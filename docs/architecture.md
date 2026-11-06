@@ -1187,7 +1187,7 @@ interface PublicShelfSnapshot {
 
 **錯誤物件**（`shared/src/api/types.ts` 的 `ApiError`）：
 
-- `synthesized` 只在用戶端自己組出信封、而不是從回應解析時為真；Extension 以 `JSON.parse` 產生不出來的 symbol 標記證明這一點（合成在 `extension/src/api/transport.ts`，標記定義在 `extension/src/api/synthesizedError.ts`）。任何原樣渲染 `rawMessage` 的畫面都必須要求它為真，否則自架或惡意後端可以回傳只有用戶端才會用的錯誤代碼，把任意文字畫進對話框。PWA 目前恆為 `false`：它沒有自行合成信封的路徑（Extension 的驗證復原節流是唯一一處），未來的 PWA 合成點直接沿用這道檢查。它刻意是一般的 `boolean` 而不是 `BoolFlag`：這是記憶體中的來源標記，從來不是 API payload 或 KV 欄位，讓它留在可序列化的詞彙之外正是重點。
+- `synthesized` 只在用戶端自己組出信封、而不是從回應解析時為真；Extension 以 `JSON.parse` 產生不出來的 symbol 標記證明這一點（合成在 `extension/src/api/unauthorizedResponse.ts`，標記定義在 `extension/src/api/synthesizedError.ts`）。任何原樣渲染 `rawMessage` 的畫面都必須要求它為真，否則自架或惡意後端可以回傳只有用戶端才會用的錯誤代碼，把任意文字畫進對話框。PWA 目前恆為 `false`：它沒有自行合成信封的路徑（Extension 的驗證復原節流是唯一一處），未來的 PWA 合成點直接沿用這道檢查。它刻意是一般的 `boolean` 而不是 `BoolFlag`：這是記憶體中的來源標記，從來不是 API payload 或 KV 欄位，讓它留在可序列化的詞彙之外正是重點。
 - `retryAfter` 在建構時檢查：自架後端可以送任何值，`NaN`、負數或小數會讓退避文案出現「NaN 秒」之類的內容。不是有限非負數的值直接丟棄（UI 改用固定文案），小數則無條件捨去。
 
 ### 借閱失敗文案只接受錯誤代碼
@@ -1325,7 +1325,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **token 只送給發行它的伺服器**（#456，`extension/src/api/tokenBinding.ts`）：記憶體裡的 token 記著發行它的伺服器（`TokenSession`）。storage 不另存配對：`moo:apiEndpoint`（沒有就是官方預設）就是 `moo:authToken` 的發行伺服器（`resolveStoredEndpoint`；值不是字串、空白或驗不過時回 `null`，不符合任何伺服器；官方預設的 URL 與 key 不存在等價）。比對發生在：
   - **開機**（`extension/src/dialog/applyStoredSession.ts`）：端點與 token 來自同一次讀取；端點不可用就兩個都不設，並從 storage 移除（token 先），client 留在官方預設且沒有 token。下一次 401 走復原加入，官方回 `FAMILY_NOT_FOUND`，回到引導畫面。
   - **送出**（`ApiTransport.doRequest`）：只有請求的伺服器就是發行者才加 `Authorization`。切端點後記憶體的舊 token 不會隨加入請求送出。
-  - **401**：請求送出後 client 已換伺服器，就直接回傳這個 401，不續期、不重送，新 token 不會被重送到舊伺服器。
+  - **401**：請求送出後 client 已換伺服器，就直接回傳這個 401，不續期、不重送，新 token 不會被重送到舊伺服器。伺服器沒換，但這個 client 的 token 在續期途中被換掉（例如變更 PIN）而使續期結果被丟棄時，會用新 token 重送一次。
   - **續期前**（`doRefreshToken`）：storage 的端點與 client 不符時什麼都不做：不送請求、不動 storage、不呼叫 callback。另一分頁換了伺服器時，這個分頁只會看到錯誤，重開 Dialog 就恢復。
   - **加入前**（`attemptJoinRecovery`）：refresh 失敗後的 `remove`、離開標記與冷卻讀取都有 await，所以緊接在送出前再比一次（`sessionStillOwnsStorage`），中間沒有其他 await。`userId`、`familyId` 用續期開頭讀到的值，不重讀。
   - **回應後**：refresh 與加入的回應回來都再比一次，不符就丟棄，成功與失敗都一樣：不寫 token、不清資料、不呼叫 callback。`ApiClient.setVerifyMethod` 的回應在切換後才回來時，同樣不採用輪替的 token，回傳的 `data` 也不帶它。
@@ -1353,7 +1353,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 - **何時不送背景加入**：重新驗證提示待處理中（理由同上：會重花 per-IP 的加入額度、清掉輸入），或使用者自己的離開家庭／刪除帳號請求仍在進行（#263，可能把他加回正在離開的家庭）。這兩種情況下前面那次 `/api/auth/refresh` 的 POST 仍照送：token 若已在別處修好並存進 storage，不需要加入就能恢復。
 - **收到 429 時**：沒帶驗證密碼的背景加入只可能撞到 Worker per-IP 敏感端點的 429（驗證嘗試上限只對猜錯計次，沒有密碼時不會觸發）。所以收到 `RATE_LIMITED` 就設定冷卻，讓之後每次開啟 Dialog 不再消耗共用的額度；而且**不**提示重新驗證：同一個 IP 帶著密碼重試，仍會被同一個 per-IP 時間窗擋下。
 - **冷卻上限**：後端給的任何 `retryAfter` 都截到 `MAX_RECOVERY_COOLDOWN_SECONDS`（1 小時）。官方 Worker 最多只要求 900 秒，所以這道上限只防惡意或有 bug 的自架後端把自動復原幾乎永久鎖住。它與 `extension/src/dialog/useRetryCountdown.ts` 的上限相同，但刻意各自定義：api 層不依賴 dialog 層（`VERIFICATION_ERROR_CODES` 與 `extension/src/dialog/useVerificationPrompt.ts` 的集合也是同樣的理由）。
-- **限流時回給畫面的錯誤**：背景復原被限流（剛收到 429 或冷卻中）時，`ApiTransport` 不回傳原本的英文 401，而是自己合成一個 `AUTH_REFRESH_RATE_LIMITED` 錯誤，附上在地化文案（`extension/src/api/rateLimitMessage.ts` 的 `buildRateLimitMessage`；知道冷卻期限時，附上無條件進位到分鐘的剩餘時間）。代碼刻意與伺服器的 `RATE_LIMITED` 不同，UI 才認得出這段專屬文案並原樣顯示，而不是換成通用的退避句子；`synthesizeError` 蓋上的 symbol 標記就是允許原樣顯示的憑據（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
+- **限流時回給畫面的錯誤**：背景復原被限流（剛收到 429 或冷卻中）時，`ApiTransport` 不回傳原本的英文 401，而是自己合成一個 `AUTH_REFRESH_RATE_LIMITED` 錯誤（`extension/src/api/unauthorizedResponse.ts`），附上在地化文案（`extension/src/api/rateLimitMessage.ts` 的 `buildRateLimitMessage`；知道冷卻期限時，附上無條件進位到分鐘的剩餘時間）。代碼刻意與伺服器的 `RATE_LIMITED` 不同，UI 才認得出這段專屬文案並原樣顯示，而不是換成通用的退避句子；`synthesizeError` 蓋上的 symbol 標記就是允許原樣顯示的憑據（見〈伺服器回傳資料的檢查〉的「錯誤物件」）。
 
 #### 背景 Service Worker 與訊息
 

@@ -8,10 +8,12 @@ import {
   type ReauthInfo,
   type RefreshOutcome,
 } from "./auth-refresh";
-import { buildRateLimitMessage } from "./rateLimitMessage";
-import { synthesizeError } from "./synthesizedError";
 import { TokenSession } from "./tokenBinding";
-import { AUTH_REFRESH_RATE_LIMITED, type ApiResponse } from "./types";
+import type { ApiResponse } from "./types";
+import {
+  rateLimitedFailure,
+  unauthorizedFailure,
+} from "./unauthorizedResponse";
 
 export interface TransportCallbacks {
   /** Read when a refresh starts. */
@@ -112,7 +114,13 @@ export class ApiTransport {
       const json = await readEnvelope<T>(response);
 
       if (response.status === 401 && !skipRefresh) {
-        return await this.recoverFromUnauthorized(server, url, init, json);
+        return await this.recoverFromUnauthorized(
+          server,
+          url,
+          init,
+          json,
+          token,
+        );
       }
 
       if (!response.ok) {
@@ -142,31 +150,24 @@ export class ApiTransport {
     url: string,
     init: RequestInit | undefined,
     json: ApiResponse<T>,
+    sentToken: string | null,
   ): Promise<ApiResponse<T>> {
-    const failed: ApiResponse<T> = {
-      error: json.error ?? {
-        code: "UNAUTHORIZED",
-        message: "Authentication failed",
-      },
-    };
+    const failed = unauthorizedFailure(json);
     if (server !== this.baseUrl) return failed;
 
     // Clear stale dedup promises — token is about to change
     this.inflightGets.clear();
     const outcome = await this.refreshToken();
-    if (outcome.refreshed && server === this.baseUrl) {
+    // A token rotated on this server (a PIN change) discards the refresh; this client still holds
+    // a valid token, so returning the old 401 would fail a request that can succeed.
+    const held = this.session.tokenFor(server);
+    const replaced = held !== null && held !== sentToken;
+    if (server === this.baseUrl && (outcome.refreshed || replaced)) {
       // Retry original request with the new token (skip refresh to avoid loop)
       return this.doRequest<T>(server, url, init, true);
     }
-    // Rate-limited recovery: a client-synthesized localized error, not the raw English 401 — its
-    // own code + marker let the UI show it verbatim. docs/architecture.md → 認證更新與冷卻.
     if (outcome.rateLimited) {
-      return {
-        error: synthesizeError(
-          AUTH_REFRESH_RATE_LIMITED,
-          buildRateLimitMessage(outcome.cooldownUntil),
-        ),
-      };
+      return rateLimitedFailure<T>(outcome.cooldownUntil);
     }
     // Refresh failed — return the original 401 error
     return failed;
