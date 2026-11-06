@@ -8,6 +8,7 @@ import {
   type AuthTokenEntry,
 } from "../kv/schema";
 import {
+  getAccountDeletedMark,
   getAuthTokenRecord,
   putAuthTokenIndex,
   putAuthTokenRecord,
@@ -68,7 +69,10 @@ async function slideListedToken(
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
  * past the 180-day cap (PIN / pattern / none accounts). A TTL gap (no record, empty
  * list) mints a new `derived` token: the presented one proved no secret here and its
- * origin is unknown. Every path that writes `token:{hash}` puts that token's
+ * origin is unknown. It refuses instead when this token has a `token:deleted:` mark (#462):
+ * it survived a failed account deletion, and a new token would leave it off the list,
+ * block the owner's retry and can stay listed after the owner re-registers. Only that
+ * branch pays the extra read. Every path that writes `token:{hash}` puts that token's
  * `tokenidx:` key first, with the same TTL (#431).
  */
 export async function renewPresentedAuthToken(
@@ -83,7 +87,8 @@ export async function renewPresentedAuthToken(
   );
   if (!current || presentedHash === null) return null;
   if (auth === null || auth.tokens.length === 0) {
-    return mintDerivedAuthToken(kv, userId, auth);
+    const mark = await getAccountDeletedMark(kv, presentedHash);
+    return mark === null ? mintDerivedAuthToken(kv, userId, auth) : null;
   }
   const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, presentedHash));
   if (!entry) return null;

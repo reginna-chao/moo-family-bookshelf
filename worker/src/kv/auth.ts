@@ -1,6 +1,11 @@
-/** Thin data access (#425, #431) for `auth:{userId}`, `token:{hash}`, `tokenidx:{userId}:{hash}` — one KV op each, no validation; normalization,
+/** Thin data access (#425, #431, #462) for `auth:{userId}`, `token:{hash}`, `tokenidx:{userId}:{hash}`, `token:deleted:{hash}` — one KV op each, no validation; normalization,
  *  list paging and fan-out live in services/authRecord.ts / authTokens.ts / authRenewal.ts. See docs/architecture.md → PWA 登入驗證機制. */
-import { kvKeys, type AuthTokenRecord, type StoredAuthRecord } from "./schema";
+import {
+  ACCOUNT_DELETED_MARK_TTL_SECONDS,
+  kvKeys,
+  type AuthTokenRecord,
+  type StoredAuthRecord,
+} from "./schema";
 
 /** `auth:{userId}` exactly as read: `tokens`, `secretAt` (both unvalidated). */
 export interface RawAuthRecord {
@@ -69,6 +74,25 @@ export async function deleteAuthTokenKey(
   keyTail: string,
 ): Promise<void> {
   await kv.delete(kvKeys.authToken(keyTail));
+}
+
+/** Write `token:deleted:{tokenHash}` (value = the deleted `userId`), TTL `ACCOUNT_DELETED_MARK_TTL_SECONDS`. */
+export async function putAccountDeletedMark(
+  kv: KVNamespace,
+  tokenHash: string,
+  userId: string,
+): Promise<void> {
+  await kv.put(kvKeys.accountDeleted(tokenHash), userId, {
+    expirationTtl: ACCOUNT_DELETED_MARK_TTL_SECONDS,
+  });
+}
+
+/** Read `token:deleted:{tokenHash}`: the userId this token deleted, `null` when absent or expired. */
+export async function getAccountDeletedMark(
+  kv: KVNamespace,
+  tokenHash: string,
+): Promise<string | null> {
+  return kv.get(kvKeys.accountDeleted(tokenHash));
 }
 
 /** Write `tokenidx:{userId}:{tokenHash}` (value `"1"`) with the TTL of the `token:{tokenHash}` put it precedes (#431). */

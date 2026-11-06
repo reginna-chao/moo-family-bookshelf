@@ -110,7 +110,7 @@ export async function listRevocableIndexHashes(
 }
 
 /** Fail-open: a leftover index names a `token:` key that is already gone — harmless. No ids logged. */
-async function deleteIndexKeys(
+export async function deleteIndexKeys(
   kv: KVNamespace,
   userId: string,
   hashes: readonly string[],
