@@ -77,6 +77,8 @@ export function useFamilyDataRefreshBookshelf({
 }: RefreshBookshelfOptions): () => Promise<void> {
   const { setBookshelfMembers, setBookshelfState, setBookshelfError } = setters;
   return useCallback(async () => {
+    // Unmounted: send nothing, the client may already point at another server (#464).
+    if (!mountedRef.current) return;
     setBookshelfState((prev) => (prev === "ready" ? prev : "loading"));
     setBookshelfError("");
     try {

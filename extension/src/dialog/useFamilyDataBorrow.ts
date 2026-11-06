@@ -57,6 +57,8 @@ export function useFamilyDataBorrowActions({
     setters;
 
   const refreshBorrowRequests = useCallback(async () => {
+    // Unmounted: send nothing, the client may already point at another server (#464).
+    if (!mountedRef.current) return;
     setBorrowRequestsState((prev) =>
       prev === "loaded" ? "loaded" : "loading",
     );
