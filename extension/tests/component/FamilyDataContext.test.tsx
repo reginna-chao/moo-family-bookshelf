@@ -2,6 +2,8 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useEffect } from "react";
 import { FamilyDataProvider, useFamilyData } from "@/dialog/FamilyDataContext";
+import { useBorrowAction, type BorrowAction } from "@/dialog/useBorrowAction";
+import type { FamilyShelfBook } from "@/dialog/useFamilyShelfBooks";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient, BookEntry, FamilyBookshelf } from "@/api/client";
 import {
@@ -672,5 +674,102 @@ describe("FamilyDataProvider store-page chip index", () => {
 
     expect(chrome.storage.local.get).not.toHaveBeenCalledWith(INDEX_GATE_KEYS);
     expect(indexWrites()).toHaveLength(0);
+  });
+});
+
+/** #464: once the family tree is torn down the client may already point at another server, so a
+ *  refresh that an `await` resumes after the provider unmounted must send nothing. */
+describe("FamilyDataProvider after unmount", () => {
+  const BOOK: FamilyShelfBook = {
+    bookId: "210000000000001",
+    title: "書",
+    author: "作者",
+    isbn: "",
+    coverUrl: "",
+    readmooUrl: "",
+    category: "",
+    isShared: BoolFlag.TRUE,
+    memberName: "Alice",
+    isUpdated: BoolFlag.FALSE,
+    ownerId: "user-2",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
+  });
+
+  afterEach(async () => {
+    await act(async () => {});
+  });
+
+  it("sends no refresh request when a borrow or member action resumes after the unmount", async () => {
+    let answerCreate!: () => void;
+    const createBorrowRequest = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          answerCreate = resolve;
+        }),
+    );
+    const apiClient = createMockApiClient({
+      createBorrowRequest:
+        createBorrowRequest as unknown as ApiClient["createBorrowRequest"],
+    });
+
+    let borrow!: BorrowAction["borrow"];
+    let refreshMembers!: () => Promise<void>;
+    let refreshBookshelf!: () => Promise<void>;
+    function ActionProbe() {
+      const family = useFamilyData();
+      const action = useBorrowAction({
+        apiClient,
+        familyId: "fam-1",
+        userId: "user-1",
+        borrowRequests: family.borrowRequests,
+        refreshBorrowRequests: family.refreshBorrowRequests,
+      });
+      borrow = action.borrow;
+      refreshMembers = family.refreshMembers;
+      refreshBookshelf = family.refreshBookshelf;
+      return (
+        <div>
+          <span data-testid="members-state">{family.membersState}</span>
+          <span data-testid="bookshelf-state">{family.bookshelfState}</span>
+          <span data-testid="borrow-state">{family.borrowRequestsState}</span>
+        </div>
+      );
+    }
+
+    const { unmount } = render(
+      <FamilyDataProvider
+        familyId="fam-1"
+        userId="user-1"
+        apiClient={apiClient}
+      >
+        <ActionProbe />
+      </FamilyDataProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("members-state")).toHaveTextContent("ready");
+      expect(screen.getByTestId("bookshelf-state")).toHaveTextContent("ready");
+      expect(screen.getByTestId("borrow-state")).toHaveTextContent("loaded");
+    });
+    const refreshesSent = () => ({
+      borrow: vi.mocked(apiClient.listBorrowRequests).mock.calls.length,
+      members: vi.mocked(apiClient.getFamilyMembers).mock.calls.length,
+      bookshelf: vi.mocked(apiClient.getFamilyBookshelf).mock.calls.length,
+    });
+    expect(refreshesSent()).toEqual({ borrow: 1, members: 1, bookshelf: 1 });
+    vi.clearAllMocks();
+
+    const borrowing = borrow(BOOK);
+    unmount();
+    answerCreate();
+    await borrowing;
+    await refreshMembers();
+    await refreshBookshelf();
+
+    expect(createBorrowRequest).toHaveBeenCalledTimes(1);
+    expect(refreshesSent()).toEqual({ borrow: 0, members: 0, bookshelf: 0 });
   });
 });

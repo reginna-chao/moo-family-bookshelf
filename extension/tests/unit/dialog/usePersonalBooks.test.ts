@@ -142,6 +142,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     patchPersonalBooks: vi
       .fn()
       .mockResolvedValue({ data: { ok: true, applied: 0 } }),
+    getEndpoint: vi.fn(() => "https://test.workers.dev"),
     ...overrides,
   } as unknown as ApiClient;
 }
