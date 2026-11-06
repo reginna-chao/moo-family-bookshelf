@@ -422,6 +422,7 @@ const READ_PATHS: {
     trail: () => [
       kvKeys.publicShelf(TOKEN),
       kvKeys.publicShelves(USER),
+      kvKeys.accountDeleting(USER),
       kvKeys.user(USER),
     ],
   },
@@ -436,6 +437,7 @@ const READ_PATHS: {
     trail: () => [
       kvKeys.publicShelf(TOKEN),
       kvKeys.publicShelves(USER),
+      kvKeys.accountDeleting(USER),
       kvKeys.user(USER),
     ],
   },
@@ -451,6 +453,7 @@ const READ_PATHS: {
       kvKeys.publicShelf(TOKEN),
       kvKeys.publicShelves(USER),
       kvKeys.user(USER),
+      kvKeys.accountDeleting(USER),
     ],
   },
 ];

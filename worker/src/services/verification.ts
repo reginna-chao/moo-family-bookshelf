@@ -22,7 +22,8 @@ import {
   type PerUserRateLimitReading,
 } from "../middleware/rateLimit";
 import { jsonError, type ErrorBody } from "../utils/errors";
-import { putVerifyRecord } from "../kv/verify";
+import { getAccountDeletingMark } from "../kv/accountDeleting";
+import { deleteVerifyRecord, putVerifyRecord } from "../kv/verify";
 import {
   hashSecret,
   hashSecretWithPepper,
@@ -712,6 +713,10 @@ export async function upgradeVerifyRecordHash(
       version: VERIFY_HASH_VERSION_PEPPER,
       pepperId,
     });
+    // A deletion that started while this ran must not get the old secret back (#468).
+    if ((await getAccountDeletingMark(env.KV, userId)) !== null) {
+      await deleteVerifyRecord(env.KV, userId);
+    }
   } catch {
     // Event name only: a KV error message may echo the key, which carries the userId (#357).
     console.error("VERIFY_HASH_UPGRADE_FAILED");

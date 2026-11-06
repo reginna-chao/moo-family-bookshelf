@@ -214,6 +214,7 @@ describe("PUT /api/user/:id/books — malformed expectedLastUpdated", () => {
     expect(ops.getKeys()).toEqual([
       await authTokenKey(token),
       PUT_BOOKS_COUNTER,
+      kvKeys.accountDeleting(USER1),
     ]);
     expect(ops.writeTrail()).toEqual([`put ${PUT_BOOKS_COUNTER}`]);
   });
@@ -288,6 +289,7 @@ describe("PUT /api/user/:id/books — precondition mismatch", () => {
       kvKeys.user(USER1),
       kvKeys.member(USER1),
       kvKeys.publicShelves(USER1),
+      kvKeys.accountDeleting(USER1),
     ]);
     expect(ops.writeTrail()).toEqual([`put ${PUT_BOOKS_COUNTER}`]);
     expect(await kv.get(kvKeys.publicShelf(SHARE_TOKEN))).toBe(snapshotBefore);

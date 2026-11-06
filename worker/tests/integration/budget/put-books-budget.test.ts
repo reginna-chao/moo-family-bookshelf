@@ -31,6 +31,8 @@
  *   middleware/rateLimit.ts. The key stays on the AUTHENTICATED caller, never
  *   on a body/path target id (security-ux Invariant 6).
  * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:deleting:{callerId}` — `accountDeletionGuard`'s one post-handler read on every
+ *   authenticated non-GET (#468). Real cost: it is how a new route is covered with nothing to add.
  * - `user:{userId}` (get `getUserBooksRecord`, put `putUserBooksRecord`),
  *   `member:{userId}` (`getMemberFamilyId`) and `publicshelves:{userId}`
  *   (`getPublicShelves`) — three parallel reads plus the
@@ -166,7 +168,7 @@ afterEach(() => {
 });
 
 describe("KV budget: PUT /api/user/:id/books", () => {
-  it("performs exactly 6 KV reads and 2 KV writes for a family member with no public shelves", async () => {
+  it("performs exactly 7 KV reads and 2 KV writes for a family member with no public shelves", async () => {
     const token = await seedMemberWithBooks();
 
     const ops = watchKvOps(kv);
@@ -186,6 +188,8 @@ describe("KV budget: PUT /api/user/:id/books", () => {
       kvKeys.publicShelves(USER1),
       // resolveDisplayName — only paid by a caller in a family
       kvKeys.family(FAMILY_ID),
+      // accountDeletionGuard, after the handler
+      kvKeys.accountDeleting(USER1),
     ]);
 
     expect(ops.putKeys()).toEqual([

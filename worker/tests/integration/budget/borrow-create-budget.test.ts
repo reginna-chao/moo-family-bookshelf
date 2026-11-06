@@ -36,6 +36,8 @@
  *   (`BORROW_MAX_PENDING_PER_BORROWER`, routes/borrow.ts) — a second
  *   bound added on top of it, at no extra KV cost.
  * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:deleting:{callerId}` — `accountDeletionGuard`'s one post-handler read on every
+ *   authenticated non-GET (#468). Real cost: it is how a new route is covered with nothing to add.
  * - `family:{familyId}` (routes/borrow.ts, `getFamilyRecord`) and
  *   `borrows:family:{familyId}` (get `readBorrowIndex`, put `writeBorrowIndex`) —
  *   real cost of creating the request.
@@ -203,7 +205,7 @@ afterEach(() => {
 });
 
 describe("KV budget: POST /api/family/:id/borrow", () => {
-  it("performs exactly 5 KV reads and 2 KV writes against a 2-entry borrow index", async () => {
+  it("performs exactly 6 KV reads and 2 KV writes against a 2-entry borrow index", async () => {
     const token = await seedFamilyWithBorrowIndex();
 
     const ops = watchKvOps(kv);
@@ -228,6 +230,8 @@ describe("KV budget: POST /api/family/:id/borrow", () => {
       kvKeys.borrowsByFamily(FAMILY_ID),
       // No `borrow:{existingRequestId}` reads (#160 item 2): a returning fan-out
       // would add two here — the seed holds a 2-entry index.
+      // accountDeletionGuard, after the handler
+      kvKeys.accountDeleting(USER1),
     ]);
 
     // Pointer first (`writeBorrowPointer`), then the index (`writeBorrowIndex`): the recoverable half.

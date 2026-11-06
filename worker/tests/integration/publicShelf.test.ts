@@ -215,7 +215,7 @@ import { PUBLIC_SHELF_WRITE_LIMIT } from "../../src/routes/publicShelf";
  * the guard resolves the shelf list from `publicshelves:{id}` alone and never
  * falls back to the books record; `user:{id}` is read once AFTER the guard, for
  * the current-sharing filter (#461). The guard now runs for a time-limited
- * snapshot too, and the pinned three-key read trail is what the hit costs. The
+ * snapshot too, and the pinned four-key read trail (with the deletion mark, #468) is what the hit costs. The
  * old guard skipped time-limited snapshots entirely; it now validates every surviving
  * one: with the un-migrated owner's list seeded and LIVE, the answer is still
  * 200 and only the read trail shows the guard ran. A deliberately pinned
@@ -2174,11 +2174,12 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
     const json = (await res.json()) as Json;
     expect(json.data.title).toBe("我的公開書櫃");
     expect(json.data.expiresAt).toBe(snapshot.expiresAt);
-    // Migrated owner: the guard reads `publicshelves:{id}` alone, the filter then `user:{id}`.
+    // Migrated owner: the guard reads `publicshelves:{id}` alone, then the deletion mark, the filter `user:{id}`.
     // See the header → "Liveness, migrated and time-limited".
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(shareToken),
       kvKeys.publicShelves(USER_ID),
+      kvKeys.accountDeleting(USER_ID),
       kvKeys.user(USER_ID),
     ]);
   });
@@ -2197,15 +2198,16 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
 
     expect(res.status).toBe(200);
     // Pointer key first, then `user:{id}`, which here resolves the list AND feeds
-    // the filter; a first public-shelf write only moves that read after the guard.
+    // the filter; a first public-shelf write only moves that read after the guard. The deletion mark follows it.
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(TIMED_TOKEN),
       kvKeys.publicShelves(USER_ID),
       kvKeys.user(USER_ID),
+      kvKeys.accountDeleting(USER_ID),
     ]);
   });
 
-  it("pays exactly two extra reads for an un-migrated owner's permanent shelf", async () => {
+  it("pays exactly three extra reads for an un-migrated owner's permanent shelf", async () => {
     await seedSnapshot(PERM_TOKEN, null);
     await seedUserWithShelves(USER_ID, [shelfEntry(SHELF_ID, PERM_TOKEN)]);
     const ops = watchKvOps(kv);
@@ -2217,6 +2219,7 @@ describe("GET /api/public/:shareToken — snapshot liveness (legacy owner)", () 
       kvKeys.publicShelf(PERM_TOKEN),
       kvKeys.publicShelves(USER_ID),
       kvKeys.user(USER_ID),
+      kvKeys.accountDeleting(USER_ID),
     ]);
     expect(ops.putKeys()).toEqual([]);
     expect(ops.deleteKeys()).toEqual([]);
