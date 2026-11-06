@@ -5,6 +5,7 @@ import { expect } from "vitest";
 import {
   kvKeys,
   TOKEN_TTL_SECONDS,
+  type BoolFlag,
   type AuthTokenEntry,
   type AuthTokenRecord,
   type StoredAuthRecord,
@@ -38,6 +39,8 @@ export interface SeedAuthTokenOptions {
   appendTo?: boolean;
   /** `auth:{userId}.secretAt` to write (#378) — the PIN/pattern rotation stamp a stale-record check compares. */
   secretAt?: number;
+  /** Mark the `auth:` list entry (`AuthTokenEntry.derived`); absent ⇒ unmarked. See `seedAuthToken`. */
+  derived?: BoolFlag;
 }
 
 /**
@@ -74,6 +77,14 @@ export interface SeedAuthTokenOptions {
  * before the index existed — revoke-all reaches it through the `auth:` list
  * only. A test about the index mints through `mintAuthToken()`.
  *
+ * `opts.derived` writes the mark on the list entry only, the one place it
+ * lives: `token:{hash}` has the same shape either way. A seed lets a test fill a
+ * list with exact marks and ages, which production cannot reach in one step (a
+ * `derived` mint never evicts an unmarked entry, and a secret-proven one might).
+ * Omitted, the entry carries no `derived` key at all, the shape of a record
+ * written before the field existed, which reads as unmarked. A test about how a
+ * token GETS the mark goes through the real redeem or `mintDerivedAuthToken()`.
+ *
  * Tests that deliberately seed only ONE half (only `token:{hash}`, or an
  * `auth:` record with no matching token key) must keep doing that inline —
  * that asymmetry is the thing under test, not a case for this helper.
@@ -94,7 +105,11 @@ export async function seedAuthToken(
   const existing = opts?.appendTo
     ? await kv.get<StoredAuthRecord>(kvKeys.auth(userId), "json")
     : null;
-  const entry: AuthTokenEntry = { hash, createdAt };
+  const entry: AuthTokenEntry = {
+    hash,
+    createdAt,
+    ...(opts?.derived !== undefined && { derived: opts.derived }),
+  };
   const record: StoredAuthRecord = {
     ...existing,
     tokens: [...(existing?.tokens ?? []), entry],

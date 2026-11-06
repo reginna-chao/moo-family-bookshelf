@@ -9,10 +9,11 @@ import { kvKeys } from "../../src/kv/schema";
 import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
 import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
 import {
-  VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_MAX,
   VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
  * Current-secret step-up on `DELETE /api/user/:id` (#396).
@@ -128,22 +129,22 @@ async function accountState(token: string): Promise<(string | null)[]> {
   );
 }
 
-const FAIL_KEY = kvKeys.verifyFail(USER_ID, CALLER_IP);
 const OVER_LONG = "1".repeat(VERIFY_SECRET_MAX_LENGTH + 1);
 
 function secretBody(currentSecret: unknown): string {
   return JSON.stringify({ currentSecret });
 }
 
-/** The account's `verify-stepup` guess-budget key, via the production builder. */
-async function attemptCounterKey(): Promise<string> {
+/** The two keys a wrong guess with `token` charges: its `verify-stepup` budget and its caller streak. */
+async function guessCounterKeys(token: string): Promise<string[]> {
+  const bucket = await hashAuthToken(token);
   const reading = await peekPerUserRateLimit(kv, {
-    userId: USER_ID,
+    userId: `${USER_ID}:${bucket}`,
     scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
-    max: VERIFY_ATTEMPT_MAX,
+    max: VERIFY_STEP_UP_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
-  return reading.key;
+  return [reading.key, kvKeys.verifyFail(USER_ID, `${CALLER_IP}:${bucket}`)];
 }
 
 async function errorCode(res: Response): Promise<string> {
@@ -184,10 +185,9 @@ describe.each(FAMILY_SHAPES)(
       async (_label, body, status, code) => {
         const token = await setPin(PIN);
         await seed();
-        const guessCounters = new Set([
-          `put ${await attemptCounterKey()}`,
-          `put ${FAIL_KEY}`,
-        ]);
+        const guessCounters = new Set(
+          (await guessCounterKeys(token)).map((key) => `put ${key}`),
+        );
         const before = await accountState(token);
         const ops = watchKvOps(kv);
 
@@ -289,7 +289,10 @@ describe("DELETE /api/user/:id — the rest of the step-up contract", () => {
       const res = await deleteAccount(token, secretBody(WRONG_PIN));
 
       expect(res.status).toBe(200);
-      expect(await kv.get(kvKeys.verifyFail(USER_ID, CALLER_IP))).toBeNull();
+      const streaks = await kv.list({
+        prefix: kvKeys.verifyFail(USER_ID, ""),
+      });
+      expect(streaks.keys).toEqual([]);
     },
   );
 

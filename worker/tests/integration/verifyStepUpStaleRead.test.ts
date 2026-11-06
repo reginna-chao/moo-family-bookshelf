@@ -144,7 +144,8 @@ describe("PUT /api/user/:id/verify — stale verify read after a PIN rotation", 
       expect(res.status).toBe(403);
       expect(await errorCode(res)).toBe("VERIFICATION_REQUIRED");
       expect(ops.writeTrail()).toEqual([]);
-      expect(await kv.get(kvKeys.verifyFail(USER_ID, CALLER_IP))).toBeNull();
+      const streaks = await kv.list({ prefix: kvKeys.verifyFail(USER_ID, "") });
+      expect(streaks.keys).toEqual([]);
       expect(await accountState(token)).toEqual(before);
     },
   );
