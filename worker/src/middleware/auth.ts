@@ -17,6 +17,7 @@ import { ACCOUNT_DELETED_ERROR_CODE } from "moo-family-bookshelf-shared/api/acco
 declare module "hono" {
   interface ContextVariableMap {
     authUserId: string | null; // null = no auth header (fallback mode)
+    authTokenCreatedAt: string | null; // the bearer's `createdAt`; null on public routes or when unreadable
   }
 }
 
@@ -27,15 +28,20 @@ function parseBearerToken(authHeader: string | undefined): string | null {
   return match[1];
 }
 
-/** userId of a bearer from `token:{hash}`; `null` when absent or malformed. */
-async function resolveTokenUserId(
+/** userId and `createdAt` of a bearer from `token:{hash}`; `null` when absent or its userId is malformed. */
+async function resolveBearer(
   kv: KVNamespace,
   tokenHash: string,
-): Promise<string | null> {
+): Promise<{ userId: string; createdAt: string | null } | null> {
   const record = await getAuthTokenRecord(kv, tokenHash);
   if (record === null) return null;
   const userId: unknown = record.userId;
-  return typeof userId === "string" && userId !== "" ? userId : null;
+  if (typeof userId !== "string" || userId === "") return null;
+  const createdAt: unknown = record.createdAt;
+  return {
+    userId,
+    createdAt: typeof createdAt === "string" ? createdAt : null,
+  };
 }
 
 /** A dead bearer retrying the deletion it already finished (#462); only `DELETE /api/user/:id` pays for these reads.
@@ -65,6 +71,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
   async (c, next) => {
     if (isPublicRoute(c.req.method, c.req.path)) {
       c.set("authUserId", null);
+      c.set("authTokenCreatedAt", null);
       await next();
       return;
     }
@@ -81,8 +88,8 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
     }
 
     const tokenHash = await hashAuthToken(token);
-    const userId = await resolveTokenUserId(c.env.KV, tokenHash);
-    if (!userId) {
+    const bearer = await resolveBearer(c.env.KV, tokenHash);
+    if (!bearer) {
       const deleted = await isDeletedAccountBearer(
         c.env.KV,
         c.req.method,
@@ -94,7 +101,8 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
         : jsonError(c, 401, "UNAUTHORIZED", "Invalid or expired token");
     }
 
-    c.set("authUserId", userId);
+    c.set("authUserId", bearer.userId);
+    c.set("authTokenCreatedAt", bearer.createdAt);
     await next();
   },
 );
@@ -105,6 +113,11 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(
  */
 export function getAuthenticatedUserId(c: Context): string | null {
   return c.get("authUserId") as string | null;
+}
+
+/** The presented token's `createdAt` as `authMiddleware` read it, before the handler could revoke the token. */
+export function getAuthTokenCreatedAt(c: Context): string | null {
+  return c.get("authTokenCreatedAt") as string | null;
 }
 
 /** The bearer token the request presented (already validated by `authMiddleware` on protected routes). */

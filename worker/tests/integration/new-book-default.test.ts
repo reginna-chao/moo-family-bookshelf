@@ -307,7 +307,7 @@ describe("PUT /api/user/:id/new-book-default — accepted save", () => {
   });
 
   // See the header → "What a save must NOT do".
-  it("writes only newbookdefault:{id} and reads nothing beyond the auth token", async () => {
+  it("writes only newbookdefault:{id} and reads nothing beyond the auth token and the deletion mark", async () => {
     const token = await seedAuthToken(kv, USER1);
     const seeded = await seedUser({
       ...seededRecord(),
@@ -326,7 +326,10 @@ describe("PUT /api/user/:id/new-book-default — accepted save", () => {
     const trail = ops.writeTrail();
 
     expect(trail).toEqual([`put ${kvKeys.newBookDefault(USER1)}`]);
-    expect(readKeys).toEqual([await authTokenKey(token)]);
+    expect(readKeys).toEqual([
+      await authTokenKey(token),
+      kvKeys.accountDeleting(USER1),
+    ]);
     expect(await kv.get(kvKeys.publicShelf(LIVE_TOKEN))).toBeNull();
     expect(await kv.get(kvKeys.publicShelf(LEGACY_TOKEN))).toBeNull();
     expect(await rawUser()).toBe(JSON.stringify(seeded));

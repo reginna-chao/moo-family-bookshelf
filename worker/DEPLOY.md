@@ -392,6 +392,71 @@ pnpm exec wrangler kv key get "publicshelves:<userId>" --namespace-id <正式 na
 
 處理完之後，請刪除那筆回報和你寄出的信的備份。
 
+### 帳號刪除的定時清理
+
+正式環境的 Worker 每 30 分鐘清一次正在刪除的帳號，由 `wrangler.toml` 的這段排程觸發：
+
+```toml
+[env.production.triggers]
+crons = ["*/30 * * * *"]
+```
+
+每次刪除開始時，Worker 會寫一把 `token:deleting:<userId>`，最長留 24 小時。排程看到這把 key 就清一次這個帳號的資料，滿 1 小時又沒有出錯才刪掉它。它做兩件事：把刪除途中失敗的帳號刪完，也把刪除之後才落地的舊請求寫回的資料清掉。所以使用者看到移除失敗，就算沒有再按一次，帳號之後也會刪完；這時才改變主意已經來不及。
+
+除了排程，只有同一個帳號真的重新建立家庭或手動加入成功時會刪掉這把 key，而且是在發登入之前才刪。這把 key 未滿 2 分鐘時，這兩個動作都回 `409 ACCOUNT_DELETION_IN_PROGRESS`，請他稍後再試。
+
+**如果你的 `wrangler.toml` 是自己維護的，更新時要手動加上這段，再 `pnpm deploy`。** 沒有排程時，只剩請求結束時的檢查，以及 24 小時內公開連結讀到這把 key 就回「找不到」。24 小時一到，還留在 KV 的資料就不會再被清；刪除途中失敗的帳號也要等本人再按一次移除才會刪完。
+
+怎麼確認：在 Cloudflare 儀表板打開這個 Worker 的設定，Cron 觸發條件要有 `*/30 * * * *`。再列出目前的標記：
+
+```bash
+pnpm exec wrangler kv key list --prefix "token:deleting:" --namespace-id <正式 namespace ID> --remote
+```
+
+平常是空的，或只有最近約 1.5 小時內刪除的帳號：標記滿 60 分鐘之後的第一次排程才會刪掉它，排程每 30 分鐘跑一次。同時有超過 10 個標記，或一個帳號有超過 10 把 token 時，會再久一點。
+
+要看一筆標記多久了，讀它的 `startedAt`（epoch 毫秒）。這行只印出這個欄位，不印標記裡的公開連結 token：
+
+```bash
+pnpm exec wrangler kv key get "token:deleting:<userId>" --namespace-id <正式 namespace ID> --remote | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(new Date(JSON.parse(s).startedAt).toISOString())}catch{console.log('not found')}})"
+```
+
+有一筆超過約 1.5 小時還在，而且標記不超過 10 個，就是排程沒有在跑，或清理一直失敗：到 Workers Logs 找 `ACCOUNT_DELETION_SWEEP_FAILED`。
+
+排程的成本：沒有標記時每次 1 次列舉（每天 48 次，免費方案每天 1,000 次的 4.8%）；每個沒有殘留的帳號多 9 次讀取、1 次列舉，不花刪除額度，只有刪掉標記的那一次多 1 次刪除。dev 環境沒有掛排程，因為 KV 列舉額度是整個 Cloudflare 帳號共用的。
+
+**手動處理時先看這把 key。** 上面「情況一」「情況二」與「使用者忘記登入驗證時」的步驟都不變，`auth:` 仍要排在 `verify:` 之前。差別是 `token:deleting:<userId>` 還在時，要等到 `key list` 看不到這把 key（正常約 1.5 小時內）才動手：這把 key 還在，每次排程都會刪 `verify:`，手動寫入的臨時 PIN 會被一起清掉。
+
+**更新之前就已被寫回的資料，排程不會處理。** 那些帳號沒有標記，而已刪除的帳號沒有紀錄可列舉，所以沒有自動清查。有人回報已刪除帳號的公開連結還打得開時，先照「帳號刪除卡住時」開頭「先確認是本人，再讀 KV」那段做回信確認，只做這件事：那一節後面讀 KV 的指令會印出書單和公開連結的 token，這裡不要跑。確認之後再依序檢查，任何一步不符就停下來，不要刪任何 key：
+
+1. 照「使用者忘記登入驗證時」的第 1 步，從回報者的 Email 算出 userId。
+
+2. 確認這個連結是他的。連結可以轉傳，回報的人手上有連結，不代表連結屬於他。在 `worker/` 目錄讀這個連結的擁有者，這行只印出 `userId`，不印書單，印出的值要和第 1 步算出來的完全相同。這行和第 1 步的 Email 一樣會把 `public:<token>` 留在終端機的歷史紀錄裡，而且這一步比對不符而停下時，那個連結仍然有效，做完可自行清除：
+
+   ```bash
+   pnpm exec wrangler kv key get "public:<連結裡的 token>" --namespace-id <正式 namespace ID> --remote | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).userId)}catch{console.log('not found')}})"
+   ```
+
+3. 確認這個帳號真的刪除了。先問回報的人是不是真的按過「移除帳戶」：只是離開家庭的人同樣沒有 `auth:` 和 `member:`，沒設 PIN 的帳號除了問他，沒有別的方法分辨。這題一定要問，他沒按過就停下來，否則接著刪 `user:` 會弄丟他的開放設定。
+
+   他確認按過之後，再讀這三把 key。這幾行只印出 `present`、`absent` 或 `read failed`，不印內容（`auth:` 存著 token 的雜湊，`member:` 是 familyId）；三把都要印 `absent`，印 `read failed` 就重跑（只讀不寫；剛發生過寫入時，等約 60 秒再讀）：
+
+   ```bash
+   pnpm exec wrangler kv key get "verify:<userId>" --namespace-id <正式 namespace ID> --remote | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{s=s.trim();console.log(s==='Value not found'?'absent':s?'present':'read failed')})"
+   pnpm exec wrangler kv key get "auth:<userId>" --namespace-id <正式 namespace ID> --remote | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{s=s.trim();console.log(s==='Value not found'?'absent':s?'present':'read failed')})"
+   pnpm exec wrangler kv key get "member:<userId>" --namespace-id <正式 namespace ID> --remote | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{s=s.trim();console.log(s==='Value not found'?'absent':s?'present':'read failed')})"
+   ```
+
+   **有任何一把是 `present`，這就是還在使用的帳號，停下來，不要刪 `user:` 或 `publicshelves:`。** 請他登入後自己重設或刪除這個連結，或在設定裡再按一次移除。
+
+4. 兩項都符合，才依序刪除：
+
+   ```bash
+   pnpm exec wrangler kv key delete "public:<連結裡的 token>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key delete "user:<userId>" --namespace-id <正式 namespace ID> --remote
+   pnpm exec wrangler kv key delete "publicshelves:<userId>" --namespace-id <正式 namespace ID> --remote
+   ```
+
 ## 更新
 
 ```bash

@@ -55,7 +55,7 @@ function indexKeyName(key: unknown): string | null {
  * `HEX_64` are returned — anything else is skipped, so a stray key can never steer a
  * `token:` delete.
  */
-async function listIndexHashesUpTo(
+export async function listIndexHashesUpTo(
   kv: KVNamespace,
   userId: string,
   max: number,

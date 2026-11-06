@@ -13,8 +13,10 @@
  *   RECOVERY_NOT_MEMBER, with no KV op of its own, no write, no time limit.
  * - A listed member's `recovery: 1` reconnect, and every manual join
  *   (`recovery` absent or 0), behave exactly as before.
- * - The departure paths write nothing new: their write trails are pinned
- *   exactly, so a marker-style key reappearing there fails loudly.
+ * - A leave and a kick write nothing extra, and an account deletion writes one
+ *   extra key, `token:deleting:{uid}` (#468), which serves in-flight writes and
+ *   not this rule: a silent recovery join never clears it. Their write trails are
+ *   pinned exactly, so any other marker-style key there fails loudly.
  *
  * Driven end-to-end over `app.request` against the Hono app + `createMockKV()`.
  * The mock never expires keys, so "the tombstone expired" is a delete, and
@@ -366,9 +368,11 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         `delete ${kvKeys.otp(USER2)}`,
         `delete ${kvKeys.member(USER2)}`,
         `put ${mark}`,
+        `put ${kvKeys.accountDeleting(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
+    expect(trail[1]).toBe(`put ${kvKeys.accountDeleting(USER2)}`);
     expectRevokeIndexOrder(trail, USER2);
     expect(await allKeys()).toEqual(
       asSet([
@@ -376,6 +380,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
         kvKeys.member(USER1),
         kvKeys.auth(USER1),
         mark,
+        kvKeys.accountDeleting(USER2),
         await authTokenKey(ownerToken),
         await authTokenIndexKey(USER1, ownerToken),
       ]),

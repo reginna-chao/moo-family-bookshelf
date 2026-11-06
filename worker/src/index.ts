@@ -5,6 +5,8 @@ import { cors } from "hono/cors";
 import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
+import { accountDeletionGuard } from "./middleware/accountDeletionGuard";
+import { sweepDeletedAccounts } from "./services/accountDeletionSweep";
 import { userRoutes } from "./routes/user";
 import { userNewBookDefaultRoutes } from "./routes/userNewBookDefault";
 import { familyRoutes } from "./routes/family";
@@ -114,6 +116,9 @@ app.use("/api/*", rateLimit);
 // Auth middleware (optional Bearer token)
 app.use("/api/*", authMiddleware);
 
+// Post-write check of an account deletion (#468): inside withKvOpCounting, needs authMiddleware's context values.
+app.use("/api/*", accountDeletionGuard);
+
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 
@@ -177,4 +182,9 @@ app.onError((err, c) => {
   return jsonError(c, 500, "INTERNAL_ERROR", "Internal server error");
 });
 
-export default app;
+// Cron trigger (production only, worker/wrangler.toml): finishes interrupted or raced account deletions.
+const scheduled = (controller: ScheduledController, env: Env) =>
+  sweepDeletedAccounts(env.KV, controller.scheduledTime);
+
+// Object.assign keeps `app.request` and its type for the tests.
+export default Object.assign(app, { scheduled });

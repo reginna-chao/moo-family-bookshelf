@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
+import { holdNextWrite, watchKvOps } from "../helpers/kvOps";
+import { passRecreateCooldown } from "../helpers/recreateCooldown";
 import { ALICE } from "../helpers/ids";
 import {
   BoolFlag,
   kvKeys,
+  TOKEN_RENEW_SKIP_WINDOW_MS,
+  type AuthTokenRecord,
   type BookEntry,
   type PublicShelf,
   type UserBooksRecord,
@@ -13,36 +17,34 @@ import { writePublicSnapshot } from "../../src/services/publicShelf";
 import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
- * Reproduction of #468: a write already in flight lands after `DELETE /api/user/:id`
- * has answered 200.
- *
- * THESE CASES PIN TODAY'S BEHAVIOUR OF A KNOWN DEFECT. What they assert is NOT the
- * desired behaviour: an account that was deleted should not get its books or a
- * readable public link back. They exist so the fix for #468 has a failing starting
- * point. When #468 is fixed, invert them; do not read them as a contract.
+ * #468: a write already in flight lands after `DELETE /api/user/:id` has answered 200,
+ * and must not bring the account's data or a readable public link back.
  *
  * THE CONTROL. `holdNextWrite` stops the first matching write just before it reaches
  * KV. Each case starts the write request, waits until it is parked on that key, runs
  * the whole deletion, proves it answered 200 with the held key absent, and only then
  * releases the write. The request passed auth and did its reads before the deletion
- * began, which is what no check at the route's entry could stop.
+ * began, which is what no check at the route's entry could stop; a held write that was
+ * never reached fails the case at once, so a reordered handler cannot pass vacuously.
  *
- * WHY THE HOLD POINT DIFFERS BY CASE. A public-shelf write puts `publicshelves:` and
- * then `public:{token}`: held at the first put, both land after the deletion, and
- * the read answers 404 only because it also needs the owner's `user:` record (#461);
- * held at the second, only the snapshot lands, and the read guard refuses it because
- * no shelf list names it. `PUT /books` puts `user:` and then the snapshots of the
- * shelves it read, so what the reader gets depends on where that list lives: a
- * migrated owner's new record no longer carries one, an un-migrated owner's does,
- * and that record holds the shared books too, so that link still answers 200.
+ * WHAT EVERY CASE ASSERTS (`expectAccountGone`). The held write landed; `accountDeletionGuard`
+ * answers it 401 byte-identical to an invalid token; `user:`, `publicshelves:` and every
+ * `public:{token}` the race knew are gone; each link answers 404; no `token:` or
+ * `tokenidx:` key is alive; a retried DELETE answers `ACCOUNT_DELETED`; a re-create inside
+ * the cooldown answers 409 and keeps the mark; and the same person re-creating past it and
+ * syncing leaves the old links 404, with the mark gone.
  *
- * A 404 IS NOT A REPAIR. The list and the snapshot a public-shelf race wrote back
- * stay in KV. The first `user:` write under the same userId makes the link readable
- * again, so the same person coming back and syncing wakes it up; a case pins that.
+ * WHY THE HOLD POINT DIFFERS BY CASE. Each write is held at each key whose landing leaves
+ * a different state. Public-shelf create and reset-token write the snapshot and then the
+ * list: held at the snapshot both land after the deletion, held at the list only the
+ * list does, and it names a token the deletion never saw. Update writes the list then the
+ * snapshot. `PUT` / `PATCH /books` write `user:` and then the snapshots of the shelves
+ * they read, so an un-migrated owner's held write puts back a record that carries the list.
  *
- * NO SELF-REPAIR. After the race the account has no way to clean up: the bearer is
- * dead, so a retried DELETE stops in the auth middleware. The cases pin that answer
- * too, since it shows the leftovers stay until something else removes them.
+ * WHAT THIS DOES NOT PROVE. `createMockKV()` is one instantly consistent store with no
+ * one-write-per-second limit, so here the guard always sees the mark and always manages
+ * the delete. On real KV either can miss, which is why the guarantee is the sweep
+ * (`accountDeletionSweep.test.ts`), not this path: docs/architecture.md → 家庭成員的授權與移除.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,6 +70,12 @@ const LEGACY_SHELF: PublicShelf = {
   expiresAt: null,
   selectionMode: "all-shared",
 };
+const INVALID_TOKEN_BODY = {
+  error: { code: "UNAUTHORIZED", message: "Invalid or expired token" },
+};
+const SNAPSHOT_PREFIX = kvKeys.publicShelf("");
+
+type KeyMatch = string | ((key: string) => boolean);
 
 let kv: KVNamespace;
 
@@ -91,60 +99,57 @@ async function dataOf(res: Response, status: number): Promise<Json> {
   return ((await res.json()) as Json).data;
 }
 
-interface HeldWrite {
-  reached: Promise<void>;
-  release(): void;
+interface RaceResult {
+  write: Response;
+  /** Every `public:{token}` the racing write put, including one with a token only it knows. */
+  shareTokensWritten: string[];
 }
 
-/** Park the first `op` on `key`: `reached` resolves when it arrives, `release()` lets it write. */
-function holdNextWrite(
-  store: KVNamespace,
-  op: "put" | "delete",
-  key: string,
-): HeldWrite {
-  let markReached = () => {};
-  let release = () => {};
-  const reached = new Promise<void>((resolve) => {
-    markReached = resolve;
-  });
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const real = (store[op] as (...args: unknown[]) => Promise<void>).bind(store);
-  let held = false;
-  vi.spyOn(store, op).mockImplementation((async (...args: unknown[]) => {
-    if (args[0] === key && !held) {
-      held = true;
-      markReached();
-      await released;
-    }
-    return real(...args);
-  }) as never);
-  return { reached, release };
-}
-
-/** Park `write` on `key`, finish the deletion while it waits, then let it land; returns its response. */
+/** Park `write` on `key`, finish the deletion while it waits, then let it land. */
 async function deleteDuringWrite(
   token: string,
-  key: string,
+  key: KeyMatch,
   write: () => Promise<Response>,
-): Promise<Response> {
+): Promise<RaceResult> {
   const hold = holdNextWrite(kv, "put", key);
+  const ops = watchKvOps(kv);
   const inFlight = write();
   try {
-    await hold.reached;
+    await Promise.race([
+      hold.reached,
+      inFlight.then(async (res) => {
+        throw new Error(
+          `the write answered ${res.status} without reaching the hold`,
+        );
+      }),
+    ]);
     const deletion = await call("DELETE", `/api/user/${USER}`, token);
     expect(await dataOf(deletion, 200)).toEqual({ ok: true });
-    expect(await kv.get(key), "the held write has not landed").toBeNull();
+    const heldKey = hold.heldKey() as string;
+    expect(await kv.get(heldKey), "the held write has not landed").toBeNull();
     expect(await kv.get(kvKeys.auth(USER))).toBeNull();
+    expect(hold.landed()).toBe(false);
   } finally {
     hold.release();
   }
-  return inFlight;
+  const res = await inFlight;
+  expect(hold.landed(), "the held write landed after the deletion").toBe(true);
+  return {
+    write: res,
+    shareTokensWritten: ops
+      .putKeys()
+      .filter((name) => name.startsWith(SNAPSHOT_PREFIX))
+      .map((name) => name.slice(SNAPSHOT_PREFIX.length)),
+  };
+}
+
+interface Owner {
+  token: string;
+  familyId: string;
 }
 
 /** A family owner with a synced book list and no public shelf yet. */
-async function seedOwner(): Promise<string> {
+async function seedOwner(): Promise<Owner> {
   const family = await dataOf(
     await call("POST", "/api/family", undefined, { userId: USER }),
     201,
@@ -155,7 +160,7 @@ async function seedOwner(): Promise<string> {
     }),
     200,
   );
-  return family.authToken;
+  return { token: family.authToken, familyId: family.familyId };
 }
 
 async function createShelf(token: string): Promise<PublicShelf> {
@@ -169,6 +174,28 @@ async function createShelf(token: string): Promise<PublicShelf> {
   return shelf;
 }
 
+/** A migrated owner with a live public link, which must be readable before the race starts. */
+async function seedOwnerWithShelf(): Promise<Owner & { shelf: PublicShelf }> {
+  const owner = await seedOwner();
+  const shelf = await createShelf(owner.token);
+  expect(await publicRead(shelf.shareToken)).toBe(200);
+  return { ...owner, shelf };
+}
+
+/** An owner whose shelf list still lives in `user:{id}.publicSharing`, with its snapshot live. */
+async function seedUnmigratedOwner(): Promise<Owner> {
+  const owner = await seedOwner();
+  const userKey = kvKeys.user(USER);
+  const stored = (await kv.get(userKey, "json")) as UserBooksRecord;
+  await kv.put(
+    userKey,
+    JSON.stringify({ ...stored, publicSharing: { shelves: [LEGACY_SHELF] } }),
+  );
+  await writePublicSnapshot(kv, USER, LEGACY_SHELF, [BOOK]);
+  expect(await publicRead(LEGACY_SHELF.shareToken)).toBe(200);
+  return owner;
+}
+
 async function publicRead(shareToken: string): Promise<number> {
   return (await call("GET", `/api/public/${shareToken}`)).status;
 }
@@ -179,170 +206,413 @@ async function retriedDeleteCode(token: string): Promise<string> {
   return ((await res.json()) as Json).error.code as string;
 }
 
+async function keysUnder(prefix: string): Promise<string[]> {
+  const { keys } = await kv.list({ prefix });
+  return keys.map((key) => key.name);
+}
+
+/** `token:{hash}` keys only: the two marks share the prefix and are meant to stay. */
+async function liveTokenKeys(): Promise<string[]> {
+  return (await keysUnder("token:")).filter(
+    (name) =>
+      !name.startsWith(kvKeys.accountDeleted("")) &&
+      !name.startsWith(kvKeys.accountDeleting("")),
+  );
+}
+
+/** See the header → "WHAT EVERY CASE ASSERTS". `shareTokens` are the links known before the race. */
+async function expectAccountGone(
+  token: string,
+  race: RaceResult,
+  shareTokens: string[],
+): Promise<void> {
+  expect(race.write.status).toBe(401);
+  expect(await race.write.json()).toEqual(INVALID_TOKEN_BODY);
+
+  for (const key of [
+    kvKeys.user(USER),
+    kvKeys.publicShelves(USER),
+    kvKeys.newBookDefault(USER),
+    kvKeys.otp(USER),
+    kvKeys.member(USER),
+    kvKeys.auth(USER),
+    kvKeys.verify(USER),
+  ]) {
+    expect(await kv.get(key), key).toBeNull();
+  }
+  const links = [...new Set([...shareTokens, ...race.shareTokensWritten])];
+  for (const shareToken of links) {
+    expect(await kv.get(kvKeys.publicShelf(shareToken))).toBeNull();
+    expect(await publicRead(shareToken)).toBe(404);
+  }
+  expect(await keysUnder(SNAPSHOT_PREFIX)).toEqual([]);
+  expect(await liveTokenKeys()).toEqual([]);
+  expect(await keysUnder(kvKeys.authTokenIndex(USER, ""))).toEqual([]);
+  expect(await kv.get(kvKeys.accountDeleting(USER))).not.toBeNull();
+  expect(await retriedDeleteCode(token)).toBe("ACCOUNT_DELETED");
+
+  const cooling = await call("POST", "/api/family", undefined, {
+    userId: USER,
+  });
+  expect(cooling.status).toBe(409);
+  expect(await kv.get(kvKeys.accountDeleting(USER))).not.toBeNull();
+
+  passRecreateCooldown();
+  const family = await dataOf(
+    await call("POST", "/api/family", undefined, { userId: USER }),
+    201,
+  );
+  await dataOf(
+    await call("PUT", `/api/user/${USER}/books`, family.authToken, {
+      books: [BOOK],
+    }),
+    200,
+  );
+  expect(await kv.get(kvKeys.accountDeleting(USER))).toBeNull();
+  expect(await kv.get(kvKeys.user(USER))).not.toBeNull();
+  for (const shareToken of links) {
+    expect(await publicRead(shareToken)).toBe(404);
+  }
+}
+
+const isSnapshot = (key: string): boolean => key.startsWith(SNAPSHOT_PREFIX);
+
 beforeEach(() => {
   kv = createMockKV();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
-describe("a public-shelf update racing DELETE /api/user/:id (#468, current behaviour)", () => {
-  it("held at publicshelves: writes the list and snapshot back, and the link answers 404 with no user:", async () => {
-    const token = await seedOwner();
-    const shelf = await createShelf(token);
-    const pointerKey = kvKeys.publicShelves(USER);
+describe("a public-shelf create racing DELETE /api/user/:id", () => {
+  it.each<{ label: string; holdAt: KeyMatch }>([
+    { label: "the new snapshot", holdAt: isSnapshot },
+    { label: "publicshelves:", holdAt: kvKeys.publicShelves(USER) },
+  ])("held at $label leaves nothing behind", async ({ holdAt }) => {
+    const { token } = await seedOwner();
 
-    const write = await deleteDuringWrite(token, pointerKey, () =>
+    const race = await deleteDuringWrite(token, holdAt, () =>
+      call("POST", `/api/user/${USER}/public-shelf`, token, {
+        title: "Shelf",
+        expiresDays: null,
+      }),
+    );
+
+    expect(race.shareTokensWritten).toHaveLength(1);
+    await expectAccountGone(token, race, []);
+  });
+});
+
+describe("a public-shelf update racing DELETE /api/user/:id", () => {
+  it.each<{ label: string; holdAt: (shelf: PublicShelf) => KeyMatch }>([
+    { label: "publicshelves:", holdAt: () => kvKeys.publicShelves(USER) },
+    {
+      label: "public:{token}",
+      holdAt: (shelf) => kvKeys.publicShelf(shelf.shareToken),
+    },
+  ])("held at $label leaves nothing behind", async ({ holdAt }) => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(token, holdAt(shelf), () =>
       call("PUT", `/api/user/${USER}/public-shelf/${shelf.shelfId}`, token, {
         title: "Renamed",
       }),
     );
 
-    expect(write.status).toBe(200);
-    const pointer = (await kv.get(pointerKey, "json")) as Json;
-    expect(pointer.shelves.map((s: Json) => s.shareToken)).toEqual([
-      shelf.shareToken,
-    ]);
-    expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).not.toBeNull();
-    expect(await kv.get(kvKeys.user(USER))).toBeNull();
-    expect(await publicRead(shelf.shareToken)).toBe(404);
-    expect(await retriedDeleteCode(token)).toBe("ACCOUNT_DELETED");
-    expect(await publicRead(shelf.shareToken)).toBe(404);
+    await expectAccountGone(token, race, [shelf.shareToken]);
   });
+});
 
-  it("held at publicshelves: leaves a link that wakes up when the same user comes back and syncs", async () => {
-    const token = await seedOwner();
-    const shelf = await createShelf(token);
+describe("a public-shelf reset-token racing DELETE /api/user/:id", () => {
+  it.each<{ label: string; holdAt: KeyMatch }>([
+    { label: "the new snapshot", holdAt: isSnapshot },
+    { label: "publicshelves:", holdAt: kvKeys.publicShelves(USER) },
+  ])(
+    "held at $label kills the old and the new link alike",
+    async ({ holdAt }) => {
+      const { token, shelf } = await seedOwnerWithShelf();
 
-    const write = await deleteDuringWrite(
+      const race = await deleteDuringWrite(token, holdAt, () =>
+        call(
+          "POST",
+          `/api/user/${USER}/public-shelf/${shelf.shelfId}/reset-token`,
+          token,
+        ),
+      );
+
+      expect(race.shareTokensWritten).toHaveLength(1);
+      expect(race.shareTokensWritten[0]).not.toBe(shelf.shareToken);
+      await expectAccountGone(token, race, [shelf.shareToken]);
+    },
+  );
+});
+
+describe("a public-shelf delete racing DELETE /api/user/:id", () => {
+  it("held at publicshelves: does not put an empty list back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(
       token,
       kvKeys.publicShelves(USER),
       () =>
-        call("PUT", `/api/user/${USER}/public-shelf/${shelf.shelfId}`, token, {
-          title: "Renamed",
+        call(
+          "DELETE",
+          `/api/user/${USER}/public-shelf/${shelf.shelfId}`,
+          token,
+        ),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+});
+
+const BOOK_WRITES: {
+  label: string;
+  send: (token: string) => Promise<Response>;
+}[] = [
+  {
+    label: "PUT /books",
+    send: (token) =>
+      call("PUT", `/api/user/${USER}/books`, token, { books: [BOOK] }),
+  },
+  {
+    label: "PATCH /books",
+    send: (token) =>
+      call("PATCH", `/api/user/${USER}/books`, token, {
+        changes: [{ bookId: BOOK.bookId, isShared: BoolFlag.TRUE }],
+      }),
+  },
+];
+
+describe.each(BOOK_WRITES)("$label racing DELETE /api/user/:id", ({ send }) => {
+  it("held at user: on a migrated owner brings neither the books nor a link back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(token, kvKeys.user(USER), () =>
+      send(token),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("held at public:{token} on a migrated owner does not put the snapshot back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(
+      token,
+      kvKeys.publicShelf(shelf.shareToken),
+      () => send(token),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("held at user: on an un-migrated owner does not bring the record carrying the list back", async () => {
+    const { token } = await seedUnmigratedOwner();
+
+    const race = await deleteDuringWrite(token, kvKeys.user(USER), () =>
+      send(token),
+    );
+
+    await expectAccountGone(token, race, [LEGACY_SHELF.shareToken]);
+  });
+
+  it("held at public:{token} on an un-migrated owner does not put the snapshot back", async () => {
+    const { token } = await seedUnmigratedOwner();
+
+    const race = await deleteDuringWrite(
+      token,
+      kvKeys.publicShelf(LEGACY_SHELF.shareToken),
+      () => send(token),
+    );
+
+    await expectAccountGone(token, race, [LEGACY_SHELF.shareToken]);
+  });
+});
+
+describe("personal-setting writes racing DELETE /api/user/:id", () => {
+  it("PUT /family-prefs held at user: does not bring the books back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(token, kvKeys.user(USER), () =>
+      call("PUT", `/api/user/${USER}/family-prefs`, token, { hidden: [] }),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("PUT /new-book-default held at newbookdefault: does not bring the setting back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(
+      token,
+      kvKeys.newBookDefault(USER),
+      () =>
+        call("PUT", `/api/user/${USER}/new-book-default`, token, {
+          newBookDefaultShared: BoolFlag.TRUE,
         }),
     );
-    expect(write.status).toBe(200);
-    expect(await publicRead(shelf.shareToken)).toBe(404);
 
-    const family = await dataOf(
-      await call("POST", "/api/family", undefined, { userId: USER }),
-      201,
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it.each([
+    { label: "user:", key: () => kvKeys.user(USER) },
+    {
+      label: "family:{id}",
+      key: (familyId: string) => kvKeys.family(familyId),
+    },
+  ])(
+    "PUT .../displayName held at $label does not bring the books back",
+    async ({ key }) => {
+      const { token, familyId, shelf } = await seedOwnerWithShelf();
+
+      const race = await deleteDuringWrite(token, key(familyId), () =>
+        call(
+          "PUT",
+          `/api/family/${familyId}/member/${USER}/displayName`,
+          token,
+          { displayName: "Renamed" },
+        ),
+      );
+
+      await expectAccountGone(token, race, [shelf.shareToken]);
+    },
+  );
+});
+
+describe("verification writes racing DELETE /api/user/:id", () => {
+  it("PUT /verify (none) held at verify: does not bring the record back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(token, kvKeys.verify(USER), () =>
+      call("PUT", `/api/user/${USER}/verify`, token, { method: "none" }),
     );
-    await dataOf(
-      await call("PUT", `/api/user/${USER}/books`, family.authToken, {
-        books: [BOOK],
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("a PIN save held at verify: revokes its own token and mints, and the guard still removes all of it", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+    const ops = watchKvOps(kv);
+
+    const race = await deleteDuringWrite(token, kvKeys.verify(USER), () =>
+      call("PUT", `/api/user/${USER}/verify`, token, {
+        method: "pin",
+        secret: "123456",
       }),
+    );
+
+    // Positive companion for "no token alive": the only `auth:` put in this request is the new mint.
+    expect(ops.putKeys()).toContain(kvKeys.auth(USER));
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("POST /verify/prompted held at verify: does not bring the record back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(token, kvKeys.verify(USER), () =>
+      call("POST", `/api/user/${USER}/verify/prompted`, token),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("POST /verify/otp held at otp: does not bring the code back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+    await dataOf(
+      await call("PUT", `/api/user/${USER}/verify`, token, { method: "code" }),
       200,
     );
 
-    expect(await publicRead(shelf.shareToken)).toBe(200);
-    expect(await retriedDeleteCode(token)).toBe("UNAUTHORIZED");
+    const race = await deleteDuringWrite(token, kvKeys.otp(USER), () =>
+      call("POST", `/api/user/${USER}/verify/otp`, token),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
   });
 
-  it("held at public:{token} leaves an orphan snapshot the read guard refuses", async () => {
-    const token = await seedOwner();
-    const shelf = await createShelf(token);
-    const snapshotKey = kvKeys.publicShelf(shelf.shareToken);
+  it("POST /qr-token held at qr: answers 401, and the token it would bind to is gone", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
 
-    const write = await deleteDuringWrite(token, snapshotKey, () =>
-      call("PUT", `/api/user/${USER}/public-shelf/${shelf.shelfId}`, token, {
-        title: "Renamed",
+    const race = await deleteDuringWrite(
+      token,
+      (key) => key.startsWith("qr:"),
+      () => call("POST", `/api/user/${USER}/qr-token`, token),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+});
+
+describe("POST /api/auth/refresh racing DELETE /api/user/:id", () => {
+  /** Age the token past the skip window, so that a refresh really rewrites its keys. */
+  async function ageToken(token: string): Promise<string> {
+    const hash = await hashAuthToken(token);
+    const key = kvKeys.authToken(hash);
+    const stored = (await kv.get(key, "json")) as AuthTokenRecord;
+    await kv.put(
+      key,
+      JSON.stringify({
+        ...stored,
+        expiresAt: stored.expiresAt - TOKEN_RENEW_SKIP_WINDOW_MS * 2,
       }),
     );
+    return hash;
+  }
 
-    expect(write.status).toBe(200);
-    expect(await kv.get(snapshotKey)).not.toBeNull();
-    expect(await kv.get(kvKeys.publicShelves(USER))).toBeNull();
-    expect(await publicRead(shelf.shareToken)).toBe(404);
-    expect(await retriedDeleteCode(token)).toBe("ACCOUNT_DELETED");
-  });
-});
+  it.each([
+    {
+      label: "tokenidx:",
+      key: (hash: string) => kvKeys.authTokenIndex(USER, hash),
+    },
+    { label: "token:", key: (hash: string) => kvKeys.authToken(hash) },
+  ])(
+    "a slide held at $label does not bring the token back",
+    async ({ key }) => {
+      const { token, shelf } = await seedOwnerWithShelf();
+      const hash = await ageToken(token);
 
-describe("a public-shelf create racing DELETE /api/user/:id (#468, current behaviour)", () => {
-  it("held at publicshelves: writes a new list and snapshot, and the new link answers 404 with no user:", async () => {
-    const token = await seedOwner();
+      const race = await deleteDuringWrite(token, key(hash), () =>
+        call("POST", "/api/auth/refresh", token, { userId: USER }),
+      );
 
-    const write = await deleteDuringWrite(
+      await expectAccountGone(token, race, [shelf.shareToken]);
+    },
+  );
+
+  it("a TTL-gap mint held at its first key does not leave a new token alive", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+    await kv.delete(kvKeys.auth(USER));
+
+    const race = await deleteDuringWrite(
       token,
-      kvKeys.publicShelves(USER),
-      () =>
-        call("POST", `/api/user/${USER}/public-shelf`, token, {
-          title: "Shelf",
-          expiresDays: null,
-        }),
+      (key) => key.startsWith(kvKeys.authTokenIndex(USER, "")),
+      () => call("POST", "/api/auth/refresh", token, { userId: USER }),
     );
 
-    const { shelf } = await dataOf(write, 201);
-    expect(await kv.get(kvKeys.publicShelves(USER))).not.toBeNull();
-    expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).not.toBeNull();
-    expect(await kv.get(kvKeys.user(USER))).toBeNull();
-    expect(await publicRead(shelf.shareToken)).toBe(404);
-    expect(await retriedDeleteCode(token)).toBe("ACCOUNT_DELETED");
+    await expectAccountGone(token, race, [shelf.shareToken]);
   });
 });
 
-describe("PUT /books racing DELETE /api/user/:id (#468, current behaviour)", () => {
-  it("held at user: on a migrated owner brings the books back but not a readable link", async () => {
-    const token = await seedOwner();
-    const shelf = await createShelf(token);
-    const userKey = kvKeys.user(USER);
-
-    const write = await deleteDuringWrite(token, userKey, () =>
-      call("PUT", `/api/user/${USER}/books`, token, { books: [BOOK] }),
-    );
-
-    expect(write.status).toBe(200);
-    const record = (await kv.get(userKey, "json")) as UserBooksRecord;
-    expect(record.books.map((book) => book.bookId)).toEqual([BOOK.bookId]);
-    expect(record.publicSharing).toBeUndefined();
-    expect(await kv.get(kvKeys.publicShelf(shelf.shareToken))).not.toBeNull();
-    expect(await kv.get(kvKeys.publicShelves(USER))).toBeNull();
-    expect(await publicRead(shelf.shareToken)).toBe(404);
-    expect(await retriedDeleteCode(token)).toBe("UNAUTHORIZED");
-  });
-
-  it("held at user: on an un-migrated owner brings the books and a readable link back", async () => {
-    const token = await seedOwner();
-    const userKey = kvKeys.user(USER);
-    const stored = (await kv.get(userKey, "json")) as UserBooksRecord;
-    await kv.put(
-      userKey,
-      JSON.stringify({ ...stored, publicSharing: { shelves: [LEGACY_SHELF] } }),
-    );
-    await writePublicSnapshot(kv, USER, LEGACY_SHELF, [BOOK]);
-    expect(await publicRead(LEGACY_SHELF.shareToken)).toBe(200);
-
-    const write = await deleteDuringWrite(token, userKey, () =>
-      call("PUT", `/api/user/${USER}/books`, token, { books: [BOOK] }),
-    );
-
-    expect(write.status).toBe(200);
-    const record = (await kv.get(userKey, "json")) as UserBooksRecord;
-    expect(record.publicSharing?.shelves).toEqual([LEGACY_SHELF]);
-    expect(
-      await kv.get(kvKeys.publicShelf(LEGACY_SHELF.shareToken)),
-    ).not.toBeNull();
-    expect(await publicRead(LEGACY_SHELF.shareToken)).toBe(200);
-    expect(await retriedDeleteCode(token)).toBe("UNAUTHORIZED");
-  });
-
-  it("leaves the deleted bearer dead and marked, so the race is not an undo of the deletion", async () => {
-    const token = await seedOwner();
+describe("the deleted bearer after a race", () => {
+  it("stays dead and marked, so the race is not an undo of the deletion", async () => {
+    const { token } = await seedOwner();
     const mark = kvKeys.accountDeleted(await hashAuthToken(token));
 
-    const write = await deleteDuringWrite(token, kvKeys.user(USER), () =>
+    const race = await deleteDuringWrite(token, kvKeys.user(USER), () =>
       call("PUT", `/api/user/${USER}/books`, token, { books: [BOOK] }),
     );
 
-    expect(write.status).toBe(200);
+    expect(race.write.status).toBe(401);
     expect(await kv.get(mark)).toBe(USER);
     expect(
       await kv.get(kvKeys.authToken(await hashAuthToken(token))),
     ).toBeNull();
     const read = await call("GET", `/api/user/${USER}/books`, token);
     expect(read.status).toBe(401);
-    expect(await retriedDeleteCode(token)).toBe("UNAUTHORIZED");
+    expect(await retriedDeleteCode(token)).toBe("ACCOUNT_DELETED");
   });
 });

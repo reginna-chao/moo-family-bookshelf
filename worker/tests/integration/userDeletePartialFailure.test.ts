@@ -10,6 +10,7 @@ import {
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { failFirstWriteTo, watchKvOps } from "../helpers/kvOps";
+import { passRecreateCooldown } from "../helpers/recreateCooldown";
 import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { ALICE, BOB, NOBODY } from "../helpers/ids";
 import {
@@ -29,7 +30,8 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * the job on a retry.
  *
  * THE STAGES (`deleteAccountKeys`, `src/services/accountDeletion.ts`), each awaited
- * before the next: (1) `public:{token}`s, (2) `user:` / `newbookdefault:` / `otp:`,
+ * before the next: (0) the deleting mark `token:deleting:{id}` (#468), never cleared
+ * here, (1) `public:{token}`s, (2) `user:` / `newbookdefault:` / `otp:`,
  * (3) `publicshelves:`, (4) the other tokens, strict listing, (5) `member:`,
  * (6) mark `token:deleted:{hash}`, fail-open, (7) `auth:`, (8) `verify:`,
  * (9) presented `token:`, then its index, fail-open.
@@ -59,8 +61,17 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * (rate limits are not under test), so `ratelimit:` keys are ignored when counting
  * what is left.
  *
- * `#468` (a write in flight landing after the deletion) is pinned separately in
- * `userDeleteConcurrentWrites.test.ts`.
+ * THE DELETING MARK (#468). Once written it stays, so a finished deletion leaves it
+ * next to `token:deleted:` until the sweep retires it, and any write the old token
+ * sends between a failed attempt and its retry is wiped and answered 401: the deletion
+ * always finishes. That is why the refresh and `PUT /books` cases come in two forms.
+ * "the deleting mark stands" is what a client meets after a failed attempt. "the mark
+ * expired" deletes the key by hand, since the mock never expires one, and pins the
+ * state a Worker with no cron reaches 24 hours later: the #462 refusals still hold.
+ *
+ * A write in flight landing after the deletion is pinned in
+ * `userDeleteConcurrentWrites.test.ts`, the mark's retry behaviour in
+ * `userDeleteMarkRetry.test.ts`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,6 +101,7 @@ const BOOK: BookEntry = {
 const REVOKED_TOKEN = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
 const MARK_TTL_SECONDS = 86400;
 const MARK_STAGE = 6;
+const DELETING_MARK = kvKeys.accountDeleting(USER);
 const REVOKE_BATCH = 400;
 const INVALID_TOKEN_BODY = {
   error: { code: "UNAUTHORIZED", message: "Invalid or expired token" },
@@ -238,6 +250,23 @@ async function seedAccount(method: Method): Promise<Account> {
   };
 }
 
+/** The mock never expires a key, so "the mark expired" is this delete. See the header → "THE DELETING MARK". */
+function expireDeletingMark(): Promise<void> {
+  return kv.delete(DELETING_MARK);
+}
+
+/** Every token key still alive for the account, ignoring both marks that share the `token:` prefix. */
+async function liveTokenKeys(): Promise<string[]> {
+  const { keys } = await kv.list({ prefix: "token:" });
+  return keys
+    .map((key) => key.name)
+    .filter(
+      (name) =>
+        !name.startsWith(kvKeys.accountDeleted("")) &&
+        !name.startsWith(kvKeys.accountDeleting("")),
+    );
+}
+
 /** Every key still stored for the account, sorted; rate-limit counters are not under test. */
 async function keysLeft(): Promise<string[]> {
   const { keys } = await kv.list();
@@ -274,6 +303,7 @@ async function expectStateAfterFailure(
   expect(await kv.get(failedKey), failedKey).not.toBeNull();
   expect(await kv.get(keys.presentedIndex)).not.toBeNull();
   expect(await kv.get(keys.mark)).toBe(failedStage > MARK_STAGE ? USER : null);
+  expect(await kv.get(DELETING_MARK)).not.toBeNull();
 }
 
 /** Make the first `tokenidx:` list of `USER` reject, or answer a malformed page. */
@@ -328,6 +358,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const FAILURES: {
@@ -375,7 +406,7 @@ describe.each(METHODS)("DELETE /api/user/:id on a %s account", (method) => {
       const retry = await deleteAccount(account.token, account.secret);
 
       expect(await dataOf(retry, 200)).toEqual({ ok: true });
-      expect(await keysLeft()).toEqual([account.keys.mark]);
+      expect(await keysLeft()).toEqual([account.keys.mark, DELETING_MARK]);
     },
   );
 });
@@ -390,8 +421,9 @@ describe("DELETE /api/user/:id, write order of a clean run", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: { ok: true } });
     const trail = ops.writeTrail();
-    const teardown = trail.slice(trail.indexOf(`delete ${keys.snapshot}`));
+    const teardown = trail.slice(trail.indexOf(`put ${DELETING_MARK}`));
     const groups = [
+      [`put ${DELETING_MARK}`],
       [`delete ${keys.snapshot}`],
       [
         `delete ${keys.user}`,
@@ -466,7 +498,7 @@ describe("DELETE /api/user/:id, a retry on a PIN account", () => {
     expect((await deleteAccount(token, secret)).status).toBe(500);
 
     expect((await deleteAccount(token)).status).toBe(200);
-    expect(await keysLeft()).toEqual([keys.mark]);
+    expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
   });
 });
 
@@ -556,7 +588,7 @@ describe("DELETE /api/user/:id, stage 4: the other tokens", () => {
       expect(await kv.get(keys.mark)).toBeNull();
 
       expect((await deleteAccount(token, secret)).status).toBe(200);
-      expect(await keysLeft()).toEqual([keys.mark]);
+      expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
     },
   );
 
@@ -575,7 +607,7 @@ describe("DELETE /api/user/:id, stage 4: the other tokens", () => {
       }
 
       expect(seen).toEqual(statuses);
-      expect(await keysLeft()).toEqual([keys.mark]);
+      expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
     },
   );
 
@@ -610,12 +642,62 @@ describe("DELETE /api/user/:id, stage 4: the other tokens", () => {
       }
 
       expect(status).toBe(200);
-      expect(await keysLeft()).toEqual([keys.mark]);
+      expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
     },
   );
 });
 
-describe("POST /api/auth/refresh around a failed deletion", () => {
+describe("POST /api/auth/refresh around a failed deletion, the deleting mark standing", () => {
+  it.each(FAILURES)(
+    "wipes and answers 401 after deleting $label failed, and the retry answers ACCOUNT_DELETED",
+    async ({ key }) => {
+      const { token, familyId, keys, secret } = await seedAccount("none");
+      failFirstWriteTo(kv, "delete", key(keys));
+      expect((await deleteAccount(token, secret)).status).toBe(500);
+
+      const res = await call("POST", "/api/auth/refresh", token, {
+        userId: USER,
+        familyId,
+      });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual(INVALID_TOKEN_BODY);
+      expect(await liveTokenKeys()).toEqual([]);
+      const data = (await keysLeft()).filter(
+        (name) => !name.startsWith(kvKeys.accountDeleted("")),
+      );
+      expect(data).toEqual([DELETING_MARK]);
+
+      const retry = await deleteAccount(token, secret);
+      expect(retry.status).toBe(401);
+      expect(await retry.json()).toEqual(ACCOUNT_DELETED_BODY);
+    },
+  );
+
+  it("wipes the token a TTL-gap refresh minted when the deleted mark put failed too", async () => {
+    const { token, keys, secret } = await seedAccount("pin");
+    failFirstWriteTo(kv, "put", keys.mark);
+    failFirstWriteTo(kv, "delete", keys.verify);
+    expect((await deleteAccount(token, secret)).status).toBe(500);
+    expect(await kv.get(keys.mark)).toBeNull();
+    expect(await kv.get(keys.auth)).toBeNull();
+    const ops = watchKvOps(kv);
+
+    const res = await call("POST", "/api/auth/refresh", token, {
+      userId: USER,
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual(INVALID_TOKEN_BODY);
+    // Positive companion for the empty list below: the handler really did mint.
+    expect(ops.putKeys()).toContain(keys.auth);
+    expect(await liveTokenKeys()).toEqual([]);
+    expect(await kv.get(keys.auth)).toBeNull();
+    expect(await kv.get(keys.verify)).toBeNull();
+  });
+});
+
+describe("POST /api/auth/refresh around a failed deletion, the mark expired", () => {
   it.each(acrossGapFailures(["pin", "code", "none"] as const))(
     "without familyId refuses a $method account after deleting $label failed, minting nothing, and the original token finishes",
     async ({ method, key }) => {
@@ -624,6 +706,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       expect((await deleteAccount(token, secret)).status).toBe(500);
       expect(await kv.get(keys.auth)).toBeNull();
       expect(await kv.get(keys.mark)).toBe(USER);
+      await expireDeletingMark();
       const before = await keysLeft();
       const ops = watchKvOps(kv);
       const writesBefore = ops.writeTrail().length;
@@ -641,7 +724,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       const retry = await deleteAccount(token, secret);
 
       expect(await dataOf(retry, 200)).toEqual({ ok: true });
-      expect(await keysLeft()).toEqual([keys.mark]);
+      expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
     },
   );
 
@@ -653,6 +736,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       failFirstWriteTo(kv, "delete", key(keys));
       expect((await deleteAccount(token, secret)).status).toBe(500);
       expect(await kv.get(keys.mark)).toBeNull();
+      await expireDeletingMark();
 
       const issued = await dataOf(
         await call("POST", "/api/auth/refresh", token, { userId: USER }),
@@ -673,7 +757,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       expect(await tokenOwner(kv, token)).toBeNull();
       expect(await kv.get(keys.user)).toBeNull();
       const newMark = kvKeys.accountDeleted(await hashAuthToken(newToken));
-      expect(await keysLeft()).toEqual([newMark]);
+      expect(await keysLeft()).toEqual([newMark, DELETING_MARK]);
     },
   );
 
@@ -682,6 +766,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
     failFirstWriteTo(kv, "delete", keys.auth);
     expect((await deleteAccount(token, secret)).status).toBe(500);
     expect(await kv.get(keys.mark)).toBe(USER);
+    await expireDeletingMark();
     const ops = watchKvOps(kv);
 
     const issued = await dataOf(
@@ -694,7 +779,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
     expect(ops.getKeys()).not.toContain(keys.mark);
 
     expect((await deleteAccount(token, secret)).status).toBe(200);
-    expect(await keysLeft()).toEqual([keys.mark]);
+    expect(await keysLeft()).toEqual([keys.mark, DELETING_MARK]);
   });
 
   it.each(FAILURES.filter(({ stage }) => stage <= 5))(
@@ -703,6 +788,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       const { token, familyId, keys } = await seedAccount("none");
       failFirstWriteTo(kv, "delete", key(keys));
       expect((await deleteAccount(token)).status).toBe(500);
+      await expireDeletingMark();
 
       const issued = await dataOf(
         await call("POST", "/api/auth/refresh", token, {
@@ -722,6 +808,7 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
       const { token, familyId, keys } = await seedAccount("none");
       failFirstWriteTo(kv, "delete", key(keys));
       expect((await deleteAccount(token)).status).toBe(500);
+      await expireDeletingMark();
       const ops = watchKvOps(kv);
 
       const res = await call("POST", "/api/auth/refresh", token, {
@@ -737,11 +824,30 @@ describe("POST /api/auth/refresh around a failed deletion", () => {
 });
 
 describe("PUT /books between a failed deletion and its retry", () => {
-  it("rebuilds the snapshot after stage 2 failed, and the retry clears it again", async () => {
+  it("is wiped and answers 401 while the deleting mark stands, and the retry answers ACCOUNT_DELETED", async () => {
+    const { token, keys, shelf, secret } = await seedAccount("none");
+    failFirstWriteTo(kv, "delete", keys.user);
+    expect((await deleteAccount(token, secret)).status).toBe(500);
+
+    const saved = await saveBooks(token);
+
+    expect(saved.status).toBe(401);
+    expect(await saved.json()).toEqual(INVALID_TOKEN_BODY);
+    expect(await kv.get(keys.snapshot)).toBeNull();
+    expect(await kv.get(keys.user)).toBeNull();
+    const reader = await call("GET", `/api/public/${shelf.shareToken}`);
+    expect(reader.status).toBe(404);
+    const retry = await deleteAccount(token, secret);
+    expect(retry.status).toBe(401);
+    expect(await retry.json()).toEqual(ACCOUNT_DELETED_BODY);
+  });
+
+  it("rebuilds the snapshot once the mark expired, and the retry clears it again", async () => {
     const { token, keys, shelf, secret } = await seedAccount("none");
     failFirstWriteTo(kv, "delete", keys.user);
     expect((await deleteAccount(token, secret)).status).toBe(500);
     expect(await kv.get(keys.snapshot)).toBeNull();
+    await expireDeletingMark();
 
     await dataOf(await saveBooks(token), 200);
 
@@ -798,11 +904,30 @@ describe("PUT /books between a failed deletion and its retry", () => {
     { label: "user:", key: () => kvKeys.user(USER) },
     { label: "publicshelves:", key: () => kvKeys.publicShelves(USER) },
   ])(
-    "does not bring a revoked legacy link back after deleting $label failed",
+    "does not bring a revoked legacy link back after deleting $label failed, the deleting mark standing",
     async ({ key }) => {
       const token = await seedRevokedLegacyShelf();
       failFirstWriteTo(kv, "delete", key());
       expect((await deleteAccount(token)).status).toBe(500);
+
+      expect((await saveBooks(token)).status).toBe(401);
+
+      expect(await kv.get(kvKeys.publicShelf(REVOKED_TOKEN))).toBeNull();
+      expect(await kv.get(kvKeys.user(USER))).toBeNull();
+      expect(await kv.get(kvKeys.publicShelves(USER))).toBeNull();
+    },
+  );
+
+  it.each([
+    { label: "user:", key: () => kvKeys.user(USER) },
+    { label: "publicshelves:", key: () => kvKeys.publicShelves(USER) },
+  ])(
+    "does not bring a revoked legacy link back after deleting $label failed, the mark expired",
+    async ({ key }) => {
+      const token = await seedRevokedLegacyShelf();
+      failFirstWriteTo(kv, "delete", key());
+      expect((await deleteAccount(token)).status).toBe(500);
+      await expireDeletingMark();
 
       await dataOf(await saveBooks(token), 200);
 
@@ -908,6 +1033,7 @@ describe("401 ACCOUNT_DELETED", () => {
   it("does not answer once the same user has a family again (auth: is back)", async () => {
     const { token, keys, secret } = await seedAccount("none");
     expect((await deleteAccount(token, secret)).status).toBe(200);
+    passRecreateCooldown();
     await dataOf(
       await call("POST", "/api/family", undefined, { userId: USER }),
       201,
@@ -924,6 +1050,7 @@ describe("401 ACCOUNT_DELETED", () => {
   it("does not answer after the same user rebuilt, synced and left again (user: is back, auth: is not)", async () => {
     const { token, keys, secret } = await seedAccount("none");
     expect((await deleteAccount(token, secret)).status).toBe(200);
+    passRecreateCooldown();
     const family = await dataOf(
       await call("POST", "/api/family", undefined, { userId: USER }),
       201,
@@ -953,7 +1080,7 @@ describe("DELETE /api/user/:id, the fail-open writes", () => {
     const res = await deleteAccount(token, secret);
 
     expect(res.status).toBe(200);
-    expect(await keysLeft()).toEqual([]);
+    expect(await keysLeft()).toEqual([DELETING_MARK]);
     expect(consoleError.mock.calls).toEqual([["ACCOUNT_DELETED_MARK_FAILED"]]);
 
     const later = await deleteAccount(token, secret);
@@ -976,7 +1103,9 @@ describe("DELETE /api/user/:id, the fail-open writes", () => {
       const res = await deleteAccount(token, secret);
 
       expect(res.status).toBe(200);
-      expect(await keysLeft()).toEqual([key(keys), keys.mark].sort());
+      expect(await keysLeft()).toEqual(
+        [key(keys), keys.mark, DELETING_MARK].sort(),
+      );
       expect(consoleError.mock.calls.map(([event]) => event)).toEqual([
         "AUTH_TOKEN_INDEX_DELETE_FAILED",
       ]);
