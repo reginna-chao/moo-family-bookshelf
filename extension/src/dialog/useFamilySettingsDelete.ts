@@ -5,6 +5,7 @@ import type { ApiErrorPayload, ApiResponse, VerifyMethod } from "../api/types";
 import { runGuardedDeparture } from "../storage/selfDeparture";
 import { treatAccountDeletedAsSuccess } from "moo-family-bookshelf-shared/api/accountDeleted";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { pinDepartureServer } from "./departureServerPin";
 import { readVerifyMethod, recoverStepUp } from "./stepUp";
 
 export type DeleteState = "idle" | "confirming" | "deleting";
@@ -102,19 +103,25 @@ export function useFamilySettingsDelete({
     // The refusal is handled after the guard ends: its re-read of the method is no departure.
     const refused: { error?: ApiErrorPayload } = {};
     try {
+      const assertSameServer = pinDepartureServer(apiClient);
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the PWA's leave / delete hooks.
       await runGuardedDeparture(
-        () =>
-          apiClient
+        () => {
+          assertSameServer();
+          return apiClient
             .deleteAccount(userId, currentSecret)
-            .then(treatAccountDeletedAsSuccess),
+            .then(treatAccountDeletedAsSuccess);
+        },
         (response) => {
           refused.error = response.error;
           return settleDelete(response);
         },
       );
-      if (refused.error) await settleDeleteError(refused.error, asked);
+      if (refused.error) {
+        assertSameServer();
+        await settleDeleteError(refused.error, asked);
+      }
     } catch (err) {
       setDeleteError(
         err instanceof Error ? err.message : "移除帳戶失敗，請稍後再試",

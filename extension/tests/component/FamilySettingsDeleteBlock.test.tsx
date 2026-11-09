@@ -30,7 +30,11 @@ function renderBlock(method: VerifyMethod | "throw", responses: DeleteRes[]) {
       : vi.fn().mockResolvedValue({ data: { method } });
   const deleteAccount = vi.fn(async () => responses.shift()!);
   const onLeave = vi.fn();
-  const api = { getVerifyMethod, deleteAccount } as unknown as ApiClient;
+  const api = {
+    getVerifyMethod,
+    deleteAccount,
+    getEndpoint: () => "https://api.example",
+  } as unknown as ApiClient;
   render(
     <FamilySettingsDeleteBlock
       userId="user-1"
