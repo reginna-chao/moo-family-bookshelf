@@ -65,6 +65,7 @@ import { dissolveFamily } from "../services/familyDissolve";
 import { isActiveMember, isLiveMembership } from "../services/membership";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
+import { summarizeErrorForLog } from "../utils/errorLog";
 import { FamilyIdParam, FamilyMemberParams } from "../schemas/common";
 
 // Business logic is kept inline for simplicity; extract to services/ if handlers grow further
@@ -674,7 +675,7 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     await settleDepartingBorrower(c.env.KV, familyId, targetUserId);
   } catch (err) {
     // No ids in logs: familyId is the sync code, a userId resolves to it (.claude/rules/backend.md → API Design).
-    console.error("BORROW_CLEANUP_FAILED", { err });
+    console.error("BORROW_CLEANUP_FAILED", { err: summarizeErrorForLog(err) });
     return jsonError(
       c,
       500,
@@ -1238,7 +1239,9 @@ async function writeKickedTombstone(
     };
     await putKickedTombstone(kv, familyId, targetUserId, kickedRecord);
   } catch (err) {
-    console.error("KICK_TOMBSTONE_WRITE_FAILED", { err });
+    console.error("KICK_TOMBSTONE_WRITE_FAILED", {
+      err: summarizeErrorForLog(err),
+    });
   }
 }
 

@@ -26,6 +26,16 @@
  *   own message / Response never echoed;
  * - a 5xx `HTTPException` or a plain Error ⇒ logged + `500 INTERNAL_ERROR`;
  * - positive companions: valid bodies reach the handler.
+ *
+ * The log line (#480): `"Unhandled error:", { err, method, route }`, where
+ * `err` is `summarizeErrorForLog`'s safe summary and `route` the route
+ * PATTERN (`routePath(c, -1)`), never the requested path. Every logged case
+ * serializes the whole call with a replacer that expands an Error's `message`
+ * and `stack` (`serializeLogCall`), asserts no SENTINEL / path id in it, and
+ * pins the exact payload beside that negative check. The `/throw/id/:id`
+ * probe throws a workerd-shaped `KV GET failed: 503 … user:{id}` message and
+ * is requested with an id-shaped path segment, so both the message and the
+ * actual path would carry the id if either reached the log.
  */
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
@@ -35,7 +45,7 @@ import app from "../../src/index";
 import { defaultHook, jsonRes } from "../../src/utils/openapi";
 import { createMockKV } from "../helpers/mockKv";
 import { seedAuthToken, tokenFor } from "../helpers/auth";
-import { USER1 } from "../helpers/ids";
+import { USER1, USER2 } from "../helpers/ids";
 
 // Distinctive text placed in every thrown message / Response: never echoed.
 const SENTINEL = "SENTINEL_9b2d_onerror_reflect";
@@ -114,6 +124,13 @@ probe.get("/throw/plain", () => {
   throw new Error(SENTINEL);
 });
 
+// A KV failure naming a key built from the path param. See the header → "The log line".
+probe.get("/throw/id/:id", (c) => {
+  throw new Error(
+    `KV GET failed: 503 Service Unavailable user:${c.req.param("id")} ${SENTINEL}`,
+  );
+});
+
 app.route("/api/__probe", probe);
 
 // ===== Helpers =====
@@ -150,6 +167,16 @@ function post(contentType: string | null, body: BodyInit): RequestInit {
     headers: contentType === null ? {} : { "Content-Type": contentType },
     body,
   };
+}
+
+/** One console call as JSON, with every Error's `message` and `stack` expanded.
+ *  See the header → "The log line". */
+function serializeLogCall(call: unknown[]): string {
+  return JSON.stringify(call, (_key, value: unknown) =>
+    value instanceof Error
+      ? { name: value.name, message: value.message, stack: value.stack }
+      : value,
+  );
 }
 
 /** Exact envelope: `{ error: { code, message } }` and nothing else. */
@@ -311,11 +338,18 @@ describe("app.onError — other thrown errors", () => {
       expect(res.headers.get("X-Leak")).toBeNull();
       expect(errorLog).toHaveBeenCalledTimes(1);
       expect(errorLog.mock.calls[0][0]).toBe("Unhandled error:");
-      expect(errorLog.mock.calls[0][1]).toBeInstanceOf(HTTPException);
+      expect(serializeLogCall(errorLog.mock.calls[0])).not.toContain(SENTINEL);
+      expect(errorLog.mock.calls[0].slice(1)).toEqual([
+        {
+          err: { name: "HTTPException", httpStatus: status },
+          method: "GET",
+          route: "/api/__probe/throw/http/:status",
+        },
+      ]);
     },
   );
 
-  it("answers a thrown plain Error with a logged 500 INTERNAL_ERROR", async () => {
+  it("answers a thrown plain Error with a logged 500 INTERNAL_ERROR, message not logged", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const res = await probeRequest("/throw/plain");
@@ -324,6 +358,34 @@ describe("app.onError — other thrown errors", () => {
     expect(text).not.toContain(SENTINEL);
     expect(errorLog).toHaveBeenCalledTimes(1);
     expect(errorLog.mock.calls[0][0]).toBe("Unhandled error:");
-    expect((errorLog.mock.calls[0][1] as Error).message).toBe(SENTINEL);
+    expect(serializeLogCall(errorLog.mock.calls[0])).not.toContain(SENTINEL);
+    expect(errorLog.mock.calls[0].slice(1)).toEqual([
+      {
+        err: { name: "Error" },
+        method: "GET",
+        route: "/api/__probe/throw/plain",
+      },
+    ]);
+  });
+
+  it("logs a KV failure as op + status under the route pattern, never the key or path id", async () => {
+    const pathId = USER2;
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await probeRequest(`/throw/id/${pathId}`);
+
+    await expectEnvelope(res, 500, INTERNAL_ERROR);
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(errorLog.mock.calls[0][0]).toBe("Unhandled error:");
+    const logged = serializeLogCall(errorLog.mock.calls[0]);
+    expect(logged).not.toContain(pathId);
+    expect(logged).not.toContain(SENTINEL);
+    expect(errorLog.mock.calls[0].slice(1)).toEqual([
+      {
+        err: { name: "Error", kvOp: "GET", kvStatus: 503 },
+        method: "GET",
+        route: "/api/__probe/throw/id/:id",
+      },
+    ]);
   });
 });

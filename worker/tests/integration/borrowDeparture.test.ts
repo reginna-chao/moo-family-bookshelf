@@ -38,15 +38,18 @@
  * `failPutsMatching` is its `put` twin, used to make the settlement itself
  * throw (its index put is the first write it makes).
  *
- * No ids in error logs (#357): the familyId IS the sync code, and a userId
- * resolves to one through `POST /api/auth/lookup`, so `BORROW_CLEANUP_FAILED`
- * and `BORROW_INDEX_DELETE_FAILED` log `{ err }` only. `expectIdFreeErrorLog`
- * pins that two ways — no `familyId` / `targetUserId` / `userId` KEY, and none
- * of the case's id VALUES anywhere in the logged arguments (the `err` message
- * included), which also catches an id coming back under another key name. That
- * value check is why both failure helpers throw a message naming no key: the
- * index key embeds the familyId, and echoing it would put an id in the log
- * that production never wrote.
+ * No ids in error logs (#357, #480): the familyId IS the sync code, and a
+ * userId resolves to one through `POST /api/auth/lookup`, so
+ * `BORROW_CLEANUP_FAILED` and `BORROW_INDEX_DELETE_FAILED` log
+ * `{ err: <summary> }` only — `summarizeErrorForLog`'s type name + KV op +
+ * status, never the message or stack. Both failure helpers DELIBERATELY throw
+ * a workerd-shaped `KV <OP> failed: 503 Service Unavailable <key>` naming the
+ * key — the index key embeds the familyId — to prove the message never
+ * reaches the log. `expectIdFreeErrorLog` pins that: no `familyId` /
+ * `targetUserId` / `userId` KEY, none of the case's id VALUES anywhere in the
+ * logged arguments (serialized with every Error's `message` and `stack`
+ * expanded, which also catches an id under another key name), and — the
+ * positive companion — the exact `{ err: <summary> }` payload.
  *
  * Both removal callers: the owner kicking a member and that member walking out
  * on their own reach the SAME settlement. Running the identical fixture
@@ -80,6 +83,7 @@ import {
   type FamilyMember,
   type FamilyRecord,
 } from "../../src/kv/schema";
+import type { SafeErrorSummary } from "../../src/utils/errorLog";
 import { ALICE, BOB, CHARLIE } from "../helpers/ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,7 +201,9 @@ async function livePointerKeys(): Promise<string[]> {
 function failDeletesMatching(predicate: (key: string) => boolean): void {
   const realDelete = kv.delete.bind(kv);
   vi.spyOn(kv, "delete").mockImplementation(async (key: string) => {
-    if (predicate(key)) throw new Error("KV delete rejected");
+    if (predicate(key)) {
+      throw new Error(`KV DELETE failed: 503 Service Unavailable ${key}`);
+    }
     await realDelete(key);
   });
 }
@@ -207,17 +213,20 @@ function failDeletesMatching(predicate: (key: string) => boolean): void {
 function failPutsMatching(predicate: (key: string) => boolean): void {
   const realPut = kv.put.bind(kv);
   vi.spyOn(kv, "put").mockImplementation(async (key, value, options) => {
-    if (predicate(key)) throw new Error("KV put rejected");
+    if (predicate(key)) {
+      throw new Error(`KV PUT failed: 503 Service Unavailable ${key}`);
+    }
     await realPut(key, value, options);
   });
 }
 
-/** The `tag` log carries `err` and no id, by key or by value.
+/** The `tag` log is `{ err: <summary> }` and carries no id, by key or by value.
  *  See the header → "No ids in error logs". */
 function expectIdFreeErrorLog(
   errors: MockInstance<typeof console.error>,
   tag: string,
   ids: string[],
+  err: SafeErrorSummary,
 ): void {
   const calls = errors.mock.calls.filter(([logged]) => logged === tag);
   expect(calls.length).toBeGreaterThan(0);
@@ -227,9 +236,12 @@ function expectIdFreeErrorLog(
       expect(payload).not.toHaveProperty(key);
     }
     const logged = JSON.stringify([payload, ...rest], (_key, value: unknown) =>
-      value instanceof Error ? `${value.name}: ${value.message}` : value,
+      value instanceof Error
+        ? { name: value.name, message: value.message, stack: value.stack }
+        : value,
     );
     for (const id of ids) expect(logged).not.toContain(id);
+    expect([payload, ...rest]).toEqual([{ err }]);
   }
 }
 
@@ -530,10 +542,12 @@ describe("Departure cleanup when KV deletes reject", () => {
     expect(await livePointerKeys()).toEqual([]);
     expect(await kv.get(kvKeys.borrowsByFamily(FAMILY_ID))).not.toBeNull();
 
-    expectIdFreeErrorLog(errorSpy, "BORROW_INDEX_DELETE_FAILED", [
-      FAMILY_ID,
-      ALICE,
-    ]);
+    expectIdFreeErrorLog(
+      errorSpy,
+      "BORROW_INDEX_DELETE_FAILED",
+      [FAMILY_ID, ALICE],
+      { name: "Error", kvOp: "DELETE", kvStatus: 503 },
+    );
   });
 });
 
@@ -560,11 +574,12 @@ describe("Departure settlement when the index put rejects", () => {
     expect(((await res.json()) as Json).error.code).toBe(
       "BORROW_CLEANUP_FAILED",
     );
-    expectIdFreeErrorLog(errorSpy, "BORROW_CLEANUP_FAILED", [
-      FAMILY_ID,
-      ALICE,
-      BOB,
-    ]);
+    expectIdFreeErrorLog(
+      errorSpy,
+      "BORROW_CLEANUP_FAILED",
+      [FAMILY_ID, ALICE, BOB],
+      { name: "Error", kvOp: "PUT", kvStatus: 503 },
+    );
   });
 
   it("still deletes the account (fail-open) and logs no id", async () => {
@@ -583,10 +598,11 @@ describe("Departure settlement when the index put rejects", () => {
     );
 
     expect(res.status).toBe(200);
-    expectIdFreeErrorLog(errorSpy, "BORROW_CLEANUP_FAILED", [
-      FAMILY_ID,
-      ALICE,
-      BOB,
-    ]);
+    expectIdFreeErrorLog(
+      errorSpy,
+      "BORROW_CLEANUP_FAILED",
+      [FAMILY_ID, ALICE, BOB],
+      { name: "Error", kvOp: "PUT", kvStatus: 503 },
+    );
   });
 });
