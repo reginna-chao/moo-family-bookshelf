@@ -26,6 +26,10 @@ import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
 import { getQrTokenRecord, deleteQrToken } from "../kv/verify";
 import { getAuthTokenRecord } from "../kv/auth";
 import {
+  deleteAccountDeletingMark,
+  getAccountDeletingMark,
+} from "../kv/accountDeleting";
+import {
   isValidUserId,
   isJsonObject,
   sanitizeDisplayName,
@@ -37,8 +41,11 @@ import {
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { readAuthRecord, isQrBoundToListedToken } from "../services/authRecord";
 import {
+  hasRoomForDerivedToken,
   mintAuthToken,
+  mintDerivedAuthToken,
   readAndRevokeAllAuthTokens,
+  type IssuedToken,
 } from "../services/authTokens";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
@@ -49,6 +56,10 @@ import {
   verificationErrorResponse,
   verifySecretFormatResponse,
 } from "../services/verification";
+import {
+  deletionStartedDuring,
+  settleDeletionForAdmission,
+} from "../services/accountDeletion";
 import { settleDepartingBorrower } from "../services/borrowIndex";
 import { dissolveFamily } from "../services/familyDissolve";
 import { isActiveMember, isLiveMembership } from "../services/membership";
@@ -87,6 +98,22 @@ function memberRemovedResponse(c: Context<{ Bindings: Env }>) {
   );
 }
 
+/** The join handler's `409 RECOVERY_NOT_MEMBER` — one builder for the gate and the account-deletion checks. */
+function recoveryNotMemberResponse(c: Context<{ Bindings: Env }>) {
+  return jsonError(c, 409, "RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員");
+}
+
+/** This account's deletion is under way (#468): its mark is still cooling, or it started while the create / join ran.
+ *  A retry past the cooldown goes through `settleDeletionForAdmission`. */
+function accountDeletionInProgressResponse(c: Context<{ Bindings: Env }>) {
+  return jsonError(
+    c,
+    409,
+    "ACCOUNT_DELETION_IN_PROGRESS",
+    "這個帳戶正在移除，請稍後再試一次",
+  );
+}
+
 // --- Route definitions ---
 
 const createFamilyRoute = createRoute({
@@ -106,7 +133,9 @@ const createFamilyRoute = createRoute({
     201: jsonRes("Family created successfully"),
     400: jsonRes("Invalid input"),
     403: jsonRes("Verification required or failed"),
-    409: jsonRes("User already in a family"),
+    409: jsonRes(
+      "User already in a family, or this account's deletion is under way: it started within the last 2 minutes or during the request (ACCOUNT_DELETION_IN_PROGRESS)",
+    ),
     429: jsonRes("Verification locked or attempt ceiling reached"),
     503: jsonRes(
       "Verification unavailable: server pepper missing or mismatched",
@@ -129,7 +158,8 @@ const joinFamilyRoute = createRoute({
     "is refused with 409 `RECOVERY_NOT_MEMBER`, after the verification and " +
     "removed-member checks and before the capacity check. A listed member's " +
     "recovery reconnect is unaffected, and a manual join (`recovery` absent " +
-    "or 0) is admitted exactly as before.",
+    "or 0) is admitted exactly as before. An operator-issued rescue link " +
+    "(`qrToken`) is an explicit action, so it is not refused on this rule.",
   request: {
     params: FamilyIdParam,
   },
@@ -139,7 +169,7 @@ const joinFamilyRoute = createRoute({
     403: jsonRes("Verification failed, or member was removed by the owner"),
     404: jsonRes("Family not found"),
     409: jsonRes(
-      "Already in a family, family full, or recovery join by a non-member",
+      "Already in a family, family full, recovery join by a non-member or during this account's deletion, or this account's deletion is under way: it started within the last 2 minutes or during the request (ACCOUNT_DELETION_IN_PROGRESS)",
     ),
     429: jsonRes("Rate limit exceeded"),
     503: jsonRes(
@@ -359,14 +389,22 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     return verificationErrorResponse(c, verification.error);
   }
 
+  // A wiped account's earlier reads are stale, so an upgrade would write the old secret back; its mark goes
+  // right before the mint below. See docs/architecture.md → 家庭成員的授權與移除.
+  const settlement = await settleDeletionForAdmission(c.env.KV, body.userId);
+  if (settlement === "cooling") {
+    return accountDeletionInProgressResponse(c);
+  }
+  const cleared = settlement === "wiped";
+
   // Same stale-record refusal as join (#378), still before any write; `auth` is reused by the mint below.
   // See docs/architecture.md → PWA 登入驗證機制.
-  const auth = await readAuthRecord(c.env.KV, body.userId);
-  if (passedAgainstStaleVerifyRecord(auth, verification.record)) {
+  const auth = cleared ? null : await readAuthRecord(c.env.KV, body.userId);
+  if (!cleared && passedAgainstStaleVerifyRecord(auth, verification.record)) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
   }
   // v1 → v2 hash upgrade (no-op unless a pin/pattern secret just matched); fail-open, never blocks create.
-  if (verification.record && verifySecret !== undefined) {
+  if (!cleared && verification.record && verifySecret !== undefined) {
     await upgradeVerifyRecordHash(
       c.env,
       body.userId,
@@ -375,7 +413,7 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
     );
   }
 
-  if (membership === "orphaned") {
+  if (!cleared && membership === "orphaned") {
     await deleteMemberFamilyId(c.env.KV, body.userId);
   }
 
@@ -398,11 +436,20 @@ familyRoutes.openapi(createFamilyRoute, async (c) => {
   await putMemberFamilyId(c.env.KV, body.userId, familyId);
   await putFamilyRecord(c.env.KV, familyId, record);
 
+  // Only a real admission ends a deletion; a throw here is a 500 with no token issued.
+  if (cleared) await deleteAccountDeletingMark(c.env.KV, body.userId);
+
   const { token: authToken, expiresAt } = await mintAuthToken(
     c.env.KV,
     body.userId,
     auth,
   );
+
+  // Skipped after a clear: re-reading the mark just deleted may see the old value and wipe this new account.
+  if (!cleared && (await deletionStartedDuring(c.env.KV, body.userId))) {
+    await dissolveFamily(c.env.KV, familyId);
+    return accountDeletionInProgressResponse(c);
+  }
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 201);
 });
@@ -501,13 +548,20 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return memberRemovedResponse(c);
   }
 
-  // A silent recovery join never admits a NEW member (#263): an unlisted user left or was
-  // removed, and only a manual join may bring them back. No KV op; precedes FAMILY_FULL.
-  if (!isExistingMember && recovery === BoolFlag.TRUE) {
-    return jsonError(c, 409, "RECOVERY_NOT_MEMBER", "你已經不是這個家庭的成員");
+  // A silent recovery join never admits a NEW member (#263): an unlisted user left or was removed, and only
+  // a manual join or an operator's rescue link may bring them back. No KV op; precedes FAMILY_FULL.
+  if (!isExistingMember && recovery === BoolFlag.TRUE && !gate.qrRescued) {
+    return recoveryNotMemberResponse(c);
   }
 
-  const step = { familyId, userId: body.userId, displayName, record, gate };
+  const step = {
+    familyId,
+    userId: body.userId,
+    displayName,
+    record,
+    gate,
+    recovery,
+  };
   return isExistingMember
     ? reconnectExistingMember(c, { ...step, existingFamily })
     : admitNewMember(c, step);
@@ -1189,12 +1243,14 @@ async function writeKickedTombstone(
 }
 
 /** A passed join gate (#378): `knownAuth` is the `auth:{userId}` the QR check read (`undefined` when none);
- *  `qrBoundHash` the listed token hash a QR bypass matched (#425, else `null`); `verifyRecord` /
- *  `verifiedSecret` are what the comparison used (`null` / `undefined` after a QR bypass). */
+ *  `qrRescued` marks an operator's rescue link (also `qrBypassed`); `qrBoundHash` the listed token hash a QR bypass
+ *  matched (#425, else `null`); `verifyRecord` / `verifiedSecret` are what the comparison used (`null` /
+ *  `undefined` after a QR bypass). */
 interface JoinGatePass {
   failure: null;
   knownAuth: AuthRecord | null | undefined;
   qrBypassed: boolean;
+  qrRescued: boolean;
   qrBoundHash: string | null;
   verifyRecord: VerifyRecord | null;
   verifiedSecret: string | undefined;
@@ -1207,10 +1263,55 @@ interface JoinStepInput {
   displayName: string;
   record: FamilyRecord;
   gate: JoinGatePass;
+  recovery: BoolFlag;
 }
 
-/** Join's verification step: a one-time QR token issued to `userId` and still bound to one of the account's
- *  listed tokens (#378, #425) skips the gate, else `validateVerification`. `failure` is the gate's error Response. */
+/** A pending deletion (#468) for a join past the route-level refusals. A QR bypass skips the mark (a wiped bound token fails
+ *  `admitJoinToken`); any mark refuses a silent recovery; `cleared` = wiped, the mark stays until the branch's mint. */
+async function settleDeletionForJoin(
+  kv: KVNamespace,
+  userId: string,
+  recovery: BoolFlag,
+  gate: JoinGatePass,
+): Promise<{ refused: boolean; cooling: boolean; cleared: boolean }> {
+  if (gate.qrBypassed) {
+    return { refused: false, cooling: false, cleared: false };
+  }
+  if (recovery === BoolFlag.TRUE) {
+    const mark = await getAccountDeletingMark(kv, userId);
+    return { refused: mark !== null, cooling: false, cleared: false };
+  }
+  const settlement = await settleDeletionForAdmission(kv, userId);
+  return {
+    refused: false,
+    cooling: settlement === "cooling",
+    cleared: settlement === "wiped",
+  };
+}
+
+/** The gate as it stands after a wipe: the `auth:` and `verify:` it read are gone, so nothing may be upgraded or
+ *  compared against them. */
+function gateAfterClear(gate: JoinGatePass): JoinGatePass {
+  return {
+    ...gate,
+    knownAuth: null,
+    verifyRecord: null,
+    verifiedSecret: undefined,
+  };
+}
+
+/** A deletion started while this join ran (#468): the refusal a silent recovery client understands, else the retry hint. */
+function joinDeletionRaceResponse(
+  c: Context<{ Bindings: Env }>,
+  recovery: BoolFlag,
+) {
+  return recovery === BoolFlag.TRUE
+    ? recoveryNotMemberResponse(c)
+    : accountDeletionInProgressResponse(c);
+}
+
+/** Join's verification step: a rescue link, or a one-time QR token issued to `userId`, bound to a listed unmarked token
+ *  (#378, #425) and leaving room for its token, skips the gate; else `validateVerification`. `failure` is its error Response. */
 async function passJoinVerificationGate(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -1236,7 +1337,20 @@ async function passJoinVerificationGate(
         deleteQrToken(c.env.KV, qrToken),
       ]);
       knownAuth = auth;
-      skipVerification = isQrBoundToListedToken(qrRecord.tokenHash, auth);
+      if (qrRecord.rescue === BoolFlag.TRUE) {
+        return {
+          failure: null,
+          knownAuth,
+          qrBypassed: true,
+          qrRescued: true,
+          qrBoundHash: null,
+          verifyRecord: null,
+          verifiedSecret: undefined,
+        };
+      }
+      skipVerification =
+        isQrBoundToListedToken(qrRecord.tokenHash, auth) &&
+        (await hasRoomForDerivedToken(c.env.KV, userId, auth));
       qrBoundHash = skipVerification ? (qrRecord.tokenHash ?? null) : null;
     }
     // If token invalid/expired/wrong-user, fall through to normal verification
@@ -1246,6 +1360,7 @@ async function passJoinVerificationGate(
       failure: null,
       knownAuth,
       qrBypassed: true,
+      qrRescued: false,
       qrBoundHash,
       verifyRecord: null,
       verifiedSecret: undefined,
@@ -1266,6 +1381,7 @@ async function passJoinVerificationGate(
     failure: null,
     knownAuth,
     qrBypassed: false,
+    qrRescued: false,
     qrBoundHash,
     verifyRecord: verification.record,
     verifiedSecret: verifySecret,
@@ -1275,7 +1391,7 @@ async function passJoinVerificationGate(
 /** Token side of a passed join (#378, #425): `auth:{userId}` (read once) for the mint. `null` ⇒ 403
  *  VERIFICATION_REQUIRED: after a QR bypass the bound token's `token:` key is gone (one read), or the secret
  *  passed against a stale verify record; a fresh secret pass also upgrades a v1 hash (`upgradeVerifyRecordHash`,
- *  fail-open). See docs/architecture.md → PWA 登入驗證機制. */
+ *  fail-open). A rescue link is bound to no token and always passes. See docs/architecture.md → PWA 登入驗證機制. */
 async function admitJoinToken(
   env: Env,
   userId: string,
@@ -1285,6 +1401,7 @@ async function admitJoinToken(
     gate.knownAuth === undefined
       ? await readAuthRecord(env.KV, userId)
       : gate.knownAuth;
+  if (gate.qrRescued) return { auth };
   if (gate.qrBypassed) {
     const bound =
       gate.qrBoundHash === null
@@ -1304,13 +1421,37 @@ async function admitJoinToken(
   return { auth };
 }
 
+/** A QR redeem proved no secret, so its token is `derived`; a secret join and an operator's rescue link are not. */
+function mintJoinToken(
+  kv: KVNamespace,
+  userId: string,
+  gate: JoinGatePass,
+  auth: AuthRecord | null,
+): Promise<IssuedToken> {
+  return gate.qrBypassed && !gate.qrRescued
+    ? mintDerivedAuthToken(kv, userId, auth)
+    : mintAuthToken(kv, userId, auth);
+}
+
 /** Join's existing-member branch: `admitJoinToken` (may 403), heals the pointer (+ tombstone re-check, may
  *  403) or, when not healing, may put a changed displayName; then mints a new token for this device (#425). */
 async function reconnectExistingMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput & { existingFamily: string | null },
 ) {
-  const { familyId, userId, displayName, record, existingFamily, gate } = input;
+  const { familyId, userId, displayName, record, recovery } = input;
+
+  const settled = await settleDeletionForJoin(
+    c.env.KV,
+    userId,
+    recovery,
+    input.gate,
+  );
+  if (settled.refused) return recoveryNotMemberResponse(c);
+  if (settled.cooling) return accountDeletionInProgressResponse(c);
+  const gate = settled.cleared ? gateAfterClear(input.gate) : input.gate;
+  // A wipe deleted `member:`, so the pointer read before it no longer holds and must be healed.
+  const existingFamily = settled.cleared ? null : input.existingFamily;
 
   const admitted = await admitJoinToken(c.env, userId, gate);
   if (!admitted) {
@@ -1339,11 +1480,21 @@ async function reconnectExistingMember(
     await putFamilyRecord(c.env.KV, familyId, record);
   }
 
-  const { token: authToken, expiresAt } = await mintAuthToken(
+  // Past the last refusal: only a real admission ends a deletion.
+  if (settled.cleared) await deleteAccountDeletingMark(c.env.KV, userId);
+
+  const { token: authToken, expiresAt } = await mintJoinToken(
     c.env.KV,
     userId,
+    gate,
     admitted.auth,
   );
+
+  // Skipped after a clear: re-reading the mark just deleted may see the old value and wipe this account.
+  if (!settled.cleared && (await deletionStartedDuring(c.env.KV, userId))) {
+    return joinDeletionRaceResponse(c, recovery);
+  }
+
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
 }
 
@@ -1353,7 +1504,7 @@ async function admitNewMember(
   c: Context<{ Bindings: Env }>,
   input: JoinStepInput,
 ) {
-  const { familyId, userId, displayName, record, gate } = input;
+  const { familyId, userId, displayName, record, recovery } = input;
 
   // --- New member flow: capacity check ---
 
@@ -1362,6 +1513,17 @@ async function admitNewMember(
   if (record.members.length >= record.maxMembers) {
     return jsonError(c, 409, "FAMILY_FULL", "家庭成員已達上限");
   }
+
+  const settled = await settleDeletionForJoin(
+    c.env.KV,
+    userId,
+    recovery,
+    input.gate,
+  );
+  if (settled.refused) return recoveryNotMemberResponse(c);
+  if (settled.cooling) return accountDeletionInProgressResponse(c);
+  const gate = settled.cleared ? gateAfterClear(input.gate) : input.gate;
+
   const admitted = await admitJoinToken(c.env, userId, gate);
   if (!admitted) {
     return verificationErrorResponse(c, VERIFICATION_REQUIRED_ERROR);
@@ -1383,13 +1545,44 @@ async function admitNewMember(
     return memberRemovedResponse(c);
   }
 
-  const { token: authToken, expiresAt } = await mintAuthToken(
+  // Past the last refusal: only a real admission ends a deletion.
+  if (settled.cleared) await deleteAccountDeletingMark(c.env.KV, userId);
+
+  const { token: authToken, expiresAt } = await mintJoinToken(
     c.env.KV,
     userId,
+    gate,
     admitted.auth,
   );
 
+  // Skipped after a clear: re-reading the mark just deleted may see the old value and wipe this account.
+  if (!settled.cleared && (await deletionStartedDuring(c.env.KV, userId))) {
+    await unlistJoinerAfterDeletion(c.env.KV, familyId, userId);
+    return joinDeletionRaceResponse(c, recovery);
+  }
+
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
+}
+
+/** Join-race cleanup (#468): re-read `family:{id}` and drop the wiped joiner unless no one would remain; fail-open,
+ *  no CAS. docs/architecture.md → 家庭成員的授權與移除 (沒清過標記時). */
+async function unlistJoinerAfterDeletion(
+  kv: KVNamespace,
+  familyId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const raw = await getFamilyRecord(kv, familyId);
+    if (!raw) return;
+    const record = normalizeFamilyRecord(raw);
+    const members = record.members.filter((m) => m.userId !== userId);
+    if (members.length === record.members.length || members.length === 0) {
+      return;
+    }
+    await putFamilyRecord(kv, familyId, { ...record, members });
+  } catch {
+    console.error("JOIN_RACE_MEMBER_CLEANUP_FAILED");
+  }
 }
 
 /** Join half of the kick pairing: after the pointer put, re-read the tombstone; if present, delete the

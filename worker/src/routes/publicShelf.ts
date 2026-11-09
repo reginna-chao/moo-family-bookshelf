@@ -14,6 +14,7 @@ import {
   getPublicSnapshot,
   deletePublicSnapshot,
 } from "../kv/publicShelves";
+import { getAccountDeletingMark } from "../kv/accountDeleting";
 import { getUserBooksRecord } from "../kv/users";
 import {
   sanitizePublicShelfTitle,
@@ -366,10 +367,19 @@ publicShelfRoutes.openapi(createPublicShelfRoute, async (c) => {
     selectionMode: "all-shared",
   };
 
-  // Writes the pointer key only (never `user:{userId}`); after a legacy fallback this write IS the
-  // lazy migration. Rationale: .claude/rules/backend.md → KV Key Patterns.
-  await writePublicShelves(c.env.KV, userId, [...shelves, shelf]);
+  // Snapshot FIRST: once the list is visible its snapshot can be found (#468). A failed list put removes the
+  // snapshot here, since a retry mints a new token. See docs/architecture.md → 公開書櫃的寫入與撤銷.
   await writePublicSnapshot(c.env.KV, userId, shelf, record.books);
+  try {
+    // Writes the pointer key only (never `user:{userId}`); after a legacy fallback this write IS the
+    // lazy migration. Rationale: .claude/rules/backend.md → KV Key Patterns.
+    await writePublicShelves(c.env.KV, userId, [...shelves, shelf]);
+  } catch (err) {
+    await deletePublicSnapshot(c.env.KV, shelf.shareToken).catch(() => {
+      console.error("PUBLIC_SHELF_SNAPSHOT_CLEANUP_FAILED");
+    });
+    throw err;
+  }
 
   return c.json({ data: { shelf } }, 201);
 });
@@ -563,6 +573,11 @@ publicQueryRoutes.openapi(getPublicSnapshotRoute, async (c) => {
     snapshot.userId,
   );
   if (!isSnapshotLive(snapshot, shareToken, shelves)) {
+    return publicShelfNotFound(c);
+  }
+
+  // A deletion in progress hides the link before the sweep reaches it (#468). Sequential, no write.
+  if ((await getAccountDeletingMark(c.env.KV, snapshot.userId)) !== null) {
     return publicShelfNotFound(c);
   }
 

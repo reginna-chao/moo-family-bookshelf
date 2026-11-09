@@ -72,7 +72,8 @@ export function createCountingKv(
  * configured they spend nothing: the per-IP tiers and the four per-minute
  * per-userId scopes resolve to a native binding through `bindingForWindow`
  * and cost no KV operation (the point of #160 item 1), leaving the auth-token
- * `get` as the entire fixed per-request cost; only the hourly scopes still
+ * `get` as the fixed per-request cost, plus `accountDeletionGuard`'s one mark
+ * `get` on an authenticated non-GET; only the hourly scopes still
  * add a counter get+put. On a deployment whose wrangler.toml carries no
  * bindings the old per-IP and per-minute counters come back at 1 get + 1 put
  * each and surface in this line — which is exactly how that fallback is

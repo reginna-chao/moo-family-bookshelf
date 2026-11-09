@@ -14,8 +14,10 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_MAX,
   VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
  * `PUT /api/user/:id/verify`'s own per-userId ceiling, `verify-set` (#396).
@@ -24,8 +26,8 @@ import {
  * current-secret step-up — so a request refused by any of them (400 / 401 /
  * 403) costs no slot, and on a PIN / pattern account only someone who knows
  * the secret can spend the owner's 30 changes an hour. A wrong `currentSecret`
- * is a guess: it charges the step-up's `verify-stepup` budget, never `verify-set`
- * and never the public login budget `verify`.
+ * is a guess: it charges the presenting token's `verify-stepup` budget, never
+ * `verify-set` and never the public login budget `verify`.
  *
  * Separate scopes: PUT no longer charges the `verify-write` scope shared by
  * OTP / prompted / qr-token, so a spent `verify-write` window does not block a
@@ -93,20 +95,35 @@ async function setUp(method: string, secret?: string): Promise<string> {
 
 type Limit = { scope: string; max: number; windowSec: number };
 
-async function counterKey(limit: Limit): Promise<string> {
-  return (await peekPerUserRateLimit(kv, { userId: USER_ID, ...limit })).key;
+async function counterKey(limit: Limit, subject = USER_ID): Promise<string> {
+  return (await peekPerUserRateLimit(kv, { userId: subject, ...limit })).key;
 }
 
 const STEP_UP_LIMIT: Limit = {
   scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
-  max: VERIFY_ATTEMPT_MAX,
+  max: VERIFY_STEP_UP_ATTEMPT_MAX,
   windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
 };
-const LOGIN_LIMIT: Limit = { ...STEP_UP_LIMIT, scope: VERIFY_ATTEMPT_SCOPE };
+const LOGIN_LIMIT: Limit = {
+  ...STEP_UP_LIMIT,
+  scope: VERIFY_ATTEMPT_SCOPE,
+  max: VERIFY_ATTEMPT_MAX,
+};
 const setKey = () => counterKey(VERIFY_SET_LIMIT);
 const writeKey = () => counterKey(VERIFY_WRITE_LIMIT);
-const attemptKey = () => counterKey(STEP_UP_LIMIT);
 const loginKey = () => counterKey(LOGIN_LIMIT);
+
+/** `token`'s own step-up budget key: the subject is `{userId}:{hash}` for an unmarked token. */
+async function attemptKey(token: string): Promise<string> {
+  const hash = await hashAuthToken(token);
+  return counterKey(STEP_UP_LIMIT, `${USER_ID}:${hash}`);
+}
+
+/** Every step-up budget key of the account, whichever token charged it. */
+async function stepUpKeys(): Promise<string[]> {
+  const prefix = `ratelimit:user:${VERIFY_STEP_UP_ATTEMPT_SCOPE}:${USER_ID}:`;
+  return (await kv.list({ prefix })).keys.map((key) => key.name);
+}
 
 async function count(key: string): Promise<number | null> {
   const raw = await kv.get(key);
@@ -143,7 +160,7 @@ describe("verify-set ceiling — charged only after the step-up", () => {
     const prefixes = [
       await setKey(),
       await writeKey(),
-      await attemptKey(),
+      await attemptKey("a".repeat(64)),
       await loginKey(),
     ].map((k) => k.slice(0, k.indexOf(USER_ID)));
     expect(new Set(prefixes).size).toBe(prefixes.length);
@@ -162,7 +179,7 @@ describe("verify-set ceiling — charged only after the step-up", () => {
     expect(await count(await setKey())).toBe(1);
     expect(getPutTtl(kv, await setKey())).toBe(VERIFY_SET_LIMIT.windowSec * 2);
     expect(await count(await writeKey())).toBeNull();
-    expect(await count(await attemptKey())).toBeNull();
+    expect(await stepUpKeys()).toEqual([]);
   });
 
   it.each([
@@ -206,20 +223,23 @@ describe("verify-set ceiling — charged only after the step-up", () => {
 
     await putVerify(token, { method: "none", currentSecret: WRONG_PIN });
 
-    expect(await count(await attemptKey())).toBe(1);
+    expect(await count(await attemptKey(token))).toBe(1);
+    expect(await stepUpKeys()).toEqual([await attemptKey(token)]);
     expect(await count(await setKey())).toBeNull();
     expect(await count(await loginKey())).toBeNull();
   });
 
   it("refuses the correct secret with the step-up budget spent before charging verify-set", async () => {
     const token = await setUp("pin", PIN);
-    await spend(await attemptKey(), VERIFY_ATTEMPT_MAX);
+    await spend(await attemptKey(token), VERIFY_STEP_UP_ATTEMPT_MAX);
 
     const res = await putVerify(token, { method: "none", currentSecret: PIN });
 
     expect(res.status).toBe(429);
     expect(await count(await setKey())).toBeNull();
-    expect(await count(await attemptKey())).toBe(VERIFY_ATTEMPT_MAX);
+    expect(await count(await attemptKey(token))).toBe(
+      VERIFY_STEP_UP_ATTEMPT_MAX,
+    );
   });
 
   it.each([
@@ -249,7 +269,7 @@ describe("verify-set ceiling — charged only after the step-up", () => {
 
       expect(res.status).toBe(401);
       expect(await count(await setKey())).toBeNull();
-      expect(await count(await attemptKey())).toBeNull();
+      expect(await stepUpKeys()).toEqual([]);
     },
   );
 });
@@ -283,7 +303,7 @@ describe("verify-set ceiling — once spent", () => {
 
     expect(missing.status).toBe(403);
     expect(wrong.status).toBe(403);
-    expect(await count(await attemptKey())).toBe(1);
+    expect(await count(await attemptKey(token))).toBe(1);
     expect(await count(await setKey())).toBe(VERIFY_SET_LIMIT.max);
   });
 

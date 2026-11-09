@@ -1,5 +1,5 @@
 /** KV key builders (`kvKeys`), record types and TTL constants. Key → value → TTL: .claude/rules/backend.md
- *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s): docs/architecture.md → KV Key 設計. */
+ *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s; an operator-written rescue record 3600s): docs/architecture.md → KV Key 設計. */
 import { MAX_BOOK_ID_LENGTH } from "moo-family-bookshelf-shared/api/bookId";
 
 /** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
@@ -124,6 +124,8 @@ export const kvKeys = {
   authToken: (tokenHash: string) => `token:${tokenHash}`,
   // Under the `token:` prefix on purpose: the KV backup already ignores it (`IGNORED`, scripts/kv-backup/format.mjs).
   accountDeleted: (tokenHash: string) => `token:deleted:${tokenHash}`,
+  // Same prefix, same reason; a `token:{hash}` tail is 64 hex chars, so it cannot collide. List prefix: `accountDeleting("")`.
+  accountDeleting: (userId: string) => `token:deleting:${userId}`,
   // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
   authTokenIndex: (userId: string, tokenHash: string) =>
     `tokenidx:${userId}:${tokenHash}`,
@@ -284,9 +286,9 @@ export interface PublicShelf {
  * carrying a stale read (KV cross-colo reads can lag ~60s) could roll a
  * revoked share token back to life and re-publish a snapshot the owner had
  * just deleted. Only the four public-shelf write handlers write THIS key, so
- * no books/family-prefs save can ever roll it back. (Account deletion in
- * `services/accountDeletion.ts` additionally `delete`s it as part of
- * whole-account teardown — a wipe, not a list write.)
+ * no books/family-prefs save can ever roll it back. (`deleteAccountKeys` and
+ * `wipeAccountData` in `services/accountDeletion.ts` additionally `delete` it as
+ * part of whole-account teardown — a wipe, not a list write.)
  *
  * Lazy migration: absent key ⇒ fall back to the legacy
  * `UserBooksRecord.publicSharing` field; the next public-shelf write handler
@@ -412,9 +414,13 @@ export interface AuthTokenRecord {
 export interface AuthTokenEntry {
   hash: string;
   createdAt: string;
+  /** `BoolFlag.TRUE`: this token was obtained through another token and proved no secret when minted (QR redeem,
+   *  TTL-gap refresh). OPTIONAL (added after release): absent ⇒ unmarked, as every record written before it. */
+  derived?: BoolFlag;
 }
 
-/** `auth:{userId}` as stored (#425): the account's tokens, at most `MAX_AUTH_TOKENS_PER_USER`. */
+/** `auth:{userId}` as stored (#425): the account's tokens. `MAX_AUTH_TOKENS_PER_USER` is the mint's target; a race
+ *  can leave the list briefly over it, and the next secret-proven mint brings it back. */
 export interface StoredAuthRecord {
   tokens: AuthTokenEntry[];
   /** Epoch ms of the `verify:{userId}.secretUpdatedAt` the PIN/pattern rotation was written for (#378); a join
@@ -435,7 +441,22 @@ export const TOKEN_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 /** How long `token:deleted:{tokenHash}` answers a retried account deletion and refuses a TTL-gap refresh: 1 day (#462). */
 export const ACCOUNT_DELETED_MARK_TTL_SECONDS = 24 * 60 * 60;
 
-/** Tokens one account may hold at once (one per device); the next mint evicts dead, then oldest, entries. */
+/** Value of `token:deleting:{userId}` (#468): an account deletion has started and is not finished. */
+export interface AccountDeletingMark {
+  /** Epoch ms the deletion (or its latest retry) wrote this mark. */
+  startedAt: number;
+  /** Share tokens known at that moment, kept across retries because `publicshelves:` may already be gone. */
+  shareTokens: string[];
+}
+
+/** Upper bound of `token:deleting:{userId}`: 1 day. The sweep usually retires it earlier; this outlasts a daily KV quota reset. */
+export const ACCOUNT_DELETING_MARK_TTL_SECONDS = 24 * 60 * 60;
+
+/** A create or manual join is refused while a mark is younger than this (2 minutes): requests in flight when the deletion
+ *  started should have landed and been wiped by then, and it outlasts the ~60s KV cache. An estimate, not measured. */
+export const ACCOUNT_RECREATE_COOLDOWN_MS = 2 * 60 * 1000;
+
+/** Tokens one account may hold at once (one per device); eviction order: `evictForNewToken`, `services/authTokens.ts`. */
 export const MAX_AUTH_TOKENS_PER_USER = 5;
 
 /** Refresh writes nothing when its target expiry is within this of the stored `expiresAt` (1 hour). */
@@ -444,7 +465,7 @@ export const TOKEN_RENEW_SKIP_WINDOW_MS = 60 * 60 * 1000;
 /** OTP TTL: 5 minutes in seconds. */
 export const OTP_TTL_SECONDS = 5 * 60;
 
-/** QR token TTL: 5 minutes in seconds. */
+/** QR token TTL: 5 minutes in seconds. An operator-written rescue record sets its own, 3600s (worker/DEPLOY.md). */
 export const QR_TOKEN_TTL_SECONDS = 5 * 60;
 
 export interface QrTokenRecord {
@@ -453,6 +474,9 @@ export interface QrTokenRecord {
    *  (added after release): absent, or an older `qr:`-salted value, matches no entry ⇒ never bypasses
    *  verification (`isQrBoundToListedToken`, `services/authRecord.ts`). */
   tokenHash?: string;
+  /** `BoolFlag.TRUE`: an operator-issued rescue link, which skips verification (`passJoinVerificationGate`,
+   *  `routes/family.ts`). Only written by hand into KV (worker/DEPLOY.md → 救援連結); `POST /qr-token` never writes it. */
+  rescue?: BoolFlag;
 }
 
 /** Verification method for PWA login. */

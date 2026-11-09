@@ -101,22 +101,75 @@ export function watchKvOps(kv: KVNamespace): KvOpLog {
   };
 }
 
+/** A write parked by {@link holdNextWrite}. */
+export interface HeldWrite {
+  /** Resolves when the matching write arrives, before it touches KV. */
+  reached: Promise<void>;
+  /** Lets the parked write go through. */
+  release(): void;
+  /** The key the write was parked on, `null` until one arrives. */
+  heldKey(): string | null;
+  /** Whether the parked write has reached KV. */
+  landed(): boolean;
+}
+
 /**
- * Make the FIRST `op` (`put` or `delete`) on `key` reject with `Error("KV down")`;
- * every other call, and any later `op` on `key`, goes straight through to `kv`. For
- * partial-failure cases whose retry must be allowed to write. Installs a `vi.spyOn`
- * on `kv[op]` like {@link watchKvOps} — restore it in `afterEach`
- * (`vi.restoreAllMocks()`), and call {@link watchKvOps} only AFTER this.
+ * Park the FIRST `op` (`put` or `delete`) whose key is `key` (or satisfies it, when the
+ * key is random); every other call goes straight through. For races that must fix the
+ * order of two requests: start one, await `reached`, run the other to completion, then
+ * `release()`. The mock itself is single-threaded and never interleaves on its own.
+ * Installs a `vi.spyOn` on `kv[op]` like {@link watchKvOps} — restore it in `afterEach`
+ * (`vi.restoreAllMocks()`), and call {@link watchKvOps} only AFTER this. A `reached` that
+ * never resolves means the write did not happen: race it against the request.
+ */
+export function holdNextWrite(
+  kv: KVNamespace,
+  op: "put" | "delete",
+  key: string | ((key: string) => boolean),
+): HeldWrite {
+  let markReached = () => {};
+  let release = () => {};
+  const reached = new Promise<void>((resolve) => {
+    markReached = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const real = (kv[op] as (...args: unknown[]) => Promise<void>).bind(kv);
+  const matches = typeof key === "string" ? (k: string) => k === key : key;
+  let heldKey: string | null = null;
+  let landed = false;
+  vi.spyOn(kv, op).mockImplementation((async (...args: unknown[]) => {
+    if (heldKey === null && matches(String(args[0]))) {
+      heldKey = String(args[0]);
+      markReached();
+      await released;
+      await real(...args);
+      landed = true;
+      return;
+    }
+    return real(...args);
+  }) as never);
+  return { reached, release, heldKey: () => heldKey, landed: () => landed };
+}
+
+/**
+ * Make the FIRST `op` (`put` or `delete`) on `key` (or satisfying it, when the key is
+ * random) reject with `Error("KV down")`; every other call, and any later matching `op`,
+ * goes straight through to `kv`. For partial-failure cases whose retry must be allowed to
+ * write. Installs a `vi.spyOn` on `kv[op]` like {@link watchKvOps} — restore it in
+ * `afterEach` (`vi.restoreAllMocks()`), and call {@link watchKvOps} only AFTER this.
  */
 export function failFirstWriteTo(
   kv: KVNamespace,
   op: "put" | "delete",
-  key: string,
+  key: string | ((key: string) => boolean),
 ): void {
   const real = (kv[op] as (...args: unknown[]) => Promise<void>).bind(kv);
+  const matches = typeof key === "string" ? (k: string) => k === key : key;
   let failed = false;
   vi.spyOn(kv, op).mockImplementation(((...args: unknown[]) => {
-    if (args[0] === key && !failed) {
+    if (matches(String(args[0])) && !failed) {
       failed = true;
       return Promise.reject(new Error("KV down"));
     }

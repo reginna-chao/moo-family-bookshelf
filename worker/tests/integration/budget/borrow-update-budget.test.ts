@@ -25,6 +25,8 @@
  *   target id (security-ux Invariant 6): now that the KV key is gone, the
  *   `calls` assertion below is that rule's only automatic check.
  * - `token:{hash}` — auth middleware (`authMiddleware`, middleware/auth.ts). Real cost.
+ * - `token:deleting:{callerId}` — `accountDeletionGuard`'s one post-handler read on every
+ *   authenticated non-GET (#468). Real cost: it is how a new route is covered with nothing to add.
  * - `borrow:{requestId}` — 1 get (routes/borrow.ts, `readBorrowPointer`)
  *   and NO put. Since #160 item 2 the key holds a `BorrowPointer`
  *   (`{ familyId }`); a bare requestId cannot name its family, so this read
@@ -184,7 +186,7 @@ afterEach(() => {
 });
 
 describe("KV budget: PATCH /api/borrow/:requestId", () => {
-  it("performs exactly 5 KV reads and 1 KV write for a PENDING to LENT update", async () => {
+  it("performs exactly 6 KV reads and 1 KV write for a PENDING to LENT update", async () => {
     const token = await seedPendingBorrow();
 
     const ops = watchKvOps(kv);
@@ -205,6 +207,8 @@ describe("KV budget: PATCH /api/borrow/:requestId", () => {
       // handler, `isActiveMember` — the caller's (USER2's) pointer for the #222 re-check;
       // after the Promise.all pair because it needs the family record.
       kvKeys.member(USER2),
+      // accountDeletionGuard, after the handler
+      kvKeys.accountDeleting(USER2),
     ]);
 
     expect(ops.putKeys()).toEqual([

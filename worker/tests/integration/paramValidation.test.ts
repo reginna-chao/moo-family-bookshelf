@@ -458,10 +458,12 @@ describe("malformed path param ⇒ the exact pre-#227 400", () => {
       const sent = await send(route.method, path, { withToken: route.auth });
 
       expect(sent.res.status).toBe(400);
-      // The only KV touch is the auth middleware resolving the token (none on
-      // a public route); nothing is written anywhere.
+      // The only KV touches are the auth middleware resolving the token (none on a public
+      // route) and accountDeletionGuard's mark read on a non-GET; nothing is written anywhere.
+      const guardRead =
+        route.method === "GET" ? [] : [kvKeys.accountDeleting(USER1)];
       expect(sent.ops.getKeys()).toEqual(
-        route.auth ? [await authTokenKey(sent.token)] : [],
+        route.auth ? [await authTokenKey(sent.token), ...guardRead] : [],
       );
       expect(sent.ops.writeTrail()).toEqual([]);
       expect(perUserCharges(sent)).toEqual([]);

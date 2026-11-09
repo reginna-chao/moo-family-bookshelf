@@ -1,6 +1,7 @@
 /** Auth-token writes (#425, #431): minting a new token (cap eviction, `tokenidx:` index) and revoking
  *  an account's `token:` keys via its list AND index (revoke-all drops `auth:` too). See docs/architecture.md → PWA 登入驗證機制. */
 import {
+  BoolFlag,
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,
   TOKEN_TTL_SECONDS,
@@ -55,7 +56,7 @@ function indexKeyName(key: unknown): string | null {
  * `HEX_64` are returned — anything else is skipped, so a stray key can never steer a
  * `token:` delete.
  */
-async function listIndexHashesUpTo(
+export async function listIndexHashesUpTo(
   kv: KVNamespace,
   userId: string,
   max: number,
@@ -133,12 +134,13 @@ function compareIso(a: string, b: string): number {
   return 0;
 }
 
-/** Make room for one new token at the cap: dead entries first, then oldest `createdAt`.
- *  See docs/architecture.md → PWA 登入驗證機制. */
+/** Make room for one new token at the cap: dead entries first, then `derived`, then oldest `createdAt`; a `derived`
+ *  mint never evicts an unmarked entry, even short of candidates. See docs/architecture.md → PWA 登入驗證機制. */
 async function evictForNewToken(
   kv: KVNamespace,
   userId: string,
   previous: AuthTokenEntry[],
+  derived: boolean,
 ): Promise<{ kept: AuthTokenEntry[]; evicted: string[] }> {
   const excess = previous.length - (MAX_AUTH_TOKENS_PER_USER - 1);
   if (excess <= 0) return { kept: previous, evicted: [] };
@@ -146,13 +148,17 @@ async function evictForNewToken(
     previous.map((e) => getAuthTokenRecord(kv, e.hash)),
   );
   const ranked = previous
-    .map((entry, index) => {
-      const dead = records[index]?.userId !== userId;
-      return { entry, index, dead };
-    })
+    .map((entry, index) => ({
+      entry,
+      index,
+      dead: records[index]?.userId !== userId,
+      marked: entry.derived === BoolFlag.TRUE,
+    }))
+    .filter((r) => !derived || r.dead || r.marked)
     .sort(
       (a, b) =>
         Number(b.dead) - Number(a.dead) ||
+        Number(b.marked) - Number(a.marked) ||
         compareIso(a.entry.createdAt, b.entry.createdAt) ||
         a.index - b.index,
     );
@@ -171,23 +177,14 @@ function generateTokenString(): string {
     .join("");
 }
 
-/**
- * Mint a NEW token for `userId` (#425; create, join, QR redeem, PIN/pattern save).
- * `knownAuth` is the caller's `auth:{userId}` read (`null` = none, or a full revoke
- * just ran). Write order (#431): evicted `token:` keys are deleted FIRST — a throw
- * fails the mint — then their `tokenidx:` keys, fail-open
- * (`AUTH_TOKEN_INDEX_DELETE_FAILED`; a leftover index names a deleted key). The new
- * token's `tokenidx:{userId}:{hash}` is put next, with the same TTL as its
- * `token:{hash}`, and an index failure throws before that token exists, so
- * revoke-all can list every token this mint writes. Only then are `auth:` (put
- * exactly once, new token appended) and the new `token:{hash}` put together.
- * `secretAt` replaces the carried-forward `knownAuth.secretAt` (PIN/pattern only).
- */
-export async function mintAuthToken(
+/** The mint both exported forms share; {@link mintAuthToken} documents the write order. `derived` marks the new
+ *  entry and restricts its eviction. */
+async function mintToken(
   kv: KVNamespace,
   userId: string,
   knownAuth: AuthRecord | null,
-  secretAt?: number,
+  secretAt: number | undefined,
+  derived: boolean,
 ): Promise<IssuedToken> {
   const token = generateTokenString();
   const now = Date.now();
@@ -196,7 +193,12 @@ export async function mintAuthToken(
   const hash = await hashAuthToken(token);
 
   const previous = knownAuth?.tokens ?? [];
-  const { kept, evicted } = await evictForNewToken(kv, userId, previous);
+  const { kept, evicted } = await evictForNewToken(
+    kv,
+    userId,
+    previous,
+    derived,
+  );
 
   await Promise.all(evicted.map((key) => deleteAuthTokenKey(kv, key)));
   await deleteIndexKeys(kv, userId, evicted);
@@ -204,7 +206,10 @@ export async function mintAuthToken(
   await putAuthTokenIndex(kv, userId, hash, TOKEN_TTL_SECONDS);
   await Promise.all([
     putAuthRecord(kv, userId, {
-      tokens: [...kept, { hash, createdAt }],
+      tokens: [
+        ...kept,
+        { hash, createdAt, ...(derived && { derived: BoolFlag.TRUE }) },
+      ],
       secretAt: secretAt ?? knownAuth?.secretAt,
     }),
     putAuthTokenRecord(
@@ -216,6 +221,59 @@ export async function mintAuthToken(
   ]);
 
   return { token, expiresAt };
+}
+
+/**
+ * Mint a NEW unmarked token for `userId` (#425): the holder proved the account's secret,
+ * or it has none to prove (create, secret join, PIN/pattern save, rescue link). May evict
+ * any entry at the cap. `knownAuth` is the caller's `auth:{userId}` read (`null` = none,
+ * or a full revoke just ran). Write order (#431): evicted `token:` keys are deleted FIRST
+ * — a throw fails the mint — then their `tokenidx:` keys, fail-open
+ * (`AUTH_TOKEN_INDEX_DELETE_FAILED`; a leftover index names a deleted key). The new
+ * token's `tokenidx:{userId}:{hash}` is put next, with the same TTL as its `token:{hash}`,
+ * and an index failure throws before that token exists, so revoke-all can list every
+ * token this mint writes. Only then are `auth:` (put exactly once, new token appended)
+ * and the new `token:{hash}` put together. `secretAt` replaces the carried-forward
+ * `knownAuth.secretAt` (PIN/pattern only).
+ */
+export function mintAuthToken(
+  kv: KVNamespace,
+  userId: string,
+  knownAuth: AuthRecord | null,
+  secretAt?: number,
+): Promise<IssuedToken> {
+  return mintToken(kv, userId, knownAuth, secretAt, false);
+}
+
+/** Mint a `derived` token: obtained through another token, with no secret proven (QR redeem, TTL-gap refresh).
+ *  Never evicts an unmarked entry. Same write order as {@link mintAuthToken}. */
+export function mintDerivedAuthToken(
+  kv: KVNamespace,
+  userId: string,
+  knownAuth: AuthRecord | null,
+): Promise<IssuedToken> {
+  return mintToken(kv, userId, knownAuth, undefined, true);
+}
+
+/**
+ * Whether a `derived` mint would fit without evicting an unmarked token: the list is
+ * under the cap, or holds a `derived` or dead entry (reads every `token:` key only when
+ * it is full and wholly unmarked). The caller reads `auth:` once, and QR redeem refuses
+ * the bypass on `false`.
+ */
+export async function hasRoomForDerivedToken(
+  kv: KVNamespace,
+  userId: string,
+  auth: AuthRecord | null,
+): Promise<boolean> {
+  if (auth === null || auth.tokens.length < MAX_AUTH_TOKENS_PER_USER) {
+    return true;
+  }
+  if (auth.tokens.some((e) => e.derived === BoolFlag.TRUE)) return true;
+  const records = await Promise.all(
+    auth.tokens.map((e) => getAuthTokenRecord(kv, e.hash)),
+  );
+  return records.some((record) => record?.userId !== userId);
 }
 
 /** The revocable hashes, fail-open: a list failure (KV refusal, quota, shape guard) reads as none. No ids logged. */

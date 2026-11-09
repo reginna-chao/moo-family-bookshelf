@@ -13,12 +13,14 @@ import {
   listRevocableIndexHashes,
   MAX_REVOKE_INDEX_HASHES,
   mintAuthToken,
+  mintDerivedAuthToken,
   revokeAllAuthTokens,
   revokeAuthTokenKeys,
   type IssuedToken,
 } from "../../src/services/authTokens";
 import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
+  BoolFlag,
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,
   TOKEN_TTL_SECONDS,
@@ -248,6 +250,42 @@ describe("mintAuthToken — tokenidx index", () => {
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors.mock.calls[0][0]).toBe("AUTH_TOKEN_INDEX_DELETE_FAILED");
     noIdsLogged(errors.mock.calls[0], [evicted, await hashOf(issued)]);
+  });
+});
+
+describe("mintDerivedAuthToken — tokenidx index", () => {
+  it("indexes the new token and revoke-all reaches it", async () => {
+    const issued = await mintDerivedAuthToken(kv, USER1, null);
+    const hash = await hashAuthToken(issued.token);
+    expect(getPutTtl(kv, kvKeys.authTokenIndex(USER1, hash))).toBe(
+      TOKEN_TTL_SECONDS,
+    );
+
+    await revokeAllAuthTokens(kv, USER1, null);
+
+    expect(await tokenOwner(kv, issued.token)).toBeNull();
+    expect(await kv.get(kvKeys.authTokenIndex(USER1, hash))).toBeNull();
+  });
+
+  it("deletes an evicted derived token's index after its token: key", async () => {
+    const devices = [...Array(MAX_AUTH_TOKENS_PER_USER).keys()];
+    for (const i of devices) {
+      await seedAuthToken(kv, USER1, {
+        token: String(i).repeat(64),
+        appendTo: i > 0,
+        ...(i === 2 && { derived: BoolFlag.TRUE }),
+      });
+    }
+    const evicted = await hashAuthToken("2".repeat(64));
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    await mintDerivedAuthToken(kv, USER1, known);
+
+    expect(ops.deleteKeys()).toEqual([
+      kvKeys.authToken(evicted),
+      kvKeys.authTokenIndex(USER1, evicted),
+    ]);
   });
 });
 

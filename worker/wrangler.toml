@@ -77,6 +77,13 @@ head_sampling_rate = 1
 [env.production.observability.logs]
 invocation_logs = false
 
+# Finishes interrupted account deletions and removes data written back after one
+# (src/services/accountDeletionSweep.ts). Production only: KV list operations are
+# shared across the Cloudflare account, and a dev cron would double the daily count.
+# Self-hosters: see worker/DEPLOY.md.
+[env.production.triggers]
+crons = ["*/30 * * * *"]
+
 # Replace with your own KV namespace ID (see worker/DEPLOY.md)
 [[env.production.kv_namespaces]]
 binding = "KV"

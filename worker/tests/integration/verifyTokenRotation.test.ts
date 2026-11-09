@@ -14,6 +14,7 @@ import { seedAuthToken, tokenFor, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
 import {
+  BoolFlag,
   kvKeys,
   OTP_TTL_SECONDS,
   QR_TOKEN_TTL_SECONDS,
@@ -1026,7 +1027,11 @@ describe("POST /api/family/:id/join — a QR bound to the live token", () => {
     expect(await readAuthRecord(kv, USER_ID)).toEqual({
       tokens: [
         { hash: sha256(next), createdAt: new Date(PINNED_NOW).toISOString() },
-        { hash: sha256(minted), createdAt: new Date(PINNED_NOW).toISOString() },
+        {
+          hash: sha256(minted),
+          createdAt: new Date(PINNED_NOW).toISOString(),
+          derived: BoolFlag.TRUE,
+        },
       ],
       secretAt: PINNED_NOW,
     });
