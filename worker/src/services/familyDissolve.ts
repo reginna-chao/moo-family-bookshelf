@@ -2,6 +2,7 @@
  *  routes/family.ts and routes/user.ts; HTTP-agnostic. Layering: .claude/rules/backend.md → Project Structure. */
 import { deleteFamilyRecord } from "../kv/families";
 import { deleteBorrowIndex } from "./borrowIndex";
+import { summarizeErrorForLog } from "../utils/errorLog";
 
 /**
  * Delete a family's storage: the borrow index, then `family:{familyId}`. Every
@@ -34,7 +35,9 @@ export async function dissolveFamily(
   try {
     await deleteBorrowIndex(kv, familyId);
   } catch (err) {
-    console.error("BORROW_INDEX_DELETE_FAILED", { err });
+    console.error("BORROW_INDEX_DELETE_FAILED", {
+      err: summarizeErrorForLog(err),
+    });
   }
   await deleteFamilyRecord(kv, familyId);
 }

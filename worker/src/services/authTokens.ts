@@ -19,6 +19,7 @@ import {
   putAuthTokenRecord,
 } from "../kv/auth";
 import { hashAuthToken } from "../utils/crypto";
+import { summarizeErrorForLog } from "../utils/errorLog";
 import { HEX_64, readAuthRecord } from "./authRecord";
 
 /** Upper bound on `tokenidx:` list pages per listing; a page holds up to 1000 keys, an account normally a handful. */
@@ -118,7 +119,9 @@ export async function deleteIndexKeys(
   await Promise.all(
     hashes.map((h) => deleteAuthTokenIndex(kv, userId, h)),
   ).catch((err: unknown) => {
-    console.error("AUTH_TOKEN_INDEX_DELETE_FAILED", { err });
+    console.error("AUTH_TOKEN_INDEX_DELETE_FAILED", {
+      err: summarizeErrorForLog(err),
+    });
   });
 }
 
@@ -284,7 +287,9 @@ async function listIndexHashesOrNone(
   try {
     return await listRevocableIndexHashes(kv, userId);
   } catch (err: unknown) {
-    console.error("AUTH_TOKEN_INDEX_LIST_FAILED", { err });
+    console.error("AUTH_TOKEN_INDEX_LIST_FAILED", {
+      err: summarizeErrorForLog(err),
+    });
     return { hashes: [], capped: false };
   }
 }

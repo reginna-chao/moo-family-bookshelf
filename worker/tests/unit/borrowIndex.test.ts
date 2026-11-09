@@ -67,6 +67,12 @@
  *    turn a persisted, successful write into a 500 and tell the caller their
  *    borrow failed when it did not. The cost of swallowing it is one orphan
  *    `borrow:{id}` key whose record is out of the index either way.
+ *  - The `BORROW_POINTER_DELETE_FAILED` log is `{ requestId, err: <summary> }`
+ *    (#480): the random requestId plus `summarizeErrorForLog`'s type name + KV
+ *    op + status. The injected failure DELIBERATELY echoes the key and the
+ *    pointer value it holds — the familyId, which IS the sync code — and the
+ *    case asserts the familyId appears nowhere in the call, serialized with
+ *    the Error's `message` and `stack` expanded, beside the exact payload.
  *
  * settleDepartingBorrower: two steps in one call — CANCEL every PENDING request
  * the departing member is either side of, then PURGE from the index every
@@ -705,7 +711,12 @@ describe("writeBorrowIndex", () => {
     const deleteSpy = vi
       .spyOn(kv, "delete")
       .mockImplementation(async (key: string) => {
-        if (key === failingKey) throw new Error("KV delete rejected");
+        if (key === failingKey) {
+          // Echoes the key and its stored value. See the header → "writeBorrowIndex".
+          throw new Error(
+            `KV DELETE failed: 503 Service Unavailable ${key} ${JSON.stringify({ familyId: FAMILY_ID })}`,
+          );
+        }
         await realDelete(key);
       });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -732,10 +743,19 @@ describe("writeBorrowIndex", () => {
 
     // Swallowed, but never silent: the orphan key is named so it can be found.
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith(
-      "BORROW_POINTER_DELETE_FAILED",
-      expect.objectContaining({ requestId: requests[0].requestId }),
+    expect(errorSpy.mock.calls[0][0]).toBe("BORROW_POINTER_DELETE_FAILED");
+    const logged = JSON.stringify(errorSpy.mock.calls[0], (_k, v: unknown) =>
+      v instanceof Error
+        ? { name: v.name, message: v.message, stack: v.stack }
+        : v,
     );
+    expect(logged).not.toContain(FAMILY_ID);
+    expect(errorSpy.mock.calls[0].slice(1)).toEqual([
+      {
+        requestId: requests[0].requestId,
+        err: { name: "Error", kvOp: "DELETE", kvStatus: 503 },
+      },
+    ]);
   });
 
   it("migrates a legacy family: the next read is new-shape and costs one get", async () => {

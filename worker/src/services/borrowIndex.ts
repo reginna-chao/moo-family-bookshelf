@@ -9,6 +9,7 @@ import {
   type BorrowRequest,
 } from "../kv/schema";
 import { isValidFamilyId } from "../utils/validation";
+import { summarizeErrorForLog } from "../utils/errorLog";
 
 /** A family's borrow requests, plus where they were read from. */
 export interface BorrowIndexRead {
@@ -167,7 +168,10 @@ async function deleteBorrowPointers(
   await Promise.all(
     requestIds.map((requestId) =>
       kv.delete(kvKeys.borrow(requestId)).catch((err: unknown) => {
-        console.error("BORROW_POINTER_DELETE_FAILED", { requestId, err });
+        console.error("BORROW_POINTER_DELETE_FAILED", {
+          requestId,
+          err: summarizeErrorForLog(err),
+        });
       }),
     ),
   );

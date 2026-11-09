@@ -54,6 +54,7 @@ import { deleteAccountKeys } from "../services/accountDeletion";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError, type ErrorBody } from "../utils/errors";
+import { summarizeErrorForLog } from "../utils/errorLog";
 import { UserIdParam } from "../schemas/common";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 import {
@@ -1075,7 +1076,9 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
           try {
             await settleDepartingBorrower(c.env.KV, familyId, userId);
           } catch (err) {
-            console.error("BORROW_CLEANUP_FAILED", { err });
+            console.error("BORROW_CLEANUP_FAILED", {
+              err: summarizeErrorForLog(err),
+            });
           }
 
           // Write the list back only when the caller was listed: an unchanged put is pointless and can

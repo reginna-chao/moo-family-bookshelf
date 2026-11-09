@@ -2,6 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { routePath } from "hono/route";
 import { withKvOpCounting } from "./middleware/kvOpCounting";
 import { rateLimit } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
@@ -15,6 +16,7 @@ import { verifyRoutes } from "./routes/verify";
 import { publicShelfRoutes, publicQueryRoutes } from "./routes/publicShelf";
 import { bodyLimitFor, payloadTooLargeMessage } from "./utils/bodyLimit";
 import { clientErrorFor, jsonError } from "./utils/errors";
+import { summarizeErrorForLog } from "./utils/errorLog";
 import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
@@ -173,7 +175,11 @@ app.onError((err, c) => {
       clientError.message,
     );
   }
-  console.error("Unhandled error:", err);
+  console.error("Unhandled error:", {
+    err: summarizeErrorForLog(err),
+    method: c.req.method,
+    route: routePath(c, -1),
+  });
   return jsonError(c, 500, "INTERNAL_ERROR", "Internal server error");
 });
 

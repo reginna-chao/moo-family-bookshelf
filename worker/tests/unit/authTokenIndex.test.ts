@@ -26,6 +26,7 @@ import {
   TOKEN_TTL_SECONDS,
 } from "../../src/kv/schema";
 import { hashAuthToken } from "../../src/utils/crypto";
+import type { SafeErrorSummary } from "../../src/utils/errorLog";
 
 /**
  * The per-token index `tokenidx:{userId}:{hash}` (#431) and the guards around it.
@@ -43,8 +44,9 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *   `token:` (and `auth:`) exists — so no token ever lacks its index.
  * - Token deletes BEFORE index deletes: a revoke whose `token:` delete throws
  *   keeps every index, so the retry still finds the token.
- * - Index deletes are fail-open (`AUTH_TOKEN_INDEX_DELETE_FAILED`, `{ err }`
- *   only — no userId, no hash): a leftover index names a key already gone.
+ * - Index deletes are fail-open (`AUTH_TOKEN_INDEX_DELETE_FAILED`,
+ *   `{ err: <summary> }` only — no userId, no hash, #480): a leftover index
+ *   names a key already gone.
  * - A list failure is fail-open (`AUTH_TOKEN_INDEX_LIST_FAILED`): the known set
  *   (the `auth:` list, `alsoKeys`) is still deleted and no index is touched.
  *   Revoke-all runs beside `deleteAuthRecord`, so a throw there would leave
@@ -61,12 +63,20 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *   no hash); the processed indexes are deleted, so the next revoke takes the
  *   rest and repeated revokes converge.
  *
- * Fault injection: `failWrites` / `failLists` make every matching op reject
- * with `Error("KV down")` and pass the rest straight through to the mock;
- * `pagedBy` forces a small `limit` onto every `list` so paging is reached
- * without seeding 1000 keys. All are `vi.spyOn`s, restored in `afterEach`.
- * `noIdsLogged` checks that the logged object holds only `err` and that no
- * userId / hash appears anywhere in the call.
+ * Fault injection: `failWrites` makes every matching op reject with
+ * `kvDown(op, key)` — a workerd-shaped `KV <OP> failed: 503 Service
+ * Unavailable <key>` that DELIBERATELY names the key (it embeds the userId and
+ * the token hash) — and passes the rest straight through to the mock; a list
+ * failure rejects with `kvDown("GET", <index prefix>)`, as workerd reports a
+ * list failure under GET. `pagedBy` forces a small `limit` onto every `list`
+ * so paging is reached without seeding 1000 keys. All are `vi.spyOn`s,
+ * restored in `afterEach`.
+ *
+ * noIdsLogged (#480): the logged object holds only `err`, which is exactly
+ * `summarizeErrorForLog`'s summary (type name + KV op + status — the positive
+ * companion), and no userId / hash appears anywhere in the call, serialized
+ * with every Error's `message` and `stack` expanded — so the key named in the
+ * injected message is proven never to reach the log.
  */
 
 let kv: KVNamespace;
@@ -85,15 +95,24 @@ async function hashOf(issued: IssuedToken | string): Promise<string> {
   return hashAuthToken(typeof issued === "string" ? issued : issued.token);
 }
 
-/** Make every `op` whose key matches reject with `Error("KV down")`; others go through. */
+/** The status part of every injected KV failure. See the header → "Fault injection". */
+const KV_DOWN = "failed: 503 Service Unavailable";
+
+/** A workerd-shaped KV failure naming `key`. See the header → "Fault injection". */
+function kvDown(op: "GET" | "PUT" | "DELETE", key: string): Error {
+  return new Error(`KV ${op} ${KV_DOWN} ${key}`);
+}
+
+/** Make every `op` whose key matches reject with `kvDown`; others go through. */
 function failWrites(
   op: "put" | "delete",
   matches: (key: string) => boolean,
 ): void {
   const real = (kv[op] as (...args: unknown[]) => Promise<void>).bind(kv);
+  const kvOp = op === "put" ? "PUT" : "DELETE";
   vi.spyOn(kv, op).mockImplementation(((key: string, ...rest: unknown[]) =>
     matches(key)
-      ? Promise.reject(new Error("KV down"))
+      ? Promise.reject(kvDown(kvOp, key))
       : real(key, ...rest)) as never);
 }
 
@@ -135,13 +154,21 @@ async function mintListed(count: number): Promise<IssuedToken[]> {
   return issued;
 }
 
-/** The logged object is `{ err }` alone and no userId / hash appears anywhere in the call. */
-function noIdsLogged(call: unknown[], hashes: readonly string[]): void {
+/** The logged object is `{ err: <summary> }` alone and no userId / hash appears anywhere
+ *  in the call. See the header → "noIdsLogged". */
+function noIdsLogged(
+  call: unknown[],
+  hashes: readonly string[],
+  err: SafeErrorSummary,
+): void {
   expect(Object.keys(call[1] as object)).toEqual(["err"]);
   const text = JSON.stringify(call, (_k, v: unknown) =>
-    v instanceof Error ? `${v.name}: ${v.message}` : v,
+    v instanceof Error
+      ? { name: v.name, message: v.message, stack: v.stack }
+      : v,
   );
   for (const id of [USER1, ...hashes]) expect(text).not.toContain(id);
+  expect(call.slice(1)).toEqual([{ err }]);
 }
 
 function silenceErrors() {
@@ -203,7 +230,7 @@ describe("mintAuthToken — tokenidx index", () => {
     failWrites("put", (key) => key.startsWith(INDEX_PREFIX));
     const puts = kv.put as unknown as { mock: { calls: unknown[][] } };
 
-    await expect(mintAuthToken(kv, USER1, null)).rejects.toThrow("KV down");
+    await expect(mintAuthToken(kv, USER1, null)).rejects.toThrow(KV_DOWN);
 
     expect(puts.mock.calls.map((c) => String(c[0]))).toEqual([
       expect.stringMatching(new RegExp(`^${INDEX_PREFIX}[0-9a-f]{64}$`)),
@@ -249,7 +276,11 @@ describe("mintAuthToken — tokenidx index", () => {
     expect(await kv.get(indexKey(evicted))).toBe("1");
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors.mock.calls[0][0]).toBe("AUTH_TOKEN_INDEX_DELETE_FAILED");
-    noIdsLogged(errors.mock.calls[0], [evicted, await hashOf(issued)]);
+    noIdsLogged(errors.mock.calls[0], [evicted, await hashOf(issued)], {
+      name: "Error",
+      kvOp: "DELETE",
+      kvStatus: 503,
+    });
   });
 });
 
@@ -324,9 +355,7 @@ describe("revokeAuthTokenKeys — reaches the index", () => {
     failWrites("delete", (key) => key === orphanKey);
     const deletes = kv.delete as unknown as { mock: { calls: unknown[][] } };
 
-    await expect(revokeAuthTokenKeys(kv, USER1, auth)).rejects.toThrow(
-      "KV down",
-    );
+    await expect(revokeAuthTokenKeys(kv, USER1, auth)).rejects.toThrow(KV_DOWN);
     // Let the sibling deletes of the rejected Promise.all settle before reading.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -388,17 +417,18 @@ describe("revokeAuthTokenKeys — reaches the index", () => {
     expect(await tokenOwner(kv, current.token)).toBeNull();
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors.mock.calls[0][0]).toBe("AUTH_TOKEN_INDEX_DELETE_FAILED");
-    noIdsLogged(errors.mock.calls[0], [
-      await hashOf(orphan),
-      await hashOf(current),
-    ]);
+    noIdsLogged(
+      errors.mock.calls[0],
+      [await hashOf(orphan), await hashOf(current)],
+      { name: "Error", kvOp: "DELETE", kvStatus: 503 },
+    );
   });
 
   it("deletes the known set and no index when the list throws, logging no identifier", async () => {
     const { orphan, current } = await mintOrphan();
     const auth = await readAuthRecord(kv, USER1);
     const errors = silenceErrors();
-    vi.spyOn(kv, "list").mockRejectedValue(new Error("KV down"));
+    vi.spyOn(kv, "list").mockRejectedValue(kvDown("GET", INDEX_PREFIX));
     const ops = watchKvOps(kv);
 
     await expect(
@@ -415,10 +445,11 @@ describe("revokeAuthTokenKeys — reaches the index", () => {
     expect(await tokenOwner(kv, orphan.token)).toBe(USER1);
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors.mock.calls[0][0]).toBe("AUTH_TOKEN_INDEX_LIST_FAILED");
-    noIdsLogged(errors.mock.calls[0], [
-      await hashOf(orphan),
-      await hashOf(current),
-    ]);
+    noIdsLogged(
+      errors.mock.calls[0],
+      [await hashOf(orphan), await hashOf(current)],
+      { name: "Error", kvOp: "GET", kvStatus: 503 },
+    );
 
     // Positive companion: with the list working again, the next revoke reaches the orphan.
     vi.restoreAllMocks();
@@ -439,6 +470,10 @@ describe("revokeAuthTokenKeys — reaches the index", () => {
     expect(errors.mock.calls.map((c) => c[0])).toEqual([
       "AUTH_TOKEN_INDEX_LIST_FAILED",
     ]);
+    // The service's own "malformed list page" Error: a type name, no KV fields.
+    noIdsLogged(errors.mock.calls[0], [await hashOf(listed)], {
+      name: "Error",
+    });
   });
 
   it("revokes every indexed token across several list pages", async () => {
@@ -696,7 +731,7 @@ describe("renewPresentedAuthToken — the index put comes first", () => {
     const puts = kv.put as unknown as { mock: { calls: unknown[][] } };
 
     await expect(renewPresentedAuthToken(kv, USER1, TOKEN_A)).rejects.toThrow(
-      "KV down",
+      KV_DOWN,
     );
 
     expect(puts.mock.calls.map((c) => String(c[0]))).toEqual([indexKey(hash)]);

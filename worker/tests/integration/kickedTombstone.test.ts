@@ -82,14 +82,17 @@
  * trade-off stays visible rather than being mistaken for enforcement that
  * silently never ran.
  *
- * No ids in error logs (#357): the familyId IS the sync code, and a userId
- * resolves to one through `POST /api/auth/lookup`, so the failure log carries
- * `{ err }` only. `expectIdFreeErrorLog` pins that two ways — no `familyId` /
- * `targetUserId` / `userId` KEY, and none of the case's id VALUES anywhere in
- * the logged arguments (the `err` message included), which also catches the id
- * coming back under another key name. That value check is why `failPutFor`'s
- * simulated error names no key: a message echoing `kicked:{familyId}:{userId}`
- * would put ids in the log that production never wrote.
+ * No ids in error logs (#357, #480): the familyId IS the sync code, and a
+ * userId resolves to one through `POST /api/auth/lookup`, so the failure log
+ * carries `{ err: <summary> }` only — `summarizeErrorForLog`'s type name + KV
+ * op + status, never the message or stack. `failPutFor`'s simulated error
+ * DELIBERATELY names the key (`KV PUT failed: 503 Service Unavailable
+ * kicked:{familyId}:{userId}`) to prove the message never reaches the log.
+ * `expectIdFreeErrorLog` pins that: no `familyId` / `targetUserId` / `userId`
+ * KEY, none of the case's id VALUES anywhere in the logged arguments
+ * (serialized with every Error's `message` and `stack` expanded, which also
+ * catches an id under another key name), and — the positive companion — the
+ * exact `{ err: <summary> }` payload.
  */
 import {
   describe,
@@ -205,8 +208,8 @@ function failPutFor(failingKey: string): () => void {
     ...base,
     put: async (key: string, value: string, opts?: unknown): Promise<void> => {
       if (key === failingKey) {
-        // No key in the message. See the header → "No ids in error logs".
-        throw new Error("simulated KV put failure");
+        // Names the key on purpose. See the header → "No ids in error logs".
+        throw new Error(`KV PUT failed: 503 Service Unavailable ${key}`);
       }
       return put(key, value, opts);
     },
@@ -216,7 +219,7 @@ function failPutFor(failingKey: string): () => void {
   };
 }
 
-/** The `tag` log carries `err` and no id, by key or by value.
+/** The `tag` log is `{ err: <summary> }` and carries no id, by key or by value.
  *  See the header → "No ids in error logs". */
 function expectIdFreeErrorLog(
   errors: MockInstance<typeof console.error>,
@@ -231,9 +234,14 @@ function expectIdFreeErrorLog(
       expect(payload).not.toHaveProperty(key);
     }
     const logged = JSON.stringify([payload, ...rest], (_key, value: unknown) =>
-      value instanceof Error ? `${value.name}: ${value.message}` : value,
+      value instanceof Error
+        ? { name: value.name, message: value.message, stack: value.stack }
+        : value,
     );
     for (const id of ids) expect(logged).not.toContain(id);
+    expect([payload, ...rest]).toEqual([
+      { err: { name: "Error", kvOp: "PUT", kvStatus: 503 } },
+    ]);
   }
 }
 
