@@ -141,16 +141,7 @@ function setupChromeMessages(options: {
    *  never via the background. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
 }) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (vi.mocked(chrome.runtime.sendMessage) as any).mockImplementation(
-    (message: unknown) => {
-      const msg = message as { type: string };
-      if (msg.type === "CLEAR_FAMILY_ID") {
-        return Promise.resolve(undefined);
-      }
-      return Promise.resolve(undefined);
-    },
-  );
+  vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
 
   const localStore: Record<string, unknown> = {};
   if (options.userId) localStore[USER_ID_KEY] = options.userId;
@@ -351,10 +342,8 @@ describe("App", () => {
       expect(screen.getByTestId("onboarding")).toBeInTheDocument();
     });
 
-    // CLEAR_FAMILY_ID should have been sent
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "CLEAR_FAMILY_ID",
-    });
+    // No background message: storage is cleared directly (#484)
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
     // Leaving is the user's own decision, so there is nothing to explain: the
     // family-gone banner belongs to the FORCED teardowns only.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -942,24 +931,18 @@ describe("App", () => {
     });
   });
 
-  // Firefox: CLEAR_FAMILY_ID message can fail (sleeping background), so leave
-  // must also clear familyId + auth credentials DIRECTLY from storage.local.
-  it("handleLeaveFamily removes credentials from storage.local even when CLEAR_FAMILY_ID message rejects", async () => {
+  // Firefox: the background can be asleep, so leave clears familyId + auth
+  // credentials DIRECTLY from storage.local, never through a message (#484).
+  it("handleLeaveFamily removes credentials from storage.local even when every background message rejects", async () => {
     setupChromeMessages({
       familyId: "fam-1",
       userId: "user-1",
       authToken: "tok",
     });
-    // The CLEAR_FAMILY_ID message rejects (Firefox sleeping background). The
-    // mount gate reads storage directly, so the main view still renders.
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      (message: unknown) => {
-        const msg = message as { type: string };
-        if (msg.type === "CLEAR_FAMILY_ID") {
-          return Promise.reject(new Error("background asleep"));
-        }
-        return Promise.resolve(undefined);
-      },
+    // Every message rejects (Firefox sleeping background). The mount gate
+    // reads storage directly, so the main view still renders.
+    vi.mocked(chrome.runtime.sendMessage).mockRejectedValue(
+      new Error("background asleep"),
     );
 
     render(<App />);

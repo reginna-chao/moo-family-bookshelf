@@ -8,8 +8,8 @@ import {
   FAMILY_ID_KEY,
 } from "../constants";
 
-/** Persist auth/family credentials to chrome.storage.local — familyId DIRECTLY, not only via the
- *  background SET_FAMILY_ID message, which Firefox's sleeping event page can lose.
+/** Persist auth/family credentials to chrome.storage.local — familyId written directly; the Dialog
+ *  never routes storage writes through the background (docs/architecture.md → 本機儲存與同步).
  *
  *  A token is written in the same `set` as the server that issued it, so the pair changes atomically,
  *  and a rejected `set` changes nothing. For the official default the key is then removed; a rejected
