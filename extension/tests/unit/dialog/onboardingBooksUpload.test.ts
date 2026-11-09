@@ -5,6 +5,7 @@ import type { ScrapedBook } from "@/content/scraper";
 import { MAX_SYNC_UPLOAD_ATTEMPTS } from "@/sync/syncUpload";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
 import { OVER_CAP_TITLE_PLACEHOLDER } from "@/sync/fieldCaps";
+import { SyncServerChangedError } from "@/sync/pinnedSyncApi";
 
 /**
  * `dialog/onboardingBooksUpload.ts` (#259) — onboarding's first sync is a
@@ -26,9 +27,14 @@ import { OVER_CAP_TITLE_PLACEHOLDER } from "@/sync/fieldCaps";
  *
  * The real merge runs here (`useAutoSetup.test.ts` stubs it). The hook-level
  * wiring — error phase, copy, `LAST_SYNC_AT_KEY` — is in `useAutoSetup.test.ts`.
+ *
+ * #471: the calls stay on the endpoint read at entry. A family teardown during
+ * the read moves the client, and the PUT must not carry the list to that server.
  */
 
 const USER = "user-hash";
+const SERVER = "https://api.example.test";
+const OTHER_SERVER = "https://other.example.test";
 const A = "210000000000001";
 const B = "210000000000002";
 const LEGACY = "14563038";
@@ -73,7 +79,11 @@ function client(gets: unknown[], puts: unknown[]) {
   const updatePersonalBooks = vi.fn();
   for (const p of puts) updatePersonalBooks.mockResolvedValueOnce(p);
   return {
-    api: { getPersonalBooks, updatePersonalBooks } as unknown as ApiClient,
+    api: {
+      getEndpoint: vi.fn(() => SERVER),
+      getPersonalBooks,
+      updatePersonalBooks,
+    } as unknown as ApiClient,
     getPersonalBooks,
     updatePersonalBooks,
   };
@@ -180,6 +190,21 @@ describe("uploadOnboardingBooks", () => {
 
     expect(getPersonalBooks).toHaveBeenCalledTimes(2);
     expect(updatePersonalBooks).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects with SyncServerChangedError and sends no PUT when the endpoint changes during the read (#471)", async () => {
+    const { api, getPersonalBooks, updatePersonalBooks } = client(
+      [record([], L0)],
+      [{ data: { ok: true } }],
+    );
+    vi.mocked(api.getEndpoint).mockImplementation(() =>
+      getPersonalBooks.mock.calls.length > 0 ? OTHER_SERVER : SERVER,
+    );
+
+    await expect(upload(api)).rejects.toBeInstanceOf(SyncServerChangedError);
+
+    expect(getPersonalBooks).toHaveBeenCalledTimes(1);
+    expect(updatePersonalBooks).not.toHaveBeenCalled();
   });
 
   it("returns a non-conflict error at once, without a re-read", async () => {

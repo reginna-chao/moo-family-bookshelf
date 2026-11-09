@@ -96,8 +96,11 @@ function lastSyncWrittenValue(): unknown {
   return undefined;
 }
 
+const MOCK_ENDPOINT = "https://api.example.test";
+
 function createMockApiClient(): ApiClient {
   return {
+    getEndpoint: vi.fn(() => MOCK_ENDPOINT),
     getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
     updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
   } as unknown as ApiClient;
@@ -285,6 +288,7 @@ describe("useAutoSetup", () => {
 
     it("does NOT write LAST_SYNC_AT_KEY when the upload responds with an error", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
         updatePersonalBooks: vi.fn().mockResolvedValue({
           error: { code: "UPLOAD_FAILED", message: "上傳失敗" },
@@ -309,6 +313,7 @@ describe("useAutoSetup", () => {
 
     it("shows the too-large copy, not the server's English message, on a 413 PAYLOAD_TOO_LARGE upload", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
         updatePersonalBooks: vi.fn().mockResolvedValue({
           error: {
@@ -349,6 +354,7 @@ describe("useAutoSetup", () => {
 
     it("re-reads and lands the onboarding upload after a conflict", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi
           .fn()
           .mockResolvedValueOnce(stamped("read-1"))
@@ -382,6 +388,7 @@ describe("useAutoSetup", () => {
 
     it("ends in the error phase with the sync conflict copy after 3 conflicted PUTs", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue(stamped("read")),
         updatePersonalBooks: vi.fn().mockResolvedValue(CONFLICT),
       } as unknown as ApiClient;
@@ -480,6 +487,7 @@ describe("useAutoSetup", () => {
     it("reads {books: [...]} from server and forwards to mergeBooks", async () => {
       const savedBook = makeSavedBook();
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({
           data: { books: [savedBook] },
         }),
@@ -506,6 +514,7 @@ describe("useAutoSetup", () => {
 
     it("passes empty savedBooks when apiResponse.data is null (first-ever sync)", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
         updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
       } as unknown as ApiClient;
@@ -585,6 +594,7 @@ describe("useAutoSetup", () => {
 
     it("enters the error phase with no upload when reading the saved list fails", async () => {
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({
           error: { code: "INTERNAL_ERROR", message: "伺服器忙碌" },
         }),
@@ -608,6 +618,7 @@ describe("useAutoSetup", () => {
       );
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({ data: { books: saved } }),
         updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
       } as unknown as ApiClient;
@@ -662,6 +673,7 @@ describe("useAutoSetup", () => {
       );
       vi.mocked(scrapeBooks).mockResolvedValueOnce(scrapedOf(active));
       const mockApi = {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn().mockResolvedValue({
           data: { books: [...active, ...archived] },
         }),
@@ -704,6 +716,7 @@ describe("useAutoSetup", () => {
         await withRealMerge();
         warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         const mockApi = {
+          getEndpoint: vi.fn(() => MOCK_ENDPOINT),
           getPersonalBooks: vi.fn().mockResolvedValue({
             data: { books: [old, kept] },
           }),
@@ -731,6 +744,7 @@ describe("useAutoSetup", () => {
         await withRealMerge();
         warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         const mockApi = {
+          getEndpoint: vi.fn(() => MOCK_ENDPOINT),
           getPersonalBooks: vi.fn().mockResolvedValue({
             data: { books: [old, kept] },
           }),
@@ -818,6 +832,7 @@ describe("useAutoSetup", () => {
     function createServer(): ApiClient {
       let record: PersonalBooks | null = null;
       return {
+        getEndpoint: vi.fn(() => MOCK_ENDPOINT),
         getPersonalBooks: vi.fn(async () => ({ data: record })),
         updatePersonalBooks: vi.fn(
           async (_userId: string, body: PersonalBooks) => {
