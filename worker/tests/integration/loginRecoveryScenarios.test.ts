@@ -1152,8 +1152,9 @@ describe("a rescue link", () => {
 
     const rescued = await issuedToken(await rescueJoin());
 
+    // `token:{hash}` keys only: the #468 deletion mark shares the `token:` prefix and is not a token.
     expect(
-      ops.getKeys().filter((key) => key.startsWith(kvKeys.authToken(""))),
+      ops.getKeys().filter((key) => /^token:[0-9a-f]{64}$/.test(key)),
     ).toEqual([]);
     await expectAlive(rescued);
   });

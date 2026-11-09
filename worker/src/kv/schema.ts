@@ -124,6 +124,8 @@ export const kvKeys = {
   authToken: (tokenHash: string) => `token:${tokenHash}`,
   // Under the `token:` prefix on purpose: the KV backup already ignores it (`IGNORED`, scripts/kv-backup/format.mjs).
   accountDeleted: (tokenHash: string) => `token:deleted:${tokenHash}`,
+  // Same prefix, same reason; a `token:{hash}` tail is 64 hex chars, so it cannot collide. List prefix: `accountDeleting("")`.
+  accountDeleting: (userId: string) => `token:deleting:${userId}`,
   // One per `token:{hash}` (#431), listed by revoke-all; the list prefix is always `authTokenIndex(userId, "")`.
   authTokenIndex: (userId: string, tokenHash: string) =>
     `tokenidx:${userId}:${tokenHash}`,
@@ -284,9 +286,9 @@ export interface PublicShelf {
  * carrying a stale read (KV cross-colo reads can lag ~60s) could roll a
  * revoked share token back to life and re-publish a snapshot the owner had
  * just deleted. Only the four public-shelf write handlers write THIS key, so
- * no books/family-prefs save can ever roll it back. (Account deletion in
- * `services/accountDeletion.ts` additionally `delete`s it as part of
- * whole-account teardown — a wipe, not a list write.)
+ * no books/family-prefs save can ever roll it back. (`deleteAccountKeys` and
+ * `wipeAccountData` in `services/accountDeletion.ts` additionally `delete` it as
+ * part of whole-account teardown — a wipe, not a list write.)
  *
  * Lazy migration: absent key ⇒ fall back to the legacy
  * `UserBooksRecord.publicSharing` field; the next public-shelf write handler
@@ -438,6 +440,22 @@ export const TOKEN_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
 /** How long `token:deleted:{tokenHash}` answers a retried account deletion and refuses a TTL-gap refresh: 1 day (#462). */
 export const ACCOUNT_DELETED_MARK_TTL_SECONDS = 24 * 60 * 60;
+
+/** Value of `token:deleting:{userId}` (#468): an account deletion has started and is not finished. */
+export interface AccountDeletingMark {
+  /** Epoch ms the deletion (or its latest retry) wrote this mark. */
+  startedAt: number;
+  /** Share tokens known at that moment, kept across retries because `publicshelves:` may already be gone. */
+  shareTokens: string[];
+}
+
+/** Upper bound of `token:deleting:{userId}`: 1 day. The sweep usually retires it earlier; this outlasts a daily KV quota reset. */
+export const ACCOUNT_DELETING_MARK_TTL_SECONDS = 24 * 60 * 60;
+
+/** A create or manual join is refused while a mark is younger than this (2 minutes): requests in flight when the deletion
+ *  started should have landed and been wiped by then, and it outlasts the ~60s KV cache. An estimate, not measured. */
+export const ACCOUNT_RECREATE_COOLDOWN_MS = 2 * 60 * 1000;
+
 /** Tokens one account may hold at once (one per device); eviction order: `evictForNewToken`, `services/authTokens.ts`. */
 export const MAX_AUTH_TOKENS_PER_USER = 5;
 

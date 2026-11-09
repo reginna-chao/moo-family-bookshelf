@@ -143,6 +143,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
         await authTokenKey(token),
         kvKeys.auth(USER_ID),
         kvKeys.verify(USER_ID),
+        kvKeys.accountDeleting(USER_ID),
         kvKeys.verifyFail(USER_ID, `${CALLER_IP}:${bucket}`),
         stepUpKey,
         setKey,
@@ -150,7 +151,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
     );
   });
 
-  it("reads as many keys as before #396 on a none account (no verifyfail read)", async () => {
+  it("reads as many keys as before #396 plus the deletion mark on a none account (no verifyfail read)", async () => {
     const token = await setUp("none");
     const setKey = await setCounterKey();
     const ops = watchKvOps(kv);
@@ -163,6 +164,7 @@ describe("PUT /api/user/:id/verify — read budget", () => {
         await authTokenKey(token),
         kvKeys.auth(USER_ID),
         kvKeys.verify(USER_ID),
+        kvKeys.accountDeleting(USER_ID),
         setKey,
       ].sort(),
     );

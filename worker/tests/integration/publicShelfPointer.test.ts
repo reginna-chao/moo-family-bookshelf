@@ -512,7 +512,7 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
     },
   );
 
-  it("reads the snapshot, the pointer key and user:{id} once each for a migrated owner", async () => {
+  it("reads the snapshot, the pointer key, the deletion mark and user:{id} once each for a migrated owner", async () => {
     // Read-cost tripwire: the filter's `user:{id}` read comes last and only once.
     // See the header → "Read-cost tripwires".
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
@@ -526,6 +526,7 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
     expect(ops.getKeys()).toEqual([
       kvKeys.publicShelf(LIVE_TOKEN),
       kvKeys.publicShelves(USER),
+      kvKeys.accountDeleting(USER),
       kvKeys.user(USER),
     ]);
     // Strictly side-effect free: a stranger can never drive a KV write.
@@ -533,7 +534,7 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
     expect(ops.deleteKeys()).toEqual([]);
   });
 
-  it("reads user:{id} exactly once for an un-migrated owner, the same trail as a migrated one", async () => {
+  it("reads user:{id} exactly once for an un-migrated owner, the same keys as a migrated one", async () => {
     await seedUser({ legacyShelves: [shelf(SHELF_ID, LIVE_TOKEN)] });
     await seedSnapshot(shelf(SHELF_ID, LIVE_TOKEN));
     const ops = watchKvOps(kv);
@@ -545,6 +546,7 @@ describe("GET /api/public/:shareToken — liveness against the pointer key", () 
       kvKeys.publicShelf(LIVE_TOKEN),
       kvKeys.publicShelves(USER),
       kvKeys.user(USER),
+      kvKeys.accountDeleting(USER),
     ]);
   });
 });
@@ -854,11 +856,12 @@ describe("PUT /api/user/:id/family-prefs", () => {
     expect(writtenKeys).toEqual([kvKeys.user(USER)]);
     expect(await storedSnapshot(REVOKED_TOKEN)).toBeNull();
     expect(await storedSnapshot(LIVE_TOKEN)).toBeNull();
-    // No pointer read either (`token:` is the auth middleware's read).
+    // No pointer read either (`token:` is the auth middleware's read, the mark accountDeletionGuard's).
     // See the header → "§6, family-prefs".
     expect(readKeys).toEqual([
       await authTokenKey(authToken),
       kvKeys.user(USER),
+      kvKeys.accountDeleting(USER),
     ]);
     expect(await pointerRecord()).toEqual({
       shelves: [shelf(SHELF_ID, LIVE_TOKEN)],
@@ -978,11 +981,12 @@ describe("DELETE /api/user/:id/public-shelf/:shelfId — without a books record"
     // Snapshot the trail before this test's own KV reads join it.
     const readKeys = ops.getKeys();
 
-    // The `token:` read is the auth middleware's; the pointer key is the only
-    // read the handler itself pays for.
+    // The `token:` read is the auth middleware's, the mark accountDeletionGuard's; the
+    // pointer key is the only read the handler itself pays for.
     expect(readKeys).toEqual([
       await authTokenKey(authToken),
       kvKeys.publicShelves(USER),
+      kvKeys.accountDeleting(USER),
     ]);
     expect(ops.deleteKeys()).toEqual([kvKeys.publicShelf(LIVE_TOKEN)]);
     expect(ops.putKeys()).toEqual([kvKeys.publicShelves(USER)]);
