@@ -141,7 +141,7 @@ describe("R2 storage and CLI boundaries", () => {
     expect(result.stderr).not.toContain("r2");
   });
 
-  it("keeps the Cloudflare backup disabled until explicit activation", () => {
+  it("keeps the template disabled, leaving activation to the tag's CD rewrite", () => {
     const config = readFileSync(resolve("wrangler.backup.toml"), "utf8");
     expect(config).toContain('BACKUP_ENABLED = "false"');
     expect(config).toMatch(/^crons = \[\]$/m);

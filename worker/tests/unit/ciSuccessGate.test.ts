@@ -112,21 +112,12 @@
  * workflow sits two levels above it.
  *
  * THE SCAN HELPERS.
- *  - `jobsRegion` is everything after the top-level `jobs:` key. Scoping
- *    matters: the `on:` block above it holds `  push:` and `  pull_request:` at
- *    the SAME two-space indentation as a job id, and neither is a job — picking
- *    them up would mean the scan is not scoped to the jobs region and the CI/CD
- *    partition is meaningless. `preJobsRegion` is everything BEFORE it —
+ *  - `jobsRegion` / `keyBlock` and the step readers live in
+ *    `tests/helpers/workflowText.ts`; see their JSDoc.
+ *  - `preJobsRegion` is everything BEFORE the top-level `jobs:` key —
  *    `name:`, `on:` and the top-level `permissions:` block live there; as the
  *    complement of `jobsRegion` it inherits that helper's loud throw when the
  *    anchor is gone.
- *  - `keyBlock` returns the body of `<key>:` indented by `indent` spaces, up to
- *    the first non-blank line indented no further than the key itself. A
- *    trailing block-scalar indicator (`|` as in `filters: |`, `>-` as in a
- *    job's multi-line `if: >-`, with an optional `-` / `+` chomping mark) is
- *    tolerated so the same helper reads those too. It returns `null` when the key is absent — callers
- *    decide how loudly that matters, since "the block does not exist" IS the
- *    finding for some of them.
  *  - `outputBindings` parses the `changes` job's `outputs:` block WHOLE — key,
  *    source step and source output. Reading only the key left of the colon is
  *    not enough: the value is a second, independent spelling of the same name,
@@ -308,8 +299,9 @@
  *  - Positive companions, because a negative over a filtered list passes
  *    vacuously once the filter swallows everything: the non-comment line
  *    count must be above zero and below the total, at least 7 lines must use
- *    `pnpm exec` (9 today: tsc ×2, playwright ×2, tsx, web-ext lint ×2,
- *    web-ext sign ×2), and exactly 2 must run `worker/node_modules/.bin/wrangler`.
+ *    `pnpm exec` (11 today: tsc ×2, playwright ×2, tsx, web-ext lint ×2,
+ *    web-ext sign ×2, wrangler ×2 — the backup Worker's deploy and its
+ *    secret list in deploy-worker-prod), and exactly 2 must run `worker/node_modules/.bin/wrangler`.
  *  - web-ext: the three Firefox steps carry a step-level
  *    `working-directory: extension`, so `pnpm exec` resolves the extension
  *    package's pinned web-ext, and their paths are relative to `extension/`.
@@ -334,6 +326,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  jobBlock,
+  jobSteps,
+  jobsRegion,
+  keyBlock,
+  namedStep,
+  readWorkflow,
+  stepIndexNamed,
+  stepRun,
+} from "../helpers/workflowText";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -358,29 +360,7 @@ const WORKFLOW_SELF_GLOB = ".github/workflows/cicd.yml";
 
 // --- A minimal, anchor-checked workflow reader ---
 
-/** Reads the workflow as UTF-8, CRLF-normalised; throws loudly when absent. */
-function readWorkflow(path: string): string {
-  if (!existsSync(path)) {
-    throw new Error(
-      `CI workflow not found at ${path}. This guard is only meaningful while ` +
-        `it reads the real file — update the path instead of letting the ` +
-        `assertions pass over an empty scan.`,
-    );
-  }
-  return readFileSync(path, "utf8").split("\r\n").join("\n");
-}
-
 const WORKFLOW = readWorkflow(WORKFLOW_PATH);
-
-// Everything after the top-level `jobs:` key (the `on:` block's `  push:` is not a job).
-// See the header → "THE SCAN HELPERS".
-function jobsRegion(workflow: string): string {
-  const match = /^jobs:[ \t]*$/m.exec(workflow);
-  if (!match) {
-    throw new Error("No top-level `jobs:` key found in the CI workflow.");
-  }
-  return workflow.slice(match.index + match[0].length);
-}
 
 // Everything BEFORE the top-level `jobs:` key; the complement of `jobsRegion`, so it
 // inherits that helper's loud throw when the anchor is gone.
@@ -403,43 +383,6 @@ function ciJobIds(ids: string[]): string[] {
       id !== GATE_JOB_ID &&
       !CD_JOB_PREFIXES.some((prefix) => id.startsWith(prefix)),
   );
-}
-
-/** The lines of one job, from its key up to the next job key (or EOF). */
-function jobBlock(workflow: string, jobId: string): string {
-  const region = jobsRegion(workflow);
-  const start = new RegExp(`^ {2}${jobId}:[ \\t]*$`, "m").exec(region);
-  if (!start) {
-    throw new Error(`Job \`${jobId}\` not found in the CI workflow.`);
-  }
-  const rest = region.slice(start.index + start[0].length);
-  const next = /^ {2}[A-Za-z0-9_-]+:[ \t]*$/m.exec(rest);
-  return next ? rest.slice(0, next.index) : rest;
-}
-
-// The body of `<key>:` at `indent` spaces (`|` / `>-` block scalars tolerated); `null` when absent.
-// See the header → "THE SCAN HELPERS".
-function keyBlock(source: string, indent: number, key: string): string | null {
-  const pad = " ".repeat(indent);
-  const start = new RegExp(
-    `^${pad}${key}:[ \\t]*(?:[|>][-+]?)?[ \\t]*$`,
-    "m",
-  ).exec(source);
-  if (!start) {
-    return null;
-  }
-  const body: string[] = [];
-  for (const line of source.slice(start.index + start[0].length).split("\n")) {
-    if (line.trim().length === 0) {
-      body.push(line);
-      continue;
-    }
-    if (!line.startsWith(`${pad} `)) {
-      break;
-    }
-    body.push(line);
-  }
-  return body.join("\n");
 }
 
 /** The job ids of an inline `needs: [a, b, c]` list. */
@@ -635,36 +578,6 @@ function checkoutSteps(source: string): string[] {
   });
 }
 
-/** Every step slice of one job block, in file order; throws when the job has none. */
-function jobSteps(block: string, jobId: string): string[] {
-  const starts = [...block.matchAll(/^ {6}- .*$/gm)];
-  if (starts.length === 0) {
-    throw new Error(`Job \`${jobId}\` has no 6-space \`- \` steps to scan.`);
-  }
-  return starts.map((start) => {
-    const rest = block.slice((start.index ?? 0) + start[0].length);
-    const next = /^ {6}- /m.exec(rest);
-    return start[0] + (next ? rest.slice(0, next.index) : rest);
-  });
-}
-
-/** Index of the ONE step named `name`; throws when it is absent or duplicated. */
-function stepIndexNamed(steps: string[], name: string): number {
-  const header = `      - name: ${name}`;
-  const hits = steps
-    .map((step, index) =>
-      step.split("\n")[0].trimEnd() === header ? index : -1,
-    )
-    .filter((index) => index >= 0);
-  if (hits.length !== 1) {
-    throw new Error(
-      `Expected exactly one step named \`${name}\`, found ${hits.length} — ` +
-        `the step this guard reads was renamed or duplicated.`,
-    );
-  }
-  return hits[0];
-}
-
 // --- Derived values ---
 
 const JOB_IDS = jobIds(WORKFLOW);
@@ -766,7 +679,7 @@ const EXTENSION_PACKAGE_PATH = resolve(HERE, "../../../extension/package.json");
 /** The worker's lockfile-pinned wrangler, run from the repo root by the Pages deploys. */
 const WORKER_WRANGLER_BIN = "worker/node_modules/.bin/wrangler";
 
-// Floors for the npx ban's positive companions: 9 `pnpm exec` lines today, 2 wrangler-bin lines.
+// Floors for the npx ban's positive companions: 11 `pnpm exec` lines today, 2 wrangler-bin lines.
 // See the header → "NPX-FREE CLI CALLS".
 const EXPECTED_PNPM_EXEC_FLOOR = 7;
 const EXPECTED_WRANGLER_BIN_LINES = 2;
@@ -826,29 +739,6 @@ function nonCommentLines(source: string): NumberedLine[] {
     .split("\n")
     .map((text, index) => ({ lineNo: index + 1, text }))
     .filter(({ text }) => !text.trim().startsWith("#"));
-}
-
-/** The ONE step named `stepName` in job `jobId`; throws via `stepIndexNamed` when absent. */
-function namedStep(workflow: string, jobId: string, stepName: string): string {
-  const steps = jobSteps(jobBlock(workflow, jobId), jobId);
-  return steps[stepIndexNamed(steps, stepName)];
-}
-
-/** A step's `run:` script — inline value or `|` / `>-` block body; throws when absent or empty. */
-function stepRun(step: string, stepName: string): string {
-  const line = /^ {8}run:[ \t]*(.*)$/m.exec(step);
-  if (!line) {
-    throw new Error(`Step \`${stepName}\` has no 8-space \`run:\` key.`);
-  }
-  const inline = line[1].trim();
-  const script =
-    inline.length > 0 && !/^[|>][-+]?$/.test(inline)
-      ? inline
-      : keyBlock(step, 8, "run");
-  if (script === null || script.trim().length === 0) {
-    throw new Error(`Step \`${stepName}\` has an empty \`run:\` script.`);
-  }
-  return script;
 }
 
 /** The `web-ext lint …` segments of `extension/package.json`'s `lint:firefox` script. */

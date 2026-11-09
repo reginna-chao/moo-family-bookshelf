@@ -1,7 +1,7 @@
 # KV 自動備份計畫：Free 方案 Cron Worker 備份至 R2，超過分界改 Workers Paid
 
-> **狀態**：程式已實作（PR #322，2026-10-16），啟用與驗收待執行，步驟見 `worker/DEPLOY.md`。
-> **更新日期**：2026-10-16
+> **狀態**：已在正式環境啟用，每日執行；發版時隨 `v*` tag 由 CD 部署（第 11 節），首次設定步驟見 `worker/DEPLOY.md`。
+> **更新日期**：2026-11-09
 > **取代**：2026-04-14 的初版設計、PR #315 的「Workers Paid 完整備份」版，以及「Cloudflare 觸發 → GitHub Actions 備份」草案。
 > **目標**：小規模階段零月費、不依賴 GitHub 排程、每日自動備份、最後成功備份保護、獨立 Email 告警；完整性核對改在還原時執行。
 > **規模與分界**：現況小（幾十個家庭、數 MB）。Free 方案的瓶頸是每次執行 10 ms CPU，資料量到達第 9 節的分界時，改訂 Workers Paid 並切換到每日雜湊核對版（第 14 節）。不採用跨平台（GitHub Actions）備援，避免多一個平台的憑證與失敗面。
@@ -70,7 +70,7 @@ KV binding 的批次讀取：一次最多 100 個 key、算 1 次內部 subreque
 
 不備份（短期憑證與計數）：`auth:`、`token:`、`tokenidx:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`
 
-出現未列入兩邊的 key 類別時，備份停止並失敗，由告警反映；新增 key 家族必須同時更新允許清單。
+出現未列入兩邊的 key 類別時，備份停止並失敗，由告警反映；新增 key 家族必須同時更新允許清單。允許清單隨 tag 的正式部署一起上線（第 11 節）。
 
 ## 5. 每日備份流程
 
@@ -166,7 +166,9 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 - 備份 Worker 只用 KV／R2 bindings，不持有 REST token；兩個 Healthchecks UUID 為 Worker secret。
 - 沒有公開入口：`fetch` 一律 404、`workers_dev = false`、`preview_urls = false`。
 - 日誌只記筆數、bytes、請求計數、manifest 路徑與 `BackupError` 的常數訊息；`worker/tests/unit/kvBackupErrorMessages.test.ts` 釘住訊息必須是字面值。
-- GitHub 不持有任何備份相關 secret；CI 只做備份 Worker 的 dry-run build，不部署。
+- GitHub 不持有備份專屬的 secret。`v*` tag 的 `deploy-worker-prod` 用既有的 `CLOUDFLARE_API_TOKEN`／`CLOUDFLARE_ACCOUNT_ID`／`KV_NAMESPACE_ID_PROD`，在 API Worker 之前部署備份 Worker：替換範本的佔位值，設成 `BACKUP_ENABLED = "true"` 與 cron `17 3 * * *`。部署後確認兩個 Healthchecks secret 仍在；任一步失敗，API Worker 就不部署。repo variable `KV_BACKUP_DEPLOY` 設成 `false` 時跳過這兩步。
+  - 由來：v1.8.0 新增 `tokenidx:`，正式 API Worker 隨 tag 上線，備份 Worker 卻留在舊版，自 2026-11-04 起每日備份失敗。改成隨 tag 部署後，允許清單與 API 同一版本上線。代價是備份部署失敗會擋住該次 API 部署；權限沒有變多，因為 CI 的 Cloudflare token 本來就能修改這個帳號的所有 Worker。
+  - 排程仍在 Cloudflare，不在 GitHub（理由見第 1 節）。
 - 還原憑證只在可信任本機使用，演練後撤銷。
 
 ## 12. 還原方式
@@ -223,16 +225,18 @@ KV 仍不是跨 key 交易快照：兩次列舉能發現 key／expiration 變化
 | 啟用後 7–14 天每天核對執行結果（GraphQL `dimensions.status`），全部 `success` 才結案 | 管理者                       |
 | 維運紀錄、每月 dry-run 提醒、每月 GraphQL 執行結果與儀表板 CPU 檢查                  | 管理者                       |
 
-合併 PR 不代表已啟用，須完成以上全部。
+首次啟用完成前（bucket 與兩個 secret 都還沒就緒），把 repo variable `KV_BACKUP_DEPLOY` 設成 `false`，否則 tag 的部署步驟會失敗並擋住 API 部署。
+
+範本保持停用；正式啟用由 tag 的 CD 替換範本後完成。`KV_BACKUP_DEPLOY` 維持 `false` 到第一次正式的每日執行成功為止（`worker/DEPLOY.md` 第 3 節步驟 9 第一段），之後就刪除或改成 `true`，不必等上表的 7–14 天觀察與每月例行檢查做完；拖著不改，這段期間的 tag 就不會更新備份 Worker 的允許清單。
 
 ## 14. 升級流程：改 Workers Paid
 
 觸發條件見第 9 節。步驟：
 
 1. 訂閱 Workers Paid（每月 US$5 起；KV、R2 額度隨之放大）。
-2. 切換到「Paid 設定檔」：`MAX_ARCHIVE_BYTES` 提高到 256 MiB、每筆上限 4 MiB、`MAX_SAVED_KEYS` 維持 5,000；啟用每日 SHA-256 核對與下載回讀（`feat/kv-backup` 分支歷史中的 `multipart.ts`／`verifyObject`），`wrangler.backup.local.toml` 加回 `cpu_ms`。批次讀取的 25 MB 回應上限在 Paid 仍然存在，自適應拆批不可移除。
+2. 切換到「Paid 設定檔」：`MAX_ARCHIVE_BYTES` 提高到 256 MiB、每筆上限 4 MiB、`MAX_SAVED_KEYS` 維持 5,000；啟用每日 SHA-256 核對與下載回讀（`feat/kv-backup` 分支歷史中的 `multipart.ts`／`verifyObject`）。這些改動做成一個升級 PR，在 PR 裡修改 `worker/wrangler.backup.toml`（加回 `cpu_ms`）與 `worker/tests/unit/kvBackupStorage.test.ts` 的 Free 設定斷言，不能只改本機檔：線上設定以範本為準，每次 tag 都會用範本重新部署。從開始切換到這個 PR 合併之前，把 `KV_BACKUP_DEPLOY` 設成 `false`，否則這段期間的 tag 會用仍是 Free 的範本把線上設定蓋回去。批次讀取的 25 MB 回應上限在 Paid 仍然存在，自適應拆批不可移除。
 3. **格式不變**：Paid 版仍寫 version 2，manifest 多一個可選的 `sha256` 欄位；還原 CLI 讀到 `sha256` 就額外核對。不能直接恢復 `feat/kv-backup` 歷史中的 version 1 工具，它會拒絕 version 2 的備份。
-4. 重新部署，重跑第 13 節的驗收（首次備份、隔離還原、保護與告警演練）。
+4. 升級 PR 合併後，先把 `KV_BACKUP_DEPLOY` 刪除或改回 `true`，再打 tag 由 CD 重新部署；在 `Deploy Worker (Prod)` 的 log 確認「Deploy backup Worker (Prod)」與「Verify backup Worker secrets」都有執行並通過（不是只有跳過的警告），再重跑第 13 節的驗收（首次備份、隔離還原、保護與告警演練）。
 5. 「容量正常」check 的分界改為 Paid 上限的 70%：封存 180 MB、筆數 3,500、內部請求 7,000；其餘告警不變。
 
 ## 官方依據

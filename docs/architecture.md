@@ -1598,7 +1598,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 
 ### KV 備份與事故還原
 
-正式 KV 的每日備份由一個獨立的 Cloudflare Worker 執行，跑在 Workers Free 方案，與服務 API Worker 分開設定與部署（`worker/wrangler.backup.toml`，程式在 `worker/src/backup/`）；服務 API Worker 的路由與 binding 不受影響。每天 03:17 UTC 的 Cron 觸發後，Worker 透過 binding 分頁列舉 KV，以 `getWithMetadata([keys], "text")` 每批 100 個 key 讀取（回應超過 25 MB 的 413 就把該批對半拆開），把原始 JSON 文字寫成 version 2 的 JSONL，分段上傳到私人 R2；再列舉一次核對 key 集合與到期時間，接著寫 manifest、以 R2 原生的 ETag 條件寫入更新 `latest.json`，清理超過 14 天且不是最後成功的備份，最後 ping Healthchecks 的「備份成功」check。內部請求數、筆數與封存大小都低於分界時，才另外 ping「容量正常」，沒收到這個訊號就是該升級 Workers Paid 的提醒。GitHub 不排程也不部署它，CI 只做 dry-run build，所以 repository 長期沒有活動也不影響備份。
+正式 KV 的每日備份由一個獨立的 Cloudflare Worker 執行，跑在 Workers Free 方案，與服務 API Worker 分開設定，部署則隨 tag 排在 API Worker 之前（`worker/wrangler.backup.toml`，程式在 `worker/src/backup/`）；服務 API Worker 的路由與 binding 不受影響。每天 03:17 UTC 的 Cron 觸發後，Worker 透過 binding 分頁列舉 KV，以 `getWithMetadata([keys], "text")` 每批 100 個 key 讀取（回應超過 25 MB 的 413 就把該批對半拆開），把原始 JSON 文字寫成 version 2 的 JSONL，分段上傳到私人 R2；再列舉一次核對 key 集合與到期時間，接著寫 manifest、以 R2 原生的 ETag 條件寫入更新 `latest.json`，清理超過 14 天且不是最後成功的備份，最後 ping Healthchecks 的「備份成功」check。內部請求數、筆數與封存大小都低於分界時，才另外 ping「容量正常」，沒收到這個訊號就是該升級 Workers Paid 的提醒。GitHub 不排程它；`v*` tag 的正式部署會在 API Worker 之前一併部署它，讓允許清單跟著版本走。排程在 Cloudflare，所以 repository 長期沒有活動也不影響備份。
 
 Free 方案每次執行只有 10 ms CPU，因此 Worker 只做搬運與計數：不算雜湊、不解析 value，每筆的 byte 長度、總長與 R2 回報的物件大小記進 manifest。完整性核對全部移到本機還原 CLI（`scripts/kv-restore.mjs`，共用模組在 `scripts/kv-backup/`）：下載後核對總長與每筆長度、每行能否解析、每筆 value 是否符合現有儲存格式，以及 `count`／`prefixCounts`。代價是備份當天不知道檔案是否損壞，要到每月的 dry-run 或真正還原時才發現。還原只寫入與來源不同的全新空白 namespace，`member:` 寫回裸字串，其餘寫回原始 JSON 文字，寫完逐筆讀回；寫入憑證不交給備份 Worker，是否切換正式 binding 由管理者另行決定。
 

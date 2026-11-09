@@ -540,6 +540,8 @@ pnpm install
 pnpm deploy
 ```
 
+用本 repo 的 `.github/workflows/cicd.yml` 在 tag 時自動部署的自架 fork，同步到新版 workflow 之後，`Deploy Worker (Prod)` 會先部署備份 Worker，再部署正式 Worker。沒有架備份 Worker 的話，先把 repo variable `KV_BACKUP_DEPLOY` 設成 `false`（見「KV 每日備份與還原演練」），否則 tag 時正式 Worker 的部署會失敗。
+
 設了 `VERIFY_PEPPER` 之後，如果回退到不認得 pepper 的舊版 Worker，已升級（`version: 2`）的帳號輸入正確的 PIN 也會被當成打錯，要再更新回新版才會恢復。回退期間這些「打錯」照樣計數：同一來源 5 次就鎖 15 分鐘，換回新版後被鎖的人最多還要再等 15 分鐘；第三方也能在這段期間用錯誤的 PIN 把該帳號每小時 10 次的猜測上限用完，讓本人暫時進不來。
 
 回退到不認得 QR 登入標記的舊版 Worker 時，任何一次登入都會洗掉這些標記；升回新版之後，這些登入算未標記（各有獨立額度、能發略過驗證的 QR Code），最多 180 天。回退過就請本人換 PIN，或由管理者撤銷他的全部登入（「使用者忘記登入驗證時」的撤銷步驟）。
@@ -559,10 +561,19 @@ pnpm exec wrangler kv key get "verify:<userId>" --namespace-id <正式 namespace
 
 正式 KV 的每日備份由一個獨立的 Cloudflare Worker 執行（程式在 `worker/src/backup/`，設定範本是 `worker/wrangler.backup.toml`），跑在 Workers **Free** 方案。排程是每天 **03:17 UTC（台灣 11:17）**。Worker 只透過 KV／R2 bindings 讀寫，不持有任何 Cloudflare REST token；備份寫進私人 R2 bucket，完成後通知 Healthchecks.io 的兩個 check，任一個超過時限沒收到訊號，就由 Healthchecks 寄 Email。設計理由、費用與升級分界見 [KV 備份計畫](../docs/kv-backup-plan.md)。
 
-- GitHub 不排程、也不部署這個 Worker。CI 只跑 `pnpm run build:backup`（`wrangler deploy --dry-run`）確認能建置，`main` 與 tag 的 CD 都不會碰它；程式更新後要由管理者用本機設定檔自行部署。
+- GitHub 不排程這個 Worker。`v*` tag 的 CD 在部署正式 API Worker 之前，會用範本加上既有的 secrets 部署它（設成每日啟用），並確認兩個 Healthchecks secret 還在；任一步失敗，API Worker 就不部署。平常程式更新不必再手動部署。PR 與 `main` 的 CI 只跑 `pnpm run build:backup`（`wrangler deploy --dry-run`）確認能建置。
 - 這個 Worker 沒有公開入口：`fetch` 一律回 404，`workers_dev = false`、`preview_urls = false`。
 
-**合併 PR 不代表已啟用。** 範本預設 `BACKUP_ENABLED = "false"`、`crons = []`，要做完下方第 3 節的全部步驟才算正式上線。
+**發版時的自動部署與 `KV_BACKUP_DEPLOY`**
+
+線上設定以範本加上 tag 的 CD 為準：每次 `v*` tag 都用 `worker/wrangler.backup.toml` 重新部署，只寫在本機 `wrangler.backup.local.toml` 的設定值，會在下一次 tag 被蓋掉。本機檔仍是 `pnpm backup:drill` 的設定來源（第 4 節），也是下方第 3 節手動部署用的設定檔。
+
+- **設定位置**：GitHub repo 的 Settings → Secrets and variables → Actions → Variables，新增 repo variable `KV_BACKUP_DEPLOY`。值是 `false`（不分大小寫）時，tag 不部署備份 Worker，只在 log 印一行警告；沒有設定或是其他值，都會部署。
+- **要設成 `false` 的情況**：第 3 節的首次啟用還沒做完；暫停備份期間（第 6 節）；自架 fork 沒有架備份 Worker。
+- **部署步驟失敗時**：在 `Deploy Worker (Prod)` job 的 log 找 `::error::` 那一行，看是 ID 格式不對、範本留有佔位值、wrangler 部署失敗（多半是 API token 權限不夠），還是缺少 Healthchecks secret。修好後重跑 `Deploy Worker (Prod)` job。同一次 tag 的 PWA、擴充功能 Release 與 Firefox 送審是平行的 job，不會被擋，已經先上線了，所以要盡快重跑。
+- **急著讓 API 上線時**：暫時把 `KV_BACKUP_DEPLOY` 設成 `false` 再重跑 job。事後記得用本機設定檔手動部署備份 Worker（第 3 節步驟 3 的 `wrangler deploy` 指令），再把變數改回。
+
+**範本預設停用。** 範本是 `BACKUP_ENABLED = "false"`、`crons = []`，由 tag 的 CD 替換後才啟用。第一次設定時，做完下方第 3 節的全部步驟之前，讓 `KV_BACKUP_DEPLOY` 維持 `false`。
 
 ### 1. Free 方案下的限制
 
@@ -627,6 +638,8 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 - **保留**「未完成 multipart upload 一天後自動清除」這條規則。Worker 被平台中止時 `catch` 不會執行，殘留的 upload 只能靠它清。
 
 ### 3. 啟用步驟
+
+整個第 3 節進行期間，把 `KV_BACKUP_DEPLOY` 設成 `false`（設定方式見本章開頭）。步驟 3 部署的停用版、步驟 5 的每小時 Cron、步驟 7 的故意失敗與步驟 8 的兩封 Email 演練，都要求線上維持本機的設定；這段期間打任何一個 tag，都會把線上設定蓋回每日啟用。步驟 9 正式啟用完成後，再把變數刪除或改成 `true`。
 
 要登入儀表板、輸入秘密、按互動確認、看信箱的由管理者做；能用本機已登入的 wrangler 完成的可由 agent 代勞（計畫第 13 節）：
 
@@ -854,17 +867,17 @@ node scripts/test-kv-backup-runtime.mjs
 2. 確認是濫用就先清掉那些資料，等下一次備份恢復成功。
 3. 排除濫用、確定是真的成長，才走第 7 節的升級流程。
 
-- **「備份成功」逾期**：備份停了或失敗了。可能原因包括碰到第 1 節的上限、CPU 超過被中止、Cron 被刪、`BACKUP_ENABLED` 被關、secret 或 binding 設錯、Cloudflare 帳號問題。先看 Worker log：失敗時只記一行專案寫死的訊息（`BackupError` 的常數訊息，或「每日 KV 備份作業未完成；請檢查設定、執行限制與獨立告警。」），接著以「每日 KV 備份作業失敗。」結束這次執行，不會出現遠端的錯誤內容。如果訊息是「備份已保留，但獨立監看回報失敗。」，表示備份已經發布、只是 ping 沒送到，先到 R2 確認 `latest.json`，不要當成資料遺失。修好後可以暫時改成每小時 Cron 補跑，再改回每日。
+- **「備份成功」逾期**：備份停了或失敗了。可能原因包括碰到第 1 節的上限、CPU 超過被中止、Cron 被刪、`BACKUP_ENABLED` 被關、secret 或 binding 設錯、Cloudflare 帳號問題。先看 Worker log：失敗時只記一行專案寫死的訊息（`BackupError` 的常數訊息，或「每日 KV 備份作業未完成；請檢查設定、執行限制與獨立告警。」），接著以「每日 KV 備份作業失敗。」結束這次執行，不會出現遠端的錯誤內容。如果訊息是「備份已保留，但獨立監看回報失敗。」，表示備份已經發布、只是 ping 沒送到，先到 R2 確認 `latest.json`，不要當成資料遺失。修好後可以暫時改成每小時 Cron 補跑，再改回每日；補跑期間把 `KV_BACKUP_DEPLOY` 設成 `false`，改回每日後再恢復。
 - **只有「容量正常」逾期**：備份仍在運作，但內部請求、筆數或封存大小已達第 1 節的分界，該升級了；讀最新的 manifest 與 `kv_backup_success` log 找出是哪一項。例外是 log 出現「備份已保留，但容量正常回報失敗。」：容量其實正常，只是第二個 ping 沒送到。三項都沒達分界、log 也沒有那句時，查最近一次執行的結果（GraphQL `dimensions.status`）：是 `exceededResources` 就表示在「備份成功」ping 之後被 CPU 中止（計畫第 9 節），走第 7 節的升級流程。
-- **暫停**：本機設定改 `BACKUP_ENABLED = "false"`、`crons = []` 並部署。沒有到期刪除規則，最後成功備份會一直保留；Healthchecks 會如期寄信。只有明確決定暫停保護時，才在 Healthchecks 暫停 check，恢復時一併恢復，不要用關掉通知來掩蓋故障。
-- **沒有 REST 匯出工具**：舊的 `scripts/kv-backup.mjs` 已刪除，Cron Worker 是唯一的備份來源。需要額外一份備份時，暫時改成每小時 Cron 跑一次即可。
+- **暫停**：本機設定改 `BACKUP_ENABLED = "false"`、`crons = []` 並部署，同時把 `KV_BACKUP_DEPLOY` 設成 `false`，否則下一次 tag 會把備份重新打開；恢復時改回。沒有到期刪除規則，最後成功備份會一直保留；Healthchecks 會如期寄信。只有明確決定暫停保護時，才在 Healthchecks 暫停 check，恢復時一併恢復，不要用關掉通知來掩蓋故障。
+- **沒有 REST 匯出工具**：舊的 `scripts/kv-backup.mjs` 已刪除，Cron Worker 是唯一的備份來源。需要額外一份備份時，暫時改成每小時 Cron 跑一次即可；這段期間把 `KV_BACKUP_DEPLOY` 設成 `false`，改回每日後再恢復。
 
 ### 7. 升級到 Workers Paid
 
 升級的觸發條件是第 1 節的分界（收到「容量正常」逾期信，或任一次 Cron 執行被中止：GraphQL `dimensions.status` 為 `exceededResources`，tail 事件 `outcome` 為 `exceededCpu`）。完整步驟見[計畫第 14 節](../docs/kv-backup-plan.md#14-升級流程改-workers-paid)，摘要：
 
 1. 訂閱 Workers Paid（每月 US$5 起）。
-2. 切換到 Paid 設定：`MAX_ARCHIVE_BYTES` 提高到 256 MiB，每筆上限 4 MiB、`MAX_SAVED_KEYS` 5,000 不變；加回每日 SHA-256 核對與下載回讀，`wrangler.backup.local.toml` 加回 `cpu_ms`。批次讀取的 25 MB 回應上限在 Paid 仍然存在，自動拆批不可移除。
+2. 切換到 Paid 設定：`MAX_ARCHIVE_BYTES` 提高到 256 MiB，每筆上限 4 MiB、`MAX_SAVED_KEYS` 5,000 不變；加回每日 SHA-256 核對與下載回讀。這些改動做成一個升級 PR，`cpu_ms` 加進 `worker/wrangler.backup.toml`，`worker/tests/unit/kvBackupStorage.test.ts` 的 Free 設定斷言一起改；只改本機檔會在下一次 tag 被蓋掉。從開始切換到這個 PR 合併之前，把 `KV_BACKUP_DEPLOY` 設成 `false`。批次讀取的 25 MB 回應上限在 Paid 仍然存在，自動拆批不可移除。
 3. 格式不變，仍是 version 2，manifest 多一個選填的 `sha256` 欄位，還原 CLI 讀到就額外核對。
-4. 重新部署，重跑第 3 節的驗收。
+4. 升級 PR 合併後，先把 `KV_BACKUP_DEPLOY` 刪除或改回 `true`，再打 tag 由 CD 重新部署；在 `Deploy Worker (Prod)` 的 log 確認「Deploy backup Worker (Prod)」與「Verify backup Worker secrets」都有執行並通過（不是只有跳過的警告），再重跑第 3 節的驗收。
 5. 「容量正常」的分界改為 Paid 上限的 70%：封存 180 MB、筆數 3,500、內部請求 7,000。

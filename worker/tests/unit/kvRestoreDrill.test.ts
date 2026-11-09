@@ -114,7 +114,7 @@ function localToml({
     "workers_dev = false",
     `account_id = "${account}"`,
     "",
-    "# Copy to wrangler.backup.local.toml; configure and validate before enabling.",
+    "# Kept disabled: deploy-worker-prod fills the placeholders and enables it; a local copy (wrangler.backup.local.toml) serves pnpm backup:drill and manual ops.",
     "[vars]",
     'BACKUP_ENABLED = "true"',
     `SOURCE_ACCOUNT_ID = "${account}"`,
