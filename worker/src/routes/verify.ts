@@ -350,8 +350,17 @@ verifyRoutes.openapi(postVerifyOtpRoute, async (c) => {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
+  const [verifyRecord, presented] = await Promise.all([
+    getVerifyRecord(c.env.KV, userId),
+    readPresentedAuth(c.env.KV, userId, getPresentedAuthToken(c)),
+  ]);
+  // A code trades through lookup + join for a new listed token, so only a current token mints one
+  // (#470). See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+  if (!presented.current) {
+    return jsonError(c, 401, "UNAUTHORIZED", "Authentication required");
+  }
+
   // Verify user has 'code' method set
-  const verifyRecord = await getVerifyRecord(c.env.KV, userId);
   if (!verifyRecord || verifyRecord.method !== "code") {
     return jsonError(
       c,

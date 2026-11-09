@@ -7,16 +7,17 @@ import {
 } from "../api/client";
 import { PERSONAL_BOOKS_CACHE_KEY, DISPLAY_NAME_KEY } from "../constants";
 import { readOwnedCachedBooks } from "./personalBooksCache";
+import { pinSyncApi, type SyncApi } from "../sync/pinnedSyncApi";
 
 type ServerRecordState = "present" | "absent" | "unknown";
 
 /** Whether the server already holds a personal-books record for `userId`. */
 async function readServerRecordState(
   userId: string,
-  apiClient: ApiClient,
+  api: Pick<SyncApi, "getPersonalBooks">,
 ): Promise<ServerRecordState> {
   try {
-    const response = await apiClient.getPersonalBooks(userId);
+    const response = await api.getPersonalBooks(userId);
     if (response.error) return "unknown";
     return response.data ? "present" : "absent";
   } catch {
@@ -29,7 +30,7 @@ async function uploadCachedBooks(
   userId: string,
   displayName: string,
   books: BookEntry[],
-  apiClient: ApiClient,
+  api: Pick<SyncApi, "updatePersonalBooks">,
 ): Promise<boolean> {
   const personalBooks: PersonalBooks = {
     schemaVersion: PERSONAL_BOOKS_SCHEMA_VERSION,
@@ -38,7 +39,7 @@ async function uploadCachedBooks(
     books,
     lastUpdated: new Date().toISOString(),
   };
-  const response = await apiClient.updatePersonalBooks(userId, personalBooks);
+  const response = await api.updatePersonalBooks(userId, personalBooks);
   return !response.error;
 }
 
@@ -51,6 +52,8 @@ async function uploadCachedBooks(
  * exists. It is kept when the server cannot be checked or the upload fails
  * (error response or thrown request), so a later attempt can retry it.
  * A cache not owned by `userId` (or in the legacy format) is deleted, never uploaded.
+ * Calls stay on the endpoint read at entry (#471): a call made after it changes
+ * is not sent, and the cache is kept.
  * Best-effort and never throws: failures do not block family create/join.
  */
 export async function migratePersonalBooksCache(
@@ -58,6 +61,7 @@ export async function migratePersonalBooksCache(
   apiClient: ApiClient,
 ): Promise<void> {
   try {
+    const api = pinSyncApi(apiClient);
     const result = await browser.storage.local.get([
       PERSONAL_BOOKS_CACHE_KEY,
       DISPLAY_NAME_KEY,
@@ -70,7 +74,7 @@ export async function migratePersonalBooksCache(
       return;
     }
 
-    const serverRecord = await readServerRecordState(userId, apiClient);
+    const serverRecord = await readServerRecordState(userId, api);
     if (serverRecord === "unknown") {
       console.warn(
         "[Onboarding] Could not check the server's personal books; keeping the cache, not uploading it",
@@ -84,7 +88,7 @@ export async function migratePersonalBooksCache(
         userId,
         storedDisplayName,
         cachedBooks,
-        apiClient,
+        api,
       );
       if (!uploaded) {
         console.warn(
