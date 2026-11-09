@@ -35,7 +35,10 @@ function setup(leaveFamily: () => Promise<LeaveRes>) {
       }),
     );
   });
-  const apiClient = { leaveFamily: send } as unknown as ApiClient;
+  const apiClient = {
+    leaveFamily: send,
+    getEndpoint: () => "https://api.example",
+  } as unknown as ApiClient;
   const hook = renderHook(() =>
     useFamilySettingsLeave({
       familyId: "fam-1",

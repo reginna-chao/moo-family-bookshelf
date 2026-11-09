@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { ApiResponse } from "../api/types";
 import { runGuardedDeparture } from "../storage/selfDeparture";
+import { pinDepartureServer } from "./departureServerPin";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
@@ -60,12 +61,13 @@ export function useFamilySettingsLeave({
     setLeaveState("leaving");
     setLeaveError("");
     try {
+      const assertSameServer = pinDepartureServer(apiClient);
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the PWA's leave / delete hooks.
-      await runGuardedDeparture(
-        () => apiClient.leaveFamily(familyId, userId),
-        settleLeave,
-      );
+      await runGuardedDeparture(() => {
+        assertSameServer();
+        return apiClient.leaveFamily(familyId, userId);
+      }, settleLeave);
     } catch (err) {
       setLeaveError(
         err instanceof Error ? err.message : "離開家庭失敗，請稍後再試",
