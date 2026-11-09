@@ -1,19 +1,18 @@
 // Onboarding flow helpers out of Onboarding.tsx: each export is one side-effectful operation on the
 // API client, chrome storage and (best-effort) the in-page cache; callers map errors to UI state.
 
-import browser from "webextension-polyfill";
 import { ApiClient, FamilyGroup } from "../api/client";
 import {
   decodeSyncCode,
   encodeSyncCode,
 } from "moo-family-bookshelf-shared/crypto/syncCode";
-import { DEFAULT_API_ENDPOINT, FAMILY_ID_KEY } from "../constants";
+import { DEFAULT_API_ENDPOINT } from "../constants";
 import { persistSwitchedFamilyEndpoint } from "../storage/familyEndpointChoice";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { removedJoinText } from "moo-family-bookshelf-shared/unkick/messages";
 import type { useAutoSetup } from "./useAutoSetup";
 import { migratePersonalBooksCache } from "./personalBooksCacheMigration";
-import { persistJoinCredentials } from "./persistJoinCredentials";
+import { settleJoinedSession } from "./settleJoinedSession";
 
 // Re-exported so existing `./onboardingFlow` importers keep working.
 export { migratePersonalBooksCache };
@@ -43,6 +42,7 @@ export async function tryAutoRecovery(opts: {
   /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
   verifySecret?: string;
 }): Promise<RecoveryResult> {
+  const issuer = opts.apiClient.getEndpoint();
   const joinRes = await opts.apiClient.joinFamily(
     opts.familyId,
     opts.userId,
@@ -59,32 +59,14 @@ export async function tryAutoRecovery(opts: {
     };
   }
 
-  const joinData = joinRes.data;
-
-  void Promise.resolve(
-    browser.runtime.sendMessage({
-      type: "SET_FAMILY_ID",
-      familyId: opts.familyId,
-    }),
-  ).catch(() => {});
-  await persistJoinCredentials({
+  await settleJoinedSession({
     userId: opts.userId,
     familyId: opts.familyId,
-    authToken: joinData?.authToken,
-    expiresAt: joinData?.expiresAt,
-    endpoint: opts.apiClient.getEndpoint(),
+    authToken: joinRes.data?.authToken,
+    expiresAt: joinRes.data?.expiresAt,
+    issuer,
+    apiClient: opts.apiClient,
   });
-  // Overwrite stale familyId in sync storage so background reads stay consistent
-  try {
-    await browser.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
-  } catch {
-    // sync storage may be unavailable in some contexts
-  }
-  await migratePersonalBooksCache(opts.userId, opts.apiClient);
-
-  if (joinData?.authToken) {
-    opts.apiClient.setAuthToken(joinData.authToken);
-  }
 
   await opts.autoSetup.syncBooks({
     userId: opts.userId,
@@ -115,6 +97,7 @@ export async function performSoloRecovery(opts: {
   /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
   verifySecret?: string;
 }): Promise<SoloRecoveryResult> {
+  const issuer = opts.apiClient.getEndpoint();
   const joinRes = await opts.apiClient.joinFamily(
     opts.familyId,
     opts.userId,
@@ -131,31 +114,14 @@ export async function performSoloRecovery(opts: {
     };
   }
 
-  const joinData = joinRes.data;
-
-  void Promise.resolve(
-    browser.runtime.sendMessage({
-      type: "SET_FAMILY_ID",
-      familyId: opts.familyId,
-    }),
-  ).catch(() => {});
-  await persistJoinCredentials({
+  await settleJoinedSession({
     userId: opts.userId,
     familyId: opts.familyId,
-    authToken: joinData?.authToken,
-    expiresAt: joinData?.expiresAt,
-    endpoint: opts.apiClient.getEndpoint(),
+    authToken: joinRes.data?.authToken,
+    expiresAt: joinRes.data?.expiresAt,
+    issuer,
+    apiClient: opts.apiClient,
   });
-  try {
-    await browser.storage.sync.set({ [FAMILY_ID_KEY]: opts.familyId });
-  } catch {
-    // sync storage may be unavailable in some contexts
-  }
-  await migratePersonalBooksCache(opts.userId, opts.apiClient);
-
-  if (joinData?.authToken) {
-    opts.apiClient.setAuthToken(joinData.authToken);
-  }
 
   await opts.autoSetup.syncBooks({
     userId: opts.userId,
@@ -205,6 +171,7 @@ export async function createNewFamily(opts: {
   /** PWA login verification secret (PIN/pattern) for verification-enabled users. */
   verifySecret?: string;
 }): Promise<CreateFamilyResult> {
+  const issuer = opts.apiClient.getEndpoint();
   const response = await opts.apiClient.createFamily(
     opts.userId,
     opts.displayName,
@@ -226,38 +193,23 @@ export async function createNewFamily(opts: {
   const data: FamilyGroup = response.data;
   const familyId = data.familyId;
 
-  const isCustomEndpoint =
-    opts.apiClient.getEndpoint() !== DEFAULT_API_ENDPOINT;
+  const isCustomEndpoint = issuer !== DEFAULT_API_ENDPOINT;
   const syncCode = encodeSyncCode({
     familyId,
-    apiHost: isCustomEndpoint ? opts.apiClient.getEndpoint() : undefined,
+    apiHost: isCustomEndpoint ? issuer : undefined,
   });
 
-  void Promise.resolve(
-    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId }),
-  ).catch(() => {});
-  await persistJoinCredentials({
+  await settleJoinedSession({
     userId: opts.userId,
     familyId,
     authToken: data.authToken,
     expiresAt: data.expiresAt,
-    endpoint: opts.apiClient.getEndpoint(),
+    issuer,
+    apiClient: opts.apiClient,
   });
-  try {
-    await browser.storage.sync.set({ [FAMILY_ID_KEY]: familyId });
-  } catch {
-    // sync storage may be unavailable in some contexts
-  }
-  await migratePersonalBooksCache(opts.userId, opts.apiClient);
 
-  if (data.authToken) {
-    opts.apiClient.setAuthToken(data.authToken);
-  }
-
-  if (isCustomEndpoint) {
-    opts.apiClient
-      .updateFamilyEndpoint(familyId, opts.apiClient.getEndpoint())
-      .catch(() => {});
+  if (isCustomEndpoint && opts.apiClient.getEndpoint() === issuer) {
+    opts.apiClient.updateFamilyEndpoint(familyId, issuer).catch(() => {});
   }
 
   return { familyId, userId: opts.userId, syncCode, authToken: data.authToken };
@@ -332,6 +284,7 @@ export async function performJoin(opts: {
     adoptedEndpoint = opts.apiClient.getEndpoint();
   }
 
+  const issuer = opts.apiClient.getEndpoint();
   const response = await opts.apiClient.joinFamily(
     decoded.familyId,
     opts.userId,
@@ -357,31 +310,14 @@ export async function performJoin(opts: {
     await persistSwitchedFamilyEndpoint(adoptedEndpoint);
   }
 
-  const joinData = response.data;
-
-  void Promise.resolve(
-    browser.runtime.sendMessage({
-      type: "SET_FAMILY_ID",
-      familyId: decoded.familyId,
-    }),
-  ).catch(() => {});
-  await persistJoinCredentials({
+  await settleJoinedSession({
     userId: opts.userId,
     familyId: decoded.familyId,
-    authToken: joinData?.authToken,
-    expiresAt: joinData?.expiresAt,
-    endpoint: opts.apiClient.getEndpoint(),
+    authToken: response.data?.authToken,
+    expiresAt: response.data?.expiresAt,
+    issuer,
+    apiClient: opts.apiClient,
   });
-  try {
-    await browser.storage.sync.set({ [FAMILY_ID_KEY]: decoded.familyId });
-  } catch {
-    // sync storage may be unavailable in some contexts
-  }
-  await migratePersonalBooksCache(opts.userId, opts.apiClient);
-
-  if (joinData?.authToken) {
-    opts.apiClient.setAuthToken(joinData.authToken);
-  }
 
   return { ok: true, familyId: decoded.familyId, userId: opts.userId };
 }

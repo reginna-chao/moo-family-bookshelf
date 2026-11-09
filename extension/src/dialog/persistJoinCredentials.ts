@@ -20,7 +20,7 @@ export async function persistJoinCredentials(opts: {
   familyId?: string;
   authToken?: string;
   expiresAt?: number;
-  /** The server that answered this request: the client's `getEndpoint()`. */
+  /** The server this request was sent to, read before it went out; never the client's endpoint after the response. */
   endpoint: string;
 }): Promise<void> {
   const storageData: Record<string, unknown> = {
