@@ -33,6 +33,8 @@ describe("GET /api/version", () => {
 
     const json = (await res.json()) as Json;
     expect(typeof json.data.apiVersion).toBe("number");
+    // 4 = self-leave / transfer require the current PIN/pattern (docs/architecture.md → `API_VERSION = 4`).
+    expect(json.data.apiVersion).toBe(4);
     expect(typeof json.data.serverVersion).toBe("string");
   });
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError, BoolFlag } from "@/api/client";
 import type { ApiClient, FamilyMember } from "@/api/client";
+import { MemberTransferConfirm } from "@/components/MemberTransferConfirm";
 import { rateLimitedEnvelopeMessage } from "@/utils/retryMessage";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
@@ -85,54 +86,30 @@ export function MemberList({
     }
   }
 
-  async function handleConfirm() {
-    if (!confirmAction) return;
+  async function handleRemoveConfirm(targetId: string) {
     setLoading(true);
     setError(null);
 
     try {
-      if (confirmAction.type === "remove") {
-        const res = await apiClient.removeMember(
-          familyId,
-          confirmAction.targetId,
+      const res = await apiClient.removeMember(familyId, targetId);
+      // MEMBER_NOT_FOUND on an owner kick means "already off the list": a completed removal. Why:
+      // docs/architecture.md → 移除成員與離開家庭的重試; Extension twin in .claude/rules/frontend.md.
+      const alreadyRemoved = res.error?.code === "MEMBER_NOT_FOUND";
+      if (res.error && !alreadyRemoved) {
+        setError(
+          rateLimitedEnvelopeMessage(res.error) ??
+            safeErrorText(res.error.message, "移除成員失敗，請稍後再試"),
         );
-        // MEMBER_NOT_FOUND on an owner kick means "already off the list": a completed removal. Why:
-        // docs/architecture.md → 移除成員與離開家庭的重試; Extension twin in .claude/rules/frontend.md.
-        const alreadyRemoved = res.error?.code === "MEMBER_NOT_FOUND";
-        if (res.error && !alreadyRemoved) {
-          setError(
-            rateLimitedEnvelopeMessage(res.error) ??
-              safeErrorText(res.error.message, "移除成員失敗，請稍後再試"),
-          );
-          setLoading(false);
-          return;
-        }
-        // Resolve the label BEFORE the refresh drops the member from the list.
-        const removed = members.find(
-          (m) => m.userId === confirmAction.targetId,
-        );
-        onMemberRemoved?.({
-          userId: confirmAction.targetId,
-          displayName: removed
-            ? getMemberLabel(removed)
-            : confirmAction.targetId.slice(0, 8),
-          removedAt: Date.now(),
-        });
-      } else {
-        const res = await apiClient.transferOwnership(
-          familyId,
-          userId,
-          confirmAction.targetId,
-        );
-        if (res.error) {
-          setError(
-            rateLimitedEnvelopeMessage(res.error) ??
-              safeErrorText(res.error.message, "轉移管理權失敗，請稍後再試"),
-          );
-          setLoading(false);
-          return;
-        }
+        setLoading(false);
+        return;
       }
+      // Resolve the label BEFORE the refresh drops the member from the list.
+      const removed = members.find((m) => m.userId === targetId);
+      onMemberRemoved?.({
+        userId: targetId,
+        displayName: removed ? getMemberLabel(removed) : targetId.slice(0, 8),
+        removedAt: Date.now(),
+      });
 
       setConfirmAction(null);
       onMembersChanged();
@@ -153,12 +130,8 @@ export function MemberList({
       {members.map((member) => {
         const memberId = member.userId;
         const label = getMemberLabel(member);
-        const isConfirmTarget =
-          confirmAction &&
-          ((confirmAction.type === "remove" &&
-            confirmAction.targetId === memberId) ||
-            (confirmAction.type === "transfer" &&
-              confirmAction.targetId === memberId));
+        const confirmType =
+          confirmAction?.targetId === memberId ? confirmAction.type : null;
         const showCanLendToggle = isOwner && memberId !== userId;
         const canLend = canLendValue(member);
         const isCanLendUpdating = canLendUpdating === memberId;
@@ -244,22 +217,16 @@ export function MemberList({
               </div>
             )}
 
-            {isConfirmTarget && (
-              <div
-                className={`mt-2 rounded p-2 ${confirmAction.type === "remove" ? "bg-red-50" : "bg-blue-50"}`}
-              >
-                <p
-                  className={`text-xs mb-2 ${confirmAction.type === "remove" ? "text-red-700" : "text-blue-700"}`}
-                >
-                  {confirmAction.type === "remove"
-                    ? `確定要移除成員 ${label}？${REJOIN_WAIT_NOTE}`
-                    : `確定要將管理權轉移給 ${label}？轉移後你將無法移除其他成員。`}
+            {confirmType === "remove" && (
+              <div className="mt-2 rounded p-2 bg-red-50">
+                <p className="text-xs mb-2 text-red-700">
+                  {`確定要移除成員 ${label}？${REJOIN_WAIT_NOTE}`}
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={handleConfirm}
+                    onClick={() => void handleRemoveConfirm(memberId)}
                     disabled={loading}
-                    className={`text-xs text-white px-3 py-1 rounded disabled:opacity-50 ${confirmAction.type === "remove" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
+                    className="text-xs text-white px-3 py-1 rounded disabled:opacity-50 bg-red-600 hover:bg-red-700"
                   >
                     {loading ? "處理中..." : "確定"}
                   </button>
@@ -272,6 +239,22 @@ export function MemberList({
                   </button>
                 </div>
               </div>
+            )}
+            {confirmType === "transfer" && (
+              <MemberTransferConfirm
+                familyId={familyId}
+                userId={userId}
+                targetId={memberId}
+                label={label}
+                apiClient={apiClient}
+                onStart={() => setError(null)}
+                onTransferred={() => {
+                  setConfirmAction(null);
+                  onMembersChanged();
+                }}
+                onFailed={setError}
+                onCancel={handleCancel}
+              />
             )}
           </div>
         );

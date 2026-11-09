@@ -1019,6 +1019,27 @@ describe("ApiClient", () => {
         expect.objectContaining({ method: "DELETE" }),
       );
     });
+
+    it("sends no body without a current secret", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.leaveFamily("fam-1", "u1");
+
+      const init = vi.mocked(globalThis.fetch).mock.calls[0][1];
+      expect(init?.body).toBeUndefined();
+    });
+
+    it("sends the current secret as the DELETE body", async () => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.leaveFamily("fam-1", "u1", "482913");
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_ENDPOINT}/api/family/fam-1/member/u1`,
+        expect.objectContaining({
+          method: "DELETE",
+          body: JSON.stringify({ currentSecret: "482913" }),
+        }),
+      );
+    });
   });
 
   describe("removeMember", () => {
@@ -1080,6 +1101,38 @@ describe("ApiClient", () => {
           body: JSON.stringify({ userId: "u1", newOwnerId: "u2" }),
         }),
       );
+    });
+
+    it.each<[string, 1 | undefined, string | undefined, object]>([
+      [
+        "a secret alone",
+        undefined,
+        "482913",
+        { userId: "u1", newOwnerId: "u2", currentSecret: "482913" },
+      ],
+      [
+        "clearEndpoint and a secret",
+        1,
+        "0,3,6,7",
+        {
+          userId: "u1",
+          newOwnerId: "u2",
+          clearEndpoint: 1,
+          currentSecret: "0,3,6,7",
+        },
+      ],
+      [
+        "clearEndpoint without a secret",
+        1,
+        undefined,
+        { userId: "u1", newOwnerId: "u2", clearEndpoint: 1 },
+      ],
+    ])("sends %s in the PUT body", async (_label, clear, secret, expected) => {
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+      await client.transferOwnership("fam-1", "u1", "u2", clear, secret);
+
+      const init = vi.mocked(globalThis.fetch).mock.calls[0][1];
+      expect(JSON.parse(init?.body as string)).toStrictEqual(expected);
     });
   });
 

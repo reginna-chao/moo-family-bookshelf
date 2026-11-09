@@ -718,6 +718,7 @@ describe("FamilySettings", () => {
         "user-abc12345",
         "user-def67890",
         undefined,
+        undefined,
       );
     });
 

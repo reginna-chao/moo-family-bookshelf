@@ -19,6 +19,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     removeMember: vi.fn().mockResolvedValue({ data: { ok: true } }),
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    // A none account: the transfer goes out at once (the secret step is in MemberTransferConfirm.test.tsx).
+    getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none" } }),
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -165,9 +167,49 @@ describe("MemberList", () => {
         "user-owner123",
         "user-member456",
         undefined,
+        undefined,
       );
       expect(onMembersChanged).toHaveBeenCalled();
     });
+  });
+
+  it("drops a failed transfer's error once the next transfer starts", async () => {
+    let resolveSecond!: (value: unknown) => void;
+    const transferOwnership = vi
+      .fn()
+      .mockResolvedValueOnce({
+        error: { code: "FORBIDDEN", message: "轉移失敗" },
+      })
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (resolveSecond = resolve)),
+      );
+    const onMembersChanged = vi.fn();
+    renderMemberList({
+      apiClient: createMockApiClient({ transferOwnership }),
+      onMembersChanged,
+    });
+
+    fireEvent.click(screen.getByText("轉移管理權"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("確定"));
+    });
+    // The Extension closes the confirm on failure and shows the error at the list's foot.
+    expect(screen.getByText("轉移失敗")).toBeInTheDocument();
+    expect(screen.queryByText("確定")).toBeNull();
+
+    fireEvent.click(screen.getByText("轉移管理權"));
+    expect(screen.getByText("轉移失敗")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByText("確定"));
+    });
+
+    expect(transferOwnership).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("處理中...")).toBeInTheDocument();
+    expect(screen.queryByText("轉移失敗")).toBeNull();
+    await act(async () => {
+      resolveSecond({ data: { ok: true } });
+    });
+    expect(onMembersChanged).toHaveBeenCalledTimes(1);
   });
 
   it("cancel hides the confirmation dialog", () => {

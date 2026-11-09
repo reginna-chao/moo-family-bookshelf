@@ -63,6 +63,11 @@ import {
 import { settleDepartingBorrower } from "../services/borrowIndex";
 import { dissolveFamily } from "../services/familyDissolve";
 import { isActiveMember, isLiveMembership } from "../services/membership";
+import {
+  enforceCallerCurrentSecret,
+  readCurrentSecretBody,
+  STEP_UP_UPDATE_REQUIRED_MESSAGE,
+} from "../services/currentSecretStepUp";
 import { defaultHook, jsonRes } from "../utils/openapi";
 import { jsonError } from "../utils/errors";
 import { summarizeErrorForLog } from "../utils/errorLog";
@@ -196,18 +201,30 @@ const removeMemberRoute = createRoute({
     "the family, so a retry after a partly-failed removal still applies the " +
     "ban even though the response is 404 `MEMBER_NOT_FOUND`. A removal made by " +
     "mistake does not have to be waited out: the owner can lift the ban at any " +
-    "time with `DELETE /{id}/kicked/{uid}`.",
+    "time with `DELETE /{id}/kicked/{uid}`. On a self-leave, a PIN / pattern " +
+    "account must send its current secret as the optional JSON body " +
+    "`{ currentSecret }`, checked before the family is read; removing another " +
+    "member reads no body.",
   request: {
     params: FamilyMemberParams,
   },
   responses: {
     200: jsonRes("Member removed"),
-    400: jsonRes("Invalid input"),
-    401: jsonRes("Unauthorized"),
-    403: jsonRes("Forbidden"),
+    400: jsonRes(
+      "Invalid input, or a malformed self-leave body (INVALID_JSON / INVALID_PAYLOAD / INVALID_VERIFY_SECRET)",
+    ),
+    401: jsonRes(
+      "Unauthorized, or on a self-leave the token is not one of the account's current tokens",
+    ),
+    403: jsonRes(
+      "Forbidden, or on a self-leave the current secret is required or wrong",
+    ),
     404: jsonRes("Family or member not found"),
-    429: jsonRes("Rate limited"),
+    429: jsonRes("Rate limited, or current-secret attempts locked or spent"),
     500: jsonRes("Borrow cleanup failed"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -298,16 +315,28 @@ const transferOwnershipRoute = createRoute({
   path: "/{id}/transfer",
   tags: ["Family"],
   summary: "Transfer family ownership",
+  description:
+    "A PIN / pattern account must send its current secret as the body's " +
+    "optional `currentSecret`; it is checked after the body's format checks " +
+    "and before the family is read, so FAMILY_NOT_FOUND / NOT_OWNER / " +
+    "SAME_OWNER / INVALID_MEMBER are answered only once it passes.",
   request: {
     params: FamilyIdParam,
   },
   responses: {
     200: jsonRes("Ownership transferred"),
-    400: jsonRes("Invalid input"),
-    401: jsonRes("Unauthorized"),
-    403: jsonRes("Not the owner"),
+    400: jsonRes(
+      "Invalid input (INVALID_JSON / MISSING_FIELDS / INVALID_USER_ID / INVALID_VERIFY_SECRET / SAME_OWNER / INVALID_MEMBER)",
+    ),
+    401: jsonRes(
+      "Unauthorized, or the token is not one of the account's current tokens",
+    ),
+    403: jsonRes("Not the owner, or the current secret is required or wrong"),
     404: jsonRes("Family not found"),
-    429: jsonRes("Rate limited"),
+    429: jsonRes("Rate limited, or current-secret attempts locked or spent"),
+    503: jsonRes(
+      "Verification unavailable: server pepper missing or mismatched",
+    ),
   },
 });
 
@@ -587,6 +616,20 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     ...FAMILY_WRITE_LIMIT,
   });
   if (rateLimitResponse) return rateLimitResponse;
+
+  // Self-leave only: current-secret step-up BEFORE the family read, so the no-CAS read-modify-write
+  // window is unchanged. Rationale: docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
+  if (targetUserId === callerId) {
+    const currentSecret = await readCurrentSecretBody(c);
+    if (currentSecret instanceof Response) return currentSecret;
+    const stepUpResponse = await enforceCallerCurrentSecret(
+      c,
+      callerId,
+      currentSecret,
+      STEP_UP_UPDATE_REQUIRED_MESSAGE,
+    );
+    if (stepUpResponse) return stepUpResponse;
+  }
 
   const raw = await getFamilyRecord(c.env.KV, familyId);
 
@@ -1012,6 +1055,7 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
     newOwnerId: string;
     userId?: string;
     clearEndpoint?: number;
+    currentSecret?: unknown;
   } | null;
   try {
     body = await c.req.json();
@@ -1026,6 +1070,20 @@ familyRoutes.openapi(transferOwnershipRoute, async (c) => {
   if (!isValidUserId(body.newOwnerId)) {
     return jsonError(c, 400, "INVALID_USER_ID", "userId format is invalid");
   }
+
+  const currentSecret = sanitizeVerifySecret(body.currentSecret);
+  if (currentSecret === null) {
+    return verifySecretFormatResponse(c, "currentSecret");
+  }
+
+  // Current-secret step-up BEFORE the family read, as in self-leave (DELETE member handler above).
+  const stepUpResponse = await enforceCallerCurrentSecret(
+    c,
+    callerUserId,
+    currentSecret,
+    STEP_UP_UPDATE_REQUIRED_MESSAGE,
+  );
+  if (stepUpResponse) return stepUpResponse;
 
   const raw = await getFamilyRecord(c.env.KV, familyId);
 

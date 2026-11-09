@@ -183,14 +183,162 @@ describe("MemberList", () => {
     fireEvent.click(screen.getByRole("button", { name: "確定" }));
 
     await waitFor(() => {
+      // No getVerifyMethod on this client: the read fails, so no current secret is sent.
       expect(mockTransferOwnership).toHaveBeenCalledWith(
         defaultProps.familyId,
         OWNER_ID,
         USER_ID,
+        undefined,
       );
     });
     await waitFor(() => {
       expect(defaultProps.onMembersChanged).toHaveBeenCalled();
+    });
+  });
+
+  /** The transfer confirm lives in MemberTransferConfirm; a failure keeps it open with the error at
+   *  the list's foot, and the next attempt clears that error as it starts. */
+  describe("transfer failure and retry", () => {
+    const TRANSFER_QUESTION =
+      "確定要將管理權轉移給 小明？轉移後你將無法移除其他成員。";
+
+    function renderOwnerWith(
+      method: string,
+      transferOwnership: ReturnType<typeof vi.fn>,
+    ) {
+      const onMembersChanged = vi.fn();
+      const { container } = render(
+        <MemberList
+          {...defaultProps}
+          userId={OWNER_ID}
+          ownerId={OWNER_ID}
+          apiClient={
+            {
+              getVerifyMethod: vi.fn().mockResolvedValue({ data: { method } }),
+              transferOwnership,
+            } as unknown as ApiClient
+          }
+          onMembersChanged={onMembersChanged}
+        />,
+      );
+      return { container, onMembersChanged };
+    }
+
+    async function settledClick(element: HTMLElement) {
+      await act(async () => {
+        fireEvent.click(element);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    it("keeps the confirm open with the error at the bottom of the list", async () => {
+      const transferOwnership = vi.fn().mockResolvedValue({
+        error: { code: "SERVER_ERROR", message: "伺服器忙碌" },
+      });
+      const { container, onMembersChanged } = renderOwnerWith(
+        "none",
+        transferOwnership,
+      );
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("伺服器忙碌");
+      // At the list's foot: after every member row.
+      expect(container.firstElementChild?.lastElementChild).toBe(alert);
+      expect(screen.getByText(TRANSFER_QUESTION)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "確定" })).toBeEnabled();
+      expect(onMembersChanged).not.toHaveBeenCalled();
+    });
+
+    it("clears the previous failure as soon as the next transfer starts", async () => {
+      let release: (v: unknown) => void = () => {};
+      const transferOwnership = vi
+        .fn()
+        .mockResolvedValueOnce({
+          error: { code: "SERVER_ERROR", message: "伺服器忙碌" },
+        })
+        .mockImplementationOnce(
+          () => new Promise((resolve) => (release = resolve)),
+        );
+      const { onMembersChanged } = renderOwnerWith("none", transferOwnership);
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+      // Positive companion for the negative below.
+      expect(screen.getByRole("alert")).toHaveTextContent("伺服器忙碌");
+
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+
+      // The second transfer is still in flight: only the start can have cleared it.
+      expect(transferOwnership).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("伺服器忙碌")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      await act(async () => {
+        release({ data: { ok: true } });
+      });
+      expect(onMembersChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears the previous failure when a PIN account opens the secret step again", async () => {
+      const transferOwnership = vi.fn().mockResolvedValue({
+        error: { code: "SERVER_ERROR", message: "伺服器忙碌" },
+      });
+      renderOwnerWith("pin", transferOwnership);
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+      fireEvent.change(screen.getByLabelText("PIN 輸入"), {
+        target: { value: "864200" },
+      });
+      await settledClick(screen.getByRole("button", { name: "確認" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("伺服器忙碌");
+      // The failure brought the question back, confirm still open.
+      expect(screen.getByText(TRANSFER_QUESTION)).toBeInTheDocument();
+
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+
+      expect(screen.getByLabelText("PIN 輸入")).toBeInTheDocument();
+      expect(screen.queryByText("伺服器忙碌")).not.toBeInTheDocument();
+    });
+
+    it("sends a PIN account's current PIN with the transfer and refreshes the list", async () => {
+      const transferOwnership = vi
+        .fn()
+        .mockResolvedValue({ data: { ok: true } });
+      const { onMembersChanged } = renderOwnerWith("pin", transferOwnership);
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+
+      fireEvent.change(screen.getByLabelText("PIN 輸入"), {
+        target: { value: "864200" },
+      });
+      await settledClick(screen.getByRole("button", { name: "確認" }));
+
+      expect(transferOwnership).toHaveBeenCalledWith(
+        defaultProps.familyId,
+        OWNER_ID,
+        USER_ID,
+        "864200",
+      );
+      expect(onMembersChanged).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(TRANSFER_QUESTION)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("PIN 輸入")).not.toBeInTheDocument();
+    });
+
+    it("closes the confirm and the secret entry on 取消", async () => {
+      renderOwnerWith("pin", vi.fn());
+      fireEvent.click(screen.getAllByRole("button", { name: "轉移管理權" })[0]);
+      await settledClick(screen.getByRole("button", { name: "確定" }));
+      expect(screen.getByLabelText("PIN 輸入")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+      expect(screen.queryByLabelText("PIN 輸入")).not.toBeInTheDocument();
+      expect(screen.queryByText(TRANSFER_QUESTION)).not.toBeInTheDocument();
+      expect(
+        screen.getAllByRole("button", { name: "轉移管理權" }),
+      ).toHaveLength(2);
     });
   });
 

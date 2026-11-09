@@ -184,6 +184,26 @@ describe("current-secret messages", () => {
       purpose: "delete",
       expected: "移除帳戶前，請先畫出目前的圖形。",
     },
+    {
+      method: "pin",
+      purpose: "leave",
+      expected: "離開家庭前，請先輸入目前的 PIN 碼。",
+    },
+    {
+      method: "pattern",
+      purpose: "leave",
+      expected: "離開家庭前，請先畫出目前的圖形。",
+    },
+    {
+      method: "pin",
+      purpose: "transfer",
+      expected: "轉移管理權前，請先輸入目前的 PIN 碼。",
+    },
+    {
+      method: "pattern",
+      purpose: "transfer",
+      expected: "轉移管理權前，請先畫出目前的圖形。",
+    },
   ] as const)(
     "builds the $purpose prompt for $method",
     ({ method, purpose, expected }) => {

@@ -1,5 +1,4 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
-import type { Context, TypedResponse } from "hono";
 import type { Env } from "../utils/env";
 import {
   BoolFlag,
@@ -24,10 +23,8 @@ import {
   writePublicSnapshot,
   resolvePublicShelves,
 } from "../services/publicShelf";
-import {
-  enforceCurrentSecret,
-  verifySecretFormatResponse,
-} from "../services/verification";
+import { enforceCurrentSecret } from "../services/verification";
+import { readCurrentSecretBody } from "../services/currentSecretStepUp";
 import { settleDepartingBorrower } from "../services/borrowIndex";
 import { nextRemovedUnsharedBookIds } from "../services/removedUnsharedBooks";
 import { dissolveFamily } from "../services/familyDissolve";
@@ -37,7 +34,6 @@ import {
   sanitizeCoverUrl,
   sanitizeReadmooUrl,
   sanitizeExpectedLastUpdated,
-  sanitizeVerifySecret,
   isValidFamilyPrefRef,
   BOOK_TITLE_MAX_LENGTH,
   BOOK_AUTHOR_MAX_LENGTH,
@@ -53,8 +49,8 @@ import { readPresentedAuth } from "../services/authRecord";
 import { deleteAccountKeys } from "../services/accountDeletion";
 import { enforcePerUserRateLimit } from "../middleware/rateLimit";
 import { defaultHook, jsonRes } from "../utils/openapi";
-import { jsonError, type ErrorBody } from "../utils/errors";
 import { summarizeErrorForLog } from "../utils/errorLog";
+import { jsonError } from "../utils/errors";
 import { UserIdParam } from "../schemas/common";
 import { isRealBookId } from "moo-family-bookshelf-shared/api/bookId";
 import {
@@ -940,36 +936,6 @@ userRoutes.openapi(putFamilyPrefsRoute, async (c) => {
   });
 });
 
-/** DELETE /api/user/:id's optional JSON body `{ currentSecret? }` (#396): no body ⇒ `""` (not supplied),
- *  else the sanitized secret, or the 400 to send. No KV, no charge. */
-async function readDeleteCurrentSecret(
-  c: Context<{ Bindings: Env }>,
-): Promise<string | (Response & TypedResponse<ErrorBody, 400, "json">)> {
-  const text = await c.req.text();
-  if (text === "") return "";
-
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return jsonError(c, 400, "INVALID_JSON", "Request body must be valid JSON");
-  }
-  if (!isJsonObject(body)) {
-    return jsonError(
-      c,
-      400,
-      "INVALID_PAYLOAD",
-      "Request body must be an object",
-    );
-  }
-
-  const currentSecret = sanitizeVerifySecret(body.currentSecret);
-  if (currentSecret === null) {
-    return verifySecretFormatResponse(c, "currentSecret");
-  }
-  return currentSecret;
-}
-
 // DELETE /api/user/:id — delete user account
 const deleteUserRoute = createRoute({
   method: "delete",
@@ -1014,7 +980,7 @@ userRoutes.openapi(deleteUserRoute, async (c) => {
     );
   }
 
-  const currentSecret = await readDeleteCurrentSecret(c);
+  const currentSecret = await readCurrentSecretBody(c);
   if (currentSecret instanceof Response) return currentSecret;
 
   // Same bearer-currency rule and step-up as PUT verify (#396), all BEFORE any KV write below, so a

@@ -172,6 +172,10 @@ function familyResponse(call: RecordedCall): Response | null {
       },
     });
   }
+  // 離開家庭 reads the method first; a none account keeps the plain 確定離開.
+  if (url.endsWith(`/api/user/${USER_ID}/verify`) && method === "GET") {
+    return jsonResponse(200, { data: { method: "none" } });
+  }
   if (method === "DELETE") return jsonResponse(200, { data: { ok: true } });
   if (url.endsWith("/family-prefs")) {
     return jsonResponse(200, {
@@ -364,6 +368,8 @@ const LEAVE_ROUTE: TeardownRoute = {
     fireEvent.click(
       await screen.findByRole("button", { name: "離開家庭" }, WAIT),
     );
+    // The confirm opens after the verify-method read, so `run` can click without awaiting.
+    await screen.findByRole("button", { name: "確定離開" }, WAIT);
   },
   clearStorageFirst: () => Promise.resolve(),
   // handleLeaveFamily runs after the DELETE's await, so its return is observed through Onboarding.

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiClient, BoolFlag, FamilyMember } from "../api/client";
 import { memberSettingsErrorMessage } from "./memberSettingsMessages";
+import { MemberTransferConfirm } from "./MemberTransferConfirm";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { REJOIN_WAIT_NOTE } from "moo-family-bookshelf-shared/unkick/messages";
@@ -64,9 +65,6 @@ export function MemberList({
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [activeTransferAction, setActiveTransferAction] = useState<
-    "keep" | "clear" | null
-  >(null);
   const [canLendUpdating, setCanLendUpdating] = useState<string | null>(null);
   const [readmooNameDeleting, setReadmooNameDeleting] = useState<string | null>(
     null,
@@ -136,33 +134,10 @@ export function MemberList({
     setConfirmAction(null);
   };
 
-  const handleTransfer = async (targetId: string, clearEndpoint?: 1) => {
-    setActionLoading(true);
+  const closeConfirm = () => {
     setActionError("");
-    try {
-      const response = await apiClient.transferOwnership(
-        familyId,
-        userId,
-        targetId,
-        clearEndpoint,
-      );
-      if (response.error) {
-        setActionError(
-          rateLimitedEnvelopeMessage(response.error) ??
-            safeErrorText(response.error.message, "轉移管理權失敗，請稍後再試"),
-        );
-      } else {
-        onMembersChanged();
-      }
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "發生未知錯誤");
-    }
-    setActionLoading(false);
-    setActiveTransferAction(null);
     setConfirmAction(null);
   };
-
-  const hasCustomEndpoint = !!familyEndpoint;
 
   const renderConfirmDialog = () => {
     if (!confirmAction) return null;
@@ -183,10 +158,7 @@ export function MemberList({
             </button>
             <button
               disabled={actionLoading}
-              onClick={() => {
-                setActionError("");
-                setConfirmAction(null);
-              }}
+              onClick={closeConfirm}
               className="moo-button moo-button--ghost moo-button--xs moo-member-list__confirm-no"
             >
               取消
@@ -196,90 +168,25 @@ export function MemberList({
       );
     }
 
-    if (confirmAction.type === "transfer" && !hasCustomEndpoint) {
-      return (
-        <div className="moo-member-list__confirm">
-          <div className="moo-member-list__confirm-text">
-            確定要將管理權轉移給此成員？轉移後你將無法移除其他成員。
-          </div>
-          <div className="moo-member-list__confirm-row">
-            <button
-              disabled={actionLoading}
-              onClick={() => void handleTransfer(confirmAction.targetId)}
-              className="moo-button moo-button--danger moo-button--xs moo-member-list__confirm-yes"
-            >
-              {actionLoading ? "處理中..." : "確定"}
-            </button>
-            <button
-              disabled={actionLoading}
-              onClick={() => {
-                setActionError("");
-                setConfirmAction(null);
-              }}
-              className="moo-button moo-button--ghost moo-button--xs moo-member-list__confirm-no"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    if (confirmAction.type === "transfer" && hasCustomEndpoint) {
-      return (
-        <div className="moo-member-list__confirm moo-member-list__confirm--warn">
-          <div className="moo-member-list__confirm-warn-title">
-            ⚠️ 目前家庭使用自訂 API 端點
-          </div>
-          <div className="moo-member-list__endpoint">{familyEndpoint}</div>
-          <div className="moo-member-list__confirm-warn-body">
-            轉移擁有者後，只有新擁有者可以變更或清除此設定。
-          </div>
-          <ul className="moo-member-list__confirm-warn-list">
-            <li>清除：回復為預設端點（家庭資料將需要重建）</li>
-            <li>不清除：新擁有者繼承目前的端點設定</li>
-          </ul>
-          <div className="moo-member-list__confirm-row moo-member-list__confirm-row--end">
-            <button
-              disabled={actionLoading}
-              onClick={() => {
-                setActionError("");
-                setConfirmAction(null);
-              }}
-              className="moo-button moo-button--ghost moo-member-list__endpoint-cancel"
-            >
-              取消
-            </button>
-            <button
-              disabled={actionLoading}
-              onClick={() => {
-                setActiveTransferAction("keep");
-                void handleTransfer(confirmAction.targetId);
-              }}
-              className="moo-button moo-button--outline moo-button--sm moo-member-list__endpoint-keep"
-            >
-              {actionLoading && activeTransferAction === "keep"
-                ? "處理中..."
-                : "不清除，直接轉移"}
-            </button>
-            <button
-              disabled={actionLoading}
-              onClick={() => {
-                setActiveTransferAction("clear");
-                void handleTransfer(confirmAction.targetId, 1);
-              }}
-              className="moo-button moo-button--sm moo-member-list__endpoint-clear"
-            >
-              {actionLoading && activeTransferAction === "clear"
-                ? "處理中..."
-                : "清除並轉移"}
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return null;
+    return (
+      <MemberTransferConfirm
+        familyId={familyId}
+        userId={userId}
+        targetId={confirmAction.targetId}
+        familyEndpoint={familyEndpoint}
+        apiClient={apiClient}
+        onStart={() => setActionError("")}
+        onTransferred={() => {
+          onMembersChanged();
+          setConfirmAction(null);
+        }}
+        onFailed={(message) => {
+          setActionError(message);
+          setConfirmAction(null);
+        }}
+        onCancel={closeConfirm}
+      />
+    );
   };
 
   return (

@@ -1,11 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { ApiClient } from "@/api/client";
-import type { ApiResponse } from "@/api/types";
+import type { ApiResponse, VerifyMethod } from "@/api/types";
 import { SELF_DEPARTURE_UNTIL_KEY } from "@/constants";
+import { DEPARTURE_SERVER_CHANGED_MESSAGE } from "@/dialog/departureServerPin";
 import { useFamilySettingsLeave } from "@/dialog/useFamilySettingsLeave";
-import { rateLimitedEnvelopeMessage } from "@/dialog/verificationMessages";
+import {
+  rateLimitedEnvelopeMessage,
+  verificationLockedMessage,
+} from "@/dialog/verificationMessages";
 import { isSelfDepartureActive } from "@/storage/selfDeparture";
+import {
+  CURRENT_PATTERN_WRONG_MESSAGE,
+  CURRENT_PIN_WRONG_MESSAGE,
+  CURRENT_SECRET_UNAVAILABLE_MESSAGE,
+} from "moo-family-bookshelf-shared/verifyInput/messages";
 
 /**
  * useFamilySettingsLeave — the dialog's own "leave family" flow, sent through
@@ -14,6 +23,14 @@ import { isSelfDepartureActive } from "@/storage/selfDeparture";
  * The outcomes and copy are the pre-#263 ones; what this file adds is that the
  * departure mark is up while the request and its settling run, and gone
  * afterwards in every branch. Twin: `pwa/tests/unit/hooks/useLeaveFamily.test.ts`.
+ *
+ * Step-up: `startConfirming` reads the verify method once; a PIN / pattern account then sends its
+ * current secret as `leaveFamily`'s third argument. A wrong secret keeps the confirm step open with the
+ * method's wrong-secret copy on the entry; `VERIFICATION_REQUIRED` re-reads the method and stays in the
+ * confirm step; a failed method read leaves `requiredMethod` null and the leave goes out without a
+ * secret. A refusal is handled only after the departure guard has ended, so the re-read runs with no
+ * departure mark up, and only on the server the leave was confirmed on (`pinDepartureServer`). The
+ * secret is a call argument only — never written to `browser.storage.local`.
  */
 
 type LeaveRes = ApiResponse<{ ok: boolean }>;
@@ -74,7 +91,7 @@ describe("useFamilySettingsLeave", () => {
 
     await confirmLeave();
 
-    expect(send).toHaveBeenCalledWith("fam-1", "user-1");
+    expect(send).toHaveBeenCalledWith("fam-1", "user-1", undefined);
     expect(onLeave).toHaveBeenCalledTimes(1);
     expect(seen).toEqual({ send: [true], settle: [true] });
     expect(hook.result.current.leaveError).toBe("");
@@ -194,5 +211,292 @@ describe("useFamilySettingsLeave", () => {
 
     const stored = await chrome.storage.local.get(SELF_DEPARTURE_UNTIL_KEY);
     expect(stored).toEqual({});
+  });
+});
+
+/** Each `getVerifyMethod` call takes the next of `methods` (null: an error envelope; "throw": a
+ *  rejection) and records whether the departure mark was up; each `leaveFamily` the next response. */
+function setupStepUp(
+  methods: (VerifyMethod | null | "throw")[],
+  responses: LeaveRes[],
+) {
+  const markDuringRead: boolean[] = [];
+  const getVerifyMethod = vi.fn(async () => {
+    markDuringRead.push(await isSelfDepartureActive());
+    const method = methods.shift();
+    if (method === "throw") throw new Error("offline");
+    if (method === null || method === undefined) {
+      return { error: { code: "SERVER_ERROR", message: "boom" } };
+    }
+    return { data: { method } };
+  });
+  const leaveFamily = vi.fn<
+    (familyId: string, userId: string, secret?: string) => Promise<LeaveRes>
+  >(async () => responses.shift()!);
+  const onLeave = vi.fn();
+  const endpoint = { current: "https://api.example" };
+  const apiClient = {
+    getVerifyMethod,
+    leaveFamily,
+    getEndpoint: () => endpoint.current,
+  } as unknown as ApiClient;
+  const hook = renderHook(() =>
+    useFamilySettingsLeave({
+      familyId: "fam-1",
+      userId: "user-1",
+      apiClient,
+      onLeave,
+    }),
+  );
+  const start = () =>
+    act(async () => {
+      await hook.result.current.startConfirming();
+    });
+  const confirm = (secret?: string) =>
+    act(async () => {
+      await hook.result.current.handleLeaveConfirm(secret);
+    });
+  return {
+    hook,
+    getVerifyMethod,
+    leaveFamily,
+    onLeave,
+    endpoint,
+    markDuringRead,
+    start,
+    confirm,
+  };
+}
+
+/** True when any `browser.storage.local.set` call so far carried `secret`. */
+function storageSawSecret(secret: string): boolean {
+  return vi
+    .mocked(chrome.storage.local.set)
+    .mock.calls.some((call) => JSON.stringify(call[0]).includes(secret));
+}
+
+const SECRET_REQUIRED: LeaveRes = {
+  error: { code: "VERIFICATION_REQUIRED", message: "server text" },
+};
+
+describe("useFamilySettingsLeave step-up", () => {
+  beforeEach(async () => {
+    await chrome.storage.local.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await chrome.storage.local.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("reads the method once, then opens the confirm step", async () => {
+    const { hook, getVerifyMethod, leaveFamily, start } = setupStepUp(
+      ["pin"],
+      [],
+    );
+
+    await start();
+
+    expect(getVerifyMethod).toHaveBeenCalledTimes(1);
+    expect(getVerifyMethod).toHaveBeenCalledWith("user-1");
+    expect(hook.result.current.requiredMethod).toBe("pin");
+    expect(hook.result.current.leaveState).toBe("confirming");
+    expect(leaveFamily).not.toHaveBeenCalled();
+  });
+
+  it("sends the current secret with the leave and never stores it", async () => {
+    const { leaveFamily, onLeave, start, confirm } = setupStepUp(
+      ["pin"],
+      [{ data: { ok: true } }],
+    );
+
+    await start();
+    await confirm("482913");
+
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", "482913");
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    // Positive companion: the departure mark write proves the spy sees this flow's writes.
+    const keys = vi
+      .mocked(chrome.storage.local.set)
+      .mock.calls.flatMap((call) => Object.keys(call[0] as object));
+    expect(keys).toContain(SELF_DEPARTURE_UNTIL_KEY);
+    expect(storageSawSecret("482913")).toBe(false);
+  });
+
+  it.each<[VerifyMethod, string, string]>([
+    ["pin", "482913", CURRENT_PIN_WRONG_MESSAGE],
+    ["pattern", "0,3,6,7", CURRENT_PATTERN_WRONG_MESSAGE],
+  ])(
+    "keeps the %s confirm step open with the wrong-secret copy",
+    async (method, secret, message) => {
+      const { hook, getVerifyMethod, onLeave, start, confirm } = setupStepUp(
+        [method],
+        [{ error: { code: "VERIFICATION_FAILED", message: "server text" } }],
+      );
+
+      await start();
+      await confirm(secret);
+
+      expect(hook.result.current.leaveState).toBe("confirming");
+      expect(hook.result.current.secretError).toBe(message);
+      expect(hook.result.current.leaveError).toBe("");
+      expect(hook.result.current.requiredMethod).toBe(method);
+      expect(getVerifyMethod).toHaveBeenCalledTimes(1);
+      expect(onLeave).not.toHaveBeenCalled();
+      expect(await isSelfDepartureActive()).toBe(false);
+      expect(storageSawSecret(secret)).toBe(false);
+    },
+  );
+
+  it("asks for the secret when the server requires one the first read missed, re-reading with no mark up", async () => {
+    const {
+      hook,
+      getVerifyMethod,
+      leaveFamily,
+      markDuringRead,
+      start,
+      confirm,
+    } = setupStepUp(["throw", "pin"], [SECRET_REQUIRED]);
+
+    await start();
+    expect(hook.result.current.requiredMethod).toBeNull();
+    await confirm();
+
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", undefined);
+    expect(getVerifyMethod).toHaveBeenCalledTimes(2);
+    // See the header → "Step-up": the re-read runs after the departure guard ended.
+    expect(markDuringRead).toEqual([false, false]);
+    expect(hook.result.current.leaveState).toBe("confirming");
+    expect(hook.result.current.requiredMethod).toBe("pin");
+    expect(hook.result.current.secretError).toBe("");
+    expect(hook.result.current.leaveError).toBe("");
+  });
+
+  it("says the sent secret could not be checked when the server still requires one", async () => {
+    const { hook, start, confirm } = setupStepUp(
+      ["pin", "pin"],
+      [SECRET_REQUIRED],
+    );
+
+    await start();
+    await confirm("482913");
+
+    expect(hook.result.current.leaveState).toBe("confirming");
+    expect(hook.result.current.secretError).toBe(
+      CURRENT_SECRET_UNAVAILABLE_MESSAGE,
+    );
+  });
+
+  it("stays in the confirm step with the unavailable copy when the re-read is not PIN / pattern", async () => {
+    const { hook, getVerifyMethod, onLeave, start, confirm } = setupStepUp(
+      ["none", "none"],
+      [SECRET_REQUIRED],
+    );
+
+    await start();
+    await confirm();
+
+    expect(getVerifyMethod).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.leaveState).toBe("confirming");
+    expect(hook.result.current.leaveError).toBe(
+      CURRENT_SECRET_UNAVAILABLE_MESSAGE,
+    );
+    expect(hook.result.current.requiredMethod).toBe("none");
+    expect(onLeave).not.toHaveBeenCalled();
+  });
+
+  it("shows the lock copy, not the server's text, when the secret is locked out", async () => {
+    const { hook, onLeave, start, confirm } = setupStepUp(
+      ["pin"],
+      [
+        {
+          error: {
+            code: "VERIFICATION_LOCKED",
+            message: "server text",
+            retryAfter: 900,
+          },
+        },
+      ],
+    );
+
+    await start();
+    await confirm("482913");
+
+    expect(hook.result.current.leaveError).toBe(verificationLockedMessage(900));
+    expect(hook.result.current.leaveState).toBe("idle");
+    expect(onLeave).not.toHaveBeenCalled();
+  });
+
+  it("re-reads nothing on another server when the endpoint changed during the refused leave", async () => {
+    const { hook, getVerifyMethod, leaveFamily, endpoint, start, confirm } =
+      setupStepUp(["none", "pin"], []);
+    leaveFamily.mockImplementationOnce(async () => {
+      endpoint.current = "https://other.example";
+      return SECRET_REQUIRED;
+    });
+
+    await start();
+    await confirm();
+
+    expect(getVerifyMethod).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.leaveError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(hook.result.current.leaveState).toBe("idle");
+  });
+
+  it.each<[string, (VerifyMethod | null | "throw")[]]>([
+    ["a none account", ["none"]],
+    ["a code account", ["code"]],
+    ["a failed method read", [null]],
+    ["a rejected method read", ["throw"]],
+  ])("leaves without a secret for %s", async (_label, methods) => {
+    const { hook, leaveFamily, onLeave, start, confirm } = setupStepUp(
+      methods,
+      [{ data: { ok: true } }],
+    );
+
+    await start();
+    expect(hook.result.current.leaveState).toBe("confirming");
+    await confirm();
+
+    expect(leaveFamily).toHaveBeenCalledTimes(1);
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", undefined);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the previous secret error when the confirm step is opened again", async () => {
+    const { hook, start, confirm } = setupStepUp(
+      ["pin", "pin"],
+      [{ error: { code: "VERIFICATION_FAILED", message: "server text" } }],
+    );
+
+    await start();
+    await confirm("000000");
+    expect(hook.result.current.secretError).toBe(CURRENT_PIN_WRONG_MESSAGE);
+    act(() => hook.result.current.setLeaveState("idle"));
+    await start();
+
+    expect(hook.result.current.secretError).toBe("");
+    expect(hook.result.current.leaveState).toBe("confirming");
+  });
+
+  it("clears the previous leave error when the confirm step is opened again", async () => {
+    const { hook, start, confirm } = setupStepUp(
+      ["pin", "pin"],
+      [{ error: { code: "OWNER_CANNOT_LEAVE", message: "owner" } }],
+    );
+
+    await start();
+    await confirm("482913");
+    expect(hook.result.current.leaveError).toBe(
+      "管理者必須先轉移管理權才能離開家庭",
+    );
+    await start();
+
+    expect(hook.result.current.leaveError).toBe("");
+    expect(hook.result.current.secretError).toBe("");
+    expect(hook.result.current.leaveState).toBe("confirming");
   });
 });

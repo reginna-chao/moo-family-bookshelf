@@ -1217,7 +1217,7 @@ describe("a rescue link for a family that no longer exists", () => {
     books: [],
   });
 
-  /** A sole owner's own leave dissolves the family and revokes every token. */
+  /** A sole owner's own leave (with the current PIN) dissolves the family and revokes every token. */
   async function dissolve(): Promise<void> {
     await seedFamily([USER_ID]);
     await kv.put(kvKeys.user(USER_ID), books);
@@ -1225,7 +1225,7 @@ describe("a rescue link for a family that no longer exists", () => {
     const left = await send(
       "DELETE",
       `/api/family/${FAMILY_ID}/member/${USER_ID}`,
-      { token: owner },
+      { body: { currentSecret: PIN }, token: owner },
     );
     expect(left.status).toBe(200);
     expect(await kv.get(kvKeys.family(FAMILY_ID))).toBeNull();
@@ -1287,12 +1287,12 @@ describe("a rescue link when the family changed hands", () => {
   const memberPath = (familyId: string) =>
     `/api/family/${familyId}/member/${USER_ID}`;
 
-  /** The account hands its family over through the real route; it stays listed and pointed. */
+  /** The account hands its family over through the real route (with the current PIN); it stays listed and pointed. */
   async function handOver(): Promise<void> {
     await seedFamily([USER_ID, OWNER_ID]);
     const token = await setPinAccount();
     const res = await send("PUT", `/api/family/${FAMILY_ID}/transfer`, {
-      body: { newOwnerId: OWNER_ID },
+      body: { newOwnerId: OWNER_ID, currentSecret: PIN },
       token,
     });
     expect(res.status).toBe(200);

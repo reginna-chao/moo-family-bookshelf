@@ -51,6 +51,7 @@ import { sanitizePersonalBooksResponse } from "moo-family-bookshelf-shared/api/p
 import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/verifyValidation";
 import { adoptRotatedVerifyToken } from "moo-family-bookshelf-shared/api/verifyTokenRotation";
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
+import { currentSecretBody } from "moo-family-bookshelf-shared/api/currentSecretBody";
 import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
 import { fetchPublicShelf } from "./publicShelfFetch";
@@ -76,35 +77,12 @@ export { validateEndpointUrl };
  * through the API client — new code outside `api/` should import the shared
  * modules directly rather than routing through this file. `BoolFlag`,
  * `ApiError` and the `import type` list above are imported as real bindings
- * because this file's methods use them; the rest are plain re-exports.
+ * because this file's methods use them; the rest are plain re-exports, the
+ * type-only ones listed in `./clientTypes`.
  */
 export { BoolFlag, BorrowStatus, ApiError };
 export { PERSONAL_BOOKS_SCHEMA_VERSION } from "moo-family-bookshelf-shared/api/types";
-export type {
-  ApiErrorPayload,
-  ApiResponse,
-  BookEntry,
-  FamilyBookshelf,
-  FamilyBookshelfMember,
-  FamilyGroup,
-  FamilyMember,
-  LookupResult,
-  MemberSettingsPayload,
-  OtpInfo,
-  PersonalBooks,
-  PublicShelf,
-  PublicShelfData,
-  SelectionMode,
-  SetVerifyBody,
-  UnkickResult,
-  VerifyInfo,
-  VerifyMethod,
-  VersionInfo,
-} from "moo-family-bookshelf-shared/api/types";
-export type {
-  BorrowRequest,
-  CreateBorrowPayload,
-} from "moo-family-bookshelf-shared/borrow/types";
+export type * from "./clientTypes";
 
 function jsonInit(method: string, body?: unknown): RequestInit {
   return { method, body: body != null ? JSON.stringify(body) : undefined };
@@ -283,12 +261,15 @@ export class ApiClient {
     );
   }
 
+  /** `currentSecret` is required while the account's method is PIN / pattern. */
   async leaveFamily(
     familyId: string,
     userId: string,
+    currentSecret?: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     assertHexId(userId, "userId");
-    return this.del(`/api/family/${familyId}/member/${userId}`);
+    const body = currentSecretBody(currentSecret);
+    return this.del(`/api/family/${familyId}/member/${userId}`, body);
   }
 
   async removeMember(
@@ -313,10 +294,15 @@ export class ApiClient {
     familyId: string,
     userId: string,
     newOwnerId: string,
+    currentSecret?: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
     assertHexId(userId, "userId");
     assertHexId(newOwnerId, "newOwnerId");
-    return this.put(`/api/family/${familyId}/transfer`, { userId, newOwnerId });
+    return this.put(`/api/family/${familyId}/transfer`, {
+      userId,
+      newOwnerId,
+      ...currentSecretBody(currentSecret),
+    });
   }
 
   /** Read as `unknown` until `sanitizeFamilyMembersResponse` checks it; the whole envelope is checked

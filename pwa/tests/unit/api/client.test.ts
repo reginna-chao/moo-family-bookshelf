@@ -504,6 +504,27 @@ describe("ApiClient", () => {
       expect(init.method).toBe("DELETE");
       expect(result.data).toEqual({ ok: true });
     });
+
+    it("sends no body when no current secret is given", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.leaveFamily("fam-1", USER_2);
+
+      expect(mockFetch.mock.calls[0][1].body).toBeUndefined();
+    });
+
+    it("sends the current secret as the DELETE body when given", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.leaveFamily("fam-1", USER_2, "1,4,7,8");
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `https://api.example.com/api/family/fam-1/member/${USER_2}`,
+      );
+      expect(init.method).toBe("DELETE");
+      expect(JSON.parse(init.body)).toEqual({ currentSecret: "1,4,7,8" });
+    });
   });
 
   describe("removeMember", () => {
@@ -576,6 +597,32 @@ describe("ApiClient", () => {
         userId: USER_1,
         newOwnerId: USER_2,
       });
+    });
+
+    it("adds the current secret to the body when given", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.transferOwnership("fam-1", USER_1, USER_2, "975310");
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://api.example.com/api/family/fam-1/transfer");
+      expect(init.method).toBe("PUT");
+      expect(JSON.parse(init.body)).toEqual({
+        userId: USER_1,
+        newOwnerId: USER_2,
+        currentSecret: "975310",
+      });
+    });
+
+    it("carries no currentSecret key when none is given", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }));
+
+      await client.transferOwnership("fam-1", USER_1, USER_2, undefined);
+
+      // Positive companion: the body really was sent and parsed.
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.newOwnerId).toBe(USER_2);
+      expect(Object.keys(body)).not.toContain("currentSecret");
     });
   });
 
