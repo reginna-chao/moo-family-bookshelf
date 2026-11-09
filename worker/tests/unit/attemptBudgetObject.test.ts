@@ -18,7 +18,8 @@ import {
  * still returns its decided result (an admission, or a refusal with nothing
  * written), because a rejected RPC would send the request to the KV fallback,
  * where a refused attempt could be admitted. A refund that deletes the record
- * also deletes the alarm.
+ * also deletes the alarm; a failed `deleteAlarm` still resolves (the leftover
+ * alarm finds no record and deletes nothing).
  * `alarm()` deletes a finished window's record (its epoch with it) and re-arms
  * for an unfinished one.
  *
@@ -178,6 +179,24 @@ describe("AttemptBudgetObject.refund", () => {
     expect(storage.kv.has(KEY)).toBe(false);
     expect(storage.alarm).toBeNull();
     expect(storage.alarmCalls.at(-1)).toBe("delete");
+  });
+
+  it("still resolves with the record gone when deleteAlarm fails", async () => {
+    const slot = await object.reserve(MAX, WINDOW_SEC);
+    if (!slot.admitted) throw new Error("expected an admitted reservation");
+    storage.failNextDeleteAlarm = true;
+
+    await expect(
+      object.refund(slot.bucket, slot.epoch),
+    ).resolves.toBeUndefined();
+
+    expect(storage.failNextDeleteAlarm).toBe(false);
+    expect(storage.alarmCalls.at(-1)).toBe("delete");
+    expect(storage.kv.has(KEY)).toBe(false);
+    // The alarm stays armed; when it fires it finds no record and deletes nothing.
+    expect(storage.alarm).toBe(ENDS_AT);
+    await object.alarm();
+    expect(storage.kv.size).toBe(0);
   });
 
   it.each([

@@ -33,7 +33,8 @@ export class AttemptBudgetObject extends DurableObject<Env> {
     const decision = decideRefund(stored, bucket, epoch);
     if (decision.delete) {
       kv.delete(WINDOW_KEY);
-      await this.ctx.storage.deleteAlarm();
+      // The refund is already stored; a leftover alarm finds no record and deletes nothing.
+      await this.ctx.storage.deleteAlarm().catch(() => {});
       return;
     }
     if (decision.next) kv.put(WINDOW_KEY, decision.next);

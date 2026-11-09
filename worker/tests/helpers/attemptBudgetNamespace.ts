@@ -34,6 +34,8 @@ export interface FakeDurableStorage {
   failNextGetAlarm: boolean;
   /** When true, the next `setAlarm` rejects (and the flag clears). */
   failNextSetAlarm: boolean;
+  /** When true, the next `deleteAlarm` rejects (and the flag clears), leaving the alarm set. */
+  failNextDeleteAlarm: boolean;
 }
 
 /**
@@ -57,6 +59,7 @@ export function createFakeDurableState(): {
     alarmCalls: [],
     failNextGetAlarm: false,
     failNextSetAlarm: false,
+    failNextDeleteAlarm: false,
   };
   const syncKv = {
     get: (key: string) => {
@@ -88,6 +91,10 @@ export function createFakeDurableState(): {
     },
     deleteAlarm: async () => {
       storage.alarmCalls.push("delete");
+      if (storage.failNextDeleteAlarm) {
+        storage.failNextDeleteAlarm = false;
+        throw new Error("deleteAlarm failed");
+      }
       storage.alarm = null;
     },
   };

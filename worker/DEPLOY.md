@@ -83,9 +83,9 @@ new_sqlite_classes = ["AttemptBudgetObject"]
 - production 要另外寫一段 `[[env.production.durable_objects.bindings]]`（內容相同）：環境不會繼承 binding。`[[migrations]]` 會繼承，不要重複寫。本專案附的設定兩份都有。
 - 用 API token 部署（例如 CI）時，token 要有建立 Durable Objects 的權限；不夠時部署會失敗，依錯誤訊息補上權限再部署一次。
 - 本機確認：在 repo 根目錄執行 `node scripts/test-attempt-budget-runtime.mjs`。它在本機 workerd 裡執行真正的物件，不需要任何 Cloudflare 憑證；五項檢查都印 `PASS`、指令正常結束才算通過，任一項不符會印 `FAIL` 並以錯誤結束。
-- **部署之後不能回到沒有這個類別的版本**：缺少既有 Durable Object 類別的版本會被拒絕部署，所以不能直接 revert。要暫停，只拿掉兩段 `durable_objects.bindings`，保留 `src/index.ts` 的 `AttemptBudgetObject` 匯出與 `[[migrations]]`；要完全移除，再加一段 `[[migrations]]`（`tag = "v2"`、`deleted_classes = ["AttemptBudgetObject"]`）之後才拿掉匯出，物件裡的計數會一起刪掉（都是暫時資料）。
+- **部署之後不能回到沒有這個類別的版本**：缺少既有 Durable Object 類別的版本會被拒絕部署，所以不能直接 revert。要暫停，只拿掉兩段 `durable_objects.bindings`，保留 `src/index.ts` 的 `AttemptBudgetObject` 匯出與 `[[migrations]]`；要完全移除，兩段 binding 一樣要先拿掉（還綁著被刪類別的 binding 會被拒絕部署），再加一段 `[[migrations]]`（`tag = "v2"`、`deleted_classes = ["AttemptBudgetObject"]`）之後才拿掉匯出，物件裡的計數會一起刪掉（都是暫時資料）。
 
-**不設定也能跑**：沒有這個 binding 時，Worker 退回原本的 KV 計數，上限數字一樣，但不是硬上限，而且每個帶密鑰、走到這道檢查的請求都會輸出一行 `ATTEMPT_BUDGET_BINDING_MISSING` 錯誤 log。物件出錯時同樣退回 KV，輸出 `ATTEMPT_BUDGET_UNAVAILABLE`；物件過載時回 429、請使用者 60 秒後再試，輸出 `ATTEMPT_BUDGET_OVERLOADED`。這些 log 都只有事件名稱，不含 userId。
+**不設定也能跑**：沒有這個 binding 時，Worker 退回原本的 KV 計數，上限數字一樣，但不是硬上限，而且每個帶密鑰、走到這道檢查的請求都會輸出一行 `ATTEMPT_BUDGET_BINDING_MISSING` 錯誤 log。物件出錯時同樣退回 KV，輸出 `ATTEMPT_BUDGET_UNAVAILABLE`（免費額度用完預期也是這樣，尚未在正式環境驗證）；物件過載時回 429、請使用者 60 秒後再試，輸出 `ATTEMPT_BUDGET_OVERLOADED`。這些 log 都只有事件名稱，不含 userId。
 
 ### 7. 部署
 
@@ -289,7 +289,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`）仍記在 KV，而它們都需要通過身分驗證才會被計數；兩種登入驗證的嘗試額度（`verify`、依 token 分開計算的 `verify-stepup`）設了步驟 6 的 Durable Object 之後記在物件裡，不寫 KV，沒設時才記在 KV。**唯一的例外是 PWA 登入驗證的猜錯紀錄**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該來源的失敗紀錄（`verifyfail:{userId}:{caller}`；沒有 Durable Object 時另寫該帳號的嘗試計數 `ratelimit:user:verify:{userId}:{bucket}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
 
-Durable Object 的免費額度（每天 10 萬次請求、10 萬列寫入，見步驟 6）與 KV 分開計算。一次密鑰比對最多用 2 次請求（預留，猜對時再退還），而且要先通過 per-IP 限制才會用到；每次比對也要讀好幾次 KV，KV 每天 10 萬次讀取的額度會同時或更早用完，用完時登入驗證本身就無法進行。物件閒置時不計 duration，只有處理請求的時間計費。額度用完時登入驗證退回 KV 計數，不會擋住登入。
+Durable Object 的免費額度（每天 10 萬次請求、10 萬列寫入，見步驟 6）與 KV 分開計算。一次密鑰比對最多用 2 次請求（預留，猜對時再退還），而且要先通過 per-IP 限制才會用到；每次比對也要讀好幾次 KV，KV 每天 10 萬次讀取的額度會同時或更早用完，用完時登入驗證本身就無法進行。物件閒置時不計 duration，只有處理請求的時間計費。Durable Object 額度用完時，登入驗證預期會退回 KV 計數、不擋住登入；這取決於那時的錯誤不帶過載標記，尚未在正式環境驗證，若帶了，當天剩下的時間帶密鑰的登入，以及要輸入目前 PIN 或圖形的操作（改驗證方式、刪除帳號），都會收到「嘗試次數過多」。
 
 若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致；硬上限只有步驟 6 的登入驗證每小時額度，其他限制要更強的保護，靠的就是這條 WAF 規則。
 

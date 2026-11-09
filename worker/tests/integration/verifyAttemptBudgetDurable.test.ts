@@ -258,6 +258,59 @@ describe("hourly attempt budgets — a correct secret gives its slot back", () =
     // The slot stays spent until the window ends.
     expect(budget.record(LOGIN_BUDGET)).toMatchObject({ count: 1 });
   });
+
+  it("logs nothing when the refund empties the window and the object's deleteAlarm fails", async () => {
+    await setPin(PIN);
+    // A first correct secret creates the object and leaves it with no record.
+    expect((await lookup(PIN)).status).toBe(200);
+    const storage = budget.storage(LOGIN_BUDGET);
+    if (!storage) throw new Error("expected the login budget's object");
+    storage.failNextDeleteAlarm = true;
+    const errors = captureErrors();
+
+    expect((await lookup(PIN)).status).toBe(200);
+
+    expect(storage.failNextDeleteAlarm).toBe(false);
+    expect(errors.calls()).toEqual([]);
+    expect(budget.record(LOGIN_BUDGET)).toBeUndefined();
+  });
+});
+
+describe("hourly attempt budgets — the login and step-up budgets are separate objects", () => {
+  it("still compares a step-up secret while the login budget is spent, leaving the login record alone", async () => {
+    const token = await setPin(PIN);
+    for (let i = 0; i < VERIFY_ATTEMPT_MAX; i++) {
+      expect((await lookup(WRONG_PIN)).status).toBe(403);
+    }
+    expect((await lookup(PIN)).status).toBe(429);
+    const loginRecord = budget.record(LOGIN_BUDGET);
+    expect(loginRecord).toMatchObject({ count: VERIFY_ATTEMPT_MAX });
+    const stepUpBudget = `${VERIFY_STEP_UP_ATTEMPT_SCOPE}:${USER_ID}:${await hashAuthToken(token)}`;
+
+    const wrong = await stepUp(token, WRONG_PIN);
+    expect(wrong.status).toBe(403);
+    expect(((await wrong.json()) as Json).error.code).toBe(
+      "VERIFICATION_FAILED",
+    );
+    expect(budget.record(stepUpBudget)).toMatchObject({ count: 1 });
+
+    // DELETE shares the token's step-up budget and, unlike a PUT save, never resets the login one.
+    const deleted = await send("DELETE", `/api/user/${USER_ID}`, {
+      body: { currentSecret: PIN },
+      token,
+    });
+    expect(deleted.status).toBe(200);
+    expect(budget.calls.slice(-2)).toEqual([
+      {
+        method: "reserve",
+        name: stepUpBudget,
+        args: [VERIFY_STEP_UP_ATTEMPT_MAX, VERIFY_ATTEMPT_WINDOW_SECONDS],
+      },
+      { method: "refund", name: stepUpBudget, args: [BUCKET, 0] },
+    ]);
+    expect(budget.record(stepUpBudget)).toMatchObject({ count: 1 });
+    expect(budget.record(LOGIN_BUDGET)).toEqual(loginRecord);
+  });
 });
 
 describe("hourly attempt budgets — when the object fails", () => {
