@@ -1,10 +1,13 @@
 /** Read-only side of the auth-token lifecycle (#425): `auth:{userId}` normalization, bearer currency and the QR
  *  binding rule — never writes KV. See docs/architecture.md → PWA 登入驗證機制. */
-import { type AuthRecord, type AuthTokenEntry } from "../kv/schema";
+import { BoolFlag, type AuthRecord, type AuthTokenEntry } from "../kv/schema";
 import { getRawAuthRecord, type RawAuthRecord } from "../kv/auth";
 import { hashAuthToken, timingSafeEqual } from "../utils/crypto";
 
 export const HEX_64 = /^[a-f0-9]{64}$/;
+
+/** The step-up budget shared by every token that proved no secret when minted, and by any bearer off the list. */
+export const DERIVED_STEP_UP_BUCKET = "derived";
 
 function isAuthTokenEntry(value: unknown): value is AuthTokenEntry {
   if (typeof value !== "object" || value === null) return false;
@@ -15,7 +18,9 @@ function isAuthTokenEntry(value: unknown): value is AuthTokenEntry {
 /**
  * Classify `auth:{userId}` as read (#425). Malformed list entries are dropped and a
  * non-array `tokens` reads as `[]`; `secretAt` is kept only when a number. `null` stays `null`.
- * An older `{ token, createdAt }` record reads as an empty list (#432).
+ * An older `{ token, createdAt }` record reads as an empty list (#432). `derived` survives only
+ * as `BoolFlag.TRUE`, anything else reads as unmarked; a mint writes this list back, so dropping
+ * the flag here would turn a marked token into an unmarked one.
  */
 export function normalizeAuthRecord(
   raw: RawAuthRecord | null,
@@ -24,7 +29,11 @@ export function normalizeAuthRecord(
   const tokens = Array.isArray(raw.tokens)
     ? raw.tokens
         .filter(isAuthTokenEntry)
-        .map(({ hash, createdAt }) => ({ hash, createdAt }))
+        .map(({ hash, createdAt, derived }) => ({
+          hash,
+          createdAt,
+          ...(derived === BoolFlag.TRUE && { derived: BoolFlag.TRUE }),
+        }))
     : [];
   return {
     tokens,
@@ -87,15 +96,30 @@ export async function readPresentedAuth(
  * QR redeem rule (#378, #425): a QR token may skip verification only while the
  * just-read `auth` still lists the token that minted it. No KV op; the join then
  * checks that token's `token:` key before minting. A record without `tokenHash`
- * (older shape) never bypasses.
+ * (older shape) never bypasses, nor does a QR minted by a `derived` token: a token
+ * that proved no secret cannot hand out another login without one.
  */
 export function isQrBoundToListedToken(
   tokenHash: string | undefined,
   auth: AuthRecord | null,
 ): boolean {
-  return (
-    typeof tokenHash === "string" &&
-    auth !== null &&
-    auth.tokens.some((e) => timingSafeEqual(e.hash, tokenHash))
-  );
+  if (typeof tokenHash !== "string" || auth === null) return false;
+  const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, tokenHash));
+  return entry !== undefined && entry.derived !== BoolFlag.TRUE;
+}
+
+/**
+ * Which step-up budget the presented token spends: its own hash when it is listed and
+ * unmarked, else {@link DERIVED_STEP_UP_BUCKET} (`derived`, off the list, no `auth:`
+ * record or an empty list). Pure; the result names the step-up counters and lockout.
+ */
+export function stepUpBudgetBucket(
+  auth: AuthRecord | null,
+  presentedHash: string | null,
+): string {
+  if (auth === null || presentedHash === null) return DERIVED_STEP_UP_BUCKET;
+  const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, presentedHash));
+  return entry !== undefined && entry.derived !== BoolFlag.TRUE
+    ? presentedHash
+    : DERIVED_STEP_UP_BUCKET;
 }

@@ -60,9 +60,10 @@ export async function deleteOtpRecord(
 }
 
 /**
- * Read `qr:{token}` — the one-time QR login bypass record. TTL
- * `QR_TOKEN_TTL_SECONDS` (300s) is set by the writer, so `null` covers both
- * "expired" and "never existed"; the join handler treats them the same.
+ * Read `qr:{token}` — the one-time QR login bypass record. The TTL is set by the
+ * writer (`QR_TOKEN_TTL_SECONDS`, 300s; 3600s for a rescue record an operator wrote
+ * by hand), so `null` covers both "expired" and "never existed"; the join handler
+ * treats them the same.
  */
 export async function getQrTokenRecord(
   kv: KVNamespace,

@@ -24,9 +24,11 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_MAX,
   VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
 import {
+  hashAuthToken,
   hashSecret,
   hashSecretWithPepper,
   pepperFingerprint,
@@ -46,11 +48,13 @@ import {
  * read and nothing is written. A device whose session is still valid keeps its
  * way back in: a QR Code needs no secret and never touches these limits.
  *
- * Two budgets, one number each: public login traffic uses `verify` +
- * `verify-burst`, the current-secret step-up (`PUT /api/user/:id/verify`,
- * `DELETE /api/user/:id`) uses `verify-stepup` + `verify-stepup-burst`, so
- * neither can spend the other. A successful `PUT /api/user/:id/verify` deletes
- * the current window of `verify` only, right after the record write.
+ * Separate budgets: public login traffic uses `verify` + `verify-burst`, 10 an
+ * hour on the account; the current-secret step-up (`PUT /api/user/:id/verify`,
+ * `DELETE /api/user/:id`) uses `verify-stepup` + `verify-stepup-burst`, 5 an hour
+ * per token (subject `{userId}:{hash}` for an unmarked token), so neither can
+ * spend the other. A successful `PUT /api/user/:id/verify` deletes the current
+ * window of `verify` only, right after the record write. How step-up budgets
+ * divide between tokens is in `loginRecoveryScenarios.test.ts`.
  *
  * `verify-burst` / `verify-stepup-burst` live on the native binding alone: no
  * binding, or one that throws, means "not limited" with a log line and no KV
@@ -86,7 +90,6 @@ const PINNED_NOW =
 const REST_OF_WINDOW = VERIFY_ATTEMPT_WINDOW_SECONDS / 2;
 const BURST_WINDOW = 60;
 const LOGIN_BURST_KEY = `ratelimit:user:verify-burst:${USER_ID}`;
-const STEP_UP_BURST_KEY = `ratelimit:user:verify-stepup-burst:${USER_ID}`;
 const REAL_BOOK_ID = "210439468000101";
 
 type Env = Record<string, unknown>;
@@ -189,6 +192,34 @@ async function budgetCount(scope: string): Promise<number | null> {
 
 async function spend(scope: string, used = VERIFY_ATTEMPT_MAX): Promise<void> {
   await kv.put(await budgetKey(scope), String(used));
+}
+
+/** The step-up subject of an unmarked `token`. */
+async function stepUpSubject(token: string): Promise<string> {
+  return `${USER_ID}:${await hashAuthToken(token)}`;
+}
+
+/** `token`'s own step-up budget key, via the production builder. */
+async function stepUpKey(token: string): Promise<string> {
+  const { key } = await peekPerUserRateLimit(kv, {
+    userId: await stepUpSubject(token),
+    scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+    max: VERIFY_STEP_UP_ATTEMPT_MAX,
+    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+  });
+  return key;
+}
+
+async function stepUpCount(token: string): Promise<number | null> {
+  const raw = await kv.get(await stepUpKey(token));
+  return raw === null ? null : parseInt(raw, 10);
+}
+
+async function spendStepUp(
+  token: string,
+  used = VERIFY_STEP_UP_ATTEMPT_MAX,
+): Promise<void> {
+  await kv.put(await stepUpKey(token), String(used));
 }
 
 function storedMethod(): Promise<string | undefined> {
@@ -495,7 +526,7 @@ describe("current-secret step-up — its own budget", () => {
 
   it("refuses a correct and a wrong currentSecret alike while the step-up budget is spent, leaving the login budget as it was", async () => {
     const token = await setPin(PIN);
-    await spend(VERIFY_STEP_UP_ATTEMPT_SCOPE);
+    await spendStepUp(token);
     await spend(VERIFY_ATTEMPT_SCOPE, 3);
     const ops = watchKvOps(kv);
 
@@ -527,11 +558,11 @@ describe("current-secret step-up — its own budget", () => {
     });
 
     expect(stepUp.status).toBe(403);
-    expect(await budgetCount(VERIFY_STEP_UP_ATTEMPT_SCOPE)).toBe(1);
+    expect(await stepUpCount(token)).toBe(1);
     expect(await budgetCount(VERIFY_ATTEMPT_SCOPE)).toBeNull();
 
     expect((await gate(LOOKUP_PATH, WRONG_PIN)).status).toBe(403);
-    expect(await budgetCount(VERIFY_STEP_UP_ATTEMPT_SCOPE)).toBe(1);
+    expect(await stepUpCount(token)).toBe(1);
     expect(await budgetCount(VERIFY_ATTEMPT_SCOPE)).toBe(1);
   });
 });
@@ -572,7 +603,7 @@ describe("PUT /api/user/:id/verify — clearing the login budget", () => {
 
   it("leaves the step-up budget alone on a successful save", async () => {
     const token = await setPin(PIN);
-    await spend(VERIFY_STEP_UP_ATTEMPT_SCOPE, 3);
+    await spendStepUp(token, 3);
 
     const res = await send("PUT", VERIFY_PATH, {
       body: { method: "none", currentSecret: PIN },
@@ -580,7 +611,7 @@ describe("PUT /api/user/:id/verify — clearing the login budget", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await budgetCount(VERIFY_STEP_UP_ATTEMPT_SCOPE)).toBe(3);
+    expect(await stepUpCount(token)).toBe(3);
   });
 
   it("keeps the counter when the currentSecret is wrong", async () => {
@@ -715,7 +746,8 @@ describe("per-minute limit", () => {
 
   it("uses the step-up key on PUT /api/user/:id/verify, refusing the correct secret and saving nothing", async () => {
     const token = await setPin(PIN);
-    const { env, calls } = prodEnv(refuse(STEP_UP_BURST_KEY));
+    const burstKey = `ratelimit:user:verify-stepup-burst:${await stepUpSubject(token)}`;
+    const { env, calls } = prodEnv(refuse(burstKey));
 
     const res = await send("PUT", VERIFY_PATH, {
       body: { method: "none", currentSecret: PIN },
@@ -728,7 +760,7 @@ describe("per-minute limit", () => {
     expect(await storedMethod()).toBe("pin");
     const burstCalls = calls.filter((call) => call.key.includes("burst"));
     expect(burstCalls).toEqual([
-      { name: "RATE_LIMIT_10_PER_MIN", key: STEP_UP_BURST_KEY },
+      { name: "RATE_LIMIT_10_PER_MIN", key: burstKey },
     ]);
   });
 

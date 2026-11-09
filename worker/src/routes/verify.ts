@@ -254,6 +254,7 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
     existing,
     currentSecret,
     presented.auth,
+    presented.presentedHash,
   );
   if (stepUpResponse) return stepUpResponse;
 

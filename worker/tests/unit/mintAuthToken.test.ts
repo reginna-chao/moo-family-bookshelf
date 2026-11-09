@@ -5,11 +5,14 @@ import { seedAuthToken } from "../helpers/auth";
 import { USER1, USER2 } from "../helpers/ids";
 import { readAuthRecord } from "../../src/services/authRecord";
 import {
+  hasRoomForDerivedToken,
   mintAuthToken,
+  mintDerivedAuthToken,
   readAndRevokeAllAuthTokens,
 } from "../../src/services/authTokens";
 import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
+  BoolFlag,
   kvKeys,
   MAX_AUTH_TOKENS_PER_USER,
   TOKEN_MAX_AGE_SECONDS,
@@ -25,13 +28,20 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * expiresAt }` with the 90-day TTL, and `auth:{userId}` is put exactly once,
  * with NO TTL, with the hash appended to the account's list. At most
  * `MAX_AUTH_TOKENS_PER_USER` (5) tokens are listed: a sixth mint evicts dead
- * entries (reverse key gone, or naming someone else) first, then the oldest
- * `createdAt`, deleting the evicted `token:` keys, then their `tokenidx:` keys
- * (#431). Evicted keys are deleted before the new token's `tokenidx:` put, which
- * precedes `auth:` and its `token:{hash}` put. `secretAt` replaces the carried-forward value; with
- * neither, it is absent. A pre-#425 `{ token, createdAt, secretAt? }` record
- * reads as `{ tokens: [], secretAt? }` (#432): the mint treats it as an empty
- * list, reads no `token:` key and keeps `secretAt`.
+ * entries (reverse key gone, or naming someone else) first, then `derived` ones,
+ * then the oldest `createdAt`, deleting the evicted `token:` keys, then their
+ * `tokenidx:` keys (#431). Evicted keys are deleted before the new token's
+ * `tokenidx:` put, which precedes `auth:` and its `token:{hash}` put. `secretAt`
+ * replaces the carried-forward value; with neither, it is absent. A pre-#425
+ * `{ token, createdAt, secretAt? }` record reads as `{ tokens: [], secretAt? }`
+ * (#432): the mint treats it as an empty list, reads no `token:` key and keeps
+ * `secretAt`.
+ *
+ * `mintDerivedAuthToken` marks its new entry and evicts only dead or `derived`
+ * entries: short of candidates the list stays over the cap until the next
+ * secret-proven mint takes the whole excess. `hasRoomForDerivedToken` says whether
+ * such a mint fits without going over, reading `token:` keys only when the list is
+ * full and wholly unmarked.
  *
  * Why `auth:` is permanent (reviewer C1): a `code` account's tokens are exempt
  * from the 180-day cap and keep sliding, so any fixed `auth:` TTL could lapse
@@ -68,8 +78,11 @@ async function tokenRecord(token: string): Promise<AuthTokenRecord | null> {
   );
 }
 
-/** Seed `count` devices, device 0 the oldest (`count` days ago), each a day newer. */
-async function seedDevices(count: number): Promise<string[]> {
+/** Seed `count` devices, device 0 the oldest (`count` days ago), each a day newer; `marked` indexes are `derived`. */
+async function seedDevices(
+  count: number,
+  marked: number[] = [],
+): Promise<string[]> {
   const tokens: string[] = [];
   for (let i = 0; i < count; i++) {
     tokens.push(
@@ -77,10 +90,23 @@ async function seedDevices(count: number): Promise<string[]> {
         token: deviceToken(i + 1),
         createdAt: daysAgo(count - i),
         appendTo: i > 0,
+        ...(marked.includes(i) && { derived: BoolFlag.TRUE }),
       }),
     );
   }
   return tokens;
+}
+
+/** The given tokens in list order, those `auth:` no longer names left out. */
+async function listedTokens(
+  tokens: string[],
+  issued: string,
+): Promise<string[]> {
+  const byHash = new Map<string, string>();
+  for (const token of [...tokens, issued]) {
+    byHash.set(await hashAuthToken(token), token);
+  }
+  return (await storedAuth())!.tokens.flatMap((e) => byHash.get(e.hash) ?? []);
 }
 
 beforeEach(() => {
@@ -240,6 +266,258 @@ describe("mintAuthToken — eviction past MAX_AUTH_TOKENS_PER_USER", () => {
     expect(puts).not.toHaveBeenCalled();
     expect(await storedAuth()).toEqual(before);
   });
+
+  it("evicts a newer derived entry before the oldest unmarked one", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER, [3]);
+
+    const issued = await mintAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.filter((_, i) => i !== 3),
+      issued.token,
+    ]);
+    expect(await tokenRecord(tokens[3])).toBeNull();
+    expect((await storedAuth())?.tokens.at(-1)).not.toHaveProperty("derived");
+  });
+
+  it("evicts a dead unmarked entry before a live derived one", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER, [1]);
+    await kv.delete(kvKeys.authToken(await hashAuthToken(tokens[4])));
+
+    const issued = await mintAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.slice(0, 4),
+      issued.token,
+    ]);
+  });
+
+  it("brings a list over the cap back to it, taking every excess entry", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER + 1, [5]);
+
+    const issued = await mintAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    // Excess 2: the one derived entry, then the oldest unmarked one.
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.slice(1, 5),
+      issued.token,
+    ]);
+    expect(await tokenRecord(tokens[0])).toBeNull();
+    expect(await tokenRecord(tokens[5])).toBeNull();
+  });
+});
+
+describe("mintDerivedAuthToken", () => {
+  it("marks only its own entry, with the same record and write order as a mint", async () => {
+    const [first] = await seedDevices(1);
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    const issued = await mintDerivedAuthToken(kv, USER1, known);
+
+    const hash = await hashAuthToken(issued.token);
+    const record = await tokenRecord(issued.token);
+    expect(record?.userId).toBe(USER1);
+    expect(issued.expiresAt).toBe(record?.expiresAt);
+    expect(ops.writeTrail()).toEqual([
+      `put ${kvKeys.authTokenIndex(USER1, hash)}`,
+      `put ${kvKeys.auth(USER1)}`,
+      `put ${kvKeys.authToken(hash)}`,
+    ]);
+    const stored = await storedAuth();
+    expect(stored?.tokens[0]).toStrictEqual({
+      hash: await hashAuthToken(first),
+      createdAt: known?.tokens[0].createdAt,
+    });
+    expect(stored?.tokens[1]).toStrictEqual({
+      hash,
+      createdAt: record?.createdAt,
+      derived: BoolFlag.TRUE,
+    });
+  });
+
+  it("carries secretAt forward", async () => {
+    await mintDerivedAuthToken(kv, USER1, { tokens: [], secretAt: SECRET_AT });
+
+    expect((await storedAuth())?.secretAt).toBe(SECRET_AT);
+  });
+
+  it("never evicts an unmarked entry: a full unmarked list goes over the cap", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER);
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    const issued = await mintDerivedAuthToken(kv, USER1, known);
+
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens,
+      issued.token,
+    ]);
+    expect(ops.deleteKeys()).toEqual([]);
+    for (const token of tokens) {
+      expect((await tokenRecord(token))?.userId).toBe(USER1);
+    }
+  });
+
+  it("evicts the oldest derived entry when the list is full", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER, [1, 3]);
+
+    const issued = await mintDerivedAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    expect(await tokenRecord(tokens[1])).toBeNull();
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.filter((_, i) => i !== 1),
+      issued.token,
+    ]);
+  });
+
+  it("evicts a dead unmarked entry, which no longer protects anyone", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER);
+    await kv.delete(kvKeys.authToken(await hashAuthToken(tokens[2])));
+
+    const issued = await mintDerivedAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.filter((_, i) => i !== 2),
+      issued.token,
+    ]);
+  });
+
+  it("takes only its candidates when an over-cap list holds too few", async () => {
+    const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER + 1, [2]);
+
+    const issued = await mintDerivedAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    // Excess 2, one candidate: the five unmarked entries stay and the list stays over the cap.
+    expect(await listedTokens(tokens, issued.token)).toEqual([
+      ...tokens.filter((_, i) => i !== 2),
+      issued.token,
+    ]);
+  });
+
+  it("leaves the next secret-proven mint to bring the list back to the cap", async () => {
+    await seedDevices(MAX_AUTH_TOKENS_PER_USER);
+    await mintDerivedAuthToken(kv, USER1, await readAuthRecord(kv, USER1));
+    expect((await storedAuth())?.tokens).toHaveLength(
+      MAX_AUTH_TOKENS_PER_USER + 1,
+    );
+
+    await mintAuthToken(kv, USER1, await readAuthRecord(kv, USER1));
+
+    const after = (await storedAuth())!.tokens;
+    expect(after).toHaveLength(MAX_AUTH_TOKENS_PER_USER);
+    expect(after.filter((e) => e.derived === BoolFlag.TRUE)).toEqual([]);
+  });
+
+  it("keeps an earlier mark through a later mint's write-back", async () => {
+    const [first] = await seedDevices(1);
+    const derived = await mintDerivedAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    const unmarked = await mintAuthToken(
+      kv,
+      USER1,
+      await readAuthRecord(kv, USER1),
+    );
+
+    const marks = (await storedAuth())!.tokens.map((e) => [e.hash, e.derived]);
+    expect(marks).toEqual([
+      [await hashAuthToken(first), undefined],
+      [await hashAuthToken(derived.token), BoolFlag.TRUE],
+      [await hashAuthToken(unmarked.token), undefined],
+    ]);
+  });
+});
+
+describe("hasRoomForDerivedToken", () => {
+  it("answers true with no read when there is no record or the list has room", async () => {
+    await seedDevices(MAX_AUTH_TOKENS_PER_USER - 1);
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    expect(await hasRoomForDerivedToken(kv, USER1, null)).toBe(true);
+    expect(await hasRoomForDerivedToken(kv, USER1, known)).toBe(true);
+    expect(ops.getKeys()).toEqual([]);
+  });
+
+  it("answers true with no read when a full list holds a derived entry", async () => {
+    await seedDevices(MAX_AUTH_TOKENS_PER_USER, [4]);
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    expect(await hasRoomForDerivedToken(kv, USER1, known)).toBe(true);
+    expect(ops.getKeys()).toEqual([]);
+  });
+
+  it("answers false after reading each key of a full list of live unmarked entries", async () => {
+    await seedDevices(MAX_AUTH_TOKENS_PER_USER);
+    const known = await readAuthRecord(kv, USER1);
+    const ops = watchKvOps(kv);
+
+    expect(await hasRoomForDerivedToken(kv, USER1, known)).toBe(false);
+    expect(ops.getKeys()).toHaveLength(MAX_AUTH_TOKENS_PER_USER);
+    expect(ops.writeTrail()).toEqual([]);
+  });
+
+  it.each([
+    {
+      label: "its token: key is gone",
+      kill: (hash: string) => kv.delete(kvKeys.authToken(hash)),
+    },
+    {
+      label: "its token: key names another user",
+      kill: (hash: string) =>
+        kv.put(
+          kvKeys.authToken(hash),
+          JSON.stringify({
+            userId: USER2,
+            createdAt: daysAgo(0),
+            expiresAt: 0,
+          }),
+        ),
+    },
+  ])(
+    "answers true when one unmarked entry is dead: $label",
+    async ({ kill }) => {
+      const tokens = await seedDevices(MAX_AUTH_TOKENS_PER_USER);
+      await kill(await hashAuthToken(tokens[2]));
+
+      expect(
+        await hasRoomForDerivedToken(
+          kv,
+          USER1,
+          await readAuthRecord(kv, USER1),
+        ),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("mintAuthToken — pre-#425 record (#432)", () => {

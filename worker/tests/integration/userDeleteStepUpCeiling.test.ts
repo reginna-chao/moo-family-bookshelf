@@ -11,18 +11,21 @@ import {
   VERIFY_ATTEMPT_MAX,
   VERIFY_ATTEMPT_SCOPE,
   VERIFY_ATTEMPT_WINDOW_SECONDS,
+  VERIFY_STEP_UP_ATTEMPT_MAX,
   VERIFY_STEP_UP_ATTEMPT_SCOPE,
 } from "../../src/services/verification";
+import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
  * The two guess budgets on the `DELETE /api/user/:id` step-up (#396).
  *
- * The step-up has its own budget (`verify-stepup`). With it spent, a correct and
- * a wrong `currentSecret` both answer `429 RATE_LIMITED`, nothing is written and
- * nothing is deleted. With the public login budget (`verify`) spent, the correct
- * secret still deletes the account: public login traffic never measures against
- * this path. The rest of the DELETE step-up contract is in
- * `userDeleteStepUp.test.ts`.
+ * The step-up has its own budget per token (`verify-stepup`, subject
+ * `{userId}:{hash}` for an unmarked token, `VERIFY_STEP_UP_ATTEMPT_MAX` an hour).
+ * With it spent, a correct and a wrong `currentSecret` both answer
+ * `429 RATE_LIMITED`, nothing is written and nothing is deleted. With the public
+ * login budget (`verify`, `VERIFY_ATTEMPT_MAX`) spent, the correct secret still
+ * deletes the account: public login traffic never measures against this path. The
+ * rest of the DELETE step-up contract is in `userDeleteStepUp.test.ts`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,14 +70,24 @@ async function setPin(pin: string): Promise<string> {
   return ((await res.json()) as Json).data.authToken as string;
 }
 
-async function spendBudget(scope: string): Promise<string> {
+async function spendLoginBudget(): Promise<void> {
   const { key } = await peekPerUserRateLimit(kv, {
     userId: USER_ID,
-    scope,
+    scope: VERIFY_ATTEMPT_SCOPE,
     max: VERIFY_ATTEMPT_MAX,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
   await kv.put(key, String(VERIFY_ATTEMPT_MAX));
+}
+
+/** `token`'s own step-up budget key, via the production builder. */
+async function stepUpKeyOf(token: string): Promise<string> {
+  const { key } = await peekPerUserRateLimit(kv, {
+    userId: `${USER_ID}:${await hashAuthToken(token)}`,
+    scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+    max: VERIFY_STEP_UP_ATTEMPT_MAX,
+    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+  });
   return key;
 }
 
@@ -93,7 +106,8 @@ afterEach(() => {
 describe("DELETE /api/user/:id — guess budgets", () => {
   it("with the step-up budget spent, answers a wrong and the correct PIN alike with 429, deleting nothing", async () => {
     const token = await setPin(PIN);
-    const stepUpKey = await spendBudget(VERIFY_STEP_UP_ATTEMPT_SCOPE);
+    const stepUpKey = await stepUpKeyOf(token);
+    await kv.put(stepUpKey, String(VERIFY_STEP_UP_ATTEMPT_MAX));
     const ops = watchKvOps(kv);
 
     const wrong = await deleteAccount(token, WRONG_PIN);
@@ -109,18 +123,13 @@ describe("DELETE /api/user/:id — guess budgets", () => {
     expect(ops.writeTrail()).toEqual([]);
     expect(await kv.get(kvKeys.verify(USER_ID))).not.toBeNull();
     expect(await tokenOwner(kv, token)).toBe(USER_ID);
-    expect(await kv.get(stepUpKey)).toBe(String(VERIFY_ATTEMPT_MAX));
+    expect(await kv.get(stepUpKey)).toBe(String(VERIFY_STEP_UP_ATTEMPT_MAX));
   });
 
   it("with the login budget spent, still deletes with the correct PIN, charging no budget", async () => {
     const token = await setPin(PIN);
-    await spendBudget(VERIFY_ATTEMPT_SCOPE);
-    const { key: stepUpKey } = await peekPerUserRateLimit(kv, {
-      userId: USER_ID,
-      scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
-      max: VERIFY_ATTEMPT_MAX,
-      windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
-    });
+    await spendLoginBudget();
+    const stepUpKey = await stepUpKeyOf(token);
 
     const res = await deleteAccount(token, PIN);
 
