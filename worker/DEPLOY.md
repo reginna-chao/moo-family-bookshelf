@@ -64,7 +64,30 @@ simple = { limit = 60, period = 60 }
 
 **不設定也能跑**：找不到 binding 時，Worker 會自動退回原本的 KV 計數器，限制數字完全一樣（登入驗證的每分鐘上限例外：沒有 binding 就沒有這道限制，每小時 10 次的額度仍在），代價是每個請求多一次 KV 讀 + 一次 KV 寫（見下方「免費方案額度與濫用防護」），並且每道每分鐘的限流檢查都會輸出一行 `RATE_LIMIT_BINDING_MISSING` 錯誤 log——家庭書櫃與借閱路由同時受 per-IP 與 per-userId 兩道每分鐘檢查，因此單一請求最多兩行。
 
-### 6. 部署
+### 6. 加上驗證次數的 Durable Object
+
+PWA 登入驗證（PIN／圖形）每小時的嘗試次數上限——登入每帳號每小時 10 次、改驗證設定或刪除帳號前確認目前密鑰每份每小時 5 次——由 Cloudflare Durable Object 計數，同時送出再多請求也不會超過。`wrangler.toml` 已內含設定，**不用改任何值**：
+
+```toml
+[[durable_objects.bindings]]
+name = "ATTEMPT_BUDGET"
+class_name = "AttemptBudgetObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AttemptBudgetObject"]
+```
+
+- 免費方案可用，但只能用 SQLite 後端（`new_sqlite_classes`）。免費方案每天的額度是 10 萬次請求、13,000 GB-s、500 萬列讀取、10 萬列寫入，儲存共 5 GB；用完時 Worker 改用 KV 計數，到隔天 00:00 UTC 重置（見下方「不設定也能跑」）。
+- `pnpm deploy`（`wrangler deploy`）會自動套用 `[[migrations]]`，不用另外下指令。部署成功時，輸出的 bindings 清單會多一行 `env.ATTEMPT_BUDGET (AttemptBudgetObject)`。
+- production 要另外寫一段 `[[env.production.durable_objects.bindings]]`（內容相同）：環境不會繼承 binding。`[[migrations]]` 會繼承，不要重複寫。本專案附的設定兩份都有。
+- 用 API token 部署（例如 CI）時，token 要有建立 Durable Objects 的權限；不夠時部署會失敗，依錯誤訊息補上權限再部署一次。
+- 本機確認：在 repo 根目錄執行 `node scripts/test-attempt-budget-runtime.mjs`。它在本機 workerd 裡執行真正的物件，不需要任何 Cloudflare 憑證；五項檢查都印 `PASS`、指令正常結束才算通過，任一項不符會印 `FAIL` 並以錯誤結束。
+- **部署之後不能回到沒有這個類別的版本**：缺少既有 Durable Object 類別的版本會被拒絕部署，所以不能直接 revert。要暫停，只拿掉兩段 `durable_objects.bindings`，保留 `src/index.ts` 的 `AttemptBudgetObject` 匯出與 `[[migrations]]`；要完全移除，再加一段 `[[migrations]]`（`tag = "v2"`、`deleted_classes = ["AttemptBudgetObject"]`）之後才拿掉匯出，物件裡的計數會一起刪掉（都是暫時資料）。
+
+**不設定也能跑**：沒有這個 binding 時，Worker 退回原本的 KV 計數，上限數字一樣，但不是硬上限，而且每個帶密鑰、走到這道檢查的請求都會輸出一行 `ATTEMPT_BUDGET_BINDING_MISSING` 錯誤 log。物件出錯時同樣退回 KV，輸出 `ATTEMPT_BUDGET_UNAVAILABLE`；物件過載時回 429、請使用者 60 秒後再試，輸出 `ATTEMPT_BUDGET_OVERLOADED`。這些 log 都只有事件名稱，不含 userId。
+
+### 7. 部署
 
 ```bash
 pnpm deploy
@@ -76,7 +99,7 @@ pnpm deploy
 https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev
 ```
 
-### 7. 設定 PIN 雜湊的 pepper（建議）
+### 8. 設定 PIN 雜湊的 pepper（建議）
 
 PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜湊只是一次 SHA-256（v1），備份檔或 KV 內容外流後，因為 PIN 的組合數少，可以離線逐一猜出來。設定 `VERIFY_PEPPER` 這個 Worker secret 之後，新設定的 PIN 或圖形改用以 pepper 為金鑰的 HMAC-SHA256（v2，紀錄裡帶 `version: 2`）；舊紀錄會在本人下一次通過驗證時（建立家庭、加入家庭，或帶 PIN 的登入查詢）自動升級，使用者不用做任何事。不設定的話，一切維持原樣。
 
@@ -118,7 +141,7 @@ PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜
 - **啟用之前的備份還是 v1**：已經存在 R2 的封存檔裡的 `verify:` 紀錄不會回頭升級，在保留期內仍然可以離線猜；要等本人換過 PIN／圖形，舊備份裡的雜湊才會失效。
 - **設錯的症狀**：已升級的帳號登入一律回 503，Workers Logs 出現 `VERIFY_PEPPER_MISMATCH`（設成了另一把）或 `VERIFY_PEPPER_MISSING`（Worker 上沒有 pepper）。這兩行是 `console.error`，關閉 invocation log 不會把它們藏起來（見「不記錄請求網址（invocation log）」），而且不含任何 userId 或同步碼。
 
-### 8. 設定 Extension / PWA 使用自訂端點
+### 9. 設定 Extension / PWA 使用自訂端點
 
 自訂 API 端點不會顯示在一般使用者介面中，需透過開發者工具手動設定。
 
@@ -264,9 +287,11 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 - 未經驗證的垃圾流量即使全部被 401 拒絕，仍會以每分鐘最多 60 次的速度消耗寫入額度——**約 17 分鐘即可耗盡當日額度**，之後所有需要寫入 KV 的操作（儲存書單、建立家庭、換發 token，乃至速率限制本身）都會失敗到隔日額度重置。
 - 內建的 per-userId 上限（例如公開書櫃寫入合計每帳號每小時 30 次）只能限制「單一帳號」的消耗速度，無法阻擋上述未驗證流量。
 
-設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`）與依 token 分開計算的 `verify-stepup` 仍記在 KV，而它們都需要通過身分驗證才會被計數。**唯一的例外是 PWA 登入驗證的猜錯上限**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該帳號的嘗試計數（`ratelimit:user:verify:{userId}:{bucket}`）與該來源的失敗紀錄（`verifyfail:{userId}:{caller}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
+設定了 binding 之後，每分鐘的限制不再寫 KV，上述「垃圾流量燒光寫入額度」的路徑就消失了；每小時的每帳號上限（`put-books`、`family-prefs`、`family-write`、`public-shelf`、`verify-write`、`verify-set`）仍記在 KV，而它們都需要通過身分驗證才會被計數；兩種登入驗證的嘗試額度（`verify`、依 token 分開計算的 `verify-stepup`）設了步驟 6 的 Durable Object 之後記在物件裡，不寫 KV，沒設時才記在 KV。**唯一的例外是 PWA 登入驗證的猜錯紀錄**：三個公開閘門端點（`POST /api/family`、`POST /api/family/:id/join`、`POST /api/auth/lookup`）在未驗證的呼叫方每猜錯一次密鑰時，仍會寫入該來源的失敗紀錄（`verifyfail:{userId}:{caller}`；沒有 Durable Object 時另寫該帳號的嘗試計數 `ratelimit:user:verify:{userId}:{bucket}`），同一組「帳號 × 來源」15 分鐘內至多 5 次（`VERIFY_MAX_FAILURES` / `VERIFY_FAIL_TTL_SECONDS`，見 `worker/src/kv/schema.ts`）。因此下方的 WAF 規則仍然值得設定。
 
-若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致——真正需要硬上限時仍得評估 Durable Objects。
+Durable Object 的免費額度（每天 10 萬次請求、10 萬列寫入，見步驟 6）與 KV 分開計算。一次密鑰比對最多用 2 次請求（預留，猜對時再退還），而且要先通過 per-IP 限制才會用到；每次比對也要讀好幾次 KV，KV 每天 10 萬次讀取的額度會同時或更早用完，用完時登入驗證本身就無法進行。物件閒置時不計 duration，只有處理請求的時間計費。額度用完時登入驗證退回 KV 計數，不會擋住登入。
+
+若你的 Worker URL 可能被陌生人掃到（部署在公開網路本來就是如此），建議在 Cloudflare Dashboard 為 `/api/*` 設定 [WAF Rate Limiting 規則](https://developers.cloudflare.com/waf/rate-limiting-rules/)（免費方案含 1 條規則），在流量抵達 Worker 之前就把異常來源擋下。原生 Rate Limiting binding（步驟 5）本身不是硬上限——它在單一 Cloudflare 節點內計數且為最終一致；硬上限只有步驟 6 的登入驗證每小時額度，其他限制要更強的保護，靠的就是這條 WAF 規則。
 
 ## 不記錄請求網址（invocation log）
 
@@ -315,7 +340,7 @@ Cloudflare 免費方案的 KV 每日寫入額度為 1,000 次。**若你略過�
 
 5. **只把臨時 PIN 回信到表單上那個讀墨註冊 Email**，不寄到申請人另外給的任何聯絡方式。收得到那個信箱的信，是唯一能證明本人的方式。自架伺服器沒有這個表單，可以一樣寄到他的讀墨註冊 Email，或用其他家人看不到的管道告訴他。請他用同步碼加臨時 PIN 重新登入，登入後立刻改成自己的 PIN 或圖形：電腦上在擴充功能設定裡改，改之前會先要求輸入這組臨時 PIN；只有手機的話，PWA 登入後會跳出提示，選擇更改後先輸入臨時 PIN，再設定新的 PIN 或圖形。他的個人書櫃與分享設定都還在，不受影響。
 
-6. 如果他用臨時 PIN 仍然看到「嘗試次數過多」，可能是這個帳號這一小時的額度已經用完，改寫驗證設定不會清掉它。這一步用在沒有人持續猜測、只是額度滿了的情況。先列出兩種計數器（第二行會列出確認 PIN 的每一份額度），再把列出的 key 逐一刪除。沒有列出，就是別的限制（每分鐘的上限），請他等一分鐘再試：
+6. 如果他用臨時 PIN 仍然看到「嘗試次數過多」，可能是這個帳號這一小時的額度已經用完，改寫驗證設定不會清掉它。設了步驟 6 的 Durable Object（本專案附的設定都有）時，額度記在物件裡，管理者沒有指令可以清除：改走下方的「救援連結」（它不經過這道額度），或請他等到下一個整點（回應裡的 `retryAfter` 就是剩下的秒數）再登入。下面的 KV 指令只適用於沒有這個 binding 的部署。這一步用在沒有人持續猜測、只是額度滿了的情況。先列出兩種計數器（第二行會列出確認 PIN 的每一份額度），再把列出的 key 逐一刪除。沒有列出，就是別的限制（每分鐘的上限），請他等一分鐘再試：
 
    ```bash
    pnpm exec wrangler kv key list --prefix "ratelimit:user:verify:<userId>:" --namespace-id <正式 namespace ID> --remote
@@ -540,6 +565,8 @@ pnpm install
 pnpm deploy
 ```
 
+更新到登入驗證改用 Durable Object 計數的版本時，若你維護自己的 `wrangler.toml`，要把步驟 6 的兩段（`[[durable_objects.bindings]]` 與 `[[migrations]]`）和 production 的 `[[env.production.durable_objects.bindings]]` 加進去；沒加的話 Worker 照常運作，登入驗證的每小時額度退回 KV 計數，日誌出現 `ATTEMPT_BUDGET_BINDING_MISSING`。加了並部署之後，就不能再回退到沒有 `AttemptBudgetObject` 的舊版 Worker（暫停方式見步驟 6）。部署當小時，原本記在 KV 的猜錯次數不會帶過去，每個帳號在那一小時多一份額度。
+
 設了 `VERIFY_PEPPER` 之後，如果回退到不認得 pepper 的舊版 Worker，已升級（`version: 2`）的帳號輸入正確的 PIN 也會被當成打錯，要再更新回新版才會恢復。回退期間這些「打錯」照樣計數：同一來源 5 次就鎖 15 分鐘，換回新版後被鎖的人最多還要再等 15 分鐘；第三方也能在這段期間用錯誤的 PIN 把該帳號每小時 10 次的猜測上限用完，讓本人暫時進不來。
 
 回退到不認得 QR 登入標記的舊版 Worker 時，任何一次登入都會洗掉這些標記；升回新版之後，這些登入算未標記（各有獨立額度、能發略過驗證的 QR Code），最多 180 天。回退過就請本人換 PIN，或由管理者撤銷他的全部登入（「使用者忘記登入驗證時」的撤銷步驟）。
@@ -651,7 +678,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 
 表中的「第 8 節」指計畫第 8 節，也就是下方步驟 5 的 CPU 判定。
 
-設了 `VERIFY_PEPPER`（「步驟」第 7 步）的話，它也是備份的一部分：沒有同一把 pepper，還原回來的已升級驗證紀錄無法使用。把它存進密碼管理器，不要放進 KV、R2 或 GitHub，備份檔與 pepper 分開保存才有保護效果。
+設了 `VERIFY_PEPPER`（「步驟」第 8 步）的話，它也是備份的一部分：沒有同一把 pepper，還原回來的已升級驗證紀錄無法使用。把它存進密碼管理器，不要放進 KV、R2 或 GitHub，備份檔與 pepper 分開保存才有保護效果。
 
 #### 步驟 1：開通 R2（管理者）
 

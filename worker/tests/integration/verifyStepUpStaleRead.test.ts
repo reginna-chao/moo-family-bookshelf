@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { rateLimitBindings } from "../helpers/rateLimitBindings";
+import {
+  productionBindings,
+  type ProductionBindings,
+} from "../helpers/productionBindings";
 import { seedAuthToken, authTokenKey, tokenOwner } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE } from "../helpers/ids";
@@ -28,14 +31,16 @@ import { kvKeys, type VerifyRecord } from "../../src/kv/schema";
  * at least as new as `secretAt`, so a later PUT — or a body-less DELETE —
  * needs no `currentSecret` even though `auth:.secretAt` is set.
  *
- * Requests run without DEV_MODE (binding stubs keep the per-IP tier off KV);
- * PIN setup goes through DEV_MODE.
+ * Requests run without DEV_MODE, with the production bindings (rate-limit stubs
+ * keep the per-IP tier off KV; an in-memory `ATTEMPT_BUDGET` holds the hourly
+ * budgets); PIN setup goes through DEV_MODE.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 let kv: KVNamespace;
+let bindings: ProductionBindings;
 
 const USER_ID = ALICE;
 const PIN = "123456";
@@ -56,7 +61,7 @@ async function request(
   };
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  const env = dev ? { DEV_MODE: "1" } : rateLimitBindings();
+  const env = dev ? { DEV_MODE: "1" } : bindings;
   return app.request(path, init, { KV: kv, ...env });
 }
 
@@ -121,6 +126,7 @@ async function errorCode(res: Response): Promise<string> {
 
 beforeEach(() => {
   kv = createMockKV();
+  bindings = productionBindings();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(SET_AT);
 });

@@ -281,7 +281,7 @@ verifyRoutes.openapi(putVerifyRoute, async (c) => {
 
   await putVerifyRecord(c.env.KV, userId, record);
   // After the put, never before: a failed save must not clear the old secret's budget.
-  await resetLoginAttemptCeiling(c.env.KV, userId);
+  await resetLoginAttemptCeiling(c.env, userId);
 
   if (method !== "pin" && method !== "pattern") {
     return c.json({
