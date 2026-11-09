@@ -8,6 +8,11 @@ import type { RawAuthRecord } from "../../src/kv/auth";
  * entries dropped; a non-array `tokens` reads as `[]`; `secretAt` survives only
  * as a number; a pre-#425 `{ token, createdAt, secretAt? }` record reads as an
  * empty list, keeping only `secretAt` (#432).
+ *
+ * `derived` survives only as exactly `BoolFlag.TRUE`, and an entry without it has
+ * no `derived` key at all (`toStrictEqual` tells the two apart). A mint writes
+ * this list back, so a mark dropped here would be lost for good, while any other
+ * value must read as unmarked.
  */
 
 const HASH = "a".repeat(64);
@@ -76,5 +81,29 @@ describe("normalizeAuthRecord", () => {
     },
   ])("$label", ({ raw, expected }) => {
     expect(normalizeAuthRecord(raw)).toStrictEqual(expected);
+  });
+
+  it("keeps derived: 1 on the entry that carries it and adds nothing to its neighbour", () => {
+    const marked = { hash: "b".repeat(64), createdAt: CREATED_AT, derived: 1 };
+
+    expect(
+      normalizeAuthRecord({ tokens: [ENTRY, marked], secretAt: 5 }),
+    ).toStrictEqual({ tokens: [ENTRY, marked], secretAt: 5 });
+  });
+
+  it.each<{ label: string; derived: unknown }>([
+    { label: "0", derived: 0 },
+    { label: "2", derived: 2 },
+    { label: "-1", derived: -1 },
+    { label: "the string 1", derived: "1" },
+    { label: "true", derived: true },
+    { label: "false", derived: false },
+    { label: "null", derived: null },
+    { label: "an object", derived: { value: 1 } },
+    { label: "an array", derived: [1] },
+  ])("reads derived: $label as unmarked", ({ derived }) => {
+    const raw = { tokens: [{ ...ENTRY, derived }] } as RawAuthRecord;
+
+    expect(normalizeAuthRecord(raw)).toStrictEqual({ tokens: [ENTRY] });
   });
 });

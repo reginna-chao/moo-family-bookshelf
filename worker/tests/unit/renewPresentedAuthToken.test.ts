@@ -6,6 +6,7 @@ import { USER1, USER2 } from "../helpers/ids";
 import { mintAuthToken } from "../../src/services/authTokens";
 import { renewPresentedAuthToken } from "../../src/services/authRenewal";
 import {
+  BoolFlag,
   kvKeys,
   TOKEN_TTL_SECONDS,
   type AuthTokenRecord,
@@ -23,10 +24,11 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * (#431) — and never `auth:{userId}`; a target within an hour of the stored
  * `expiresAt` writes nothing. `null` (→ 401 REFRESH_FAILED) when the bearer is
  * not current, its reverse key is gone or names someone else, its `createdAt`
- * is unreadable, or it is at the cap. A TTL gap (no record, empty list) mints,
- * unless the presented token has a `token:deleted:` mark (#462): then `null`
- * and no write. Only that branch reads the mark; a listed token's slide never
- * does.
+ * is unreadable, or it is at the cap. A TTL gap (no record, empty list) mints a
+ * `derived` token: the presented one proved no secret here. A slide never touches
+ * the list, so a `derived` mark stays where it is. The TTL gap refuses instead
+ * when the presented token has a `token:deleted:` mark (#462): then `null` and no
+ * write. Only that branch reads the mark; a listed token's slide never does.
  *
  * Seeds: token A is seeded 10 days old so the slide is observable (its stored
  * `expiresAt` is 80 days out); token B is minted by production so its recorded
@@ -352,26 +354,49 @@ describe("renewPresentedAuthToken — TTL gap", () => {
     expect(issued?.token).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it.each(GAPS)("mints a new listed token when $label", async ({ seed }) => {
-    await seed();
-    const ops = watchKvOps(kv);
+  it.each(GAPS)(
+    "mints a new listed derived token when $label",
+    async ({ seed }) => {
+      await seed();
+      const ops = watchKvOps(kv);
+
+      const issued = await renewPresentedAuthToken(kv, USER1, TOKEN_A);
+
+      expect(ops.getKeys()).toContain(
+        kvKeys.accountDeleted(await hashAuthToken(TOKEN_A)),
+      );
+
+      expect(issued?.token).toMatch(/^[a-f0-9]{64}$/);
+      expect(issued?.token).not.toBe(TOKEN_A);
+      const record = await tokenRecord(issued!.token);
+      expect(record?.userId).toBe(USER1);
+      const auth = await kv.get<{ tokens: unknown[] }>(
+        kvKeys.auth(USER1),
+        "json",
+      );
+      expect(auth?.tokens).toEqual([
+        {
+          hash: await hashAuthToken(issued!.token),
+          createdAt: record?.createdAt,
+          derived: BoolFlag.TRUE,
+        },
+      ]);
+    },
+  );
+
+  it("leaves the marks on the list alone when it slides a listed token", async () => {
+    await seedAuthToken(kv, USER1, {
+      token: TOKEN_A,
+      createdAt: daysAgo(10),
+      derived: BoolFlag.TRUE,
+    });
+    const before = await kv.get(kvKeys.auth(USER1));
 
     const issued = await renewPresentedAuthToken(kv, USER1, TOKEN_A);
 
-    expect(ops.getKeys()).toContain(
-      kvKeys.accountDeleted(await hashAuthToken(TOKEN_A)),
-    );
-
-    expect(issued?.token).toMatch(/^[a-f0-9]{64}$/);
-    expect(issued?.token).not.toBe(TOKEN_A);
-    expect((await tokenRecord(issued!.token))?.userId).toBe(USER1);
-    const auth = await kv.get<{ tokens: { hash: string }[] }>(
-      kvKeys.auth(USER1),
-      "json",
-    );
-    expect(auth?.tokens.map((e) => e.hash)).toEqual([
-      await hashAuthToken(issued!.token),
-    ]);
+    expect(issued?.token).toBe(TOKEN_A);
+    expect(await kv.get(kvKeys.auth(USER1))).toBe(before);
+    expect(before).toContain('"derived":1');
   });
 });
 
@@ -400,6 +425,7 @@ describe("renewPresentedAuthToken — pre-#425 record (#432)", () => {
       await hashAuthToken(issued!.token),
     ]);
     expect(auth?.secretAt).toBe(9);
+    expect(auth?.tokens[0]).toHaveProperty("derived", BoolFlag.TRUE);
     const newHash = await hashAuthToken(issued!.token);
     const trail = ops.writeTrail();
     expect(trail.indexOf(`put ${kvKeys.authTokenIndex(USER1, newHash)}`)).toBe(

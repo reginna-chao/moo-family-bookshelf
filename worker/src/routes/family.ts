@@ -41,8 +41,11 @@ import {
 import { getAuthenticatedUserId } from "../middleware/auth";
 import { readAuthRecord, isQrBoundToListedToken } from "../services/authRecord";
 import {
+  hasRoomForDerivedToken,
   mintAuthToken,
+  mintDerivedAuthToken,
   readAndRevokeAllAuthTokens,
+  type IssuedToken,
 } from "../services/authTokens";
 import { enforcePerUserRateLimit, getCallerIp } from "../middleware/rateLimit";
 import {
@@ -155,7 +158,8 @@ const joinFamilyRoute = createRoute({
     "is refused with 409 `RECOVERY_NOT_MEMBER`, after the verification and " +
     "removed-member checks and before the capacity check. A listed member's " +
     "recovery reconnect is unaffected, and a manual join (`recovery` absent " +
-    "or 0) is admitted exactly as before.",
+    "or 0) is admitted exactly as before. An operator-issued rescue link " +
+    "(`qrToken`) is an explicit action, so it is not refused on this rule.",
   request: {
     params: FamilyIdParam,
   },
@@ -544,9 +548,9 @@ familyRoutes.openapi(joinFamilyRoute, async (c) => {
     return memberRemovedResponse(c);
   }
 
-  // A silent recovery join never admits a NEW member (#263): an unlisted user left or was
-  // removed, and only a manual join may bring them back. No KV op; precedes FAMILY_FULL.
-  if (!isExistingMember && recovery === BoolFlag.TRUE) {
+  // A silent recovery join never admits a NEW member (#263): an unlisted user left or was removed, and only
+  // a manual join or an operator's rescue link may bring them back. No KV op; precedes FAMILY_FULL.
+  if (!isExistingMember && recovery === BoolFlag.TRUE && !gate.qrRescued) {
     return recoveryNotMemberResponse(c);
   }
 
@@ -1239,12 +1243,14 @@ async function writeKickedTombstone(
 }
 
 /** A passed join gate (#378): `knownAuth` is the `auth:{userId}` the QR check read (`undefined` when none);
- *  `qrBoundHash` the listed token hash a QR bypass matched (#425, else `null`); `verifyRecord` /
- *  `verifiedSecret` are what the comparison used (`null` / `undefined` after a QR bypass). */
+ *  `qrRescued` marks an operator's rescue link (also `qrBypassed`); `qrBoundHash` the listed token hash a QR bypass
+ *  matched (#425, else `null`); `verifyRecord` / `verifiedSecret` are what the comparison used (`null` /
+ *  `undefined` after a QR bypass). */
 interface JoinGatePass {
   failure: null;
   knownAuth: AuthRecord | null | undefined;
   qrBypassed: boolean;
+  qrRescued: boolean;
   qrBoundHash: string | null;
   verifyRecord: VerifyRecord | null;
   verifiedSecret: string | undefined;
@@ -1304,8 +1310,8 @@ function joinDeletionRaceResponse(
     : accountDeletionInProgressResponse(c);
 }
 
-/** Join's verification step: a one-time QR token issued to `userId` and still bound to one of the account's
- *  listed tokens (#378, #425) skips the gate, else `validateVerification`. `failure` is the gate's error Response. */
+/** Join's verification step: a rescue link, or a one-time QR token issued to `userId`, bound to a listed unmarked token
+ *  (#378, #425) and leaving room for its token, skips the gate; else `validateVerification`. `failure` is its error Response. */
 async function passJoinVerificationGate(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -1331,7 +1337,20 @@ async function passJoinVerificationGate(
         deleteQrToken(c.env.KV, qrToken),
       ]);
       knownAuth = auth;
-      skipVerification = isQrBoundToListedToken(qrRecord.tokenHash, auth);
+      if (qrRecord.rescue === BoolFlag.TRUE) {
+        return {
+          failure: null,
+          knownAuth,
+          qrBypassed: true,
+          qrRescued: true,
+          qrBoundHash: null,
+          verifyRecord: null,
+          verifiedSecret: undefined,
+        };
+      }
+      skipVerification =
+        isQrBoundToListedToken(qrRecord.tokenHash, auth) &&
+        (await hasRoomForDerivedToken(c.env.KV, userId, auth));
       qrBoundHash = skipVerification ? (qrRecord.tokenHash ?? null) : null;
     }
     // If token invalid/expired/wrong-user, fall through to normal verification
@@ -1341,6 +1360,7 @@ async function passJoinVerificationGate(
       failure: null,
       knownAuth,
       qrBypassed: true,
+      qrRescued: false,
       qrBoundHash,
       verifyRecord: null,
       verifiedSecret: undefined,
@@ -1361,6 +1381,7 @@ async function passJoinVerificationGate(
     failure: null,
     knownAuth,
     qrBypassed: false,
+    qrRescued: false,
     qrBoundHash,
     verifyRecord: verification.record,
     verifiedSecret: verifySecret,
@@ -1370,7 +1391,7 @@ async function passJoinVerificationGate(
 /** Token side of a passed join (#378, #425): `auth:{userId}` (read once) for the mint. `null` ⇒ 403
  *  VERIFICATION_REQUIRED: after a QR bypass the bound token's `token:` key is gone (one read), or the secret
  *  passed against a stale verify record; a fresh secret pass also upgrades a v1 hash (`upgradeVerifyRecordHash`,
- *  fail-open). See docs/architecture.md → PWA 登入驗證機制. */
+ *  fail-open). A rescue link is bound to no token and always passes. See docs/architecture.md → PWA 登入驗證機制. */
 async function admitJoinToken(
   env: Env,
   userId: string,
@@ -1380,6 +1401,7 @@ async function admitJoinToken(
     gate.knownAuth === undefined
       ? await readAuthRecord(env.KV, userId)
       : gate.knownAuth;
+  if (gate.qrRescued) return { auth };
   if (gate.qrBypassed) {
     const bound =
       gate.qrBoundHash === null
@@ -1397,6 +1419,18 @@ async function admitJoinToken(
     );
   }
   return { auth };
+}
+
+/** A QR redeem proved no secret, so its token is `derived`; a secret join and an operator's rescue link are not. */
+function mintJoinToken(
+  kv: KVNamespace,
+  userId: string,
+  gate: JoinGatePass,
+  auth: AuthRecord | null,
+): Promise<IssuedToken> {
+  return gate.qrBypassed && !gate.qrRescued
+    ? mintDerivedAuthToken(kv, userId, auth)
+    : mintAuthToken(kv, userId, auth);
 }
 
 /** Join's existing-member branch: `admitJoinToken` (may 403), heals the pointer (+ tombstone re-check, may
@@ -1449,9 +1483,10 @@ async function reconnectExistingMember(
   // Past the last refusal: only a real admission ends a deletion.
   if (settled.cleared) await deleteAccountDeletingMark(c.env.KV, userId);
 
-  const { token: authToken, expiresAt } = await mintAuthToken(
+  const { token: authToken, expiresAt } = await mintJoinToken(
     c.env.KV,
     userId,
+    gate,
     admitted.auth,
   );
 
@@ -1513,9 +1548,10 @@ async function admitNewMember(
   // Past the last refusal: only a real admission ends a deletion.
   if (settled.cleared) await deleteAccountDeletingMark(c.env.KV, userId);
 
-  const { token: authToken, expiresAt } = await mintAuthToken(
+  const { token: authToken, expiresAt } = await mintJoinToken(
     c.env.KV,
     userId,
+    gate,
     admitted.auth,
   );
 

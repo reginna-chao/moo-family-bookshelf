@@ -24,6 +24,7 @@ import {
 import { jsonError, type ErrorBody } from "../utils/errors";
 import { getAccountDeletingMark } from "../kv/accountDeleting";
 import { deleteVerifyRecord, putVerifyRecord } from "../kv/verify";
+import { stepUpBudgetBucket } from "./authRecord";
 import {
   hashSecret,
   hashSecretWithPepper,
@@ -302,44 +303,56 @@ export const VERIFY_STEP_UP_ATTEMPT_SCOPE = "verify-stepup";
 export const VERIFY_BURST_SCOPE = "verify-burst";
 /** Binding key scope of the current-secret per-minute limit; never written to KV. */
 export const VERIFY_STEP_UP_BURST_SCOPE = "verify-stepup-burst";
-/** Wrong guesses per target userId per window, all callers summed, for EACH hourly budget. Once spent, every secret is refused. */
+/** Wrong guesses per target userId per window on the login budget, all callers summed. Once spent, every secret is refused. */
 export const VERIFY_ATTEMPT_MAX = 10;
-/** Window for {@link VERIFY_ATTEMPT_MAX}: 1 hour, in seconds. */
+/** Wrong guesses per window on ONE step-up budget (one per unmarked token, one shared by the rest). Once spent, every secret is refused. */
+export const VERIFY_STEP_UP_ATTEMPT_MAX = 5;
+/** Window for both attempt budgets: 1 hour, in seconds. */
 export const VERIFY_ATTEMPT_WINDOW_SECONDS = 3600;
-/** Secret-bearing requests per target userId per window, right or wrong; served by `RATE_LIMIT_10_PER_MIN`. */
+/** Secret-bearing requests per budget subject per window, right or wrong; served by `RATE_LIMIT_10_PER_MIN`. */
 export const VERIFY_BURST_MAX = 10;
 /** Window for {@link VERIFY_BURST_MAX}: 1 minute, in seconds. */
 export const VERIFY_BURST_WINDOW_SECONDS = 60;
 
-/** The hourly budget and per-minute limit a gate call is measured against. */
+/** The hourly budget and per-minute limit a gate call is measured against. `subject` replaces the userId in
+ *  both counter keys; absent ⇒ the userId. */
 interface VerifyAttemptBudget {
   ceilingScope: string;
   burstScope: string;
+  max: number;
+  subject?: string;
 }
 
 const LOGIN_ATTEMPT_BUDGET: VerifyAttemptBudget = {
   ceilingScope: VERIFY_ATTEMPT_SCOPE,
   burstScope: VERIFY_BURST_SCOPE,
+  max: VERIFY_ATTEMPT_MAX,
 };
 
-const STEP_UP_ATTEMPT_BUDGET: VerifyAttemptBudget = {
-  ceilingScope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
-  burstScope: VERIFY_STEP_UP_BURST_SCOPE,
-};
+/** One token's step-up budget; `bucket` comes from `stepUpBudgetBucket` (`services/authRecord.ts`). */
+function stepUpBudgetFor(userId: string, bucket: string): VerifyAttemptBudget {
+  return {
+    ceilingScope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
+    burstScope: VERIFY_STEP_UP_BURST_SCOPE,
+    max: VERIFY_STEP_UP_ATTEMPT_MAX,
+    subject: `${userId}:${bucket}`,
+  };
+}
 
 /** Read one hourly attempt budget without charging (`null` under DEV_MODE). The gate reads it BEFORE comparing,
  *  and {@link chargeWrongGuess} reuses this reading: docs/architecture.md → 安全措施. */
 async function peekAttemptCeiling(
   env: Env,
-  userId: string,
+  subject: string,
   scope: string,
+  max: number,
 ): Promise<PerUserRateLimitReading | null> {
   if (isDevMode(env)) return null;
 
   return peekPerUserRateLimit(env.KV, {
-    userId,
+    userId: subject,
     scope,
-    max: VERIFY_ATTEMPT_MAX,
+    max,
     windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
   });
 }
@@ -408,12 +421,13 @@ export async function resetLoginAttemptCeiling(
  *    Cloudflare-supplied client IP, IPv6 bucketed per /64), in a TTL-backed
  *    `verifyfail:{userId}:{callerKey}` entry. A caller's lockout never touches
  *    another caller.
- * 2. **Per-minute limit — keyed on the TARGET userId**, {@link VERIFY_BURST_MAX}
- *    per {@link VERIFY_BURST_WINDOW_SECONDS} on the native binding, never KV
- *    (`checkPerUserBurstLimit`). It counts every secret-bearing request, right or
- *    wrong, and is skipped when the deployment has no binding or the binding fails.
- * 3. **Hourly attempt budget — keyed on the TARGET userId**
- *    ({@link VERIFY_ATTEMPT_MAX} per {@link VERIFY_ATTEMPT_WINDOW_SECONDS}, on KV).
+ * 2. **Per-minute limit — keyed on the TARGET userId** (`opts.budget.subject` on the
+ *    step-up), {@link VERIFY_BURST_MAX} per {@link VERIFY_BURST_WINDOW_SECONDS} on the
+ *    native binding, never KV (`checkPerUserBurstLimit`). It counts every
+ *    secret-bearing request, right or wrong, and is skipped when the deployment has
+ *    no binding or the binding fails.
+ * 3. **Hourly attempt budget — keyed the same way** (`opts.budget.max` per
+ *    {@link VERIFY_ATTEMPT_WINDOW_SECONDS}, on KV; {@link VERIFY_ATTEMPT_MAX} on login).
  *    Only a wrong guess charges it. Without a per-account brake the caller-scoped
  *    lockout leaves no account-wide bound, and the shortest allowed pattern has
  *    only 9×8×7×6 = 3,024 combinations.
@@ -432,13 +446,14 @@ export async function resetLoginAttemptCeiling(
  * - Neither limit is a hard bound: both hold for sequential traffic within one
  *   Cloudflare location only (docs/architecture.md → 已接受的殘餘風險).
  *
- * ACCEPTED TRADE-OFF: brakes 2 and 3 are keyed on the TARGET userId, so a third
- * party can spend them with wrong answers and block the owner's new-device login,
- * window after window. They gain no data, and an account takeover is worse. A
- * device whose login is still valid keeps working and can mint a QR Code, which
- * needs no secret. Requests with no secret never count, which is what separates
- * these limits from a charge-EVERY-request counter (join's removed `"join"` scope).
- * The step-up has its own budget ({@link enforceCurrentSecret}). Rule:
+ * ACCEPTED TRADE-OFF: on login, brakes 2 and 3 are keyed on the TARGET userId, so a
+ * third party can spend them with wrong answers and block the owner's new-device
+ * login, window after window. They gain no data, and an account takeover is worse. A
+ * device whose login is still valid keeps working, an unmarked one can mint a QR Code
+ * that needs no secret, and an operator can issue a rescue link, which skips this gate
+ * (worker/DEPLOY.md → 救援連結). Requests with no secret never count, which is what
+ * separates these limits from a charge-EVERY-request counter (join's removed `"join"`
+ * scope). The step-up's budgets are per token ({@link enforceCurrentSecret}). Rule:
  * .claude/rules/security-ux-invariants.md → Invariant 6.
  *
  * Order of evaluation, and what each outcome costs (first match wins):
@@ -470,7 +485,8 @@ export async function resetLoginAttemptCeiling(
  * Under `DEV_MODE=1` both limits are skipped, exactly like every other limiter
  * (per-IP and per-userId), leaving lockout as the only brake.
  *
- * `opts.budget` (default {@link LOGIN_ATTEMPT_BUDGET}) names the two scopes.
+ * `opts.budget` (default {@link LOGIN_ATTEMPT_BUDGET}) names the two scopes, the
+ * hourly maximum and the string that keys both limits.
  *
  * `opts.consumeOtp` (default `true`) decides whether a matching `code` secret is
  * spent. Read-only disclosure decisions pass `false`: `POST /api/auth/lookup`
@@ -564,8 +580,9 @@ export async function validateVerification(
   // Both limits come BEFORE the comparison, so both answers take one path once either is spent
   // (Inv-6's sanctioned exception). See docs/architecture.md → 安全措施.
   const budget = opts.budget ?? LOGIN_ATTEMPT_BUDGET;
+  const subject = budget.subject ?? userId;
   const burst = await checkPerUserBurstLimit(env, {
-    userId,
+    userId: subject,
     scope: budget.burstScope,
     max: VERIFY_BURST_MAX,
     windowSec: VERIFY_BURST_WINDOW_SECONDS,
@@ -574,7 +591,12 @@ export async function validateVerification(
     return { valid: false, error: attemptLimitError(burst.retryAfter) };
   }
 
-  const reading = await peekAttemptCeiling(env, userId, budget.ceilingScope);
+  const reading = await peekAttemptCeiling(
+    env,
+    subject,
+    budget.ceilingScope,
+    budget.max,
+  );
   if (reading?.verdict.limited) {
     return {
       valid: false,
@@ -617,10 +639,11 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  * and `DELETE /api/user/:id` must present the account's CURRENT PIN / pattern when
  * one is configured. Returns `null` to proceed, else the error response to send.
  *
- * `record` and `presentedAuth` are the handler's own reads of `verify:{userId}` and
- * `auth:{userId}` (`readPresentedAuth(...).auth`) — this function reads neither
- * again. `currentSecret` is `sanitizeVerifySecret()`'s value, passed through
- * unchanged: `""` means "not supplied", exactly as for {@link validateVerification}.
+ * `record`, `presentedAuth` and `presentedHash` are the handler's own reads of
+ * `verify:{userId}`, `auth:{userId}` and the bearer's hash (`readPresentedAuth(...)`) —
+ * this function reads neither record again. `currentSecret` is `sanitizeVerifySecret()`'s
+ * value, passed through unchanged: `""` means "not supplied", exactly as for
+ * {@link validateVerification}.
  *
  * - Stale record ({@link passedAgainstStaleVerifyRecord}) ⇒ `403 VERIFICATION_REQUIRED`
  *   whatever its shape — absent, `none` and `code` included — checked FIRST, with no
@@ -632,16 +655,18 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  *   secret is ignored. Covers an account that never had a PIN (`auth` has no `secretAt`),
  *   one that switched PIN ⇒ `none` / `code` (that save's `secretUpdatedAt` ≥ `secretAt`)
  *   and a missing `auth:` record (TTL gap).
- * - Otherwise the login gate itself decides, with the caller's IP as the lockout
- *   key and the handler's record — byte-identical responses (`403
- *   VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429 VERIFICATION_LOCKED` /
- *   `RATE_LIMITED` + `retryAfter`, `503 VERIFY_UNAVAILABLE`). A step-up never
- *   upgrades a v1 hash (the caller rewrites or deletes the record next). The lockout
- *   key is shared with PWA login on purpose, but the two limits are this path's own
- *   (`verify-stepup`, `verify-stepup-burst`), so public login traffic cannot spend
- *   them. With either spent, a correct secret is refused too (Invariant 6): a token
- *   holder who keeps guessing wrong blocks the owner's PIN change until manual rescue
- *   (worker/DEPLOY.md → 使用者忘記登入驗證時).
+ * - Otherwise the login gate itself decides, on the handler's record — byte-identical
+ *   responses (`403 VERIFICATION_REQUIRED` / `VERIFICATION_FAILED`, `429
+ *   VERIFICATION_LOCKED` / `RATE_LIMITED` + `retryAfter`, `503 VERIFY_UNAVAILABLE`). A
+ *   step-up never upgrades a v1 hash (the caller rewrites or deletes the record next).
+ *   The lockout and both limits belong to the bucket `stepUpBudgetBucket` names: each
+ *   listed unmarked token has its own, every other bearer shares one. They are separate
+ *   from login's, so public login traffic cannot spend them, and a spent budget refuses
+ *   a correct secret from that bucket only (Invariant 6); the owner's other logins, a
+ *   PIN login on a new device and the rescue link stay open (worker/DEPLOY.md →
+ *   使用者忘記登入驗證時).
+ * - A KV error logs the event name only and rethrows a generic error (still a 500): its
+ *   message may echo a key, and the step-up keys carry a token hash (#357).
  *
  * See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
  */
@@ -651,6 +676,7 @@ export async function enforceCurrentSecret(
   record: VerifyRecord | null,
   currentSecret: string | undefined,
   presentedAuth: AuthRecord | null,
+  presentedHash: string | null,
 ): Promise<
   (Response & TypedResponse<ErrorBody, 403 | 429 | 503, "json">) | null
 > {
@@ -660,12 +686,18 @@ export async function enforceCurrentSecret(
 
   if (!needsCurrentSecret(record)) return null;
 
-  const verification = await validateVerification(
-    c.env,
-    userId,
-    currentSecret,
-    { callerKey: getCallerIp(c), record, budget: STEP_UP_ATTEMPT_BUDGET },
-  );
+  const bucket = stepUpBudgetBucket(presentedAuth, presentedHash);
+  let verification: VerificationResult;
+  try {
+    verification = await validateVerification(c.env, userId, currentSecret, {
+      callerKey: `${getCallerIp(c)}:${bucket}`,
+      record,
+      budget: stepUpBudgetFor(userId, bucket),
+    });
+  } catch {
+    console.error("VERIFY_STEP_UP_FAILED");
+    throw new Error("VERIFY_STEP_UP_FAILED");
+  }
   if (!verification.valid) {
     return verificationErrorResponse(c, verification.error);
   }

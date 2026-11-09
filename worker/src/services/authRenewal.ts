@@ -16,7 +16,7 @@ import {
 import { getVerifyRecord } from "../kv/verify";
 import { timingSafeEqual } from "../utils/crypto";
 import { readPresentedAuth } from "./authRecord";
-import { mintAuthToken, type IssuedToken } from "./authTokens";
+import { mintDerivedAuthToken, type IssuedToken } from "./authTokens";
 
 /** Sliding 90 days, capped 180 days after `createdAt` — except on a `code` account (one extra read, cap only). */
 async function renewalTarget(
@@ -68,8 +68,9 @@ async function slideListedToken(
  * Refresh (#425): renews only the PRESENTED token. `null` (→ 401 REFRESH_FAILED)
  * when it is not current (`readPresentedAuth`), its `token:` key is gone, or it is
  * past the 180-day cap (PIN / pattern / none accounts). A TTL gap (no record, empty
- * list) mints a new token, unless this token has a `token:deleted:` mark (#462): it
- * survived a failed account deletion, and a new token would leave it off the list,
+ * list) mints a new `derived` token: the presented one proved no secret here and its
+ * origin is unknown. It refuses instead when this token has a `token:deleted:` mark (#462):
+ * it survived a failed account deletion, and a new token would leave it off the list,
  * block the owner's retry and can stay listed after the owner re-registers. Only that
  * branch pays the extra read. Every path that writes `token:{hash}` puts that token's
  * `tokenidx:` key first, with the same TTL (#431).
@@ -87,7 +88,7 @@ export async function renewPresentedAuthToken(
   if (!current || presentedHash === null) return null;
   if (auth === null || auth.tokens.length === 0) {
     const mark = await getAccountDeletedMark(kv, presentedHash);
-    return mark === null ? mintAuthToken(kv, userId, auth) : null;
+    return mark === null ? mintDerivedAuthToken(kv, userId, auth) : null;
   }
   const entry = auth.tokens.find((e) => timingSafeEqual(e.hash, presentedHash));
   if (!entry) return null;

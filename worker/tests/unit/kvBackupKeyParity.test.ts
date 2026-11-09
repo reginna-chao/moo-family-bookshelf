@@ -97,6 +97,16 @@ const builtKeys = Object.entries(kvKeys).map(([name, builder]) => {
 const HAND_BUILT_RATE_LIMIT_KEYS = [
   ...RATE_LIMIT_KEY_PREFIXES.map((prefix) => `${prefix}:1.2.3.4:123`),
   `${PER_USER_RATE_LIMIT_KEY_PREFIX}:verify:${USER_ID}:123`,
+  // The step-up budget's subject is `{userId}:{bucket}`: a token hash, or the shared "derived".
+  `${PER_USER_RATE_LIMIT_KEY_PREFIX}:verify-stepup:${USER_ID}:${"a".repeat(64)}:123`,
+  `${PER_USER_RATE_LIMIT_KEY_PREFIX}:verify-stepup:${USER_ID}:derived:123`,
+];
+
+// The step-up lockout's caller is `{ip}:{bucket}`, one more segment than login's `{ip}`.
+const STEP_UP_LOCKOUT_KEYS = [
+  kvKeys.verifyFail(USER_ID, `1.2.3.4:${"a".repeat(64)}`),
+  kvKeys.verifyFail(USER_ID, "1.2.3.4:derived"),
+  kvKeys.verifyFail(USER_ID, `2001:db8:1:2:${"a".repeat(64)}`),
 ];
 
 describe("classifyKey parity with the Worker's KV keys", () => {
@@ -129,6 +139,11 @@ describe("classifyKey parity with the Worker's KV keys", () => {
       expect(classifyKey(key)).toBeNull();
     },
   );
+
+  it.each(STEP_UP_LOCKOUT_KEYS)("ignores the lockout key %s", (key) => {
+    expect(() => classifyKey(key)).not.toThrow();
+    expect(classifyKey(key)).toBeNull();
+  });
 
   it("still throws on an unknown key prefix", () => {
     expect(() => classifyKey("future:x")).toThrow(BackupError);
