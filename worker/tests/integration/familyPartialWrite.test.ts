@@ -502,11 +502,12 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
       `put ${kvKeys.kicked(familyId, USER2)}`,
       `put ${kvKeys.family(familyId)}`,
     ]);
-    // The three revoke deletes run in parallel — compared as a set — and are
-    // the last writes.
+    // The revoke deletes (pointer, tokens, pending code) run in parallel —
+    // compared as a set — and are the last writes.
     expect(asSet(trail.slice(2))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
@@ -527,6 +528,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
@@ -574,6 +576,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(2))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
@@ -633,6 +636,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [strayToken], [])),
       ]),
     );
@@ -746,6 +750,7 @@ describe("DELETE /api/family/:id/member/:uid partial-write convergence", () => {
     expect(asSet(trail)).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
@@ -831,6 +836,7 @@ describe("Sole-owner dissolve partial-write convergence", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER1)}`,
+        `delete ${kvKeys.otp(USER1)}`,
         ...(await revokeAllTrailEntries(USER1, [authToken])),
       ]),
     );

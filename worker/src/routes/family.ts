@@ -23,7 +23,7 @@ import {
   deleteKickedTombstone,
 } from "../kv/families";
 import { getUserBooksRecord, putUserBooksRecord } from "../kv/users";
-import { getQrTokenRecord, deleteQrToken } from "../kv/verify";
+import { getQrTokenRecord, deleteQrToken, deleteOtpRecord } from "../kv/verify";
 import { getAuthTokenRecord } from "../kv/auth";
 import {
   deleteAccountDeletingMark,
@@ -38,7 +38,11 @@ import {
   sanitizeShortString,
   parseRecoveryFlag,
 } from "../utils/validation";
-import { getAuthenticatedUserId } from "../middleware/auth";
+import {
+  getAuthenticatedUserId,
+  getPresentedAuthToken,
+} from "../middleware/auth";
+import { hashAuthToken } from "../utils/crypto";
 import { readAuthRecord, isQrBoundToListedToken } from "../services/authRecord";
 import {
   hasRoomForDerivedToken,
@@ -618,10 +622,11 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     // Single-member owner: `dissolveFamily` (borrow index, family record) FIRST, then pointer + token —
     // a failure leaves only an orphan pointer. See .claude/rules/backend.md → Route handler invariants.
     await dissolveFamily(c.env.KV, familyId);
-    await Promise.all([
-      deleteMemberFamilyId(c.env.KV, callerId),
-      readAndRevokeAllAuthTokens(c.env.KV, callerId),
-    ]);
+    await revokeDepartingMemberAccess(
+      c.env.KV,
+      callerId,
+      await selfLeaveTokenKeys(c, callerId, targetUserId),
+    );
 
     return c.json({ data: { ok: true } });
   }
@@ -643,10 +648,11 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     // only when the pointer names THIS family. Rationale: .claude/rules/backend.md → API Design (removal).
     const strayPointer = await getMemberFamilyId(c.env.KV, targetUserId);
     if (strayPointer === familyId) {
-      await Promise.all([
-        deleteMemberFamilyId(c.env.KV, targetUserId),
-        readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
-      ]);
+      await revokeDepartingMemberAccess(
+        c.env.KV,
+        targetUserId,
+        await selfLeaveTokenKeys(c, callerId, targetUserId),
+      );
     }
     return jsonError(c, 404, "MEMBER_NOT_FOUND", "目標使用者不是家庭成員");
   }
@@ -661,10 +667,11 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
     await dissolveFamily(c.env.KV, familyId);
     const leaverPointer = await getMemberFamilyId(c.env.KV, targetUserId);
     if (leaverPointer === familyId) {
-      await Promise.all([
-        deleteMemberFamilyId(c.env.KV, targetUserId),
-        readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
-      ]);
+      await revokeDepartingMemberAccess(
+        c.env.KV,
+        targetUserId,
+        await selfLeaveTokenKeys(c, callerId, targetUserId),
+      );
     }
     return c.json({ data: { ok: true } });
   }
@@ -700,10 +707,11 @@ familyRoutes.openapi(removeMemberRoute, async (c) => {
   // the removal's half of the tombstone/pointer pairing.
   const targetPointer = await getMemberFamilyId(c.env.KV, targetUserId);
   if (targetPointer === familyId) {
-    await Promise.all([
-      deleteMemberFamilyId(c.env.KV, targetUserId),
-      readAndRevokeAllAuthTokens(c.env.KV, targetUserId),
-    ]);
+    await revokeDepartingMemberAccess(
+      c.env.KV,
+      targetUserId,
+      await selfLeaveTokenKeys(c, callerId, targetUserId),
+    );
   }
 
   return c.json({ data: record });
@@ -1586,6 +1594,32 @@ async function unlistJoinerAfterDeletion(
   } catch {
     console.error("JOIN_RACE_MEMBER_CLEANUP_FAILED");
   }
+}
+
+/** End a departing member's access: delete `member:{userId}`, revoke every token (plus `alsoKeys`) and drop a
+ *  pending one-time code, in parallel. */
+async function revokeDepartingMemberAccess(
+  kv: KVNamespace,
+  userId: string,
+  alsoKeys: readonly (string | null | undefined)[] = [],
+): Promise<void> {
+  await Promise.all([
+    deleteMemberFamilyId(kv, userId),
+    readAndRevokeAllAuthTokens(kv, userId, alsoKeys),
+    deleteOtpRecord(kv, userId),
+  ]);
+}
+
+/** The presented bearer's hash on a self-leave (`[hash]`), `[]` otherwise — a kick must never revoke the
+ *  owner's own token. */
+async function selfLeaveTokenKeys(
+  c: Context,
+  callerId: string,
+  targetUserId: string,
+): Promise<string[]> {
+  if (targetUserId !== callerId) return [];
+  const token = getPresentedAuthToken(c);
+  return token === null ? [] : [await hashAuthToken(token)];
 }
 
 /** Join half of the kick pairing: after the pointer put, re-read the tombstone; if present, delete the
