@@ -1,25 +1,29 @@
 /** The shared bridge that hands a verification-gated onboarding flow to the verification prompt. */
 
 import { useCallback } from "react";
+import type { ApiClient } from "../api/client";
 import {
   isVerificationError,
   type UseVerificationPromptResult,
 } from "./useVerificationPrompt";
 import type { OnboardingFlowStore } from "./useOnboardingFlowState";
+import { STALE_SESSION_CODE, STALE_SESSION_MESSAGE } from "./verificationCodes";
 
 /** Fallback when a verified join is refused for good (deleted / full / removed by the owner) and an
  *  older or self-hosted backend sent no message; the server normally explains the reason. */
 const FAMILY_GONE_FALLBACK_MESSAGE = "無法加入此家庭，請聯繫家庭管理者確認。";
 
 export interface RecoveryVerificationBridgeOptions {
+  apiClient: Pick<ApiClient, "getEndpoint">;
   verifyBegin: UseVerificationPromptResult["begin"];
   setState: OnboardingFlowStore["setState"];
   showRetryableError: (message: string) => void;
 }
 
-// setState appears in the dependency array only because it arrives as an
-// argument; it is identity-stable, so the memoisation is unchanged.
+// apiClient and setState sit in the deps only because they arrive as arguments; both are
+// identity-stable for the Dialog's lifetime, so the memoisation is unchanged.
 export function useRecoveryVerificationBridge({
+  apiClient,
   verifyBegin,
   setState,
   showRetryableError,
@@ -44,13 +48,23 @@ export function useRecoveryVerificationBridge({
       onFamilyGone?: (message: string) => void;
     }): Promise<boolean> => {
       if (!isVerificationError(params.errorCode)) return false;
+      // Where the prompt opened: no secret leaves once the client has moved off it
+      // (docs/architecture.md → 重新驗證視窗).
+      const server = apiClient.getEndpoint();
       setState("verify-prompt");
       await verifyBegin(
         params.errorCode,
         {
           userId: params.userId,
-          // Pure data transform: `run`'s outcome, shaped for the controller.
+          // `run`'s outcome, shaped for the controller.
           retry: async (secret) => {
+            if (apiClient.getEndpoint() !== server) {
+              return {
+                ok: false,
+                errorCode: STALE_SESSION_CODE,
+                errorMessage: STALE_SESSION_MESSAGE,
+              };
+            }
             const result = await params.run(secret);
             return {
               ok: result.recovered,
@@ -74,7 +88,7 @@ export function useRecoveryVerificationBridge({
       );
       return true;
     },
-    [verifyBegin, showRetryableError, setState],
+    [apiClient, verifyBegin, showRetryableError, setState],
   );
 
   return promptRecoveryVerification;

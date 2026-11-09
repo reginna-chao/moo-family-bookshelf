@@ -9,6 +9,7 @@ import type { OnboardingAttempts } from "./useOnboardingAttempts";
 import type { OnboardingFlowStore } from "./useOnboardingFlowState";
 import type { useOnboardingNavigation } from "./useOnboardingNavigation";
 import type { PromptRecoveryVerification } from "./useRecoveryVerificationBridge";
+import { STALE_SESSION_CODE } from "./verificationCodes";
 
 /** Shown on backing out of start's lookup challenge: the family data was withheld, so the normal
  *  screen would wrongly tell a user who has a family that they have none. */
@@ -43,6 +44,7 @@ export function useOnboardingStartFlow(opts: OnboardingStartFlowOptions) {
       displayName: string;
       verifySecret: string;
     }): Promise<RecoveryResult> => {
+      const server = apiClient.getEndpoint();
       const lookup = await lookupFamily({
         apiClient,
         userId: params.userId,
@@ -60,6 +62,10 @@ export function useOnboardingStartFlow(opts: OnboardingStartFlowOptions) {
         // Verified, but there is nothing to recover — continue as a new user.
         setState("idle");
         return { recovered: true };
+      }
+      // The join carries the secret again: never to a server the client moved to during the lookup.
+      if (apiClient.getEndpoint() !== server) {
+        return { recovered: false, errorCode: STALE_SESSION_CODE };
       }
       return attemptRecovery({
         familyId: existingFamilyId,
