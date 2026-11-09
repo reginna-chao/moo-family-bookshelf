@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo } from "react";
 import { ApiClient } from "../api/client";
-import { USER_ID_KEY, type AuthState } from "./useAuth";
+import type { AuthState } from "./useAuth";
+import { storedSessionIs } from "./authStorage";
 
 /** True when `a` is still session `b` (the keys that pick the client below). */
 export function isSameSession(a: AuthState | null, b: AuthState): boolean {
@@ -13,11 +14,11 @@ export function isSameSession(a: AuthState | null, b: AuthState): boolean {
 }
 
 /**
- * `isSameSession` plus `b.userId` still stored: React state lags a logout issued
- * after an await, but logout / login update `USER_ID_KEY` synchronously.
+ * `isSameSession` plus storage still holding `b`'s userId, familyId and server
+ * (token not compared); a storage read that throws counts as ended.
  */
 export function isLiveSession(a: AuthState | null, b: AuthState): boolean {
-  return isSameSession(a, b) && localStorage.getItem(USER_ID_KEY) === b.userId;
+  return isSameSession(a, b) && storedSessionIs(b);
 }
 
 /** Re-acquires a token for `session`; refuses unless `session` (userId, familyId, apiHost) is still the live one. */

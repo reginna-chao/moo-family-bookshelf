@@ -39,6 +39,9 @@ export interface UseAuthReturn {
   logout: () => void;
   /** Clears everything unconditionally, ignoring rememberSyncCode. Used by delete account. */
   forceLogout: () => void;
+  /** Ends only this tab's on-screen session and leaves localStorage alone; used when another
+   *  tab has already moved storage to a different session. */
+  dropSession: () => void;
   /** Pre-filled sync code from QR code, invite link, or remembered logout. */
   initialSyncCode: string;
   /** Pre-hashed userId from QR code (#code=…&uid=…). Skips email entry on LandingPage. */
@@ -135,12 +138,19 @@ export function useAuth(): UseAuthReturn {
     setInitialSyncCode("");
   }, []);
 
+  const dropSession = useCallback((): void => {
+    setAuth(null);
+    setQrUserId("");
+    setQrToken("");
+  }, []);
+
   return {
     auth,
     isLoading,
     login,
     logout,
     forceLogout,
+    dropSession,
     initialSyncCode,
     qrUserId,
     qrToken,

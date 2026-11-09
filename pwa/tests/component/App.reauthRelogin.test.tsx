@@ -36,6 +36,7 @@ import { webcrypto } from "node:crypto";
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
 const mockForceLogout = vi.fn();
+const mockDropSession = vi.fn();
 let mockAuth: Record<string, unknown> | null = null;
 
 vi.mock("@/hooks/useAuth", async (importOriginal) => {
@@ -48,6 +49,7 @@ vi.mock("@/hooks/useAuth", async (importOriginal) => {
       login: mockLogin,
       logout: mockLogout,
       forceLogout: mockForceLogout,
+      dropSession: mockDropSession,
       initialSyncCode: "",
       qrUserId: "",
       qrToken: "",
@@ -109,6 +111,7 @@ import {
   REMEMBER_SYNC_CODE_KEY,
   REMEMBERED_LOGOUT_KEY,
   USER_ID_KEY,
+  namespacedKey,
 } from "@/hooks/useAuth";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import {
@@ -139,10 +142,30 @@ const FAMILY_ID = "fam-001";
 const SESSION = { userId: USER_ID, familyId: FAMILY_ID, encryptionKey: "k" };
 const OTP = "123456";
 
+/** Removes the stored session identity production's logout clears (USER_ID_KEY, familyId, apiHost). */
+function removeMirroredSession(): void {
+  const userId = localStorage.getItem(USER_ID_KEY);
+  if (userId) {
+    localStorage.removeItem(namespacedKey(userId, "familyId"));
+    localStorage.removeItem(namespacedKey(userId, "apiHost"));
+  }
+  localStorage.removeItem(USER_ID_KEY);
+}
+
+/** Mirrors production's synchronous write of the session's userId, familyId and apiHost, which
+ *  App's `isLiveSession` compares with the session. */
 function setMockSession(next: Record<string, unknown> | null): void {
   mockAuth = next;
-  if (next) localStorage.setItem(USER_ID_KEY, next.userId as string);
-  else localStorage.removeItem(USER_ID_KEY);
+  removeMirroredSession();
+  if (!next) return;
+  const userId = next.userId as string;
+  localStorage.setItem(USER_ID_KEY, userId);
+  if (typeof next.familyId === "string") {
+    localStorage.setItem(namespacedKey(userId, "familyId"), next.familyId);
+  }
+  if (typeof next.apiHost === "string") {
+    localStorage.setItem(namespacedKey(userId, "apiHost"), next.apiHost);
+  }
 }
 
 function clearSuiteStorageKeys(): void {
@@ -151,10 +174,10 @@ function clearSuiteStorageKeys(): void {
     REMEMBERED_LOGOUT_KEY,
     REMEMBER_SYNC_CODE_KEY,
     RECOVERY_COOLDOWN_UNTIL_KEY,
-    USER_ID_KEY,
   ]) {
     localStorage.removeItem(key);
   }
+  removeMirroredSession();
 }
 
 /** Submit the landing form, then answer the "code" challenge with the OTP. */

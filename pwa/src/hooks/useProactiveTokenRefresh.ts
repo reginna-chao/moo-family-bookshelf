@@ -26,7 +26,8 @@ function needsRefresh(session: AuthState): boolean {
   return session.expiresAt - Date.now() < PROACTIVE_REFRESH_THRESHOLD_MS;
 }
 
-/** `current` is no longer the live session; storage that throws reads as ended. */
+/** `current` is no longer the live session, or storage now holds another session (`isLiveSession`).
+ *  The catch is an extra guard: `isLiveSession` already reads a throwing storage as ended. */
 function sessionEnded(live: AuthState | null, current: AuthState): boolean {
   try {
     return !isLiveSession(live, current);
