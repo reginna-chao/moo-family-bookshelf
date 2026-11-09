@@ -33,6 +33,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * of an all-unshared one. These cases back chrome.storage.local.get / remove
  * with a local store and the API with a stateful in-memory record, and run the
  * real merge so the onboarding PUT is built on top of the migrated record.
+ *
+ * #476 server change: a fresh Onboarding instance can put another server on the
+ * shared client while this sync runs, and the sync must stop instead of following
+ * it. These cases keep a personal-books cache in storage because the two checks
+ * cover different steps: with no cache the first check's absence would go unseen,
+ * since the migration would make no server call and the second check would still
+ * stop the upload. So each case goes red only when its own check is removed.
  */
 
 // Mock scraper module before importing the hook
@@ -80,6 +87,7 @@ import {
   BOOKS_TOO_LARGE_MESSAGE,
 } from "moo-family-bookshelf-shared/personal/saveErrors";
 import { SYNC_PAUSED_MESSAGE } from "@/sync/syncBreaker";
+import { SYNC_SERVER_CHANGED_MESSAGE } from "@/sync/pinnedSyncApi";
 import {
   setReadmooEmailCookie,
   clearReadmooEmailCookie,
@@ -936,5 +944,101 @@ describe("useAutoSetup", () => {
         expect(store[PERSONAL_BOOKS_CACHE_KEY]).toBe(ENCODED_CACHE);
       },
     );
+  });
+
+  // See the header → "#476 server change".
+  describe("syncBooks — the server changes during the sync (#476)", () => {
+    const USER_ID = "user-hash";
+    const OTHER_ENDPOINT = "https://other-server.example.test";
+    const KEPT_CACHE = encodePersonalBooksCache(USER_ID, [
+      {
+        bookId: "210000000000001",
+        title: "設好分享的書",
+        author: "",
+        isbn: "",
+        coverUrl: "",
+        readmooUrl: "",
+        category: "",
+        isShared: BoolFlag.TRUE,
+      },
+    ]);
+
+    let endpoint: string;
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      endpoint = MOCK_ENDPOINT;
+      vi.mocked(chrome.storage.local.get).mockImplementation((() =>
+        Promise.resolve({
+          [PERSONAL_BOOKS_CACHE_KEY]: KEPT_CACHE,
+        })) as unknown as typeof chrome.storage.local.get);
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    function createClient(): ApiClient {
+      return {
+        getEndpoint: vi.fn(() => endpoint),
+        getPersonalBooks: vi.fn().mockResolvedValue({ data: null }),
+        updatePersonalBooks: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      } as unknown as ApiClient;
+    }
+
+    async function runSync(api: ApiClient) {
+      const { result } = renderHook(() => useAutoSetup());
+      let success = true;
+      const promise = act(async () => {
+        success = await result.current.syncBooks({
+          userId: USER_ID,
+          apiClient: api,
+        });
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      await promise;
+      return { success, result };
+    }
+
+    function expectStoppedForServerChange(
+      run: Awaited<ReturnType<typeof runSync>>,
+    ): void {
+      expect(run.success).toBe(false);
+      expect(run.result.current.phase).toBe("error");
+      expect(run.result.current.errorMessage).toBe(SYNC_SERVER_CHANGED_MESSAGE);
+      expect(lastSyncWrittenValue()).toBeUndefined();
+      expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+    }
+
+    it("stops before the cache retry and the upload when the server changes during the scrape", async () => {
+      const { scrapeBooks } = await import("@/content/scraper");
+      vi.mocked(scrapeBooks).mockImplementationOnce(async () => {
+        endpoint = OTHER_ENDPOINT;
+        return [];
+      });
+      const api = createClient();
+
+      const run = await runSync(api);
+
+      expectStoppedForServerChange(run);
+      expect(api.getPersonalBooks).not.toHaveBeenCalled();
+      expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+    });
+
+    it("stops before the upload when the server changes during the cache retry's own read", async () => {
+      const api = createClient();
+      vi.mocked(api.getPersonalBooks).mockImplementationOnce(async () => {
+        endpoint = OTHER_ENDPOINT;
+        return {};
+      });
+
+      const run = await runSync(api);
+
+      expectStoppedForServerChange(run);
+      // The one call is the cache retry's read, sent before the change; the upload's would be a second.
+      expect(api.getPersonalBooks).toHaveBeenCalledTimes(1);
+      expect(api.updatePersonalBooks).not.toHaveBeenCalled();
+    });
   });
 });
