@@ -1521,10 +1521,32 @@ async function admitNewMember(
 
   // Skipped after a clear: re-reading the mark just deleted may see the old value and wipe this account.
   if (!settled.cleared && (await deletionStartedDuring(c.env.KV, userId))) {
+    await unlistJoinerAfterDeletion(c.env.KV, familyId, userId);
     return joinDeletionRaceResponse(c, recovery);
   }
 
   return c.json({ data: { ...record, authToken, expiresAt } }, 200);
+}
+
+/** Join-race cleanup (#468): re-read `family:{id}` and drop the wiped joiner unless no one would remain; fail-open,
+ *  no CAS. docs/architecture.md → 家庭成員的授權與移除 (沒清過標記時). */
+async function unlistJoinerAfterDeletion(
+  kv: KVNamespace,
+  familyId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const raw = await getFamilyRecord(kv, familyId);
+    if (!raw) return;
+    const record = normalizeFamilyRecord(raw);
+    const members = record.members.filter((m) => m.userId !== userId);
+    if (members.length === record.members.length || members.length === 0) {
+      return;
+    }
+    await putFamilyRecord(kv, familyId, { ...record, members });
+  } catch {
+    console.error("JOIN_RACE_MEMBER_CLEANUP_FAILED");
+  }
 }
 
 /** Join half of the kick pairing: after the pointer put, re-read the tombstone; if present, delete the

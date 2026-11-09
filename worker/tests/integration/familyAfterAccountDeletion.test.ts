@@ -528,11 +528,12 @@ describe("a QR-bypass join with a mark present", () => {
 });
 
 describe("a deletion that starts during the request", () => {
-  /** Run the real deletion while `request` is parked on `key`, then let it finish. */
+  /** Run the real deletion while `request` is parked on `key`, then `between`, then let it finish. */
   async function deleteDuring(
     key: string | ((name: string) => boolean),
     token: string,
     request: () => Promise<Response>,
+    between: () => Promise<void> = async () => {},
   ): Promise<Response> {
     const hold = holdNextWrite(kv, "put", key);
     const inFlight = request();
@@ -549,6 +550,7 @@ describe("a deletion that starts during the request", () => {
       token,
     );
     expect(await dataOf(deletion, 200)).toEqual({ ok: true });
+    await between();
     hold.release();
     const res = await inFlight;
     expect(hold.landed()).toBe(true);
@@ -632,8 +634,24 @@ describe("a deletion that starts during the request", () => {
     ]);
   });
 
-  it("a new member's join answers 409 IN_PROGRESS and leaves no session", async () => {
+  function familyRecord(familyId: string): Promise<Json> {
+    return kv.get(kvKeys.family(familyId), "json");
+  }
+
+  function memberIds(record: Json): string[] {
+    return (record.members as Json[]).map((m) => m.userId as string);
+  }
+
+  /** The writes from this call on, read once the request has finished. */
+  function writesFromNow(): () => string[] {
+    const ops = watchKvOps(kv);
+    const seen = ops.writeTrail().length;
+    return () => ops.writeTrail().slice(seen);
+  }
+
+  it("a new member's join answers 409 IN_PROGRESS, leaves no session and takes the joiner off the list", async () => {
     const familyId = await ownerFamily();
+    const before = await familyRecord(familyId);
     const token = await seedAuthToken(kv, USER);
 
     const res = await deleteDuring(kvKeys.family(familyId), token, () =>
@@ -643,8 +661,121 @@ describe("a deletion that starts during the request", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual(IN_PROGRESS_BODY);
     await expectNoSession();
-    expect(await kv.get(kvKeys.family(familyId))).not.toBeNull();
+    const after = await familyRecord(familyId);
+    expect(memberIds(after)).toEqual([OWNER]);
+    expect(after).toEqual(before);
     expect(await kv.get(kvKeys.member(OWNER))).toBe(familyId);
+  });
+
+  describe("taking the joiner back off the list", () => {
+    /** The join parked on its pointer put, after its `family:` put has landed. */
+    function raceNewMemberJoin(
+      familyId: string,
+      token: string,
+      between: () => Promise<void>,
+    ): Promise<Response> {
+      return deleteDuring(
+        kvKeys.member(USER),
+        token,
+        () => joinFamily(familyId),
+        between,
+      );
+    }
+
+    it("re-reads the record, so a write landing after the join's own put survives", async () => {
+      const owner = await dataOf(await createFamily(OWNER), 201);
+      const familyId = owner.familyId as string;
+      const token = await seedAuthToken(kv, USER);
+      let writes: () => string[] = () => [];
+
+      const res = await raceNewMemberJoin(familyId, token, async () => {
+        const renamed = await send(
+          "PUT",
+          `/api/family/${familyId}/member/${OWNER}/displayName`,
+          { displayName: "新名字" },
+          owner.authToken,
+        );
+        expect(renamed.status).toBe(200);
+        writes = writesFromNow();
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual(IN_PROGRESS_BODY);
+      await expectNoSession();
+      expect(writes()).toContain(`put ${kvKeys.family(familyId)}`);
+      const after = await familyRecord(familyId);
+      expect(memberIds(after)).toEqual([OWNER]);
+      expect(after.members[0].displayName).toBe("新名字");
+      expect(after.ownerId).toBe(OWNER);
+    });
+
+    it("writes nothing to the family when the joiner is already gone from the list", async () => {
+      const familyId = await ownerFamily();
+      const ownerOnly = await familyRecord(familyId);
+      const token = await seedAuthToken(kv, USER);
+      let writes: () => string[] = () => [];
+
+      const res = await raceNewMemberJoin(familyId, token, async () => {
+        await kv.put(kvKeys.family(familyId), JSON.stringify(ownerOnly));
+        writes = writesFromNow();
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual(IN_PROGRESS_BODY);
+      expect(
+        writes().filter((w) => w.endsWith(kvKeys.family(familyId))),
+      ).toEqual([]);
+      expect(await familyRecord(familyId)).toEqual(ownerOnly);
+    });
+
+    it("never writes an empty member list: a record listing only the joiner is left as it is", async () => {
+      const familyId = await ownerFamily();
+      const token = await seedAuthToken(kv, USER);
+      let joinerOnly: Json = null;
+      let writes: () => string[] = () => [];
+
+      const res = await raceNewMemberJoin(familyId, token, async () => {
+        const listed = await familyRecord(familyId);
+        expect(memberIds(listed)).toEqual([OWNER, USER]);
+        joinerOnly = {
+          ...listed,
+          members: listed.members.filter((m: Json) => m.userId === USER),
+        };
+        await kv.put(kvKeys.family(familyId), JSON.stringify(joinerOnly));
+        writes = writesFromNow();
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual(IN_PROGRESS_BODY);
+      expect(
+        writes().filter((w) => w.endsWith(kvKeys.family(familyId))),
+      ).toEqual([]);
+      expect(await familyRecord(familyId)).toEqual(joinerOnly);
+      expect(memberIds(joinerOnly)).toEqual([USER]);
+    });
+
+    it.each(["get", "put"] as const)(
+      "still answers 409 IN_PROGRESS when the family %s throws, logging the event name only",
+      async (op) => {
+        const familyId = await ownerFamily();
+        const token = await seedAuthToken(kv, USER);
+        const real = (kv[op] as (...args: unknown[]) => unknown).bind(kv);
+
+        const res = await raceNewMemberJoin(familyId, token, async () => {
+          vi.spyOn(kv, op).mockImplementation(((...args: unknown[]) =>
+            args[0] === kvKeys.family(familyId)
+              ? Promise.reject(new Error("KV down"))
+              : real(...args)) as never);
+        });
+
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual(IN_PROGRESS_BODY);
+        await expectNoSession();
+        expect(consoleError.mock.calls).toEqual([
+          ["JOIN_RACE_MEMBER_CLEANUP_FAILED"],
+        ]);
+      },
+    );
   });
 
   it.each([
@@ -655,20 +786,31 @@ describe("a deletion that starts during the request", () => {
       body: RECOVERY_REFUSED_BODY,
     },
   ])(
-    "$label answers its own 409 and leaves no session",
+    "$label answers its own 409, leaves no session and leaves the list as the deletion left it",
     async ({ extra, body }) => {
       const familyId = await ownerFamily();
       const joined = await dataOf(await joinFamily(familyId), 200);
+      let writes: () => string[] = () => [];
+      let leftByDeletion: Json = null;
 
       const res = await deleteDuring(
         (name) => name.startsWith(kvKeys.authTokenIndex(USER, "")),
         joined.authToken,
         () => joinFamily(familyId, extra),
+        async () => {
+          leftByDeletion = await familyRecord(familyId);
+          writes = writesFromNow();
+        },
       );
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual(body);
       await expectNoSession();
+      expect(memberIds(leftByDeletion)).toEqual([OWNER]);
+      expect(
+        writes().filter((w) => w.endsWith(kvKeys.family(familyId))),
+      ).toEqual([]);
+      expect(await familyRecord(familyId)).toEqual(leftByDeletion);
     },
   );
 });
