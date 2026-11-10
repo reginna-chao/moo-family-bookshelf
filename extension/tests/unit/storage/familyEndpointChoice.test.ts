@@ -40,8 +40,10 @@ import {
  * interleaving with another tab's write-back lands inside the endpoint write, between
  * the two removals.
  *
- * resetFamilyEndpointChoice: leaving a family drops this device's endpoint state
- * entirely. The endpoint is FAMILY-scoped — the owner picks it, every member
+ * resetFamilyEndpointChoice: drops this device's endpoint state entirely. Only
+ * `dialog/useReauth.ts`'s catch path uses it, after `clearFamilyStorage` rejects;
+ * leaving a family and being removed instead fold `FAMILY_ENDPOINT_CHOICE_KEYS`
+ * into the teardown's own single removal (#492). The endpoint is FAMILY-scoped — the owner picks it, every member
  * adopts it — so a family-less client left pointing at the former family's
  * server would send the next create/join there (userId, display name, the token
  * that server issues, the whole personal book list) and bake that host into the
@@ -382,7 +384,7 @@ describe("familyEndpointChoice storage", () => {
     });
   });
 
-  // Leaving a family drops the FAMILY-scoped endpoint AND the declined marker.
+  // The useReauth catch-path reset: drops the FAMILY-scoped endpoint AND the declined marker.
   // See the header → "resetFamilyEndpointChoice".
   describe("resetFamilyEndpointChoice", () => {
     it("drops the accepted endpoint AND the declined marker", async () => {
@@ -419,8 +421,8 @@ describe("familyEndpointChoice storage", () => {
       expect(browser.storage.local.set).not.toHaveBeenCalled();
     });
 
-    // Account deletion reaches this through the same leave handler AFTER a
-    // storage.local.clear(), so "nothing stored" must be an ordinary no-op.
+    // A reset may find no endpoint state at all (e.g. this device never switched
+    // servers), so "nothing stored" must be an ordinary no-op.
     it("is a no-op when this device had no endpoint state", async () => {
       await expect(resetFamilyEndpointChoice()).resolves.toBeUndefined();
 

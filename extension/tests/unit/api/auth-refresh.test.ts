@@ -1,4 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from "vitest";
+import browser from "webextension-polyfill";
 import {
   clearFamilyStorage,
   doRefreshToken,
@@ -75,8 +84,8 @@ import {
  *    server; the rate-limit branch keeps it because the client still needs to
  *    reach the right server once the window clears.
  * `endpointChoiceWasReset()` checks BOTH keys (the accepted endpoint and the
- * declined marker) — what `resetFamilyEndpointChoice` removes in one call.
- * Housing the reset INSIDE the shared teardown (`clearFamilyStorage`)
+ * declined marker) — the family-scoped endpoint keys (`FAMILY_ENDPOINT_CHOICE_KEYS`).
+ * Folding them into the shared teardown's (`clearFamilyStorage`) single removal
  * is what structurally guarantees the silent path and the re-verification path
  * do it identically.
  *
@@ -154,12 +163,21 @@ import {
  * NOT invoke `onFamilyRemoved` — reacting in the UI is the caller's business and
  * the two callers do it at different moments. It sends no message of its own
  * (#366: the message it used to send had no receiver).
- *  - Order is binding → endpoint: resetting the endpoint while the family
- *    binding still stands would leave a bound client talking to the wrong
- *    server.
- *  - `resetFamilyEndpointChoice` swallows its own storage failures, so it can
- *    never abort the teardown it was added to: the familyId removal has already happened, and App's own
- *    handler still puts the LIVE client back on the default.
+ *  - Binding and endpoint go in ONE local removal (#492): there is no state with
+ *    the binding still standing and the endpoint already reset (a bound client
+ *    talking to the wrong server), nor with a token left and its endpoint gone.
+ *    Before, the endpoint keys went in a second removal, so another tab's join
+ *    (`persistJoinCredentials`: familyId + self-hosted token + endpoint in one
+ *    `set`) landing between the two kept its token but lost its endpoint, and
+ *    that token would then go to the official default.
+ *  - A failed removal rejects as a whole, keeping familyId AND endpoint
+ *    together. The callers handle it: `dialog/useReauth.ts`'s catch resets the
+ *    endpoint itself, and App's handler puts the LIVE client back on the default.
+ *
+ * Another tab's join mid-teardown (`afterFirstWrite`): the hook runs one write
+ * right after the next local storage write takes hold, i.e. right after the
+ * teardown's first removal. The store implementations are restored in
+ * `afterEach`, so the hook cannot leak into the file's other suites.
  */
 
 interface RequestOutcome {
@@ -243,8 +261,8 @@ function familyWasCleared(): boolean {
     );
 }
 
-/** True when BOTH family-scoped endpoint keys (accepted endpoint + declined
- *  marker) were removed — what `resetFamilyEndpointChoice` removes in one call. */
+/** True when BOTH family-scoped endpoint keys (`FAMILY_ENDPOINT_CHOICE_KEYS`: the
+ *  accepted endpoint + the declined marker) were removed in one call. */
 function endpointChoiceWasReset(): boolean {
   return vi
     .mocked(chrome.storage.local.remove)
@@ -1200,6 +1218,30 @@ describe("isFamilyGoneError", () => {
   });
 });
 
+const NEW_FAMILY = "fam-new";
+const SELF_HOSTED_TOKEN = "b".repeat(64);
+const SELF_HOSTED_URL = "https://self-hosted.example";
+
+type StorageWrite = Mock<(arg: unknown) => Promise<void>>;
+const localSet = browser.storage.local.set as unknown as StorageWrite;
+const localRemove = browser.storage.local.remove as unknown as StorageWrite;
+const storeSet = localSet.getMockImplementation()!;
+const storeRemove = localRemove.getMockImplementation()!;
+
+/** Run `effect` once, right after the next local storage write takes hold. */
+function afterFirstWrite(effect: () => Promise<void>): void {
+  let fired = false;
+  const firing =
+    (store: (arg: unknown) => Promise<void>) => async (arg: unknown) => {
+      await store(arg);
+      if (fired) return;
+      fired = true;
+      await effect();
+    };
+  localSet.mockImplementation(firing(storeSet));
+  localRemove.mockImplementation(firing(storeRemove));
+}
+
 // Shared "no family any more" teardown for the silent path and `dialog/useReauth.ts`;
 // never calls `onFamilyRemoved`. See the header → "clearFamilyStorage".
 describe("clearFamilyStorage", () => {
@@ -1219,6 +1261,8 @@ describe("clearFamilyStorage", () => {
   });
 
   afterEach(async () => {
+    localSet.mockImplementation(storeSet);
+    localRemove.mockImplementation(storeRemove);
     // The store behind the setup mock is module-scoped: clear it while the
     // store-backed implementations are still installed.
     await chrome.storage.local.clear();
@@ -1250,54 +1294,60 @@ describe("clearFamilyStorage", () => {
       expect(local).toEqual({});
     });
 
-    it("resets the endpoint only after the family binding is gone", async () => {
+    it("removes the family binding and the endpoint keys in one local removal", async () => {
       await clearFamilyStorage();
 
-      // Order is binding → endpoint. See the header → "clearFamilyStorage".
+      // One removal, no gap between binding and endpoint. See the header → "clearFamilyStorage".
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
+      expect(removeCalls).toHaveLength(1);
       expect(removeCalls[0][0]).toEqual([
         FAMILY_ID_KEY,
         STORE_PAGE_INDEX_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        API_ENDPOINT_KEY,
+        DECLINED_FAMILY_ENDPOINT_KEY,
       ]);
-      expect(removeCalls[1][0]).toEqual(
-        expect.arrayContaining([
-          API_ENDPOINT_KEY,
-          DECLINED_FAMILY_ENDPOINT_KEY,
-        ]),
-      );
     });
 
-    // `resetFamilyEndpointChoice` swallows its own storage failure; the familyId
-    // removal is unaffected. See the header → "clearFamilyStorage".
-    it("still clears the familyId and warns when the endpoint reset's storage write fails", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      // Only the endpoint remove rejects; the familyId remove still resolves.
-      const remove = vi.mocked(chrome.storage.local.remove);
-      remove.mockImplementation(((keys: unknown) =>
-        Array.isArray(keys) && (keys as string[]).includes(API_ENDPOINT_KEY)
-          ? Promise.reject(new Error("storage unavailable"))
-          : Promise.resolve()) as typeof chrome.storage.local.remove);
+    // A failed removal rejects as a whole and keeps familyId, token and endpoint
+    // together. See the header → "clearFamilyStorage".
+    it("rejects and keeps the family, its token and its endpoint when the removal fails", async () => {
+      vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
 
-      try {
-        await expect(clearFamilyStorage()).resolves.toBeUndefined();
+      await expect(clearFamilyStorage()).rejects.toThrow("storage unavailable");
 
-        // The family binding — the part that must not survive — was still dropped.
-        expect(remove).toHaveBeenCalledWith([
-          FAMILY_ID_KEY,
-          STORE_PAGE_INDEX_KEY,
-          AUTH_TOKEN_KEY,
-          TOKEN_EXPIRES_AT_KEY,
-        ]);
-        // Swallowed, not silenced — the failure stays on the record.
-        expect(warn).toHaveBeenCalled();
-      } finally {
-        // Hand the shared store-backed implementation back: the file's other
-        // suites read and write through it.
-        remove.mockRestore();
-        warn.mockRestore();
-      }
+      const synced = await chrome.storage.sync.get(FAMILY_ID_KEY);
+      expect(synced[FAMILY_ID_KEY]).toBe("fam-1");
+      const local = await chrome.storage.local.get(null);
+      expect(local).toMatchObject({
+        [FAMILY_ID_KEY]: "fam-1",
+        [AUTH_TOKEN_KEY]: "old-token",
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: null },
+      });
+    });
+
+    // See the header → "Another tab's join mid-teardown".
+    it("never leaves another tab's self-hosted token without its endpoint (#492)", async () => {
+      const otherTab = vi.fn(async () => {
+        await storeSet({
+          [FAMILY_ID_KEY]: NEW_FAMILY,
+          [AUTH_TOKEN_KEY]: SELF_HOSTED_TOKEN,
+          [API_ENDPOINT_KEY]: SELF_HOSTED_URL,
+        });
+      });
+      afterFirstWrite(otherTab);
+
+      await clearFamilyStorage();
+
+      expect(otherTab).toHaveBeenCalledTimes(1);
+      const local = await chrome.storage.local.get(null);
+      expect(local[FAMILY_ID_KEY]).toBe(NEW_FAMILY);
+      expect(local[AUTH_TOKEN_KEY]).toBe(SELF_HOSTED_TOKEN);
+      expect(local[API_ENDPOINT_KEY]).toBe(SELF_HOSTED_URL);
     });
   });
 
@@ -1306,8 +1356,8 @@ describe("clearFamilyStorage", () => {
 
     await clearFamilyStorage();
 
-    // The endpoint reset would pair a surviving token with the official default (#456); the userId
-    // is the user's own and outlives the family (Invariant 5).
+    // A token left behind would pair with the official default once the same removal drops the
+    // endpoint (#456, #492); the userId is the user's own and outlives the family (Invariant 5).
     const local = await chrome.storage.local.get([
       USER_ID_KEY,
       AUTH_TOKEN_KEY,
