@@ -191,12 +191,12 @@ Every push/PR triggers:
 
 ### CD (GitHub Actions)
 
-| Trigger                             | Action                                                                                                                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Merge to `main` + `worker/` changed | Deploy the **dev** Worker only (`deploy-worker-dev`)                                                                                                                     |
-| Merge to `main` + `pwa/` changed    | Deploy the PWA to the **dev** Cloudflare Pages project `moo-family-bookshelf-dev` (`deploy-pwa-dev`)                                                                     |
-| Merge to `main` + `site/` changed   | Deploy GitHub Pages (`deploy-pages`)                                                                                                                                     |
-| Git tag `v*`                        | Deploy the **production** Worker and PWA (`deploy-worker-prod`, `deploy-pwa-prod`), build the Extension → `.zip` → GitHub Release, then build & submit the Firefox build |
+| Trigger                             | Action                                                                                                                                                                                                                                                                                             |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Merge to `main` + `worker/` changed | Deploy the **dev** Worker only (`deploy-worker-dev`)                                                                                                                                                                                                                                               |
+| Merge to `main` + `pwa/` changed    | Deploy the PWA to the **dev** Cloudflare Pages project `moo-family-bookshelf-dev` (`deploy-pwa-dev`)                                                                                                                                                                                               |
+| Merge to `main` + `site/` changed   | Deploy GitHub Pages (`deploy-pages`)                                                                                                                                                                                                                                                               |
+| Git tag `v*`                        | Deploy the **production** Worker and PWA (`deploy-worker-prod` deploys the backup Worker first, unless repo variable `KV_BACKUP_DEPLOY` is `false`, then the API Worker; `deploy-pwa-prod` runs in parallel), build the Extension → `.zip` → GitHub Release, then build & submit the Firefox build |
 
 A merge to `main` never reaches production: everything a user runs ships on the tag. The production Worker is live minutes after the tag, while the Extension waits for the store rollout (hours) and the PWA for the user's next reload — that gap is what the `**請更新擴充功能／PWA**` line in `.claude/rules/user-facing-copy.md` (Rule 8) exists for.
 
@@ -206,7 +206,7 @@ When `CHANGELOG.md` is written: between releases, every `/develop` run writes it
 
 ### Secrets
 
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (Worker and PWA deploys), `KV_NAMESPACE_ID_DEV`, `KV_NAMESPACE_ID_PROD` (substituted into `wrangler.toml` by the Worker deploys; the backup Worker is built but never deployed by CI), `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` (Firefox add-on submission), `CLAUDE_CODE_OAUTH_TOKEN` (the two Claude review workflows). `GITHUB_TOKEN` is also used, but GitHub provides it automatically — nothing to configure.
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (Worker and PWA deploys), `KV_NAMESPACE_ID_DEV`, `KV_NAMESPACE_ID_PROD` (substituted into `wrangler.toml` by the Worker deploys; also substituted into `wrangler.backup.toml` by `deploy-worker-prod`, which deploys the backup Worker before the API Worker on a tag), `AMO_JWT_ISSUER`, `AMO_JWT_SECRET` (Firefox add-on submission), `CLAUDE_CODE_OAUTH_TOKEN` (the two Claude review workflows). `GITHUB_TOKEN` is also used, but GitHub provides it automatically — nothing to configure.
 
 ### Dev Script Maintenance Note
 

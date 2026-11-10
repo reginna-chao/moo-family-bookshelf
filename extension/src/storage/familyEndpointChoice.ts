@@ -55,14 +55,18 @@ export async function saveDeclinedFamilyEndpoint(
   }
 }
 
+/** The storage keys holding this device's family endpoint choice. The family teardowns put them
+ *  in their own single storage removal (#492). */
+export const FAMILY_ENDPOINT_CHOICE_KEYS: readonly string[] = [
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
+];
+
 /** `null` reverts to the official default: the key is removed rather than storing the default URL.
  *  Throws when storage refuses. */
 async function writeAcceptedEndpoint(target: string | null): Promise<void> {
   if (target === null) {
-    await browser.storage.local.remove([
-      API_ENDPOINT_KEY,
-      DECLINED_FAMILY_ENDPOINT_KEY,
-    ]);
+    await browser.storage.local.remove([...FAMILY_ENDPOINT_CHOICE_KEYS]);
   } else {
     await browser.storage.local.set({ [API_ENDPOINT_KEY]: target });
     await browser.storage.local.remove([DECLINED_FAMILY_ENDPOINT_KEY]);
@@ -110,8 +114,10 @@ export async function persistSwitchedFamilyEndpoint(
  * Drop this device's family-endpoint state entirely — the accepted endpoint AND
  * the declined marker — so a family-less client is back on the official default.
  *
- * Called when the user leaves a family (dialog/familyBindingReset.ts, dialog/useReauth.ts,
- * api/auth-refresh.ts). The endpoint is a FAMILY-scoped setting: the owner picks it and every
+ * Called only from dialog/useReauth.ts's catch path, after clearFamilyStorage rejects. The two
+ * family teardowns (clearStoredFamilyBinding, clearFamilyStorage) instead fold
+ * FAMILY_ENDPOINT_CHOICE_KEYS into their own single storage removal (#492).
+ * The endpoint is a FAMILY-scoped setting: the owner picks it and every
  * member adopts it, so it must not outlive the membership. A client left pointing at a former
  * family's server would send the next create/join there — userId, display name, the auth token
  * that server issues, and the whole personal book list, unshared books included — and would bake

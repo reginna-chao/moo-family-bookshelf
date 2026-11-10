@@ -13,6 +13,7 @@ import {
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
   STORE_PAGE_INDEX_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
 } from "@/constants";
 
 /**
@@ -1800,12 +1801,14 @@ describe("ApiClient", () => {
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
       ]);
-      // Then: clear family data after recovery fails
+      // Then: clear family data and its endpoint in one removal after recovery fails (#492)
       expect(chrome.storage.local.remove).toHaveBeenCalledWith([
         FAMILY_ID_KEY,
         STORE_PAGE_INDEX_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        API_ENDPOINT_KEY,
+        DECLINED_FAMILY_ENDPOINT_KEY,
       ]);
     });
 

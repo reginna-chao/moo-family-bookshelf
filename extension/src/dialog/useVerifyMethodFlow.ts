@@ -8,6 +8,9 @@ import { recoverStepUp } from "./stepUp";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
+export const VERIFY_SERVER_CHANGED_MESSAGE =
+  "伺服器已更換，請重新設定驗證方式。";
+
 export interface UseVerifyMethodFlowOptions {
   userId: string;
   apiClient: ApiClient;
@@ -94,6 +97,7 @@ export function useVerifyMethodFlow({
       setSaveState("saving");
       setSaveError("");
       const asked = current === undefined ? null : currentMethod;
+      const server = apiClient.getEndpoint();
       const result = await saveVerifyMethod(
         apiClient,
         userId,
@@ -102,6 +106,12 @@ export function useVerifyMethodFlow({
         current,
       );
       setCurrentSecret(undefined);
+      // The save went to the server recorded above; nothing further goes to another one.
+      if (apiClient.getEndpoint() !== server) {
+        setSaveState("error");
+        setSaveError(VERIFY_SERVER_CHANGED_MESSAGE);
+        return;
+      }
       if (result.error) {
         await settleSaveError(result.error, asked);
         return;
