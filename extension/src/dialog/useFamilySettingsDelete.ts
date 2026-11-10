@@ -5,13 +5,19 @@ import type { ApiErrorPayload, ApiResponse, VerifyMethod } from "../api/types";
 import { runGuardedDeparture } from "../storage/selfDeparture";
 import { treatAccountDeletedAsSuccess } from "moo-family-bookshelf-shared/api/accountDeleted";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
+import { departureBindingIsCurrent } from "./departureBinding";
 import { pinDepartureServer } from "./departureServerPin";
 import { readVerifyMethod, recoverStepUp } from "./stepUp";
 
 export type DeleteState = "idle" | "confirming" | "deleting";
 
+/** Shown when the delete succeeded but storage now binds another account or family. */
+export const DELETED_ELSEWHERE_MESSAGE =
+  "帳戶已移除。這個視窗的資料已過期，請關閉後重新開啟。";
+
 export interface UseFamilySettingsDeleteOptions {
   userId: string;
+  familyId: string;
   apiClient: ApiClient;
   onLeave: () => void;
 }
@@ -37,6 +43,7 @@ export interface UseFamilySettingsDeleteResult {
  */
 export function useFamilySettingsDelete({
   userId,
+  familyId,
   apiClient,
   onLeave,
 }: UseFamilySettingsDeleteOptions): UseFamilySettingsDeleteResult {
@@ -56,8 +63,13 @@ export function useFamilySettingsDelete({
 
   const settleDelete = async (response: ApiResponse<{ ok: boolean }>) => {
     if (response.error) return;
-    // Best-effort: the server account is already, irreversibly, deleted, so a failed local clear
-    // must not block onLeave() or surface as an error.
+    if (!(await departureBindingIsCurrent({ userId, familyId }))) {
+      setDeleteError(DELETED_ELSEWHERE_MESSAGE);
+      setDeleteState("idle");
+      return;
+    }
+    // The server account is gone for good. Storage that now names another account or family is left
+    // alone (that binding is not ours to clear); otherwise a failed local clear must not block onLeave().
     try {
       await browser.storage.local.clear();
     } catch (clearErr) {

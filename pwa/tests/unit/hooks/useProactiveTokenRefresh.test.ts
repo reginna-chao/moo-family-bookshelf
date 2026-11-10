@@ -28,7 +28,8 @@ import { beginSelfDeparture } from "@/utils/selfDeparture";
  *  - Renew when less than `PROACTIVE_REFRESH_THRESHOLD_MS` (30 days) is left, or when the session
  *    has no usable expiry (sessions saved before #364, a rotated token) — exactly one request.
  *  - The 429 recovery cooldown is NOT consulted (it only gates the recovery join); the user's own
- *    leave / delete in flight (`isSelfDepartureActive`) and an ended session are.
+ *    leave / delete in flight (`isSelfDepartureActive`) and an ended session are — storage that
+ *    another tab moved to another family or server of the same user counts as ended (`isLiveSession`).
  *  - The request goes out on a throwaway client with no token refresher; any failure — error
  *    envelope, network error, thrown exception, unusable token — changes nothing, sends no join,
  *    and the next foreground check tries again.
@@ -752,6 +753,53 @@ describe("useProactiveTokenRefresh", () => {
       expect(refreshCount()).toBe(1);
       unmount();
     });
+
+    it.each<{
+      label: string;
+      outcome: string;
+      otherTab: () => void;
+      expected: number;
+    }>([
+      {
+        label: "another family",
+        outcome: "no refresh",
+        otherTab: () =>
+          localStorage.setItem(namespacedKey(USER_A, "familyId"), "fam-tab2"),
+        expected: 0,
+      },
+      {
+        label: "another server",
+        outcome: "no refresh",
+        otherTab: () =>
+          localStorage.setItem(
+            namespacedKey(USER_A, "apiHost"),
+            "https://other.example.com",
+          ),
+        expected: 0,
+      },
+      // Positive companion: the same check renews while storage still holds this session.
+      {
+        label: "nothing else",
+        outcome: "one refresh",
+        otherTab: () => {},
+        expected: 1,
+      },
+    ])(
+      "sends $outcome once storage of the same user moved to $label before the check",
+      async ({ otherTab, expected }) => {
+        visibility = "hidden";
+        seedSession({ apiHost: "https://self.example.com" });
+        const { onLogin, unmount } = await renderApp();
+        expect(refreshCount()).toBe(0);
+
+        otherTab();
+        await setVisibility("visible");
+
+        expect(refreshCount()).toBe(expected);
+        expect(onLogin).toHaveBeenCalledTimes(expected);
+        unmount();
+      },
+    );
 
     it("leaves a session without a token to the auto-acquire path", async () => {
       seedSession({ token: null });
