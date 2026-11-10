@@ -28,17 +28,6 @@ const ACCOUNT_LOCAL_KEYS = [
   PERSONAL_BOOKS_CACHE_KEY,
 ];
 
-/** Best-effort: Firefox's sleeping background page can drop this message. */
-function notifyBackgroundFamilyCleared(): void {
-  try {
-    void Promise.resolve(
-      browser.runtime.sendMessage({ type: "CLEAR_FAMILY_ID" }),
-    ).catch(() => {});
-  } catch {
-    // Background unreachable — the direct storage removal below is authoritative.
-  }
-}
-
 async function removeSyncFamilyId(): Promise<void> {
   try {
     await browser.storage.sync.remove(FAMILY_ID_KEY);
@@ -48,8 +37,9 @@ async function removeSyncFamilyId(): Promise<void> {
 }
 
 /**
- * Remove familyId + auth credentials from storage DIRECTLY (the background
- * message can fail in Firefox), so Unbind Isolation never depends on it.
+ * Remove familyId + auth credentials from storage DIRECTLY — the Dialog never
+ * routes this through a background message — so Unbind Isolation rests on
+ * this removal alone.
  *
  * The API endpoint is a FAMILY-scoped setting — the owner picks it, every
  * member adopts it — so its stored choice goes too, but only once the local
@@ -61,12 +51,11 @@ async function removeSyncFamilyId(): Promise<void> {
  * the chip switch is the user's own setting and stays.
  *
  * Every removal is started synchronously; rejects if the local removal fails.
- * The background message and the storage.sync removal are best-effort.
+ * Only the storage.sync removal is best-effort.
  */
 export async function clearStoredFamilyBinding(
   extraLocalKeys: readonly string[] = [],
 ): Promise<void> {
-  notifyBackgroundFamilyCleared();
   const syncRemoval = removeSyncFamilyId();
   await browser.storage.local.remove([
     FAMILY_ID_KEY,

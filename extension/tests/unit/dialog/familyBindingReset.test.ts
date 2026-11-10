@@ -97,7 +97,7 @@ describe("familyBindingReset", () => {
   beforeEach(async () => {
     await chrome.storage.local.clear();
     await chrome.storage.sync.clear();
-    vi.clearAllMocks();
+    vi.clearAllMocks(); // clears sendMessage's call log, so each not-called check starts clean
     vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
     fetchMock = vi.fn().mockRejectedValue(new Error("no network in tests"));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -128,9 +128,7 @@ describe("familyBindingReset", () => {
       // Positive companion: the store was readable and device prefs survive.
       expect(local).toEqual({ [AUTO_SYNC_INTERVAL_KEY]: "daily" });
       expect(await chrome.storage.sync.get(null)).toEqual({});
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "CLEAR_FAMILY_ID",
-      });
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
     });
 
     it("resets the live client and calls no API", async () => {
@@ -199,10 +197,7 @@ describe("familyBindingReset", () => {
       expect(await chrome.storage.sync.get(null)).toEqual({});
     });
 
-    it("still clears local storage when the background and sync storage fail", async () => {
-      vi.mocked(chrome.runtime.sendMessage).mockImplementation(() => {
-        throw new Error("Receiving end does not exist.");
-      });
+    it("still clears local storage when sync storage fails", async () => {
       vi.mocked(chrome.storage.sync.remove).mockImplementationOnce(() =>
         Promise.reject(new Error("sync unavailable")),
       );
