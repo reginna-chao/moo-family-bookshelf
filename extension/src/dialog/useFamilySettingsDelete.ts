@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import browser from "webextension-polyfill";
 import type { ApiClient } from "../api/client";
 import type { ApiErrorPayload, ApiResponse, VerifyMethod } from "../api/types";
@@ -10,6 +10,8 @@ import { pinDepartureServer } from "./departureServerPin";
 import { readVerifyMethod, recoverStepUp } from "./stepUp";
 
 export type DeleteState = "idle" | "confirming" | "deleting";
+
+type ServerCheck = () => void;
 
 /** Shown when the delete succeeded but storage now binds another account or family. */
 export const DELETED_ELSEWHERE_MESSAGE =
@@ -47,18 +49,44 @@ export function useFamilySettingsDelete({
   apiClient,
   onLeave,
 }: UseFamilySettingsDeleteOptions): UseFamilySettingsDeleteResult {
-  const [deleteState, setDeleteState] = useState<DeleteState>("idle");
+  const [deleteState, setRawDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [requiredMethod, setRequiredMethod] = useState<VerifyMethod | null>(
     null,
   );
   const [secretError, setSecretError] = useState("");
+  // The server pinned when this confirm session opened; every send reuses it, never re-pins.
+  // Why: docs/architecture.md → 離開家庭時一併清除.
+  const serverCheckRef = useRef<ServerCheck | null>(null);
+
+  // Back at idle the confirm session is over: the next startConfirming() pins afresh.
+  const setDeleteState = (state: DeleteState) => {
+    if (state === "idle") serverCheckRef.current = null;
+    setRawDeleteState(state);
+  };
+
+  const failDelete = (err: unknown) => {
+    setDeleteError(
+      err instanceof Error ? err.message : "移除帳戶失敗，請稍後再試",
+    );
+    setDeleteState("idle");
+  };
 
   const startConfirming = async () => {
     setDeleteError("");
     setSecretError("");
-    setRequiredMethod(await readVerifyMethod(apiClient, userId));
-    setDeleteState("confirming");
+    try {
+      const assertSameServer = pinDepartureServer(apiClient);
+      serverCheckRef.current = assertSameServer;
+      const method = await readVerifyMethod(apiClient, userId);
+      // A later startConfirming() owns the confirm step now.
+      if (serverCheckRef.current !== assertSameServer) return;
+      assertSameServer();
+      setRequiredMethod(method);
+      setDeleteState("confirming");
+    } catch (err) {
+      failDelete(err);
+    }
   };
 
   const settleDelete = async (response: ApiResponse<{ ok: boolean }>) => {
@@ -115,7 +143,10 @@ export function useFamilySettingsDelete({
     // The refusal is handled after the guard ends: its re-read of the method is no departure.
     const refused: { error?: ApiErrorPayload } = {};
     try {
-      const assertSameServer = pinDepartureServer(apiClient);
+      // Pin at the press only when no confirm session pinned (startConfirming never ran).
+      const assertSameServer =
+        serverCheckRef.current ?? pinDepartureServer(apiClient);
+      serverCheckRef.current = assertSameServer;
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the PWA's leave / delete hooks.
       await runGuardedDeparture(
@@ -133,12 +164,11 @@ export function useFamilySettingsDelete({
       if (refused.error) {
         assertSameServer();
         await settleDeleteError(refused.error, asked);
+        return;
       }
+      serverCheckRef.current = null;
     } catch (err) {
-      setDeleteError(
-        err instanceof Error ? err.message : "移除帳戶失敗，請稍後再試",
-      );
-      setDeleteState("idle");
+      failDelete(err);
     }
   };
 

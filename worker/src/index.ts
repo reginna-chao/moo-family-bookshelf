@@ -126,9 +126,9 @@ app.use("/api/*", accountDeletionGuard);
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "moo-family-bookshelf" }));
 
-/** Bump only on a breaking API change (docs/architecture.md → 何時遞增 API_VERSION, row 變更認證機制). 3 = PUT verify /
- *  DELETE user require the current PIN/pattern (#396): docs/architecture.md → `API_VERSION = 3`：改驗證設定與刪除帳號要先確認目前的密鑰. */
-const API_VERSION = 3;
+/** Bump only on a breaking API change (docs/architecture.md → 何時遞增 API_VERSION, row 變更認證機制). 4 = self-leave /
+ *  transfer require the current PIN/pattern: docs/architecture.md → `API_VERSION = 4`：離開家庭與轉移管理權要先確認目前的密鑰. */
+const API_VERSION = 4;
 const SERVER_VERSION = "0.1.0";
 
 app.get("/api/version", (c) =>

@@ -10,8 +10,8 @@ import {
   rateLimitedEnvelopeMessage,
 } from "@/utils/retryMessage";
 
-/** Next step after a refused change of verification or account deletion (#396): ask for the
- *  current secret of `method` again, or stay where the user is and show `error`. */
+/** Next step after a refused change of verification, account deletion (#396), family leave or
+ *  ownership transfer: ask for the current secret of `method` again, or stay and show `error`. */
 export type StepUpRecovery =
   | { kind: "ask"; method: VerifyMethod; error: string }
   | { kind: "message"; error: string };

@@ -50,6 +50,8 @@ export function VerificationSettings({
   }
 
   const stepError = saveState === "error" ? saveError : undefined;
+  // An error on the step means it is back after a refused save: the frame that had focus is gone.
+  const reasked = saveState === "error" && saveError !== "";
   return (
     <div className="moo-verify">
       <div className="moo-verify__title">登入驗證</div>
@@ -91,6 +93,7 @@ export function VerificationSettings({
           onComplete={flow.handleCurrentSecret}
           error={stepError}
           disabled={saveState === "saving"}
+          autoFocus={reasked}
         />
       )}
 

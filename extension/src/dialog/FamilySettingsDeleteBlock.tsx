@@ -36,6 +36,8 @@ export function FamilySettingsDeleteBlock({
     requiredMethod !== null && requiresCurrentSecret(requiredMethod)
       ? requiredMethod
       : null;
+  // Either error means the entry is back after a refused secret: its old frame had focus.
+  const reasked = secretError !== "" || deleteError !== "";
 
   return (
     <div className="moo-settings__section-divider--spaced">
@@ -68,6 +70,7 @@ export function FamilySettingsDeleteBlock({
               purpose="delete"
               onComplete={(secret) => void handleDeleteConfirm(secret)}
               error={secretError}
+              autoFocus={reasked}
             />
           )}
           <div className="moo-settings__confirm-row">

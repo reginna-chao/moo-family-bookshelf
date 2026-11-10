@@ -12,27 +12,42 @@ const SYNC_CODE_INPUT_HEIGHT = 48;
 const CREDENTIAL_TEXT_HEIGHT = 32;
 const SYNC_CODE_TITLE = "家庭同步碼";
 
+interface EntryFrameFocus {
+  /** Focus the entry once the frame is ready; off by default (`SecureFrame`'s `autoFocus`). */
+  autoFocus?: boolean;
+}
+
 /** PinInput, same props, rendered inside the secure frame. */
-export function PinFrame({ onComplete, ...props }: PinInputProps) {
+export function PinFrame({
+  onComplete,
+  autoFocus,
+  ...props
+}: PinInputProps & EntryFrameFocus) {
   return (
     <SecureFrame
       view="pin"
       title="PIN 輸入"
       props={props}
       placeholderHeight={PIN_HEIGHT}
+      autoFocus={autoFocus}
       onSubmit={onComplete}
     />
   );
 }
 
 /** PatternLock, same props, rendered inside the secure frame. */
-export function PatternFrame({ onComplete, ...props }: PatternLockProps) {
+export function PatternFrame({
+  onComplete,
+  autoFocus,
+  ...props
+}: PatternLockProps & EntryFrameFocus) {
   return (
     <SecureFrame
       view="pattern"
       title="圖形驗證"
       props={props}
       placeholderHeight={PATTERN_HEIGHT}
+      autoFocus={autoFocus}
       onSubmit={onComplete}
     />
   );

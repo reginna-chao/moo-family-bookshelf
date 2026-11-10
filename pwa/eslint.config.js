@@ -12,8 +12,8 @@ import reactHooks from "eslint-plugin-react-hooks";
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
   "src/App.tsx": 308,
-  "src/api/client.ts": 525,
-  "src/components/MemberList.tsx": 287,
+  "src/api/client.ts": 511,
+  "src/components/MemberList.tsx": 270,
   "src/components/PublicShareDialog.tsx": 298,
   "src/components/PatternLock.tsx": 276,
   "src/hooks/useFamilyData.tsx": 442,

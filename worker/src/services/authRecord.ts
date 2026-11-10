@@ -69,8 +69,10 @@ function isCurrentBearer(
 
 /**
  * Bearer currency (#378, #425), the one rule shared by refresh (`renewPresentedAuthToken`),
- * `PUT /api/user/:id/verify`, `POST /api/user/:id/verify/prompted`, `POST /api/user/:id/verify/otp` (#470)
- * and `DELETE /api/user/:id` (#396): the presented token is current when its hash is in `auth:{userId}`'s list, or when
+ * `PUT /api/user/:id/verify`, `POST /api/user/:id/verify/prompted`, `POST /api/user/:id/verify/otp` (#470),
+ * `DELETE /api/user/:id` (#396), self-leave (`DELETE /api/family/:id/member/:uid` with `uid` = caller) and
+ * `PUT /api/family/:id/transfer` (the last two via `enforceCallerCurrentSecret`): the presented token is
+ * current when its hash is in `auth:{userId}`'s list, or when
  * there is no record / an empty list (TTL gap). A
  * token that still has its `token:` key but is off the list (revoked on a lagging
  * colo, or orphaned by a concurrent mint) is NOT current. A missing bearer never is.

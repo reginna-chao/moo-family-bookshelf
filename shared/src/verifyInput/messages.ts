@@ -9,7 +9,8 @@ export const PIN_MISMATCH_MESSAGE = "兩次輸入的 PIN 碼不一致，請重�
 /** Shown when the pattern drawn in the setup confirm step differs from the first one. */
 export const PATTERN_MISMATCH_MESSAGE = "兩次圖形不一致，請重新繪製。";
 
-/** Shown when the server rejects the current PIN sent to change verification or delete the account (#396). */
+/** Shown when the server rejects the current PIN sent to change verification, delete the account
+ *  (#396), leave the family or transfer ownership. */
 export const CURRENT_PIN_WRONG_MESSAGE = "目前的 PIN 碼不正確，請重新輸入。";
 
 /** Pattern counterpart of `CURRENT_PIN_WRONG_MESSAGE`. */
@@ -26,12 +27,22 @@ export function currentSecretWrongMessage(method: VerifyMethod): string {
     : CURRENT_PIN_WRONG_MESSAGE;
 }
 
+/** What the current secret is asked for; picks the reason at the start of `currentSecretPrompt`. */
+export type CurrentSecretPurpose = "change" | "delete" | "leave" | "transfer";
+
+const CURRENT_SECRET_REASONS: Record<CurrentSecretPurpose, string> = {
+  change: "要更改登入驗證",
+  delete: "移除帳戶前",
+  leave: "離開家庭前",
+  transfer: "轉移管理權前",
+};
+
 /** Lead line above the current-secret entry: why it is asked, then what to enter. */
 export function currentSecretPrompt(
   method: VerifyMethod,
-  purpose: "change" | "delete",
+  purpose: CurrentSecretPurpose,
 ): string {
-  const reason = purpose === "change" ? "要更改登入驗證" : "移除帳戶前";
+  const reason = CURRENT_SECRET_REASONS[purpose];
   const ask =
     method === "pattern" ? "請先畫出目前的圖形" : "請先輸入目前的 PIN 碼";
   return `${reason}，${ask}。`;

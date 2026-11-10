@@ -101,9 +101,11 @@
  * (listed, no pointer, no session), then the target joins another family
  * instead of retrying.
  *
- * Dissolve read fault: the dissolve's only read of `auth:{uid}` is inside
+ * Dissolve read fault: a self-leave reads `auth:{uid}` twice — first in the
+ * current-secret step-up (bearer currency, before the family read), then inside
  * readAndRevokeAllAuthTokens (auth middleware resolves the bearer via
- * `token:{hash}`), so failing it stops the revoke before any of its deletes starts.
+ * `token:{hash}`). Failing the SECOND read stops the revoke before any of its
+ * deletes starts; failing the first would refuse the leave before it dissolves.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
@@ -866,9 +868,13 @@ describe("Sole-owner dissolve partial-write convergence", () => {
 
   it("should answer the retried leave with 404 FAMILY_NOT_FOUND when the token revoke's auth-record read fails after the family delete", async () => {
     const { familyId, authToken } = await createFamily(USER1);
-    // Failing the dissolve's only `auth:{uid}` read stops the token revoke early.
+    // Failing the revoke's `auth:{uid}` read (the second; the step-up's is first) stops it early.
     // See the header → "Dissolve read fault".
-    const fault = failNextKvOp("get", kvKeys.auth(USER1));
+    let authReads = 0;
+    const fault = failNextKvOp(
+      "get",
+      (key) => key === kvKeys.auth(USER1) && ++authReads === 2,
+    );
 
     const first = await removeMember(familyId, USER1, authToken);
 

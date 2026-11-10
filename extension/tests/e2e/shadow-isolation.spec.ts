@@ -37,6 +37,13 @@
  * The PIN field is reached through Settings → 登入驗證 → PIN 碼 (a new account has no method yet, so
  * the setup PinInput opens without a current-secret step); nothing is submitted.
  *
+ * Re-asked entry: leaving the family with a WRONG current PIN (the local Worker really refuses it)
+ * removes the focused PIN frame and shows a new one. Without the re-asked entry's `autoFocus`, focus
+ * falls back to the page and the PIN typed next — with no click, as a user would — reaches the page's
+ * key listeners. The test types through `page.keyboard` only and checks the digits land in the new
+ * frame's field while the probe records nothing; the retyped PIN is never submitted. Positive
+ * companion: a key on a Shadow Root button still reaches the probe.
+ *
  * `document.getAnimations()` check: an animation inside the closed tree (a real Dialog spinner class,
  * planted via CDP) must not hand its target element to the main world.
  *
@@ -57,6 +64,8 @@ import {
   type ElementQuery,
 } from "./helpers/closed-shadow-cdp";
 import { API_ENDPOINT_KEY } from "../../src/constants";
+// Relative path, not the `moo-family-bookshelf-shared/*` alias (same reason as book-sharing.spec.ts).
+import { CURRENT_PIN_WRONG_MESSAGE } from "../../../shared/src/verifyInput/messages";
 import type { BrowserContext, Frame, Page } from "@playwright/test";
 
 const HOST_ID = "moo-family-bookshelf-host";
@@ -69,6 +78,10 @@ const QR_IMAGE = "img";
 const START_BUTTON = { selector: "button", text: "開始使用" };
 const CREATE_BUTTON = { selector: "button", text: "建立家庭公開書櫃" };
 const PIN_METHOD_BUTTON = { selector: "button", text: "PIN 碼" };
+/** 登入驗證's current-method line once the PIN is saved (it reads 不設定驗證 before). */
+const PIN_SAVED = { selector: ".moo-verify__current", text: "PIN 碼" };
+const PIN_CONFIRM_LABEL = "再次輸入 PIN 碼確認";
+const CANCEL_BUTTON = { selector: "button", text: "取消" };
 const CREATED_HEADING = { selector: "h2", text: "家庭公開書櫃已建立" };
 /** Occurs on the page only in that heading (IdleView's 建立家庭公開書櫃 lacks the 已). */
 const CREATED_HEADING_PREFIX = "家庭公開書櫃已";
@@ -589,6 +602,73 @@ test.describe("Dialog shadow root isolation (real closed dist/)", () => {
     });
 
     await removeKeyProbe(page);
+    await page.close();
+  });
+
+  test("a PIN retyped after a refused leave goes to the new secure frame, not the page", async ({
+    context,
+    extensionId,
+  }) => {
+    test.setTimeout(120_000);
+    const accountPin = "246813";
+    const page = await openDialogOnMockPage(context, extensionId, "refocus");
+    driver = await createClosedShadowDriver(page, HOST_ID);
+    await reachIdleView(driver);
+    await createFamily(page, driver);
+    await openSettings(driver);
+
+    await test.step("set a PIN on the account", async () => {
+      await driver!.waitFor(PIN_METHOD_BUTTON, 15_000);
+      await driver!.click(PIN_METHOD_BUTTON);
+      const frame = await secureFrameWith(page, PIN_INPUT);
+      const field = frame.locator(PIN_INPUT);
+      await field.pressSequentially(accountPin);
+      await field.press("Enter");
+      await expect(frame.getByText(PIN_CONFIRM_LABEL)).toBeVisible();
+      await expect(field).toHaveValue("");
+      await field.pressSequentially(accountPin);
+      await field.press("Enter");
+      await driver!.waitFor(PIN_SAVED, 15_000);
+    });
+
+    await test.step("a wrong current PIN refuses the leave", async () => {
+      const at = await driver!.stableCenter(LEAVE_BUTTON);
+      await page.mouse.click(at.x, at.y);
+      await driver!.waitFor(LEAVE_CONFIRM_PROMPT, 15_000);
+      const field = (await secureFrameWith(page, PIN_INPUT)).locator(PIN_INPUT);
+      await field.pressSequentially("999999");
+      await field.press("Enter");
+    });
+
+    // The re-asked entry is a new frame: it carries the wrong-PIN copy the first one never showed.
+    const retry = await secureFrameWith(
+      page,
+      `text=${CURRENT_PIN_WRONG_MESSAGE}`,
+    );
+    await expect
+      .poll(() =>
+        retry.evaluate(
+          (sel) =>
+            document.hasFocus() &&
+            document.activeElement?.matches(sel) === true,
+          PIN_INPUT,
+        ),
+      )
+      .toBe(true);
+
+    await test.step("digits typed without a click land in the new frame, not on the page", async () => {
+      await installKeyProbe(page);
+      await page.keyboard.type("135791");
+      await expect(retry.locator(PIN_INPUT)).toHaveValue("135791");
+      expect(await takeKeyEvents(page)).toEqual([]);
+
+      await pressKeyOnShadowButton(page, driver!, CANCEL_BUTTON);
+      expect(await takeKeyEvents(page)).toEqual(
+        expect.arrayContaining(SHADOW_KEY_EVENTS),
+      );
+      await removeKeyProbe(page);
+    });
+
     await page.close();
   });
 

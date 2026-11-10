@@ -57,8 +57,9 @@ import { sanitizeVerifyInfoResponse } from "moo-family-bookshelf-shared/api/veri
 import { assertHexId } from "moo-family-bookshelf-shared/api/hexId";
 import { sanitizeIssuedFamilyGroup } from "moo-family-bookshelf-shared/api/issuedCredentials";
 import { adoptRotatedVerifyToken } from "moo-family-bookshelf-shared/api/verifyTokenRotation";
-import type { SetVerifyResult } from "moo-family-bookshelf-shared/api/verifyTypes";
+import { currentSecretBody } from "moo-family-bookshelf-shared/api/currentSecretBody";
 import { isClientSynthesized } from "./synthesizedError";
+import { withoutIssuedToken } from "./withoutIssuedToken";
 
 // Re-export all types so existing imports from "./client" continue to work
 export {
@@ -99,21 +100,6 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 function jsonInit(method: string, body?: unknown): RequestInit {
   return { method, body: body != null ? JSON.stringify(body) : undefined };
-}
-
-/** A verify response from a server this client has left: its token must reach neither the client nor
- *  the caller, whose storage check compares the client's CURRENT server (`dialog/saveVerifyMethod.ts`). */
-function withoutIssuedToken(
-  res: ApiResponse<SetVerifyResult>,
-): ApiResponse<SetVerifyResult> {
-  const issued = res.data;
-  if (issued?.authToken === undefined && issued?.expiresAt === undefined) {
-    return res;
-  }
-  const data = { ...issued };
-  delete data.authToken;
-  delete data.expiresAt;
-  return { ...res, data };
 }
 
 export class ApiClient {
@@ -362,11 +348,14 @@ export class ApiClient {
     });
   }
 
+  /** `currentSecret` is required while the account's method is PIN / pattern. */
   async leaveFamily(
     familyId: string,
     userId: string,
+    currentSecret?: string,
   ): Promise<ApiResponse<{ ok: boolean }>> {
-    return this.del(`/api/family/${familyId}/member/${userId}`);
+    const body = currentSecretBody(currentSecret);
+    return this.del(`/api/family/${familyId}/member/${userId}`, body);
   }
 
   async removeMember(
@@ -390,6 +379,7 @@ export class ApiClient {
     userId: string,
     newOwnerId: string,
     clearEndpoint?: 1,
+    currentSecret?: string,
   ): Promise<ApiResponse<FamilyGroup>> {
     const res = await this.put<FamilyGroup>(
       `/api/family/${familyId}/transfer`,
@@ -397,6 +387,7 @@ export class ApiClient {
         userId,
         newOwnerId,
         ...(clearEndpoint !== undefined && { clearEndpoint }),
+        ...currentSecretBody(currentSecret),
       },
     );
     return this.sanitizeEnvelope(res, sanitizeFamilyGroupText);

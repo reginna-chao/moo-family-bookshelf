@@ -124,7 +124,8 @@ export function passedAgainstStaleVerifyRecord(
  *
  * Shared by every caller of {@link validateVerification} (family create, family
  * join, auth lookup, and the {@link enforceCurrentSecret} step-up) so all of them
- * emit the exact same codes and statuses.
+ * emit the exact same codes and statuses (the step-up's optional `requiredMessage`
+ * only rewords its no-secret 403 on self-leave and ownership transfer).
  * `retryAfter` is carried by the 429 variants only; `jsonError` omits both the
  * body field and the `Retry-After` header when it is undefined.
  */
@@ -144,7 +145,8 @@ export function verificationErrorResponse(
  * Shared by every entry point of the gate (family create, family join, auth
  * lookup) so one malformed body cannot produce three different statuses, and by
  * the step-up callers of {@link enforceCurrentSecret} (`PUT /api/user/:id/verify`,
- * `DELETE /api/user/:id`), which pass `field = "currentSecret"`; the code stays
+ * `DELETE /api/user/:id`, self-leave through `DELETE /api/family/:id/member/:uid`
+ * and `PUT /api/family/:id/transfer`), which pass `field = "currentSecret"`; the code stays
  * `INVALID_VERIFY_SECRET`. The check belongs to the handlers, before the gate: a
  * value that is not a secret at all is a request-format error, not a failed
  * verification, so it must never be charged against the caller's failure budget
@@ -372,8 +374,9 @@ export async function resetLoginAttemptCeiling(
  * The shared gate for every public endpoint that mints a token for, or reveals
  * data bound to, an email-derived userId: `POST /api/family` (create),
  * `POST /api/family/:id/join`, and `POST /api/auth/lookup` — and, through
- * {@link enforceCurrentSecret}, the step-up of `PUT /api/user/:id/verify` and
- * `DELETE /api/user/:id`. Accounts with no `verify:{userId}` record (or
+ * {@link enforceCurrentSecret}, the step-up of `PUT /api/user/:id/verify`,
+ * `DELETE /api/user/:id`, self-leave (`DELETE /api/family/:id/member/:uid` with
+ * `uid` = caller) and `PUT /api/family/:id/transfer`. Accounts with no `verify:{userId}` record (or
  * `method: "none"`) pass through unchanged.
  *
  * Three independent brakes, deliberately keyed differently:
@@ -603,17 +606,20 @@ export async function validateVerification(
   return { valid: true, record };
 }
 
-/** True when changing this account's verification or deleting it needs the CURRENT secret (#396): a configured
- *  pin/pattern record. `none` / `code` / no record never do; a corrupted pin/pattern record does, like the gate. */
+/** True when changing this account's verification, deleting it, leaving a family or transferring ownership needs the
+ *  CURRENT secret (#396): a configured pin/pattern record. `none` / `code` / no record never do; a corrupted one does. */
 function needsCurrentSecret(record: VerifyRecord | null): boolean {
   if (!isVerificationConfigured(record)) return false;
   return record?.method === "pin" || record?.method === "pattern";
 }
 
 /**
- * Step-up for an authenticated owner's sensitive write (#396): `PUT /api/user/:id/verify`
- * and `DELETE /api/user/:id` must present the account's CURRENT PIN / pattern when
- * one is configured. Returns `null` to proceed, else the error response to send.
+ * Step-up for an authenticated owner's sensitive write (#396): `PUT /api/user/:id/verify`,
+ * `DELETE /api/user/:id`, self-leave (`DELETE /api/family/:id/member/:uid` with `uid` =
+ * caller) and `PUT /api/family/:id/transfer` must present the account's CURRENT PIN /
+ * pattern when one is configured. Returns `null` to proceed, else the error response to send.
+ * The two family routes reach it through `enforceCallerCurrentSecret`
+ * (`services/currentSecretStepUp.ts`).
  *
  * `record`, `presentedAuth` and `presentedHash` are the handler's own reads of
  * `verify:{userId}`, `auth:{userId}` and the bearer's hash (`readPresentedAuth(...)`) —
@@ -643,6 +649,9 @@ function needsCurrentSecret(record: VerifyRecord | null): boolean {
  *   使用者忘記登入驗證時).
  * - A KV error logs the event name only and rethrows a generic error (still a 500): its
  *   message may echo a key, and the step-up keys carry a token hash (#357).
+ * - `requiredMessage`, when given, replaces the message of the gate's no-secret
+ *   `403 VERIFICATION_REQUIRED` only — never the stale-record one above, never any other
+ *   code, status or `retryAfter`. Without it every response is unchanged.
  *
  * See docs/architecture.md → 只有帳號目前的 token 能改驗證設定.
  */
@@ -653,6 +662,7 @@ export async function enforceCurrentSecret(
   currentSecret: string | undefined,
   presentedAuth: AuthRecord | null,
   presentedHash: string | null,
+  requiredMessage?: string,
 ): Promise<
   (Response & TypedResponse<ErrorBody, 403 | 429 | 503, "json">) | null
 > {
@@ -675,9 +685,24 @@ export async function enforceCurrentSecret(
     throw new Error("VERIFY_STEP_UP_FAILED");
   }
   if (!verification.valid) {
-    return verificationErrorResponse(c, verification.error);
+    return verificationErrorResponse(
+      c,
+      withRequiredMessage(verification.error, requiredMessage),
+    );
   }
   return null;
+}
+
+/** Swap the message of the gate's no-secret 403 (the only `VERIFICATION_REQUIRED` `validateVerification`
+ *  returns); every other error, and an absent `requiredMessage`, passes through unchanged. */
+function withRequiredMessage(
+  error: VerificationError,
+  requiredMessage: string | undefined,
+): VerificationError {
+  if (requiredMessage === undefined || error.code !== "VERIFICATION_REQUIRED") {
+    return error;
+  }
+  return { ...error, message: requiredMessage };
 }
 
 /**

@@ -171,6 +171,13 @@ async function openDeleteConfirm() {
   });
 }
 
+/** 離開家庭 reads the verify method before the confirm opens, like 移除帳戶; `act` lets that read settle. */
+async function openLeaveConfirm() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+  });
+}
+
 describe("SettingsPage", () => {
   beforeEach(() => {
     // Mock clipboard API
@@ -650,7 +657,7 @@ describe("SettingsPage", () => {
     });
 
     // Step 1: click 離開家庭
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
 
     // Step 2: confirm step appears
     expect(
@@ -662,9 +669,11 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {
+      // A `none` account sends no current secret.
       expect(mockLeaveFamily).toHaveBeenCalledWith(
         defaultProps.familyId,
         defaultProps.userId,
+        undefined,
       );
     });
     await waitFor(() => {
@@ -688,7 +697,7 @@ describe("SettingsPage", () => {
     });
 
     // Click 離開家庭 then confirm
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {
@@ -715,7 +724,7 @@ describe("SettingsPage", () => {
         expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+      await openLeaveConfirm();
       fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
       await waitFor(() => {
@@ -747,7 +756,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {
@@ -808,7 +817,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {
@@ -1112,7 +1121,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
     expect(
       screen.getByRole("button", { name: "確定離開" }),
     ).toBeInTheDocument();
@@ -1140,7 +1149,7 @@ describe("SettingsPage", () => {
       expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "離開家庭" }));
+    await openLeaveConfirm();
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {

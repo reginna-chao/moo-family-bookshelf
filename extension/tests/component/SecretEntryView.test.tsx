@@ -5,7 +5,8 @@ import { PatternView, PinView } from "@/secureFrame/views/SecretEntryView";
 /**
  * The secure frame's `pin` / `pattern` views (#363): the unchanged `PinInput` / `PatternLock` with
  * their `onComplete` turned into a `submit` message, and focus taken on the first props only when
- * the host passed `autoFocus` (every Dialog call site leaves it off, matching the pre-#363 fields).
+ * the host passed `autoFocus` (off by default; the current-secret step turns it on when it is shown
+ * again after a refusal — `.claude/rules/frontend.md` → SecureFrame).
  * The full widget behaviour stays in `PinInput.test.tsx` / `PatternLock.test.tsx`.
  */
 

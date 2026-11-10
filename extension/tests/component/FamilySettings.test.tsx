@@ -748,6 +748,7 @@ describe("FamilySettings", () => {
         "user-abc12345",
         "user-def67890",
         undefined,
+        undefined,
       );
     });
 
@@ -1955,6 +1956,7 @@ describe("FamilySettings", () => {
           expect(apiClient.leaveFamily).toHaveBeenCalledWith(
             "fam-123",
             "user-abc12345",
+            undefined,
           );
           expect(bindingReads()).toBe(readsBefore + 1);
         });

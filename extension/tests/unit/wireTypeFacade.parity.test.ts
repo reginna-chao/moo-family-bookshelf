@@ -5,8 +5,9 @@ import { describe, it, expect } from "vitest";
 /**
  * The wire types both apps must agree on live ONCE, in
  * `shared/src/api/types.ts`; `extension/src/api/types.ts`,
- * `extension/src/api/client.ts` and `pwa/src/api/client.ts` are façades that
- * only re-export them. Nothing used to enforce that: the Extension kept its
+ * `extension/src/api/client.ts` and `pwa/src/api/client.ts` (with its
+ * type-only half `pwa/src/api/clientTypes.ts`) are façades that only
+ * re-export them. Nothing used to enforce that: the Extension kept its
  * own `FamilyBookshelf` for months with no `familyId` and no per-member
  * `lastUpdated`, so the update tracker was fed a synthesized `null` and an
  * existing member's newly shared books never earned a 「更新」 chip (issue
@@ -92,6 +93,8 @@ const FACADES: Facade[] = [
   // shared/ directly — so `./types` is the specifier that proves the chain.
   { path: "extension/src/api/client.ts", reExportsFrom: "./types" },
   { path: "pwa/src/api/client.ts", reExportsFrom: SHARED_TYPES_MODULE },
+  // The PWA client's type-only re-exports, pulled in by `export type * from "./clientTypes"`.
+  { path: "pwa/src/api/clientTypes.ts", reExportsFrom: SHARED_TYPES_MODULE },
 ];
 
 const THIS_TEST_TWINS = {

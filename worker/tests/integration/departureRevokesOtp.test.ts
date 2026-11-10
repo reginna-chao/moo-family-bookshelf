@@ -31,8 +31,13 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *   holds only a non-owner, `ownerId` names someone no longer listed.
  *
  * A self-leave also revokes the token it presents, even one that is neither on
- * `auth:{userId}`'s list nor indexed under `tokenidx:{userId}:` (T5); an owner
- * kick never revokes the owner's own token (T6).
+ * `auth:{userId}`'s list nor indexed under `tokenidx:{userId}:` (T5). That is
+ * reachable only while the account has no `auth:{userId}` record (the TTL gap),
+ * where any live bearer counts as current: with a list in place, an unlisted
+ * bearer is refused `401 UNAUTHORIZED` before the family record is read, and
+ * nothing is written or revoked (T5b; `enforceCallerCurrentSecret` in
+ * `worker/src/services/currentSecretStepUp.ts`). An owner kick never revokes
+ * the owner's own token (T6).
  *
  * Every account is put on the `code` method through its own token
  * (`PUT /api/user/:id/verify`), and every code is minted through the API, so
@@ -209,26 +214,54 @@ describe("DELETE /api/family/:id/member/:uid — a pending one-time code does no
   });
 });
 
+/** Put only the `token:` half of a USER2 token — no `tokenidx:` key, no `auth:` list entry — and return it. */
+async function seedUnindexedToken(): Promise<{
+  presented: string;
+  hash: string;
+}> {
+  const presented = "e".repeat(64);
+  const createdAt = new Date().toISOString();
+  const tokenRecord: AuthTokenRecord = {
+    userId: USER2,
+    createdAt,
+    expiresAt: Date.parse(createdAt) + TOKEN_TTL_SECONDS * 1000,
+  };
+  const hash = await hashAuthToken(presented);
+  await kv.put(kvKeys.authToken(hash), JSON.stringify(tokenRecord));
+  expect(await listsToken(kv, USER2, presented)).toBe(false);
+  expect(await kv.get(kvKeys.authTokenIndex(USER2, hash))).toBeNull();
+  expect(await tokenOwner(kv, presented)).toBe(USER2);
+  return { presented, hash };
+}
+
 describe("DELETE /api/family/:id/member/:uid — which tokens a departure revokes", () => {
   it("revokes the presented token on a self-leave even when it is neither listed nor indexed (T5)", async () => {
     const { familyId } = await createFamilyWithTwoMembers();
-    // Only the `token:` half: off `auth:{USER2}`'s list, with no `tokenidx:` key.
-    const presented = "e".repeat(64);
-    const createdAt = new Date().toISOString();
-    const tokenRecord: AuthTokenRecord = {
-      userId: USER2,
-      createdAt,
-      expiresAt: Date.parse(createdAt) + TOKEN_TTL_SECONDS * 1000,
-    };
-    const hash = await hashAuthToken(presented);
-    await kv.put(kvKeys.authToken(hash), JSON.stringify(tokenRecord));
-    expect(await listsToken(kv, USER2, presented)).toBe(false);
-    expect(await kv.get(kvKeys.authTokenIndex(USER2, hash))).toBeNull();
-    expect(await tokenOwner(kv, presented)).toBe(USER2);
+    // TTL gap: with no `auth:{USER2}` record, an unlisted bearer still counts as current.
+    await kv.delete(kvKeys.auth(USER2));
+    expect(await kv.get(kvKeys.auth(USER2))).toBeNull();
+    const { presented, hash } = await seedUnindexedToken();
 
     expect((await removeMember(familyId, USER2, presented)).status).toBe(200);
 
+    expect(await kv.get(kvKeys.member(USER2))).toBeNull();
     expect(await kv.get(kvKeys.authToken(hash))).toBeNull();
+  });
+
+  it("refuses a self-leave whose token is off an existing list, changing nothing (T5b)", async () => {
+    const { familyId } = await createFamilyWithTwoMembers();
+    expect(await kv.get(kvKeys.auth(USER2))).not.toBeNull();
+    const { presented, hash } = await seedUnindexedToken();
+    const familyBefore = await kv.get(kvKeys.family(familyId));
+    const tokenBefore = await kv.get(kvKeys.authToken(hash));
+    expect(familyBefore).toContain(USER2);
+
+    const res = await removeMember(familyId, USER2, presented);
+
+    await expectErrorCode(res, 401, "UNAUTHORIZED");
+    expect(await kv.get(kvKeys.family(familyId))).toBe(familyBefore);
+    expect(await kv.get(kvKeys.member(USER2))).toBe(familyId);
+    expect(await kv.get(kvKeys.authToken(hash))).toBe(tokenBefore);
   });
 
   it("keeps the owner's own token alive after the owner removes a member (T6)", async () => {
