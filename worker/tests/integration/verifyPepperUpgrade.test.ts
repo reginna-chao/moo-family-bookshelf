@@ -46,7 +46,9 @@ import {
  * stubs keep the per-IP tier off KV), so the hourly guess ceiling is live and
  * "nothing charged" is a real check: an empty write trail, no
  * `verifyfail:{userId}:{ip}` and no ceiling counter. A positive companion
- * shows a wrong guess under the right pepper does write both keys.
+ * shows a wrong guess under the right pepper does write both keys. Those
+ * requests carry no `ATTEMPT_BUDGET` binding on purpose: the hourly budget
+ * takes its KV fallback, so the ceiling counter is a KV key the check can see.
  *
  * Exception: a secret-less lookup never reaches the gate (it is the
  * requires-verification probe), so the no-secret 503 rows cover create and
@@ -91,6 +93,7 @@ interface EnvOpts {
   prod?: boolean;
 }
 
+// KV fallback on prod (no ATTEMPT_BUDGET): the ceiling counter stays observable in KV.
 function envFor({ pepper, prod }: EnvOpts) {
   const base = prod
     ? { KV: kv, ...rateLimitBindings() }

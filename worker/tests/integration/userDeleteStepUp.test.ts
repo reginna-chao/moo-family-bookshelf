@@ -1,18 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { rateLimitBindings } from "../helpers/rateLimitBindings";
+import {
+  productionBindings,
+  type ProductionBindings,
+} from "../helpers/productionBindings";
 import { seedAuthToken, tokenFor, authTokenKey } from "../helpers/auth";
 import { watchKvOps } from "../helpers/kvOps";
 import { ALICE, BOB } from "../helpers/ids";
 import { kvKeys } from "../../src/kv/schema";
 import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
-import { peekPerUserRateLimit } from "../../src/middleware/rateLimit";
-import {
-  VERIFY_ATTEMPT_WINDOW_SECONDS,
-  VERIFY_STEP_UP_ATTEMPT_MAX,
-  VERIFY_STEP_UP_ATTEMPT_SCOPE,
-} from "../../src/services/verification";
 import { hashAuthToken } from "../../src/utils/crypto";
 
 /**
@@ -32,17 +29,20 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * books untouched. Each case seeds a family (`FAMILY_SHAPES`: a non-owner in a
  * two-member family — the settle-and-put branch — and a sole owner — the
  * dissolve branch) so the write paths are reachable, and asserts an empty
- * write trail. The only writes a wrong guess may cause are the gate's own
- * guess counters, never an account write.
+ * write trail. The only KV write a wrong guess may cause is the gate's own
+ * caller streak, never an account write.
  *
- * Requests run without DEV_MODE (binding stubs keep the per-IP tier off KV);
- * PIN setup goes through the real verify route under DEV_MODE.
+ * Requests run without DEV_MODE, with the production bindings (rate-limit stubs
+ * keep the per-IP tier off KV; an in-memory `ATTEMPT_BUDGET` holds the hourly
+ * budgets, as in production); PIN setup goes through the real verify route under
+ * DEV_MODE.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 let kv: KVNamespace;
+let bindings: ProductionBindings;
 
 const USER_ID = ALICE;
 const OTHER_ID = BOB;
@@ -66,7 +66,7 @@ async function deleteAccount(
   if (rawBody !== undefined) init.body = rawBody;
   return app.request(`/api/user/${USER_ID}`, init, {
     KV: kv,
-    ...rateLimitBindings(),
+    ...bindings,
   });
 }
 
@@ -135,16 +135,11 @@ function secretBody(currentSecret: unknown): string {
   return JSON.stringify({ currentSecret });
 }
 
-/** The two keys a wrong guess with `token` charges: its `verify-stepup` budget and its caller streak. */
+/** The KV key a wrong guess with `token` writes: its caller streak. Its `verify-stepup` budget is
+ *  counted in the `ATTEMPT_BUDGET` Durable Object, not in KV. */
 async function guessCounterKeys(token: string): Promise<string[]> {
   const bucket = await hashAuthToken(token);
-  const reading = await peekPerUserRateLimit(kv, {
-    userId: `${USER_ID}:${bucket}`,
-    scope: VERIFY_STEP_UP_ATTEMPT_SCOPE,
-    max: VERIFY_STEP_UP_ATTEMPT_MAX,
-    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
-  });
-  return [reading.key, kvKeys.verifyFail(USER_ID, `${CALLER_IP}:${bucket}`)];
+  return [kvKeys.verifyFail(USER_ID, `${CALLER_IP}:${bucket}`)];
 }
 
 async function errorCode(res: Response): Promise<string> {
@@ -153,7 +148,8 @@ async function errorCode(res: Response): Promise<string> {
 
 beforeEach(() => {
   kv = createMockKV();
-  // Mid-hour pin: the guess-counter key computed before a request names the bucket it charges.
+  bindings = productionBindings();
+  // Mid-hour pin: no hourly budget window rolls over during a case.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.parse("2026-01-01T00:30:00.000Z"));
 });

@@ -45,7 +45,9 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *
  * Requests run without DEV_MODE (binding stubs keep the per-IP tier off KV),
  * so the `verify-stepup` budget is really charged; setup goes through DEV_MODE.
- * `Date` is pinned mid-window so no counter bucket rolls over.
+ * `Date` is pinned mid-window so no counter bucket rolls over. KV fallback, on
+ * purpose: no `ATTEMPT_BUDGET` binding, so both hourly budgets are KV counters
+ * the cases seed and read.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,6 +76,7 @@ async function send(
     Authorization: `Bearer ${token}`,
     "cf-connecting-ip": CALLER_IP,
   };
+  // No ATTEMPT_BUDGET: the hourly budgets take their KV fallback (see the header).
   const env = dev
     ? { KV: kv, DEV_MODE: "1" }
     : { KV: kv, ...rateLimitBindings() };
