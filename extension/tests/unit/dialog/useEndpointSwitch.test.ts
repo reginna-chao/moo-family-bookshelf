@@ -6,9 +6,11 @@ import {
   useEndpointSwitch,
 } from "@/dialog/useEndpointSwitch";
 import {
+  FAMILY_ENDPOINT_CHOICE_KEYS,
   saveDeclinedFamilyEndpoint,
   type DeclinedFamilyEndpoint,
 } from "@/storage/familyEndpointChoice";
+import { clearStoredFamilyBinding } from "@/dialog/familyBindingReset";
 import { ApiClient, validateEndpointUrl } from "@/api/client";
 import {
   API_ENDPOINT_KEY,
@@ -69,10 +71,13 @@ import {
  * leave the member on the endpoint they already trust. `tests/setup.ts` backs
  * `browser.storage.local` with an in-memory store, so these tests assert on
  * stored values rather than on call shapes where possible.
- *  - A confirmed switch and the old token (#456): `confirm` moves the client and
- *    drops the in-memory token synchronously, so a refresh in flight is already
- *    discarded by the time storage is touched, and nothing a late response does can
- *    reach storage. The storage half runs afterwards and may fail: then the client
+ *  - A confirmed switch and the old token (#456): `confirm` checks the stored family
+ *    binding first (one storage read, nothing written), then moves the client and
+ *    drops the in-memory token with no await before the storage writes, so a refresh
+ *    in flight is already discarded by the time storage is written, and nothing a
+ *    late response does can reach storage. Because of that first read, every case
+ *    confirms inside an async `act`, which settles the whole chain, and beforeEach
+ *    stores the family the hook is bound to. The storage half may fail: then the client
  *    stays on the new server with no token (a 401 there refuses to refresh, because
  *    storage still pairs the token with the old server), `confirmSaveFailed` tells
  *    the user, and `adoptedEndpoint` goes back to what storage says. The rejoin that
@@ -90,6 +95,18 @@ import {
  *    failed confirm records a decline, which re-runs the recompute effect with
  *    nothing pending; the notice must outlive that, and every later members
  *    refresh, until the user acknowledges it.
+ *  - The stored family binding (#498): another tab may have left the family (or
+ *    left it and joined another) while this screen still shows it. A confirm
+ *    refused BEFORE the write (another family, none, or an unreadable store)
+ *    leaves the client, its in-memory token and storage alone and records no
+ *    decline — on a family-less device a decline would mute the next family's
+ *    question — and `confirmBindingGone` tells the user. A binding found gone
+ *    AFTER the write keeps the client where the confirm put it (a teardown may
+ *    already have moved it) and rolls `adoptedEndpoint` back. While a confirm is
+ *    in flight, a second confirm and a decline do nothing; an unmount before the
+ *    first read returns ends it with nothing done. The other tab's writes go
+ *    through the store's own writers (unrecorded), keyed on the read's key list.
+ *    The store-level outcomes are pinned in tests/unit/storage/familyEndpointChoice.test.ts.
  */
 
 const CURRENT_CUSTOM = "https://current.example";
@@ -487,6 +504,9 @@ describe("useEndpointSwitch", () => {
     .mocked(browser.storage.local.remove)
     .getMockImplementation()!;
 
+  /** The family every rendered hook is bound to; beforeEach stores it. */
+  const FAMILY_ID = "fam-1";
+
   interface HookProps {
     familyEndpoint: string | undefined;
     membersReady: boolean;
@@ -495,7 +515,12 @@ describe("useEndpointSwitch", () => {
   function renderSwitch(apiClient: ApiClient, initialProps: HookProps) {
     return renderHook(
       ({ familyEndpoint, membersReady }: HookProps) =>
-        useEndpointSwitch({ apiClient, familyEndpoint, membersReady }),
+        useEndpointSwitch({
+          apiClient,
+          familyId: FAMILY_ID,
+          familyEndpoint,
+          membersReady,
+        }),
       { initialProps },
     );
   }
@@ -510,6 +535,8 @@ describe("useEndpointSwitch", () => {
 
   beforeEach(async () => {
     await browser.storage.local.clear();
+    // A confirm goes through only while storage binds the hook's family (#498).
+    await browser.storage.local.set({ [FAMILY_ID_KEY]: FAMILY_ID });
     vi.clearAllMocks();
   });
 
@@ -578,7 +605,7 @@ describe("useEndpointSwitch", () => {
 
     await waitFor(() => expect(result.current.pending).not.toBeNull());
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
     expect(result.current.pending).toBeNull();
@@ -599,7 +626,7 @@ describe("useEndpointSwitch", () => {
       expect(result.current.pending?.isDefaultTarget).toBe(true),
     );
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
     await waitFor(async () => {
@@ -617,7 +644,7 @@ describe("useEndpointSwitch", () => {
 
     await waitFor(() => expect(result.current.pending).not.toBeNull());
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     await waitFor(async () => {
       await expect(
@@ -694,7 +721,7 @@ describe("useEndpointSwitch", () => {
     await waitFor(() => expect(result.current.pending).not.toBeNull());
     expect(result.current.pending?.targetEndpoint).toBe(FAMILY_CUSTOM);
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     // Everything the switch leaves behind is in the same form the sync-code
     // join path stores for this endpoint, so the two cannot disagree later.
@@ -740,7 +767,7 @@ describe("useEndpointSwitch", () => {
     // rather than presenting a doomed switch as a real destination.
     expect(result.current.pending?.targetValid).toBe(false);
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
     expect(result.current.pending).toBeNull();
@@ -774,7 +801,7 @@ describe("useEndpointSwitch", () => {
     await waitFor(() => expect(result.current.pending).not.toBeNull());
     expect(result.current.pending?.targetValid).toBe(false);
 
-    act(() => result.current.confirm());
+    await act(async () => result.current.confirm());
 
     // Nothing switched: neither the client, nor the persisted endpoint, nor the
     // value the sync code is built from.
@@ -845,7 +872,7 @@ describe("useEndpointSwitch", () => {
       await waitFor(() => expect(result.current.pending).not.toBeNull());
       expect(result.current.adoptedEndpoint).toBe(DEFAULT_API_ENDPOINT);
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
 
       // In step with the client, with no reopen/remount in between.
       expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
@@ -860,7 +887,7 @@ describe("useEndpointSwitch", () => {
       });
 
       await waitFor(() => expect(result.current.pending).not.toBeNull());
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
 
       expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
       expect(result.current.adoptedEndpoint).toBe(apiClient.getEndpoint());
@@ -876,7 +903,7 @@ describe("useEndpointSwitch", () => {
       await waitFor(() =>
         expect(result.current.pending?.isDefaultTarget).toBe(true),
       );
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
 
       expect(result.current.adoptedEndpoint).toBe(DEFAULT_API_ENDPOINT);
       expect(result.current.adoptedEndpoint).toBe(apiClient.getEndpoint());
@@ -924,7 +951,7 @@ describe("useEndpointSwitch", () => {
       });
 
       await waitFor(() => expect(result.current.pending).not.toBeNull());
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
 
       expect(result.current.confirmError).toBe(true);
       expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
@@ -941,7 +968,7 @@ describe("useEndpointSwitch", () => {
       });
 
       await waitFor(() => expect(result.current.pending).not.toBeNull());
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
 
       rerender({ familyEndpoint: FAMILY_CUSTOM, membersReady: true });
@@ -970,7 +997,7 @@ describe("useEndpointSwitch", () => {
     async function seedOldSession(): Promise<void> {
       await browser.storage.local.set({
         [USER_ID_KEY]: USER_ID,
-        [FAMILY_ID_KEY]: "fam-1",
+        [FAMILY_ID_KEY]: FAMILY_ID,
         [API_ENDPOINT_KEY]: CURRENT_CUSTOM,
         [AUTH_TOKEN_KEY]: OLD_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 123,
@@ -1011,7 +1038,7 @@ describe("useEndpointSwitch", () => {
         () => firstRemoval.promise,
       );
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
 
       expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
       expect(result.current.pending).toBeNull();
@@ -1045,7 +1072,7 @@ describe("useEndpointSwitch", () => {
       await seedOldSession();
       const { result } = await askedSwitch();
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
 
       await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
@@ -1096,7 +1123,7 @@ describe("useEndpointSwitch", () => {
         },
       );
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {
         await pendingRequest;
       });
@@ -1116,7 +1143,7 @@ describe("useEndpointSwitch", () => {
         },
       );
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
 
       await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
@@ -1150,7 +1177,7 @@ describe("useEndpointSwitch", () => {
         const { apiClient, result } = await askedSwitch();
         arm();
 
-        act(() => result.current.confirm());
+        await act(async () => result.current.confirm());
         await act(async () => {});
 
         expect(result.current.confirmSaveFailed).toBe(true);
@@ -1175,7 +1202,7 @@ describe("useEndpointSwitch", () => {
       vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
         new Error("storage unavailable"),
       );
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
       const fetchMock = vi.fn().mockResolvedValue({
         ok: false,
@@ -1204,7 +1231,7 @@ describe("useEndpointSwitch", () => {
       vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
         new Error("storage unavailable"),
       );
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
       expect(result.current.confirmSaveFailed).toBe(true);
 
@@ -1221,7 +1248,7 @@ describe("useEndpointSwitch", () => {
       vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
         new Error("storage unavailable"),
       );
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
       expect(result.current.confirmSaveFailed).toBe(true);
 
@@ -1250,7 +1277,7 @@ describe("useEndpointSwitch", () => {
       });
       await waitFor(() => expect(result.current.pending).not.toBeNull());
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
 
       expect(result.current.confirmError).toBe(true);
@@ -1275,7 +1302,7 @@ describe("useEndpointSwitch", () => {
       await waitFor(() => expect(result.current.pending).not.toBeNull());
       expect(result.current.confirmError).toBe(false);
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
 
       return { apiClient, result, rerender, warn };
@@ -1291,7 +1318,7 @@ describe("useEndpointSwitch", () => {
       await waitFor(() => expect(result.current.pending).not.toBeNull());
       expect(result.current.confirmError).toBe(false);
 
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {});
 
       expect(result.current.confirmError).toBe(false);
@@ -1344,6 +1371,337 @@ describe("useEndpointSwitch", () => {
       expect(result.current.confirmError).toBe(false);
 
       warn.mockRestore();
+    });
+  });
+
+  // See the header → "The stored family binding".
+  describe("the stored family binding", () => {
+    const OLD_TOKEN = "a".repeat(64);
+    const OTHER_TOKEN = "b".repeat(64);
+    const OTHER_FAMILY = "fam-2";
+    const OTHER_ENDPOINT = "https://other-family.example";
+    const PRE_READ_KEYS = [FAMILY_ID_KEY];
+    const RE_READ_KEYS = [FAMILY_ID_KEY, API_ENDPOINT_KEY, AUTH_TOKEN_KEY];
+    const UNDO_KEYS = [
+      ...FAMILY_ENDPOINT_CHOICE_KEYS,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+    ];
+    const realStoreGet = vi
+      .mocked(browser.storage.local.get)
+      .getMockImplementation()!;
+    let warn: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+      vi.mocked(browser.storage.local.get).mockImplementation(realStoreGet);
+      vi.mocked(browser.storage.local.set).mockImplementation(realStoreSet);
+      vi.mocked(browser.storage.local.remove).mockImplementation(
+        realStoreRemove,
+      );
+    });
+
+    function sameKeys(keys: unknown, expected: string[]): boolean {
+      return (
+        Array.isArray(keys) &&
+        keys.length === expected.length &&
+        expected.every((key) => keys.includes(key))
+      );
+    }
+
+    function readsWith(expected: string[]): number {
+      return vi
+        .mocked(browser.storage.local.get)
+        .mock.calls.filter(([keys]) => sameKeys(keys, expected)).length;
+    }
+
+    function setsWith(key: string): number {
+      return vi
+        .mocked(browser.storage.local.set)
+        .mock.calls.filter(([items]) => key in (items as object)).length;
+    }
+
+    function removalsWith(key: string): unknown[] {
+      return vi
+        .mocked(browser.storage.local.remove)
+        .mock.calls.map(([keys]) => keys)
+        .filter((keys) => Array.isArray(keys) && keys.includes(key));
+    }
+
+    /** Runs `write` on the real store right before the read asking for `readKeys`. */
+    function landBefore(
+      readKeys: string[],
+      write: () => Promise<unknown>,
+    ): void {
+      vi.mocked(browser.storage.local.get).mockImplementation(async (keys) => {
+        if (sameKeys(keys, readKeys)) await write();
+        return realStoreGet(keys);
+      });
+    }
+
+    async function seedSession({
+      familyId = FAMILY_ID,
+      endpoint = CURRENT_CUSTOM,
+      token = OLD_TOKEN as string | null,
+    } = {}): Promise<void> {
+      await browser.storage.local.clear();
+      await browser.storage.local.set({
+        [USER_ID_KEY]: "1".repeat(64),
+        [FAMILY_ID_KEY]: familyId,
+        [API_ENDPOINT_KEY]: endpoint,
+        ...(token === null
+          ? {}
+          : { [AUTH_TOKEN_KEY]: token, [TOKEN_EXPIRES_AT_KEY]: 123 }),
+      });
+    }
+
+    /** A hook bound to FAMILY_ID with the question asked; the call log starts empty. */
+    async function askedSwitch() {
+      const apiClient = new ApiClient(CURRENT_CUSTOM);
+      apiClient.setAuthToken(OLD_TOKEN);
+      const hook = renderSwitch(apiClient, {
+        familyEndpoint: FAMILY_CUSTOM,
+        membersReady: true,
+      });
+      await waitFor(() => expect(hook.result.current.pending).not.toBeNull());
+      const setAuthToken = vi.spyOn(apiClient, "setAuthToken");
+      vi.clearAllMocks();
+      return { apiClient, setAuthToken, ...hook };
+    }
+
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    }
+
+    it("refuses a confirm after another tab cleared the binding, changing nothing (issue #498)", async () => {
+      await seedSession();
+      const { apiClient, setAuthToken, result } = await askedSwitch();
+      await clearStoredFamilyBinding();
+      vi.clearAllMocks();
+
+      await act(async () => result.current.confirm());
+
+      expect(readsWith(PRE_READ_KEYS)).toBe(1);
+      await expect(readStored(FAMILY_ID_KEY)).resolves.toBeUndefined();
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBeUndefined();
+      expect(apiClient.getEndpoint()).toBe(CURRENT_CUSTOM);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(result.current.confirmBindingGone).toBe(true);
+      expect(result.current.pending).toBeNull();
+      expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
+      expect(setsWith(DECLINED_FAMILY_ENDPOINT_KEY)).toBe(0);
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      expect(browser.storage.local.remove).not.toHaveBeenCalled();
+    });
+
+    it("refuses a confirm while storage binds another family, leaving its endpoint and token", async () => {
+      await seedSession({
+        familyId: OTHER_FAMILY,
+        endpoint: OTHER_ENDPOINT,
+        token: OTHER_TOKEN,
+      });
+      const { apiClient, setAuthToken, result } = await askedSwitch();
+
+      await act(async () => result.current.confirm());
+
+      expect(readsWith(PRE_READ_KEYS)).toBe(1);
+      await expect(readStored(FAMILY_ID_KEY)).resolves.toBe(OTHER_FAMILY);
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(OTHER_ENDPOINT);
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBe(OTHER_TOKEN);
+      await expect(readStored(TOKEN_EXPIRES_AT_KEY)).resolves.toBe(123);
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      expect(browser.storage.local.remove).not.toHaveBeenCalled();
+      expect(apiClient.getEndpoint()).toBe(CURRENT_CUSTOM);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(result.current.confirmBindingGone).toBe(true);
+    });
+
+    it("refuses a confirm when the binding cannot be read, writing nothing", async () => {
+      await seedSession();
+      const { apiClient, setAuthToken, result } = await askedSwitch();
+      vi.mocked(browser.storage.local.get).mockRejectedValueOnce(
+        new Error("Extension context invalidated"),
+      );
+
+      await act(async () => result.current.confirm());
+
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      expect(browser.storage.local.remove).not.toHaveBeenCalled();
+      expect(apiClient.getEndpoint()).toBe(CURRENT_CUSTOM);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(result.current.confirmBindingGone).toBe(true);
+      expect(result.current.confirmSaveFailed).toBe(false);
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBe(OLD_TOKEN);
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(CURRENT_CUSTOM);
+    });
+
+    it("undoes the write in one removal when the binding is gone after it, keeping the client on the target (5a)", async () => {
+      await seedSession();
+      const { apiClient, result } = await askedSwitch();
+      // Another tab's teardown lands after the pre-write check, before the endpoint write.
+      vi.mocked(browser.storage.local.set).mockImplementation(async (items) => {
+        if (API_ENDPOINT_KEY in items) {
+          await realStoreRemove([FAMILY_ID_KEY, ...UNDO_KEYS]);
+        }
+        await realStoreSet(items);
+      });
+
+      await act(async () => result.current.confirm());
+
+      for (const key of UNDO_KEYS) {
+        await expect(readStored(key)).resolves.toBeUndefined();
+      }
+      expect(removalsWith(API_ENDPOINT_KEY)).toEqual([UNDO_KEYS]);
+      const removeOrder = vi.mocked(browser.storage.local.remove).mock
+        .invocationCallOrder;
+      const reRead = vi
+        .mocked(browser.storage.local.get)
+        .mock.calls.findIndex(([keys]) => sameKeys(keys, RE_READ_KEYS));
+      expect(removeOrder[removeOrder.length - 1]).toBeGreaterThan(
+        vi.mocked(browser.storage.local.get).mock.invocationCallOrder[reRead],
+      );
+      expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+      expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
+      expect(result.current.confirmBindingGone).toBe(true);
+      expect(result.current.confirmSaveFailed).toBe(false);
+    });
+
+    it("reports a failed save, keeping the written endpoint, when the read after the write throws (5d)", async () => {
+      await seedSession();
+      const { apiClient, result } = await askedSwitch();
+      vi.mocked(browser.storage.local.get).mockImplementation(async (keys) => {
+        if (sameKeys(keys, RE_READ_KEYS)) {
+          throw new Error("storage unavailable");
+        }
+        return realStoreGet(keys);
+      });
+
+      await act(async () => result.current.confirm());
+
+      expect(result.current.confirmSaveFailed).toBe(true);
+      expect(result.current.confirmBindingGone).toBe(false);
+      expect(result.current.adoptedEndpoint).toBe(CURRENT_CUSTOM);
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+      expect(removalsWith(API_ENDPOINT_KEY)).toEqual([]);
+      expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+    });
+
+    it("runs a double-clicked confirm once", async () => {
+      await seedSession();
+      const { apiClient, result } = await askedSwitch();
+
+      await act(async () => {
+        result.current.confirm();
+        result.current.confirm();
+      });
+
+      expect(readsWith(PRE_READ_KEYS)).toBe(1);
+      expect(readsWith(RE_READ_KEYS)).toBe(1);
+      expect(setsWith(API_ENDPOINT_KEY)).toBe(1);
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+      expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+    });
+
+    it("ignores a decline pressed while a confirm is in flight", async () => {
+      await seedSession();
+      const { apiClient, result } = await askedSwitch();
+
+      await act(async () => {
+        result.current.confirm();
+        result.current.decline();
+      });
+
+      // A decline on its own does write this key: see "decline keeps the current endpoint".
+      expect(setsWith(DECLINED_FAMILY_ENDPOINT_KEY)).toBe(0);
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+      expect(apiClient.getEndpoint()).toBe(FAMILY_CUSTOM);
+      expect(result.current.adoptedEndpoint).toBe(FAMILY_CUSTOM);
+    });
+
+    it("does nothing when the hook unmounts before the binding read returns", async () => {
+      await seedSession();
+      const { apiClient, setAuthToken, result, unmount } = await askedSwitch();
+      const preRead = deferred<Record<string, unknown>>();
+      vi.mocked(browser.storage.local.get).mockImplementationOnce(
+        () => preRead.promise,
+      );
+
+      act(() => result.current.confirm());
+      unmount();
+      await act(async () => {
+        preRead.resolve({ [FAMILY_ID_KEY]: FAMILY_ID });
+        await preRead.promise;
+      });
+
+      expect(readsWith(PRE_READ_KEYS)).toBe(1);
+      expect(apiClient.getEndpoint()).toBe(CURRENT_CUSTOM);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+      expect(browser.storage.local.remove).not.toHaveBeenCalled();
+    });
+
+    it("drops a token written back during the binding read", async () => {
+      await seedSession({ token: null });
+      const { result } = await askedSwitch();
+      landBefore(PRE_READ_KEYS, () =>
+        realStoreSet({
+          [AUTH_TOKEN_KEY]: OLD_TOKEN,
+          [TOKEN_EXPIRES_AT_KEY]: 456,
+        }),
+      );
+
+      await act(async () => result.current.confirm());
+
+      expect(readsWith(PRE_READ_KEYS)).toBe(1);
+      await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readStored(TOKEN_EXPIRES_AT_KEY)).resolves.toBeUndefined();
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
+      expect(result.current.confirmBindingGone).toBe(false);
+      expect(result.current.confirmSaveFailed).toBe(false);
+    });
+
+    it("clears confirmBindingGone through dismissConfirmError", async () => {
+      await seedSession({ familyId: OTHER_FAMILY });
+      const { result } = await askedSwitch();
+      await act(async () => result.current.confirm());
+      expect(result.current.confirmBindingGone).toBe(true);
+
+      act(() => result.current.dismissConfirmError());
+
+      expect(result.current.confirmBindingGone).toBe(false);
+      expect(result.current.pending).toBeNull();
+    });
+
+    it("clears confirmBindingGone on a fresh question, whose confirm then goes through", async () => {
+      await seedSession({ familyId: OTHER_FAMILY });
+      const { apiClient, result, rerender } = await askedSwitch();
+      await act(async () => result.current.confirm());
+      expect(result.current.confirmBindingGone).toBe(true);
+      await realStoreSet({ [FAMILY_ID_KEY]: FAMILY_ID });
+
+      rerender({ familyEndpoint: "https://moved.example", membersReady: true });
+      await waitFor(() =>
+        expect(result.current.pending?.targetEndpoint).toBe(
+          "https://moved.example",
+        ),
+      );
+      expect(result.current.confirmBindingGone).toBe(false);
+
+      await act(async () => result.current.confirm());
+
+      expect(apiClient.getEndpoint()).toBe("https://moved.example");
+      await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(
+        "https://moved.example",
+      );
+      expect(result.current.confirmBindingGone).toBe(false);
     });
   });
 });

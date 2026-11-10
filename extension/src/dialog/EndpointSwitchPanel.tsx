@@ -24,6 +24,8 @@ export interface EndpointSwitchPanelProps {
   confirmError: boolean;
   /** True when the client switched but storage did not take it. */
   saveFailed?: boolean;
+  /** True when the last confirmation was refused because this device is no longer in the family. */
+  bindingGone?: boolean;
   onConfirm: () => void;
   onDecline: () => void;
   onDismissConfirmError: () => void;
@@ -33,12 +35,13 @@ export function EndpointSwitchPanel({
   pending,
   confirmError,
   saveFailed = false,
+  bindingGone = false,
   onConfirm,
   onDecline,
   onDismissConfirmError,
 }: EndpointSwitchPanelProps) {
-  // Wins over `pending` (exclusive in practice: a fresh question clears the notice); an unreported
-  // failed switch is the more urgent thing to say.
+  // The notices win over `pending`, in this order: confirmError, bindingGone, saveFailed (exclusive in
+  // practice: a fresh question clears them); an unreported failed switch is the more urgent thing to say.
   if (confirmError) {
     return (
       <div
@@ -50,6 +53,26 @@ export function EndpointSwitchPanel({
         <div className="moo-endpoint-switch__error-text">
           此位址無法使用（需為 HTTPS，或本機／私人網路的
           HTTP），已略過此次切換。
+        </div>
+        <button
+          onClick={onDismissConfirmError}
+          className="moo-button moo-button--ghost moo-button--sm moo-endpoint-switch__error-dismiss"
+        >
+          知道了
+        </button>
+      </div>
+    );
+  }
+
+  if (bindingGone) {
+    return (
+      <div
+        role="alert"
+        data-testid="endpoint-switch-binding-gone"
+        className="moo-endpoint-switch moo-endpoint-switch--error"
+      >
+        <div className="moo-endpoint-switch__error-text">
+          這個視窗的資料已過期，沒有切換伺服器。請關閉書櫃後重新開啟。
         </div>
         <button
           onClick={onDismissConfirmError}

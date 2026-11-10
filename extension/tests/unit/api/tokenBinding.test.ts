@@ -70,7 +70,10 @@ import {
  *
  * Decision on a confirmed switch (`after a confirmed switch`): the old token is
  * dropped and the user rejoins on the new server, so that block drives the real
- * `useEndpointSwitch` and then sends a request.
+ * `useEndpointSwitch` and then sends a request. The confirm first checks that storage
+ * still binds the hook's family (the default seed stores `OLD_FAMILY`, the family the
+ * hook is rendered for), then moves the client and drops the token with no await
+ * before the storage writes; it runs inside an async `act` that settles that chain.
  *
  * Token replaced during a refresh (`a token replaced during a refresh`): a PIN change
  * rotates the token on this server, which ends the session and so discards the refresh
@@ -1272,12 +1275,13 @@ describe("ApiClient token binding", () => {
       const { result, unmount } = renderHook(() =>
         useEndpointSwitch({
           apiClient: client,
+          familyId: OLD_FAMILY,
           familyEndpoint: NEW_SERVER,
           membersReady: true,
         }),
       );
       await waitFor(() => expect(result.current.pending).not.toBeNull());
-      act(() => result.current.confirm());
+      await act(async () => result.current.confirm());
       await act(async () => {
         await drain();
       });

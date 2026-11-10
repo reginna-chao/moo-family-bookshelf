@@ -7,6 +7,7 @@ import {
   API_ENDPOINT_KEY,
   AUTH_TOKEN_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
+  FAMILY_ID_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   TOKEN_EXPIRES_AT_KEY,
 } from "../constants";
@@ -78,8 +79,9 @@ async function writeAcceptedEndpoint(target: string | null): Promise<void> {
  * teardown: what resetFamilyEndpointChoice needs. `target` is a custom endpoint,
  * or `null` to revert to the official default.
  *
- * A confirmed switch and the sync-code join path adopt a server the stored token
- * did not come from, so they go through persistSwitchedFamilyEndpoint instead.
+ * A confirmed switch and the sync-code join path adopt a server the stored token did not come from,
+ * so they go through persistSwitchedFamilyEndpoint instead — the confirmed switch via
+ * persistConfirmedFamilyEndpoint, which also checks the family binding.
  */
 export async function persistAcceptedFamilyEndpoint(
   target: string | null,
@@ -97,6 +99,8 @@ export async function persistAcceptedFamilyEndpoint(
  *  The recovery cooldown goes with the token: it is the old server's 429, and would block the join
  *  on the new one. The last removal catches a token another tab's refresh wrote back before the
  *  endpoint write; once the endpoint is written that refresh no longer owns storage.
+ *  Called directly by the sync-code join (no familyId is stored yet) and by the boot read; a
+ *  confirmed switch reaches it through persistConfirmedFamilyEndpoint.
  *  See docs/architecture.md → 端點切換確認. */
 export async function persistSwitchedFamilyEndpoint(
   target: string | null,
@@ -108,6 +112,47 @@ export async function persistSwitchedFamilyEndpoint(
   ]);
   await writeAcceptedEndpoint(target);
   await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+}
+
+/** Whether storage still binds `familyId`. An unreadable store reads as `false`, so the caller
+ *  refuses; only for the check before a confirmed switch writes anything. */
+export async function storedFamilyIdIs(familyId: string): Promise<boolean> {
+  const stored = await safeStorageGet([FAMILY_ID_KEY]);
+  return stored[FAMILY_ID_KEY] === familyId;
+}
+
+/**
+ * Persist a confirmed switch through persistSwitchedFamilyEndpoint, then re-read the binding.
+ * Resolves `"switched"` when storage still binds `familyId`. Resolves `"bindingGone"` when it does
+ * not: if storage still holds this write's endpoint and no token, the endpoint and the token keys
+ * go in one removal, so a token is never left without its endpoint; otherwise another tab owns
+ * storage (or, for `null`, nothing is left to undo) and nothing is written. Rejects when a write
+ * or the re-read fails, with no removal. See docs/architecture.md → 端點切換確認.
+ */
+export async function persistConfirmedFamilyEndpoint(
+  target: string | null,
+  familyId: string,
+): Promise<"switched" | "bindingGone"> {
+  await persistSwitchedFamilyEndpoint(target);
+  // Direct read, not safeStorageGet: a failed read must reject, never look like a lost binding.
+  const stored = await browser.storage.local.get([
+    FAMILY_ID_KEY,
+    API_ENDPOINT_KEY,
+    AUTH_TOKEN_KEY,
+  ]);
+  if (stored[FAMILY_ID_KEY] === familyId) return "switched";
+  if (
+    target !== null &&
+    stored[API_ENDPOINT_KEY] === target &&
+    stored[AUTH_TOKEN_KEY] === undefined
+  ) {
+    await browser.storage.local.remove([
+      ...FAMILY_ENDPOINT_CHOICE_KEYS,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+    ]);
+  }
+  return "bindingGone";
 }
 
 /**
