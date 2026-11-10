@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 preview_urls = false
 
-# Copy to wrangler.backup.local.toml; configure and validate before enabling.
-# This Worker is deployed separately from the application Worker.
+# Kept disabled: deploy-worker-prod fills the placeholders and enables it; a local copy (wrangler.backup.local.toml) serves pnpm backup:drill and manual ops.
+# Deployed by CD on `v*` tags, before (and separately from) the application Worker.
 # The two Healthchecks UUIDs are secrets, never vars:
 #   wrangler secret put HEALTHCHECKS_UUID / HEALTHCHECKS_CAPACITY_UUID
 [vars]
@@ -26,7 +26,7 @@ binding = "BACKUP_BUCKET"
 bucket_name = "moo-family-bookshelf-backups"
 
 [triggers]
-# Set to ["17 3 * * *"] in the local config after the activation checks.
+# Keep empty here: deploy-worker-prod sets it to ["17 3 * * *"] on `v*` tags.
 crons = []
 
 [observability]

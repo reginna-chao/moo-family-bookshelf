@@ -61,7 +61,7 @@ worker/src/
 ├── durable/
 │   ├── attemptWindow.ts       # Pure reserve / refund / reset decisions on one { bucket, count, endsAt, epoch } record (no imports)
 │   └── attemptBudgetObject.ts # AttemptBudgetObject (ATTEMPT_BUDGET binding): one hourly budget per object, sync ctx.storage.kv + cleanup alarm
-├── backup/            # SEPARATE Free-tier Cron Worker (wrangler.backup.toml), never deployed by CI — docs/kv-backup-plan.md
+├── backup/            # SEPARATE Free-tier Cron Worker (wrangler.backup.toml), deployed by `deploy-worker-prod` on `v*` tags, before the API Worker — docs/kv-backup-plan.md
 │   ├── index.ts       # scheduled(): list → batch read → v2 JSONL multipart → manifest + latest.json CAS → retention → 2 Healthchecks pings
 │   ├── runtime.ts     # Free profile constants, RunBudget (internal vs external request counting), isWithinCapacity
 │   ├── source.ts      # KV listing + adaptive getWithMetadata([keys]) batches (413 → halve); no JSON.parse of values
