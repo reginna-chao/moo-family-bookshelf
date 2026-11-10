@@ -26,6 +26,10 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * login budget (`verify`, `VERIFY_ATTEMPT_MAX`) spent, the correct secret still
  * deletes the account: public login traffic never measures against this path. The
  * rest of the DELETE step-up contract is in `userDeleteStepUp.test.ts`.
+ *
+ * KV fallback, on purpose: requests carry the Rate Limiting stubs but no
+ * `ATTEMPT_BUDGET` binding, so both budgets are the KV counters these cases seed
+ * and read. The Durable Object path is in `verifyAttemptBudgetDurable.test.ts`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

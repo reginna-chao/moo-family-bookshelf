@@ -21,8 +21,10 @@ id = "YOUR_DEV_KV_NAMESPACE_ID"
 preview_id = "YOUR_DEV_KV_NAMESPACE_ID"
 
 # ---------------------------------------------------------------------------
-# Native Rate Limiting bindings — per-minute limits only; the hourly counters
-# stay on KV. One binding per distinct limit: several counters share a binding
+# Native Rate Limiting bindings — per-minute limits only. The verification
+# gate's two hourly attempt budgets live in the ATTEMPT_BUDGET Durable Object
+# below; every other hourly counter stays on KV. One binding per distinct
+# limit: several counters share a binding
 # and stay isolated by the key the Worker passes to limit(). Mapping lives in
 # src/middleware/rateLimit.ts (BINDING_BY_LIMIT).
 #
@@ -64,6 +66,24 @@ simple = { limit = 10, period = 60 }
 name = "RATE_LIMIT_3_PER_MIN"
 namespace_id = "1004"
 simple = { limit = 3, period = 60 }
+
+# ---------------------------------------------------------------------------
+# Verification attempt budgets (src/durable/attemptBudgetObject.ts): one
+# Durable Object per hourly budget, so parallel requests cannot exceed it.
+# SQLite-backed, which the Workers Free plan allows; `wrangler deploy` applies
+# the migration. Once deployed, the Worker cannot go back to a version without
+# this class — to pause it, remove only the binding (worker/DEPLOY.md).
+# Without the binding the Worker still runs: those budgets fall back to the
+# KV counters and log ATTEMPT_BUDGET_BINDING_MISSING.
+# ---------------------------------------------------------------------------
+[[durable_objects.bindings]]
+name = "ATTEMPT_BUDGET"
+class_name = "AttemptBudgetObject"
+
+# Inherited by [env.production]; never repeat it there.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AttemptBudgetObject"]
 
 # Production environment
 [env.production]
@@ -118,6 +138,13 @@ simple = { limit = 10, period = 60 }
 name = "RATE_LIMIT_3_PER_MIN"
 namespace_id = "2004"
 simple = { limit = 3, period = 60 }
+
+# Durable Object binding, repeated for production: environments do NOT inherit
+# it (the [[migrations]] above they do). Omitting it puts the production
+# verification budgets back on the KV counters.
+[[env.production.durable_objects.bindings]]
+name = "ATTEMPT_BUDGET"
+class_name = "AttemptBudgetObject"
 
 # DEV_MODE is NOT set in production.
 # For local dev, create .dev.vars with DEV_MODE=1 to enable localhost CORS.
