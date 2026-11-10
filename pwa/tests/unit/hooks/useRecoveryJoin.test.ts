@@ -9,7 +9,9 @@ import {
   useAuth,
   type AuthState,
 } from "@/hooks/useAuth";
+import { REMEMBERED_LOGOUT_KEY, saveToStorage } from "@/hooks/authStorage";
 import { REAUTH_PENDING_KEY } from "@/utils/reauthPendingKey";
+import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
 
 /**
  * useRecoveryJoin (PWA, #364): the silent recovery join moved out of App, now storing the token's
@@ -32,6 +34,12 @@ import { REAUTH_PENDING_KEY } from "@/utils/reauthPendingKey";
  * session, and the current session must stay exactly as it was. The join answers are real replies on
  * purpose, so a refresh that did run would change the session rather than just fail. The positive
  * control proves the same wiring does refresh while the session is still current.
+ *
+ * Another tab. A second tab of the SAME user can move storage to another family and server (B@Y)
+ * while this tab still shows A@X. A join sent before that move must not act on its answer — no login
+ * writing A back, no logout clearing B, no cooldown, remembered sync code or re-verification marker —
+ * and a 401 that arrives after the move must not send a join at all. Each case has a companion with
+ * the same harness and no move, which does reach the answer's effect.
  *
  * The join's failure branches are unchanged by the move and stay covered in
  * tests/component/App.test.tsx; `fetch` is the only mock here.
@@ -367,6 +375,144 @@ describe("useRecoveryJoin", () => {
     expect(result.current.auth).toEqual(next);
     expect(result.current.landingError).toBe("");
     unmount();
+  });
+
+  describe("when another tab of the same user moves storage to another session", () => {
+    const FAMILY_B = "fam-other-tab";
+    const OTHER_TAB: AuthState = {
+      userId: USER,
+      familyId: FAMILY_B,
+      apiHost: HOST_B,
+      authToken: TOKEN_B,
+    };
+
+    function expectStorageHolds(session: AuthState): void {
+      expect(localStorage.getItem(USER_ID_KEY)).toBe(session.userId);
+      for (const key of ["familyId", "apiHost", "authToken"] as const) {
+        expect(localStorage.getItem(namespacedKey(session.userId, key))).toBe(
+          session[key] ?? null,
+        );
+      }
+    }
+
+    /** Sends A's recovery join, lets the other tab write B@Y (`switchStorage`), then answers it. */
+    async function answerJoin(answer: unknown, switchStorage: boolean) {
+      const view = renderRecovery();
+      act(() => {
+        view.result.current.login(SESSION_A);
+      });
+      const reply = deferredReply();
+      mockFetch.mockImplementation((url: string) =>
+        isJoinUrl(url)
+          ? reply.promise
+          : Promise.reject(new Error(`unexpected ${url}`)),
+      );
+      let pending!: Promise<string | null>;
+      act(() => {
+        pending = view.result.current.join(view.result.current.auth!);
+      });
+      // The join really is in flight before the other tab writes.
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      expect(new URL(fetchCall(0)[0]).origin).toBe(HOST_A);
+      if (switchStorage) saveToStorage(OTHER_TAB);
+
+      let token: string | null = "unset";
+      await act(async () => {
+        reply.resolve(answer);
+        token = await pending;
+      });
+      return { ...view, token };
+    }
+
+    const ANSWERS = [
+      {
+        label: "a new token",
+        answer: joinReply({ authToken: NEW_TOKEN, expiresAt: NEW_EXPIRES_AT }),
+      },
+      {
+        label: "VERIFICATION_REQUIRED",
+        answer: errorReply(403, "VERIFICATION_REQUIRED"),
+      },
+      { label: "RATE_LIMITED", answer: errorReply(429, "RATE_LIMITED") },
+    ];
+
+    it.each(ANSWERS)(
+      "leaves B@Y and this tab alone when the join answers $label after the switch",
+      async ({ answer }) => {
+        const { result, token, unmount } = await answerJoin(answer, true);
+
+        expect(token).toBeNull();
+        expectStorageHolds(OTHER_TAB);
+        expect(result.current.onLogin).toHaveBeenCalledTimes(1); // login(SESSION_A) above only
+        expect(result.current.auth).toEqual(SESSION_A);
+        expect(result.current.landingError).toBe("");
+        expect(localStorage.getItem(RECOVERY_COOLDOWN_UNTIL_KEY)).toBeNull();
+        expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).toBeNull();
+        expect(localStorage.getItem(REAUTH_PENDING_KEY)).toBeNull();
+        unmount();
+      },
+    );
+
+    // Positive companion: the same harness without the switch reaches each answer's effect.
+    it.each([
+      {
+        ...ANSWERS[0],
+        effect: (r: ReturnType<typeof renderRecovery>["result"]) =>
+          expect(r.current.auth?.authToken).toBe(NEW_TOKEN),
+      },
+      {
+        ...ANSWERS[1],
+        effect: (r: ReturnType<typeof renderRecovery>["result"]) => {
+          expect(r.current.auth).toBeNull();
+          expect(localStorage.getItem(REMEMBERED_LOGOUT_KEY)).not.toBeNull();
+          expect(localStorage.getItem(REAUTH_PENDING_KEY)).not.toBeNull();
+        },
+      },
+      {
+        ...ANSWERS[2],
+        effect: () =>
+          expect(
+            localStorage.getItem(RECOVERY_COOLDOWN_UNTIL_KEY),
+          ).not.toBeNull(),
+      },
+    ])(
+      "acts on $label while storage still holds the session",
+      async ({ answer, effect }) => {
+        const { result, unmount } = await answerJoin(answer, false);
+
+        effect(result);
+        unmount();
+      },
+    );
+
+    it("sends no join when the switch landed before the 401", async () => {
+      const { result, unmount } = renderRecovery();
+      act(() => {
+        result.current.login(SESSION_A);
+      });
+      const clientA = result.current.client;
+      saveToStorage(OTHER_TAB);
+      mockFetch.mockImplementation((url: string) =>
+        Promise.resolve(
+          isJoinUrl(url)
+            ? joinReply({ authToken: NEW_TOKEN })
+            : errorReply(401, "UNAUTHORIZED"),
+        ),
+      );
+
+      let response!: Awaited<ReturnType<typeof clientA.updateFamilyPrefs>>;
+      await act(async () => {
+        response = await clientA.updateFamilyPrefs(USER, NO_PREFS);
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(new URL(fetchCall(0)[0]).pathname).toBe(PREFS_PATH);
+      expect(response.error?.code).toBe("UNAUTHORIZED");
+      expectStorageHolds(OTHER_TAB);
+      expect(result.current.onLogin).toHaveBeenCalledTimes(1);
+      expect(result.current.auth).toEqual(SESSION_A);
+      unmount();
+    });
   });
 
   it("refreshes and resends through the same client while its session is current", async () => {

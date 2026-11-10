@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { recoveryJoinBlocked } from "@/hooks/recoveryJoinGate";
 import { USER_ID_KEY, type AuthState } from "@/hooks/useAuth";
+import { saveToStorage } from "@/hooks/authStorage";
 import { RECOVERY_COOLDOWN_UNTIL_KEY } from "@/utils/recoveryCooldown";
-import {
-  beginSelfDeparture,
-  SELF_DEPARTURE_UNTIL_KEY,
-} from "@/utils/selfDeparture";
+import { beginSelfDeparture } from "@/utils/selfDeparture";
 
 /**
  * `recoveryJoinBlocked` decides whether App's silent recovery join may go out.
@@ -23,14 +21,12 @@ const SESSION: AuthState = {
 
 describe("recoveryJoinBlocked", () => {
   beforeEach(() => {
-    localStorage.setItem(USER_ID_KEY, SESSION.userId);
+    saveToStorage(SESSION);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    localStorage.removeItem(USER_ID_KEY);
-    localStorage.removeItem(RECOVERY_COOLDOWN_UNTIL_KEY);
-    localStorage.removeItem(SELF_DEPARTURE_UNTIL_KEY);
+    localStorage.clear();
   });
 
   it("lets the join through for a live session with nothing in the way", () => {
@@ -82,6 +78,18 @@ describe("recoveryJoinBlocked", () => {
 
     expect(recoveryJoinBlocked(live, SESSION)).toBe(true);
   });
+
+  it.each<[string, AuthState]>([
+    ["another family", { ...SESSION, familyId: "fam-2" }],
+    ["another server", { ...SESSION, apiHost: "https://other.example.com" }],
+  ])(
+    "blocks once another tab moved storage to %s of the same user",
+    (_label, otherTab) => {
+      saveToStorage(otherTab);
+
+      expect(recoveryJoinBlocked(SESSION, SESSION)).toBe(true);
+    },
+  );
 
   it("treats a throwing storage read as an ended session", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

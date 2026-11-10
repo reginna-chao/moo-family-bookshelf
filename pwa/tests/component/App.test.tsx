@@ -15,9 +15,10 @@ import {
  * user's own leave in flight.
  *
  * Session mirror: setMockSession sets the session the mocked useAuth returns AND mirrors production's
- * synchronous storage write — login stores USER_ID_KEY, logout removes it. App's #258 guard
- * (`isLiveSession`) reads that key after the recovery join, so the two must never disagree outside a
- * test that splits them on purpose. Production logout() / forceLogout() drop the stored session, and
+ * synchronous storage write — login stores USER_ID_KEY plus the namespaced familyId / apiHost, logout
+ * removes them. App's #258 guard (`isLiveSession`) compares the stored userId, familyId and server
+ * with the session after the recovery join, so the two must never disagree outside a test that splits
+ * them on purpose. Production logout() / forceLogout() drop the stored session, and
  * mirroring that is what lets LandingPage render on the branches that DO log out; the mocks are
  * registered per test, after vi.clearAllMocks() (afterEach's vi.restoreAllMocks() wipes them), so no
  * implementation leaks between tests.
@@ -77,6 +78,7 @@ import {
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
 const mockForceLogout = vi.fn();
+const mockDropSession = vi.fn();
 let mockAuth: Record<string, unknown> | null = null;
 let mockIsLoading = false;
 
@@ -92,6 +94,7 @@ vi.mock("@/hooks/useAuth", async (importOriginal) => {
       login: mockLogin,
       logout: mockLogout,
       forceLogout: mockForceLogout,
+      dropSession: mockDropSession,
       initialSyncCode: "",
       qrUserId: "",
       qrToken: "",
@@ -239,18 +242,33 @@ function clearSuiteStorageKeys() {
   localStorage.removeItem(RECOVERY_COOLDOWN_UNTIL_KEY);
   localStorage.removeItem(REMEMBERED_LOGOUT_KEY);
   localStorage.removeItem(REMEMBER_SYNC_CODE_KEY);
-  localStorage.removeItem(USER_ID_KEY);
+  removeMirroredSession();
   localStorage.removeItem(REAUTH_PENDING_KEY);
 }
 
-/** Set the session the mocked useAuth returns AND mirror production's synchronous USER_ID_KEY write.
- *  See the header → "Session mirror". */
+/** Removes the stored session identity production's logout clears (USER_ID_KEY, familyId, apiHost). */
+function removeMirroredSession(): void {
+  const userId = localStorage.getItem(USER_ID_KEY);
+  if (userId) {
+    localStorage.removeItem(namespacedKey(userId, "familyId"));
+    localStorage.removeItem(namespacedKey(userId, "apiHost"));
+  }
+  localStorage.removeItem(USER_ID_KEY);
+}
+
+/** Set the session the mocked useAuth returns AND mirror production's synchronous storage write of
+ *  its userId, familyId and apiHost. See the header → "Session mirror". */
 function setMockSession(next: Record<string, unknown> | null): void {
   mockAuth = next;
-  if (next) {
-    localStorage.setItem(USER_ID_KEY, next.userId as string);
-  } else {
-    localStorage.removeItem(USER_ID_KEY);
+  removeMirroredSession();
+  if (!next) return;
+  const userId = next.userId as string;
+  localStorage.setItem(USER_ID_KEY, userId);
+  if (typeof next.familyId === "string") {
+    localStorage.setItem(namespacedKey(userId, "familyId"), next.familyId);
+  }
+  if (typeof next.apiHost === "string") {
+    localStorage.setItem(namespacedKey(userId, "apiHost"), next.apiHost);
   }
 }
 

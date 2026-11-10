@@ -11,6 +11,8 @@ interface SettingsPageProps {
   userId: string;
   apiClient: ApiClient;
   onLogout: () => void;
+  /** Called after a successful leave; already bound to the session that sent the request. */
+  onLeft: () => void;
   onForceLogout: () => void;
 }
 
@@ -23,6 +25,7 @@ export function SettingsPage({
   userId,
   apiClient,
   onLogout,
+  onLeft,
   onForceLogout,
 }: SettingsPageProps) {
   return (
@@ -48,7 +51,7 @@ export function SettingsPage({
         familyId={familyId}
         userId={userId}
         apiClient={apiClient}
-        onLogout={onLogout}
+        onLogout={onLeft}
       />
 
       {/* Logout */}

@@ -4,6 +4,7 @@ import { CurrentSecretStep } from "./CurrentSecretStep";
 import { useFamilySettingsDelete } from "./useFamilySettingsDelete";
 
 export interface FamilySettingsDeleteBlockProps {
+  familyId: string;
   userId: string;
   apiClient: ApiClient;
   onLeave: () => void;
@@ -15,6 +16,7 @@ export interface FamilySettingsDeleteBlockProps {
  * lifetime.
  */
 export function FamilySettingsDeleteBlock({
+  familyId,
   userId,
   apiClient,
   onLeave,
@@ -28,7 +30,7 @@ export function FamilySettingsDeleteBlock({
     secretError,
     startConfirming,
     handleDeleteConfirm,
-  } = useFamilySettingsDelete({ userId, apiClient, onLeave });
+  } = useFamilySettingsDelete({ userId, familyId, apiClient, onLeave });
   // A PIN / pattern account confirms with its current secret: the entry's own 確認 submits (#396).
   const secretMethod =
     requiredMethod !== null && requiresCurrentSecret(requiredMethod)

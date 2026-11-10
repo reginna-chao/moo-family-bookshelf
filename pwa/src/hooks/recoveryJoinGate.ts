@@ -10,9 +10,9 @@ import { isSelfDepartureActive } from "@/utils/selfDeparture";
  *    join spends the worker's per-IP 3/min tier (LandingPage joins bypass this);
  *  - this user's own leave / delete-account request is in flight in any tab
  *    (#263) — a join now could re-add them to the family they are leaving;
- *  - the session already ended: `live` is no longer `current`, or `USER_ID_KEY`
- *    moved (`isLiveSession`). Storage that throws reads as ended, as the same
- *    check after the join would throw too.
+ *  - the session already ended: `live` is no longer `current`, or storage no
+ *    longer holds `current`'s userId, familyId and server — another tab moved
+ *    to another session (`isLiveSession`).
  */
 export function recoveryJoinBlocked(
   live: AuthState | null,
@@ -20,6 +20,7 @@ export function recoveryJoinBlocked(
 ): boolean {
   if (getActiveRecoveryCooldown() !== undefined) return true;
   if (isSelfDepartureActive()) return true;
+  // Extra guard: `isLiveSession` already reads a throwing storage as ended.
   try {
     return !isLiveSession(live, current);
   } catch {

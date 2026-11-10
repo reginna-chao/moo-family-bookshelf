@@ -47,8 +47,12 @@ import { buildLinkInviteMessage } from "moo-family-bookshelf-shared/invite/messa
  * request's recovery re-join it. 404 FAMILY_NOT_FOUND is the same outcome: a sole-owner dissolve that
  * half-failed after deleting the family record answers it on every retry, and keeping the session
  * would strand the user on a family that no longer exists. The opposite case (a real refusal renders
- * its error and does NOT call onLogout) is pinned by "shows the localized back-off copy when leave
+ * its error and does NOT call onLeft) is pinned by "shows the localized back-off copy when leave
  * family is rate limited".
+ *
+ * Leave vs logout: a completed leave ends the session through `onLeft` — App's logout bound to the
+ * session that sent the request — and never through `onLogout`, which only the manual 登出 button
+ * calls (that one is deliberately not session-bound).
  *
  * Rate-limited writes: the Worker rate-limits the family write endpoints (429 RATE_LIMITED, with an
  * optional `retryAfter`). Its `message` is English, so both write paths here render the localized
@@ -109,6 +113,7 @@ const defaultProps = {
   userId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
   apiClient: mockApiClient,
   onLogout: vi.fn(),
+  onLeft: vi.fn(),
   onForceLogout: vi.fn(),
 };
 
@@ -660,7 +665,7 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
 
-    // Step 3: confirm → calls API → onLogout
+    // Step 3: confirm → calls API → onLeft (the session-bound logout), never the plain onLogout
     fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
     await waitFor(() => {
@@ -672,8 +677,10 @@ describe("SettingsPage", () => {
       );
     });
     await waitFor(() => {
-      expect(defaultProps.onLogout).toHaveBeenCalled();
+      expect(defaultProps.onLeft).toHaveBeenCalledOnce();
     });
+    expect(defaultProps.onLogout).not.toHaveBeenCalled();
+    expect(defaultProps.onForceLogout).not.toHaveBeenCalled();
   });
 
   it("shows error message when leave family returns OWNER_CANNOT_LEAVE", async () => {
@@ -721,8 +728,9 @@ describe("SettingsPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "確定離開" }));
 
       await waitFor(() => {
-        expect(defaultProps.onLogout).toHaveBeenCalledOnce();
+        expect(defaultProps.onLeft).toHaveBeenCalledOnce();
       });
+      expect(defaultProps.onLogout).not.toHaveBeenCalled();
       expect(screen.queryByText(serverMessage)).not.toBeInTheDocument();
       expect(
         screen.queryByText("離開家庭失敗，請稍後再試"),
@@ -758,6 +766,7 @@ describe("SettingsPage", () => {
     });
     expect(screen.queryByText("Too many requests")).not.toBeInTheDocument();
     // A refused leave must not look like it succeeded.
+    expect(defaultProps.onLeft).not.toHaveBeenCalled();
     expect(defaultProps.onLogout).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: "離開家庭" }),
@@ -838,9 +847,11 @@ describe("SettingsPage", () => {
       screen.getByRole("button", { name: "確定登出" }),
     ).toBeInTheDocument();
 
-    // Step 3: confirm → calls onLogout
+    // Step 3: confirm → calls the plain onLogout (manual logout is not session-bound)
     fireEvent.click(screen.getByRole("button", { name: "確定登出" }));
-    expect(defaultProps.onLogout).toHaveBeenCalled();
+    expect(defaultProps.onLogout).toHaveBeenCalledOnce();
+    expect(defaultProps.onLeft).not.toHaveBeenCalled();
+    expect(defaultProps.onForceLogout).not.toHaveBeenCalled();
   });
 
   it("shows different logout message when remember is set to 0", async () => {

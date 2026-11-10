@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useRotatedTokenPersistence } from "@/hooks/useRotatedTokenPersistence";
-import { USER_ID_KEY, type AuthState } from "@/hooks/useAuth";
+import { USER_ID_KEY, namespacedKey, type AuthState } from "@/hooks/useAuth";
+import { saveToStorage } from "@/hooks/authStorage";
 
 /**
  * useRotatedTokenPersistence (#378): the callback App hands VerifySetupPrompt as `onTokenRotated`.
  * It persists the token a new pin / pattern / code rotated through `login`, but only into the session
  * that rendered it and only while that session is still live (`isLiveSession`, #258: same userId /
- * familyId / apiHost in `authRef`, and `USER_ID_KEY` still stored — a logout issued after an await
- * removes the key synchronously while React state lags a render behind). The App-level wiring with the
+ * familyId / apiHost in `authRef`, and storage still holding that userId, familyId and server — a
+ * logout issued after an await clears it synchronously while React state lags a render behind, and
+ * another tab may have moved it to another family or server). The App-level wiring with the
  * real `useAuth` is pinned in tests/component/App.verifyTokenRotation.test.tsx; this file walks the
  * live / not-live matrix with the real `isLiveSession`, `login` being the only test double.
  */
@@ -39,7 +41,7 @@ function renderPersistence(
 
 describe("useRotatedTokenPersistence", () => {
   beforeEach(() => {
-    localStorage.setItem(USER_ID_KEY, USER_A);
+    saveToStorage(SESSION_A);
   });
 
   afterEach(() => {
@@ -123,6 +125,43 @@ describe("useRotatedTokenPersistence", () => {
     expect(login).not.toHaveBeenCalled();
   });
 
+  it.each<{ label: string; otherTab: AuthState }>([
+    {
+      label: "another family and server",
+      otherTab: {
+        ...SESSION_A,
+        familyId: "fam-b",
+        apiHost: "https://other.example.com",
+        authToken: "token-b",
+      },
+    },
+    {
+      label: "another family",
+      otherTab: { ...SESSION_A, familyId: "fam-b", authToken: "token-b" },
+    },
+    {
+      label: "another server",
+      otherTab: {
+        ...SESSION_A,
+        apiHost: "https://other.example.com",
+        authToken: "token-b",
+      },
+    },
+  ])(
+    "stores nothing when another tab already moved storage to $label of the same user",
+    ({ otherTab }) => {
+      saveToStorage(otherTab);
+      const { persist, login } = renderPersistence(SESSION_A, SESSION_A);
+
+      persist(ROTATED_TOKEN);
+
+      expect(login).not.toHaveBeenCalled();
+      expect(localStorage.getItem(namespacedKey(USER_A, "authToken"))).toBe(
+        "token-b",
+      );
+    },
+  );
+
   it("stores nothing when it was created without a session", () => {
     const { persist, login } = renderPersistence(null, SESSION_A);
 
@@ -140,7 +179,7 @@ describe("useRotatedTokenPersistence", () => {
       login,
     } = renderPersistence(SESSION_A, SESSION_A);
     const sessionB: AuthState = { userId: USER_B, familyId: "fam-b" };
-    localStorage.setItem(USER_ID_KEY, USER_B);
+    saveToStorage(sessionB);
     authRef.current = sessionB;
     rerender({ session: sessionB });
 

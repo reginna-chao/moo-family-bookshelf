@@ -17,7 +17,8 @@ import {
   isSameSession,
   useSessionApiClient,
 } from "@/hooks/useSessionApiClient";
-import { USER_ID_KEY, type AuthState } from "@/hooks/useAuth";
+import type { AuthState } from "@/hooks/useAuth";
+import { saveToStorage } from "@/hooks/authStorage";
 import type { ApiClient } from "@/api/client";
 
 const USER_A = "a".repeat(64);
@@ -234,59 +235,82 @@ describe("isSameSession", () => {
   });
 });
 
-// #258: React state lags a logout issued after an await; the stored userId,
-// which production logout / login update synchronously, does not.
+// #258: React state lags a logout issued after an await; storage, which production logout / login
+// update synchronously, does not. Another tab may also have moved storage to another family / server.
 describe("isLiveSession", () => {
   afterEach(() => {
-    localStorage.removeItem(USER_ID_KEY);
+    vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   const OTHER_HOST = "https://self-hosted.example.com";
 
-  it.each<[string, boolean, AuthState | null, string | null]>([
-    ["same session, its userId stored", true, SESSION_A, USER_A],
+  it.each<[string, boolean, AuthState | null, AuthState | null]>([
+    ["same session, it is stored", true, SESSION_A, SESSION_A],
     [
-      "same session after a token swap, its userId stored",
+      "same session after a token swap, it is stored",
       true,
       { ...SESSION_A, authToken: "token-a2" },
-      USER_A,
+      SESSION_A,
     ],
     [
-      "same session, userId removed (logout not yet rendered)",
+      "same session, storage cleared (logout not yet rendered)",
       false,
       SESSION_A,
       null,
     ],
     [
-      "same session, another user's id stored (login not yet rendered)",
+      "same session, another user stored (login not yet rendered)",
       false,
       SESSION_A,
-      USER_B,
+      { ...SESSION_A, userId: USER_B },
     ],
-    ["no session (logged out)", false, null, USER_A],
     [
-      "different userId, A's id still stored",
+      "same session, storage moved to another family of the same user",
+      false,
+      SESSION_A,
+      { ...SESSION_A, familyId: "fam-other" },
+    ],
+    [
+      "same session, storage moved to another server of the same user",
+      false,
+      SESSION_A,
+      { ...SESSION_A, apiHost: OTHER_HOST },
+    ],
+    ["no session (logged out)", false, null, SESSION_A],
+    [
+      "different userId, A still stored",
       false,
       { ...SESSION_A, userId: USER_B },
-      USER_A,
+      SESSION_A,
     ],
     [
-      "different familyId, userId stored",
+      "different familyId, A still stored",
       false,
       { ...SESSION_A, familyId: "fam-other" },
-      USER_A,
+      SESSION_A,
     ],
     [
-      "different apiHost, userId stored",
+      "different apiHost, A still stored",
       false,
       { ...SESSION_A, apiHost: OTHER_HOST },
-      USER_A,
+      SESSION_A,
     ],
-  ])("%s → %s", (_case, expected, current, storedUserId) => {
-    localStorage.removeItem(USER_ID_KEY);
-    if (storedUserId !== null) {
-      localStorage.setItem(USER_ID_KEY, storedUserId);
-    }
+  ])("%s → %s", (_case, expected, current, stored) => {
+    localStorage.clear();
+    if (stored !== null) saveToStorage(stored);
     expect(isLiveSession(current, SESSION_A)).toBe(expected);
+  });
+
+  it("reads a throwing storage as an ended session", () => {
+    saveToStorage(SESSION_A);
+    // Positive companion: the same stored session is live while reads succeed.
+    expect(isLiveSession(SESSION_A, SESSION_A)).toBe(true);
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+
+    expect(isLiveSession(SESSION_A, SESSION_A)).toBe(false);
   });
 });

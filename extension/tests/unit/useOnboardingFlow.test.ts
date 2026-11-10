@@ -179,6 +179,7 @@ vi.mock("moo-family-bookshelf-shared/crypto/syncCode", () => ({
 import { waitFor } from "@testing-library/react";
 import { useOnboardingFlow } from "@/dialog/useOnboardingFlow";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
+import { STALE_SESSION_MESSAGE } from "@/dialog/verificationCodes";
 import { deriveUserId } from "moo-family-bookshelf-shared/crypto/hash";
 import { encodeSyncCode } from "moo-family-bookshelf-shared/crypto/syncCode";
 import {
@@ -629,6 +630,41 @@ describe("useOnboardingFlow", () => {
       );
       const lastCall = vi.mocked(tryAutoRecovery).mock.calls.at(-1);
       expect(lastCall?.[0].verifySecret).toBe("123456");
+    });
+
+    it("auto-recovery: a secret submitted after the client moved to another server is never sent", async () => {
+      const onFamilyJoined = vi.fn();
+      vi.mocked(tryAutoRecovery).mockImplementation(async (opts) => {
+        if (opts.verifySecret) {
+          opts.onFamilyJoined(opts.familyId, opts.userId);
+          return { recovered: true };
+        }
+        return { recovered: false, errorCode: "VERIFICATION_REQUIRED" };
+      });
+      const api = apiClientWithFamily();
+      const { result } = renderFlow(api, createMockAutoSetup(), onFamilyJoined);
+
+      await act(async () => {
+        await result.current.handleStart();
+      });
+      expect(result.current.state).toBe("verify-prompt");
+      const callsBeforeSubmit = vi.mocked(tryAutoRecovery).mock.calls.length;
+
+      // The prompt opened on ORIGINAL_ENDPOINT; the client now points elsewhere.
+      api.setEndpoint("https://other.example");
+      await act(async () => {
+        await result.current.verify.submit("123456");
+      });
+
+      expect(vi.mocked(tryAutoRecovery).mock.calls).toHaveLength(
+        callsBeforeSubmit,
+      );
+      const secretCalls = vi
+        .mocked(tryAutoRecovery)
+        .mock.calls.filter(([opts]) => opts.verifySecret !== undefined);
+      expect(secretCalls).toEqual([]);
+      expect(onFamilyJoined).not.toHaveBeenCalled();
+      expect(result.current.verify.error).toBe(STALE_SESSION_MESSAGE);
     });
 
     it("auto-recovery: cancel returns to the recovery-choice screen", async () => {

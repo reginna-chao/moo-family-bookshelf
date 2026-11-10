@@ -2,9 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { ApiClient } from "@/api/client";
 import type { ApiResponse } from "@/api/types";
-import { SELF_DEPARTURE_UNTIL_KEY, USER_ID_KEY } from "@/constants";
+import {
+  API_ENDPOINT_KEY,
+  FAMILY_ID_KEY,
+  SELF_DEPARTURE_UNTIL_KEY,
+  USER_ID_KEY,
+} from "@/constants";
 import type { VerifyMethod } from "@/api/types";
-import { useFamilySettingsDelete } from "@/dialog/useFamilySettingsDelete";
+import {
+  DELETED_ELSEWHERE_MESSAGE,
+  useFamilySettingsDelete,
+} from "@/dialog/useFamilySettingsDelete";
 import { isSelfDepartureActive } from "@/storage/selfDeparture";
 import { verificationLockedMessage } from "@/dialog/verificationMessages";
 import { ACCOUNT_DELETED_ERROR_CODE } from "moo-family-bookshelf-shared/api/accountDeleted";
@@ -32,9 +40,19 @@ import {
  * its response was lost, and the hook counts that as success. "Called once" below counts `deleteAccount`
  * calls, not network requests: the real 401 path inside the client also posts a refresh. A plain
  * `UNAUTHORIZED` on both sends must keep today's failure, so the rewrite cannot swallow it.
+ *
+ * Stored binding: a success clears storage only while it still holds the userId + familyId the delete
+ * was sent for, so every suite seeds `BOUND`. When another tab bound storage to another family or
+ * account while the delete was in flight, the success leaves storage alone, skips `onLeave`, returns
+ * to idle and shows `DELETED_ELSEWHERE_MESSAGE`. When another tab only LEFT mid-delete (familyId
+ * removed, the same userId kept) there is no other session to keep: the success still clears storage
+ * and calls `onLeave`, so a deleted account's cache never stays behind. A binding read that rejects
+ * still clears and leaves: the server account is gone, so the Dialog must not get stuck on a failed read.
  */
 
 type DeleteRes = ApiResponse<{ ok: boolean }>;
+
+const BOUND = { [USER_ID_KEY]: "user-1", [FAMILY_ID_KEY]: "fam-1" };
 
 const ALREADY_DELETED: DeleteRes = {
   error: { code: "ACCOUNT_DELETED", message: "這個帳戶已經移除" },
@@ -56,7 +74,12 @@ function setup(deleteAccount: () => Promise<DeleteRes>) {
     getEndpoint: () => "https://api.example",
   } as unknown as ApiClient;
   const hook = renderHook(() =>
-    useFamilySettingsDelete({ userId: "user-1", apiClient, onLeave }),
+    useFamilySettingsDelete({
+      userId: "user-1",
+      familyId: "fam-1",
+      apiClient,
+      onLeave,
+    }),
   );
   const confirmDelete = async (currentSecret?: string) => {
     await act(async () => {
@@ -69,7 +92,7 @@ function setup(deleteAccount: () => Promise<DeleteRes>) {
 describe("useFamilySettingsDelete", () => {
   beforeEach(async () => {
     await chrome.storage.local.clear();
-    await chrome.storage.local.set({ [USER_ID_KEY]: "user-1" });
+    await chrome.storage.local.set(BOUND);
     vi.clearAllMocks();
   });
 
@@ -282,7 +305,12 @@ function setupStepUp(
     getEndpoint: () => "https://api.example",
   } as unknown as ApiClient;
   const hook = renderHook(() =>
-    useFamilySettingsDelete({ userId: "user-1", apiClient, onLeave }),
+    useFamilySettingsDelete({
+      userId: "user-1",
+      familyId: "fam-1",
+      apiClient,
+      onLeave,
+    }),
   );
   const start = () =>
     act(async () => {
@@ -305,7 +333,7 @@ function storageSawSecret(secret: string): boolean {
 describe("useFamilySettingsDelete step-up (#396)", () => {
   beforeEach(async () => {
     await chrome.storage.local.clear();
-    await chrome.storage.local.set({ [USER_ID_KEY]: "user-1" });
+    await chrome.storage.local.set(BOUND);
     vi.clearAllMocks();
   });
 
@@ -473,5 +501,125 @@ describe("useFamilySettingsDelete step-up (#396)", () => {
 
     expect(hook.result.current.secretError).toBe("");
     expect(hook.result.current.deleteState).toBe("confirming");
+  });
+});
+
+describe("useFamilySettingsDelete stored binding", () => {
+  beforeEach(async () => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(BOUND);
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await chrome.storage.local.clear();
+    vi.restoreAllMocks();
+  });
+
+  /** The stored userId + familyId right now. */
+  async function storedBinding() {
+    return chrome.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY]);
+  }
+
+  it.each<[string, Record<string, string>, DeleteRes]>([
+    ["another family", { [FAMILY_ID_KEY]: "fam-2" }, { data: { ok: true } }],
+    ["another account", { [USER_ID_KEY]: "user-2" }, { data: { ok: true } }],
+    [
+      "another family (ACCOUNT_DELETED)",
+      { [FAMILY_ID_KEY]: "fam-2" },
+      ALREADY_DELETED,
+    ],
+  ])(
+    "leaves storage alone and shows the stale-window copy when storage switched to %s mid-delete",
+    async (_label, switched, response) => {
+      const { hook, send, onLeave, confirmDelete } = setup(async () => {
+        await chrome.storage.local.set(switched);
+        return response;
+      });
+
+      await confirmDelete();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(chrome.storage.local.clear).not.toHaveBeenCalled();
+      expect(onLeave).not.toHaveBeenCalled();
+      expect(hook.result.current.deleteState).toBe("idle");
+      expect(hook.result.current.deleteError).toBe(DELETED_ELSEWHERE_MESSAGE);
+      expect(await storedBinding()).toEqual({ ...BOUND, ...switched });
+      expect(await isSelfDepartureActive()).toBe(false);
+    },
+  );
+
+  it.each<[string, Record<string, string>]>([
+    ["storage is unchanged", {}],
+    [
+      "only the stored server changed",
+      { [API_ENDPOINT_KEY]: "https://x.example" },
+    ],
+  ])("clears storage and calls onLeave when %s", async (_label, changed) => {
+    const { hook, onLeave, confirmDelete } = setup(async () => {
+      await chrome.storage.local.set(changed);
+      return { data: { ok: true } };
+    });
+
+    await confirmDelete();
+
+    expect(chrome.storage.local.clear).toHaveBeenCalledTimes(1);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBe("");
+    expect(await chrome.storage.local.get(null)).toEqual({});
+  });
+
+  it("clears storage and calls onLeave when another tab left the family mid-delete", async () => {
+    const { hook, onLeave, confirmDelete } = setup(async () => {
+      await chrome.storage.local.remove(FAMILY_ID_KEY);
+      return { data: { ok: true } };
+    });
+
+    await confirmDelete();
+
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(FAMILY_ID_KEY);
+    expect(chrome.storage.local.clear).toHaveBeenCalledTimes(1);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBe("");
+    expect(await chrome.storage.local.get(null)).toEqual({});
+    expect(await isSelfDepartureActive()).toBe(false);
+  });
+
+  it("clears storage and calls onLeave when the binding read rejects", async () => {
+    const get = vi.mocked(chrome.storage.local.get);
+    const storeGet = get.getMockImplementation()!;
+    const readStore = storeGet as (keys: unknown) => unknown;
+    let rejected = 0;
+    get.mockImplementation(((keys: unknown) => {
+      const isBindingRead =
+        Array.isArray(keys) &&
+        keys.length === 2 &&
+        keys.includes(USER_ID_KEY) &&
+        keys.includes(FAMILY_ID_KEY);
+      if (!isBindingRead) return readStore(keys);
+      rejected += 1;
+      return Promise.reject(new Error("Extension context invalidated"));
+    }) as never);
+    const { hook, onLeave, confirmDelete } = setup(async () => ({
+      data: { ok: true },
+    }));
+
+    try {
+      await confirmDelete();
+    } finally {
+      get.mockImplementation(storeGet);
+    }
+
+    expect(rejected).toBe(1);
+    expect(chrome.storage.local.clear).toHaveBeenCalledTimes(1);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBe("");
+    expect(await chrome.storage.local.get(null)).toEqual({});
+  });
+
+  it("pins the stale-window copy", () => {
+    expect(DELETED_ELSEWHERE_MESSAGE).toBe(
+      "帳戶已移除。這個視窗的資料已過期，請關閉後重新開啟。",
+    );
   });
 });
