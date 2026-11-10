@@ -37,7 +37,9 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * Requests run without DEV_MODE (DEV_MODE skips every ceiling) and carry the
  * binding stubs, so only the hourly KV counters are written; setup goes
  * through DEV_MODE. `Date` is pinned mid-window, which also fixes `retryAfter`
- * at half the window.
+ * at half the window. KV fallback, on purpose: no `ATTEMPT_BUDGET` binding, so
+ * the gate's `verify` / `verify-stepup` budgets are KV counters too and the
+ * four prefixes can be read side by side.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,6 +67,7 @@ async function call(
     "Content-Type": "application/json",
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  // No ATTEMPT_BUDGET: the gate's budgets take their KV fallback (see the header).
   const env = dev
     ? { KV: kv, DEV_MODE: "1" }
     : { KV: kv, ...rateLimitBindings() };

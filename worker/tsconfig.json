@@ -20,6 +20,6 @@
       "moo-family-bookshelf-shared/*": ["../shared/src/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "vitest/**/*"],
   "exclude": ["node_modules", "dist"]
 }
