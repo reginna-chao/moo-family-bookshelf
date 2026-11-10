@@ -83,8 +83,8 @@ export function rateLimitBucketFor(
   return { prefix: PREFIX_STANDARD, limit: RATE_LIMIT_STANDARD };
 }
 
-/** Period of every native binding: the platform accepts only 10 or 60, and every limit here is per
- *  minute. Longer windows (the hourly per-userId scopes) have no binding and stay on KV. */
+/** Period of every native binding: the platform accepts only 10 or 60, and every limit here is per minute.
+ *  Hourly scopes have none: KV, except `verify` / `verify-stepup` (Durable Object, services/attemptBudget.ts). */
 const BINDING_PERIOD_SECONDS = 60;
 
 /** Per-minute limit → binding name: the ONE place a binding is resolved by name (edit with wrangler.toml).
@@ -416,9 +416,9 @@ export type PerUserRateLimitVerdict =
  * charge the SAME window afterwards.
  *
  * Exists so a caller that only wants to charge SOME outcomes (the verification
- * gate charges wrong guesses only) still costs exactly one KV read and at most
- * one KV write per request — the count observed here is reused for the write
- * instead of being read again.
+ * gate's KV fallback, `services/attemptBudget.ts`, charges wrong guesses only)
+ * still costs exactly one KV read and at most one KV write per request — the
+ * count observed here is reused for the write instead of being read again.
  */
 export interface PerUserRateLimitReading {
   verdict: PerUserRateLimitVerdict;
@@ -448,9 +448,10 @@ function perUserWindowKey(
  *
  * This is the single implementation of the counter key/verdict derivation:
  * {@link consumePerUserRateLimit}, the `Context`-aware
- * {@link enforcePerUserRateLimit} wrapper, and the verification gate
- * (`validateVerification` in `services/verification.ts`) all go through it, so
- * none of them can drift apart. Pure read — pair it with
+ * {@link enforcePerUserRateLimit} wrapper, and the verification gate's KV
+ * fallback (`reserveAttempt` in `services/attemptBudget.ts`, used when the
+ * Durable Object binding is missing or fails) all go through it, so none of
+ * them can drift apart. Pure read — pair it with
  * {@link chargePerUserRateLimit} to actually consume a slot.
  *
  * Does NOT consult DEV_MODE — that gating belongs to the callers, which own the
@@ -488,17 +489,19 @@ export async function peekPerUserRateLimit(
  *
  * The clamp is defensive: every caller today passes `windowSec >= 60`, but a
  * future window under 30s would derive a TTL real KV rejects, turning an
- * admitted request into a 500 — and inside `chargeWrongGuess`'s `Promise.all`
- * (`services/verification.ts`) that throw would silently stop the verification
- * attempt budgets from counting.
+ * admitted request into a 500 — and inside the gate's wrong-guess `Promise.all`
+ * (`validateVerification` → `settleWrongGuess`) that throw would silently stop
+ * the verification attempt budgets' KV fallback from counting.
  *
  * Known limitation: KV get-then-put is not atomic, and the read happened in
  * {@link peekPerUserRateLimit}. Requests fired in parallel all observe the same
  * pre-write count, so a burst can exceed `max` by as much as the caller's own
  * concurrency — there is no fixed overshoot factor. This applies to every
- * counter still on KV: the hourly scopes (`verify`, `verify-stepup`,
- * `verify-write`, `verify-set`, `put-books`, `family-prefs`,
- * `new-book-default`, `family-write`, `public-shelf`) and the missing-binding
+ * counter still on KV: the hourly scopes (`verify-write`, `verify-set`,
+ * `put-books`, `family-prefs`, `new-book-default`, `family-write`,
+ * `public-shelf`), `verify` / `verify-stepup` whenever they fall back to KV
+ * (no `ATTEMPT_BUDGET` binding, or the Durable Object failed — normally they
+ * are counted there, `services/attemptBudget.ts`) and the missing-binding
  * fallback in {@link chargeIpCounterInKv}. The per-minute scopes normally
  * bypass this path entirely — see {@link bindingForWindow}.
  */
@@ -604,7 +607,7 @@ export async function enforcePerUserRateLimit(
  * Unlike {@link enforcePerUserRateLimit} it has no KV fallback: a get-then-put
  * counter would not hold back parallel requests, which is this check's one job.
  * Used by the verification gate (`validateVerification`), which has its own hourly
- * budget on KV to stand behind it.
+ * budget (Durable Object, KV fallback — `services/attemptBudget.ts`) behind it.
  *
  * - `DEV_MODE` ⇒ not limited.
  * - No binding ⇒ logs `RATE_LIMIT_BINDING_MISSING`, not limited.

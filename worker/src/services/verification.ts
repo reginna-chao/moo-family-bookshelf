@@ -1,5 +1,5 @@
 import type { Context, TypedResponse } from "hono";
-import { type Env, getVerifyPepper, isDevMode } from "../utils/env";
+import { type Env, getVerifyPepper } from "../utils/env";
 import {
   kvKeys,
   VERIFY_HASH_VERSION_PEPPER,
@@ -13,14 +13,16 @@ import {
 } from "../kv/schema";
 import { VERIFY_SECRET_MAX_LENGTH } from "../utils/validation";
 import {
-  chargePerUserRateLimit,
   checkPerUserBurstLimit,
-  deletePerUserRateLimitWindow,
   getCallerIp,
-  peekPerUserRateLimit,
   RATE_LIMITED_MESSAGE,
-  type PerUserRateLimitReading,
 } from "../middleware/rateLimit";
+import {
+  releaseCorrectGuess,
+  reserveAttempt,
+  resetAttemptBudget,
+  settleWrongGuess,
+} from "./attemptBudget";
 import { jsonError, type ErrorBody } from "../utils/errors";
 import { getAccountDeletingMark } from "../kv/accountDeleting";
 import { deleteVerifyRecord, putVerifyRecord } from "../kv/verify";
@@ -339,64 +341,23 @@ function stepUpBudgetFor(userId: string, bucket: string): VerifyAttemptBudget {
   };
 }
 
-/** Read one hourly attempt budget without charging (`null` under DEV_MODE). The gate reads it BEFORE comparing,
- *  and {@link chargeWrongGuess} reuses this reading: docs/architecture.md → 安全措施. */
-async function peekAttemptCeiling(
-  env: Env,
-  subject: string,
-  scope: string,
-  max: number,
-): Promise<PerUserRateLimitReading | null> {
-  if (isDevMode(env)) return null;
-
-  return peekPerUserRateLimit(env.KV, {
-    userId: subject,
-    scope,
-    max,
-    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
-  });
-}
-
-/** Writes the budget's `ratelimit:user:{scope}:{userId}:{bucket}` only — no-op under DEV_MODE (`reading` is `null`).
- *  The caller's streak is a different key ({@link chargeFailure}). */
-async function chargeFailedAttempt(
-  kv: KVNamespace,
-  reading: PerUserRateLimitReading | null,
-): Promise<void> {
-  if (!reading) return;
-  await chargePerUserRateLimit(kv, reading);
-}
-
-/** Charge a wrong guess to both brakes, reusing the reading taken before the comparison. Two DIFFERENT keys,
- *  so one write per key holds: .claude/rules/backend.md → Service, middleware and KV invariants. */
-async function chargeWrongGuess(
-  kv: KVNamespace,
-  reading: PerUserRateLimitReading | null,
-  failKey: string,
-  failRecord: VerifyFailRecord | null,
-): Promise<void> {
-  await Promise.all([
-    chargeFailedAttempt(kv, reading),
-    chargeFailure(kv, failKey, failRecord),
-  ]);
-}
-
 /**
  * Clear the current window of the login attempt budget, after the owner saved new
  * verification settings: guesses against the old secret no longer mean anything.
- * The step-up budget is deliberately left alone.
+ * Clears both the Durable Object (when bound, not DEV_MODE) and the KV fallback
+ * counter (`resetAttemptBudget`). The step-up budget is deliberately left alone.
  *
- * Fail-open: the settings are already saved, so a KV error only logs the event name
- * (its message may echo the key, which carries the userId, #357) and the counter
+ * Fail-open: the settings are already saved, so an error only logs the event name
+ * (a KV message may echo the key, which carries the userId, #357) and the count
  * stays until its window ends. See docs/architecture.md → 安全措施.
  */
 export async function resetLoginAttemptCeiling(
-  kv: KVNamespace,
+  env: Env,
   userId: string,
 ): Promise<void> {
   try {
-    await deletePerUserRateLimitWindow(kv, {
-      userId,
+    await resetAttemptBudget(env, {
+      subject: userId,
       scope: VERIFY_ATTEMPT_SCOPE,
       windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
     });
@@ -427,10 +388,12 @@ export async function resetLoginAttemptCeiling(
  *    secret-bearing request, right or wrong, and is skipped when the deployment has
  *    no binding or the binding fails.
  * 3. **Hourly attempt budget — keyed the same way** (`opts.budget.max` per
- *    {@link VERIFY_ATTEMPT_WINDOW_SECONDS}, on KV; {@link VERIFY_ATTEMPT_MAX} on login).
- *    Only a wrong guess charges it. Without a per-account brake the caller-scoped
- *    lockout leaves no account-wide bound, and the shortest allowed pattern has
- *    only 9×8×7×6 = 3,024 combinations.
+ *    {@link VERIFY_ATTEMPT_WINDOW_SECONDS}; {@link VERIFY_ATTEMPT_MAX} on login), held
+ *    by the `ATTEMPT_BUDGET` Durable Object with the KV counter as fallback
+ *    (`services/attemptBudget.ts`). Every compared secret reserves a slot first; a
+ *    correct one gives it back, so in effect only wrong guesses spend it. Without a
+ *    per-account brake the caller-scoped lockout leaves no account-wide bound, and
+ *    the shortest allowed pattern has only 9×8×7×6 = 3,024 combinations.
  *
  * Brakes 2 and 3 live here rather than in the handlers so no current or future
  * caller of this gate can forget them. Both are consulted BEFORE the comparison,
@@ -439,12 +402,18 @@ export async function resetLoginAttemptCeiling(
  * the submitted secret and writes nothing. Consequences:
  *
  * - With either limit spent, a CORRECT secret gets the same `429 RATE_LIMITED` as
- *   a wrong one. A correct secret never charges the hourly budget.
+ *   a wrong one. A correct secret's slot is refunded; while it is reserved a
+ *   parallel request may be refused, and a failed refund keeps it spent until the
+ *   window ends.
  * - A request with no secret (`VERIFICATION_REQUIRED`), a malformed one (rejected
  *   earlier, at the handler), and an account with nothing configured cost neither
  *   limit, so probing and silent recovery joins cannot spend them.
- * - Neither limit is a hard bound: both hold for sequential traffic within one
- *   Cloudflare location only (docs/architecture.md → 已接受的殘餘風險).
+ * - With the Durable Object the hourly budget is a hard bound: in one window no
+ *   more than `max` requests reach the comparison, however many arrive at once.
+ *   An overloaded object answers `429 RATE_LIMITED` (`retryAfter` 60). Without the
+ *   binding, or when the object fails, the KV fallback holds for sequential
+ *   traffic within one Cloudflare location only, and the per-minute limit is never
+ *   a hard bound (docs/architecture.md → 已接受的殘餘風險).
  *
  * ACCEPTED TRADE-OFF: on login, brakes 2 and 3 are keyed on the TARGET userId, so a
  * third party can spend them with wrong answers and block the owner's new-device
@@ -458,26 +427,29 @@ export async function resetLoginAttemptCeiling(
  *
  * Order of evaluation, and what each outcome costs (first match wins):
  *
- * | Situation                       | Result                    | KV writes         |
- * | ------------------------------- | ------------------------- | ----------------- |
- * | nothing configured              | valid                     | none              |
- * | locked caller                   | 429 VERIFICATION_LOCKED   | none              |
- * | unverifiable hash scheme²       | 503 VERIFY_UNAVAILABLE    | none              |
- * | no secret supplied              | 403 VERIFICATION_REQUIRED | none              |
- * | corrupted record (no hash/salt) | valid                     | none              |
- * | per-minute limit spent          | 429 RATE_LIMITED (60)     | none              |
- * | hourly budget spent             | 429 RATE_LIMITED (rest)³  | none              |
- * | correct secret                  | valid                     | delete failKey¹   |
- * | wrong secret                    | 403 VERIFICATION_FAILED   | counter + failKey |
+ * | Situation                       | Result                    | KV writes          |
+ * | ------------------------------- | ------------------------- | ------------------ |
+ * | nothing configured              | valid                     | none               |
+ * | locked caller                   | 429 VERIFICATION_LOCKED   | none               |
+ * | unverifiable hash scheme²       | 503 VERIFY_UNAVAILABLE    | none               |
+ * | no secret supplied              | 403 VERIFICATION_REQUIRED | none               |
+ * | corrupted record (no hash/salt) | valid                     | none               |
+ * | per-minute limit spent          | 429 RATE_LIMITED (60)     | none               |
+ * | hourly budget spent             | 429 RATE_LIMITED (rest)³  | none               |
+ * | correct secret                  | valid                     | delete failKey¹    |
+ * | wrong secret                    | 403 VERIFICATION_FAILED   | failKey (+ count⁴) |
  *
  * ¹ only when this caller has a failure record (or a void leftover) to clear.
+ *   A slot reserved in the Durable Object is refunded first.
  * ² a pin/pattern record of v2 with no pepper configured or a different one
  *   (`pepperId` mismatch), or of an unknown `version` — with or without a
  *   secret; logs `VERIFY_PEPPER_MISSING` / `VERIFY_PEPPER_MISMATCH` /
  *   `VERIFY_HASH_VERSION_UNSUPPORTED` (no identifiers) and charges nothing.
  *   It never falls through to the corrupted-record pass. Its pepper fingerprint
  *   does not involve the submitted secret.
- * ³ `retryAfter` = the seconds left in the window.
+ * ³ `retryAfter` = the seconds left in the window (60 while the object is overloaded).
+ * ⁴ the KV counter, on the fallback only; the Durable Object counted the slot when
+ *   it was reserved.
  *
  * A correct v1 secret is NOT upgraded here: the create / join / lookup handlers
  * call {@link upgradeVerifyRecordHash} after their stale-record check.
@@ -591,17 +563,15 @@ export async function validateVerification(
     return { valid: false, error: attemptLimitError(burst.retryAfter) };
   }
 
-  const reading = await peekAttemptCeiling(
-    env,
+  // A slot is reserved before comparing; a throw from matchesSecret keeps it spent (conservative).
+  const reservation = await reserveAttempt(env, {
     subject,
-    budget.ceilingScope,
-    budget.max,
-  );
-  if (reading?.verdict.limited) {
-    return {
-      valid: false,
-      error: attemptLimitError(reading.verdict.retryAfter),
-    };
+    scope: budget.ceilingScope,
+    max: budget.max,
+    windowSec: VERIFY_ATTEMPT_WINDOW_SECONDS,
+  });
+  if (reservation.kind === "limited") {
+    return { valid: false, error: attemptLimitError(reservation.retryAfter) };
   }
 
   const matched = await matchesSecret(kv, userId, record, secret, {
@@ -610,13 +580,19 @@ export async function validateVerification(
   });
 
   if (!matched) {
+    // Two DIFFERENT keys, one write each: .claude/rules/backend.md → Service, middleware and KV invariants.
     // `chargeFailure` overwrites the whole entry, so a void leftover is replaced here, not deleted first.
-    await chargeWrongGuess(kv, reading, failKey, failRecord);
+    await Promise.all([
+      settleWrongGuess(env, reservation),
+      chargeFailure(kv, failKey, failRecord),
+    ]);
     return {
       valid: false,
       error: { code: "VERIFICATION_FAILED", message: "驗證失敗", status: 403 },
     };
   }
+
+  await releaseCorrectGuess(env, reservation);
 
   // Success — clear this caller's failure history, including a void leftover
   // that no later write will replace.

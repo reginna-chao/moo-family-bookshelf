@@ -68,10 +68,12 @@ moo-family-bookshelf/
 ├── worker/                      # Cloudflare Workers backend (self-hostable)
 │   ├── src/
 │   │   ├── index.ts
+│   │   ├── durable/           # AttemptBudgetObject: the Durable Object counting the verification gate's hourly attempt budgets
 │   │   └── backup/            # Separate Free-tier Cron Worker: daily KV → R2 backup (docs/kv-backup-plan.md)
 │   ├── tests/
 │   │   ├── unit/              # Unit tests (routes, middleware)
 │   │   └── integration/      # Integration tests (Hono app + in-memory mock KV)
+│   ├── vitest/                # Vitest-only stand-in for the `cloudflare:workers` runtime module (aliased in vitest.config.ts)
 │   ├── vitest.config.ts
 │   ├── wrangler.toml
 │   ├── wrangler.backup.toml    # Backup Worker config template (copy to the gitignored wrangler.backup.local.toml)
@@ -80,7 +82,8 @@ moo-family-bookshelf/
 │   ├── kv-backup/               # Archive format (shared with the backup Worker) + restore CLI modules
 │   ├── kv-restore.mjs           # Restore a backup into an EMPTY isolated KV namespace (dry-run by default)
 │   ├── kv-restore-drill.mjs     # `pnpm backup:drill`: monthly dry-run of the latest backup via the local wrangler login
-│   └── test-kv-backup-runtime.mjs # Local Miniflare drill of the real scheduled handler
+│   ├── test-kv-backup-runtime.mjs # Local Miniflare drill of the real scheduled handler
+│   └── test-attempt-budget-runtime.mjs # Local Miniflare drill of the real AttemptBudgetObject (parallel reserves, refund, reset)
 ├── pwa/                         # PWA mobile viewer (Phase 3)
 ├── site/                        # GitHub Pages landing page
 │   └── index.html
@@ -111,6 +114,7 @@ moo-family-bookshelf/
 | Mobile   | PWA                       | Shares the same Workers API; cannot scrape Readmoo          |
 | Backend  | Cloudflare Workers        | Serverless; free tier sufficient; self-hostable             |
 | Storage  | Cloudflare KV             | `user:{id}` for personal settings, `family:{id}` for groups |
+| Storage  | Durable Objects (SQLite)  | Verification attempt budgets only (`ATTEMPT_BUDGET`)        |
 
 ## Build & Development Commands
 
