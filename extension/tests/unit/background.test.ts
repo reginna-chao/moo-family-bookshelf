@@ -3,9 +3,6 @@ import browser, { type Runtime } from "webextension-polyfill";
 import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
 import {
   FAMILY_ID_KEY,
-  AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
-  PERSONAL_BOOKS_CACHE_KEY,
   USER_EMAIL_KEY,
   STORE_PAGE_CHIP_ENABLED_KEY,
   STORE_PAGE_INDEX_KEY,
@@ -13,7 +10,8 @@ import {
 
 /**
  * Tests for the background service worker message handlers.
- * Validates the sync+local dual-storage strategy.
+ * Validates message dispatch (only OPEN_OPTIONS_PAGE is handled; familyId
+ * messages were removed in #484) and the store-page chip wiring.
  *
  * Messaging contract (webextension-polyfill): the onMessage listener is an
  * async function that RETURNS a Promise resolving to the response object. There
@@ -29,12 +27,8 @@ import {
  * remove resolve a Promise). The mock spies are shared with `chrome.*` (see
  * tests/setup.ts); this file views them through the `browser.*` namespace so the
  * promise-native polyfill types line up with production. Storage writes take a
- * single argument (no trailing callback).
- *
- * Note: message payloads (e.g. { type: "SET_FAMILY_ID", familyId }) and handler
- * response shapes (e.g. { familyId: value }) use their own field names and are
- * unrelated to storage keys. Only storage reads/writes use the `moo:`-prefixed
- * key constants.
+ * single argument (no trailing callback). Storage reads/writes use the
+ * `moo:`-prefixed key constants.
  *
  * Store-page chip (#313): `@/background/storePageScript` is mocked with a stable spy, so these cases
  * pin only the WIRING (which event re-runs the reconcile) and stay independent of the reconcile's own
@@ -83,85 +77,6 @@ describe("background service worker", () => {
 
     // Side-effect import: registers onMessage listener
     await import("@/background/index");
-  });
-
-  describe("SET_FAMILY_ID", () => {
-    it("writes familyId to both sync and local storage", async () => {
-      const response = await sendMessage({
-        type: "SET_FAMILY_ID",
-        familyId: "fam-abc",
-      });
-
-      expect(response).toEqual({ ok: true });
-      expect(browser.storage.sync.set).toHaveBeenCalledWith({
-        [FAMILY_ID_KEY]: "fam-abc",
-      });
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [FAMILY_ID_KEY]: "fam-abc",
-      });
-    });
-
-    it("still writes familyId to local and resolves ok when sync.set rejects (Firefox)", async () => {
-      vi.mocked(browser.storage.sync.set).mockRejectedValue(
-        new Error("sync unavailable"),
-      );
-
-      const response = await sendMessage({
-        type: "SET_FAMILY_ID",
-        familyId: "fam-no-sync",
-      });
-
-      // Local-first ordering: the local write is independent of the sync
-      // outcome, so it must persist even though sync threw.
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        [FAMILY_ID_KEY]: "fam-no-sync",
-      });
-      // A sync rejection must not propagate; handler still resolves ok.
-      expect(response).toEqual({ ok: true });
-    });
-  });
-
-  describe("CLEAR_FAMILY_ID", () => {
-    it("removes synced keys from sync and synced keys+authToken from local", async () => {
-      const response = await sendMessage({ type: "CLEAR_FAMILY_ID" });
-
-      expect(response).toEqual({ ok: true });
-      expect(browser.storage.sync.remove).toHaveBeenCalledWith([FAMILY_ID_KEY]);
-      expect(browser.storage.local.remove).toHaveBeenCalledWith([
-        FAMILY_ID_KEY,
-        AUTH_TOKEN_KEY,
-        TOKEN_EXPIRES_AT_KEY,
-      ]);
-    });
-
-    it("does not remove personalBooksCache", async () => {
-      await sendMessage({ type: "CLEAR_FAMILY_ID" });
-
-      // Verify that personalBooksCache is NOT in the keys removed from local storage
-      const removeCalls = vi.mocked(browser.storage.local.remove).mock.calls;
-      for (const call of removeCalls) {
-        const keys = call[0] as string[];
-        expect(keys).not.toContain(PERSONAL_BOOKS_CACHE_KEY);
-      }
-    });
-
-    it("still removes local keys and resolves ok when sync.remove rejects (Firefox)", async () => {
-      vi.mocked(browser.storage.sync.remove).mockRejectedValue(
-        new Error("sync unavailable"),
-      );
-
-      const response = await sendMessage({ type: "CLEAR_FAMILY_ID" });
-
-      // Local removal is authoritative and independent of the sync outcome, so
-      // it must still run even though sync threw.
-      expect(browser.storage.local.remove).toHaveBeenCalledWith([
-        FAMILY_ID_KEY,
-        AUTH_TOKEN_KEY,
-        TOKEN_EXPIRES_AT_KEY,
-      ]);
-      // A sync rejection must not propagate; handler still resolves ok.
-      expect(response).toEqual({ ok: true });
-    });
   });
 
   describe("unhandled message types", () => {
@@ -226,6 +141,14 @@ describe("background service worker", () => {
         name: "CLEAR_SYNC_ERROR_BADGE (removed)",
         message: { type: "CLEAR_SYNC_ERROR_BADGE" },
       },
+      {
+        name: "SET_FAMILY_ID (removed, #484)",
+        message: { type: "SET_FAMILY_ID", familyId: "fam-late" },
+      },
+      {
+        name: "CLEAR_FAMILY_ID (removed, #484)",
+        message: { type: "CLEAR_FAMILY_ID" },
+      },
       { name: "a null message", message: null },
       { name: "an undefined message", message: undefined },
       { name: "a string message", message: "SET_FAMILY_ID" },
@@ -255,15 +178,17 @@ describe("background service worker", () => {
       },
     );
 
+    // Backs the table's "returns undefined" half: the listener still dispatches a registered type.
+    // The storage spies' wiring is pinned by "runtime.onInstalled" → "purges both stored email keys".
     it("still answers a registered message type (positive companion)", async () => {
       const response = listener(
-        { type: "CLEAR_FAMILY_ID" },
+        { type: "OPEN_OPTIONS_PAGE" },
         {} as Runtime.MessageSender,
       );
 
       expect(response).toBeInstanceOf(Promise);
-      await expect(response).resolves.toEqual({ ok: true });
-      expect(browser.storage.local.remove).toHaveBeenCalled();
+      await expect(response).resolves.toEqual({ ok: 1 });
+      expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
     });
   });
 

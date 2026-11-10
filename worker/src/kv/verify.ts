@@ -51,7 +51,8 @@ export async function putOtpRecord(
   });
 }
 
-/** Delete `otp:{userId}` — the account-deletion teardown of a still-pending one-time code. */
+/** Delete `otp:{userId}`, a still-pending one-time code: on a PIN / pattern save, when a member leaves, is removed or
+ *  dissolves the family, and in the account-deletion teardown. */
 export async function deleteOtpRecord(
   kv: KVNamespace,
   userId: string,

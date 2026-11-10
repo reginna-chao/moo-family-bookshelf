@@ -1009,6 +1009,7 @@ describe("owner rules need ownerId AND a listing (#222 INFO-2 / INFO-4)", () => 
       expect([...trail].sort()).toEqual(
         [
           `delete ${kvKeys.member(USER1)}`,
+          `delete ${kvKeys.otp(USER1)}`,
           ...(await revokeAllTrailEntries(USER1, [ctx.ownerToken])),
         ].sort(),
       );
