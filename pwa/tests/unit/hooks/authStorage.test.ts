@@ -5,6 +5,8 @@ import {
   loadFromStorage,
   persistedSessionMatches,
   saveToStorage,
+  storageHoldsNoSession,
+  storedSessionIs,
 } from "@/hooks/authStorage";
 import {
   USER_ID_KEY,
@@ -27,6 +29,12 @@ import {
  *
  * The storage functions are exercised directly for the value matrix; the round trip through the
  * real `useAuth` (login → reload → logout) pins that the hook really goes through them.
+ *
+ * Stored session identity. `storedSessionIs` is what `isLiveSession` checks: storage still holds the
+ * session's userId, familyId and server, the stored host compared in the canonical form
+ * `loadFromStorage` reads it in (an older value may carry a trailing slash), the token ignored, a
+ * stored host the client refuses or a throwing read never matching. `storageHoldsNoSession` tells
+ * "nothing stored" apart from "another session stored"; a throwing read is neither, so it is false.
  */
 
 const USER = "d".repeat(64);
@@ -195,6 +203,107 @@ describe("authStorage token expiry", () => {
 
     expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
     expect(localStorage.getItem(namespacedKey(USER, "authToken"))).toBeNull();
+  });
+
+  describe("storedSessionIs", () => {
+    const HOST = "https://self.example.com";
+    const STORED: AuthState = { ...SESSION, apiHost: HOST };
+
+    function seedRaw(apiHost: string | null, userId = USER): void {
+      localStorage.setItem(USER_ID_KEY, userId);
+      localStorage.setItem(namespacedKey(userId, "familyId"), FAMILY);
+      localStorage.setItem(namespacedKey(userId, "authToken"), TOKEN);
+      if (apiHost !== null) {
+        localStorage.setItem(namespacedKey(userId, "apiHost"), apiHost);
+      }
+    }
+
+    it("matches the session loadFromStorage reads from a host stored with a trailing slash", () => {
+      seedRaw(`${HOST}/`);
+      const loaded = loadFromStorage();
+      // The stored value really differs from the canonical one the session carries.
+      expect(loaded?.apiHost).toBe(HOST);
+
+      expect(storedSessionIs(loaded!)).toBe(true);
+    });
+
+    it("ignores the token: a session carrying another token still matches", () => {
+      saveToStorage(STORED);
+
+      expect(storedSessionIs(STORED)).toBe(true);
+      expect(storedSessionIs({ ...STORED, authToken: "other-token" })).toBe(
+        true,
+      );
+    });
+
+    it.each<{ label: string; session: AuthState }>([
+      { label: "userId", session: { ...STORED, userId: "f".repeat(64) } },
+      { label: "familyId", session: { ...STORED, familyId: "fam-other" } },
+      {
+        label: "apiHost",
+        session: { ...STORED, apiHost: "https://other.example.com" },
+      },
+      { label: "apiHost (session has none)", session: SESSION },
+    ])("reports another session when the $label differs", ({ session }) => {
+      saveToStorage(STORED);
+      // Positive companion: the stored session itself matches.
+      expect(storedSessionIs(STORED)).toBe(true);
+
+      expect(storedSessionIs(session)).toBe(false);
+    });
+
+    it("reports another session when storage has no apiHost but the session has one", () => {
+      saveToStorage(SESSION);
+      expect(storedSessionIs(SESSION)).toBe(true);
+
+      expect(storedSessionIs(STORED)).toBe(false);
+    });
+
+    it("reports no match for a non-empty stored host the client refuses", () => {
+      seedRaw("https://api.moofamily.app@evil.com");
+      // loadFromStorage drops such a session too.
+      expect(loadFromStorage()).toBeNull();
+
+      expect(storedSessionIs(SESSION)).toBe(false);
+    });
+
+    it("reports no match when reading localStorage throws", () => {
+      saveToStorage(STORED);
+      expect(storedSessionIs(STORED)).toBe(true);
+
+      const getItem = vi
+        .spyOn(Storage.prototype, "getItem")
+        .mockImplementation(() => {
+          throw new DOMException("denied", "SecurityError");
+        });
+      try {
+        expect(storedSessionIs(STORED)).toBe(false);
+      } finally {
+        getItem.mockRestore();
+      }
+    });
+  });
+
+  describe("storageHoldsNoSession", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("is true only while no userId is stored", () => {
+      expect(storageHoldsNoSession()).toBe(true);
+
+      saveToStorage(SESSION);
+      expect(storageHoldsNoSession()).toBe(false);
+    });
+
+    it("is false when reading localStorage throws", () => {
+      expect(storageHoldsNoSession()).toBe(true);
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError");
+      });
+
+      expect(storageHoldsNoSession()).toBe(false);
+    });
   });
 
   describe("persistedSessionMatches", () => {

@@ -22,6 +22,7 @@ import { useFamilySettingsCopy } from "./useFamilySettingsCopy";
 import { useFamilySettingsSyncArchived } from "./useFamilySettingsSyncArchived";
 import { useFamilySettingsNewBookDefault } from "./useFamilySettingsNewBookDefault";
 import { useStorePageChip } from "./useStorePageChip";
+import { useBoundDepartureLeave } from "./useBoundDepartureLeave";
 
 export interface FamilySettingsProps {
   familyId: string;
@@ -93,6 +94,9 @@ export function FamilySettings({
   // After the hooks above, so their effect order stays as documented; reads the server once per mount.
   const newBookDefault = useFamilySettingsNewBookDefault(apiClient, userId);
   const storePageChip = useStorePageChip(userId, familyId);
+  // Only the leave is bound here: the delete checks before it clears storage
+  // (a check after the clear would always fail).
+  const leaveIfBound = useBoundDepartureLeave({ userId, familyId, onLeave });
 
   return (
     <div>
@@ -154,7 +158,7 @@ export function FamilySettings({
         familyId={familyId}
         userId={userId}
         apiClient={apiClient}
-        onLeave={onLeave}
+        onLeave={leaveIfBound}
       />
       <div className="moo-settings__section-divider">
         <FamilySettingsSectionHeader
@@ -176,6 +180,7 @@ export function FamilySettings({
         )}
       </div>
       <FamilySettingsDeleteBlock
+        familyId={familyId}
         userId={userId}
         apiClient={apiClient}
         onLeave={onLeave}

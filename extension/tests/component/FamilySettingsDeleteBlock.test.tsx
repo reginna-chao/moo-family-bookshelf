@@ -7,8 +7,9 @@ import {
 } from "moo-family-bookshelf-shared/verifyInput/messages";
 import type { ApiClient } from "@/api/client";
 import type { ApiResponse, VerifyMethod } from "@/api/types";
-import { USER_ID_KEY } from "@/constants";
+import { FAMILY_ID_KEY, USER_ID_KEY } from "@/constants";
 import { FamilySettingsDeleteBlock } from "@/dialog/FamilySettingsDeleteBlock";
+import { DELETED_ELSEWHERE_MESSAGE } from "@/dialog/useFamilySettingsDelete";
 import { drawPattern, patternConfirmButton } from "./helpers/patternGrid";
 
 /**
@@ -18,17 +19,29 @@ import { drawPattern, patternConfirmButton } from "./helpers/patternGrid";
  * A wrong secret keeps the confirm step open with the method's wrong-secret copy and an empty entry.
  * A `none` account, or a failed method read, keeps the old 確定移除 and deletes without a secret.
  * The old flow's copy and the OWNER_CANNOT_DELETE path stay in FamilySettings.test.tsx.
+ *
+ * The block forwards its `familyId` to the delete hook, which clears storage on success only while
+ * storage still holds this userId + familyId; every case seeds that binding. When another tab bound
+ * storage to another family mid-delete, the block shows `DELETED_ELSEWHERE_MESSAGE` and stays put.
  */
 
 const PIN_PROMPT = "移除帳戶前，請先輸入目前的 PIN 碼。";
 type DeleteRes = ApiResponse<{ ok: boolean }>;
 
-function renderBlock(method: VerifyMethod | "throw", responses: DeleteRes[]) {
+/** `beforeReply` runs while each delete is in flight, before its response lands. */
+function renderBlock(
+  method: VerifyMethod | "throw",
+  responses: DeleteRes[],
+  beforeReply: () => Promise<void> = async () => {},
+) {
   const getVerifyMethod =
     method === "throw"
       ? vi.fn().mockRejectedValue(new Error("offline"))
       : vi.fn().mockResolvedValue({ data: { method } });
-  const deleteAccount = vi.fn(async () => responses.shift()!);
+  const deleteAccount = vi.fn(async () => {
+    await beforeReply();
+    return responses.shift()!;
+  });
   const onLeave = vi.fn();
   const api = {
     getVerifyMethod,
@@ -37,6 +50,7 @@ function renderBlock(method: VerifyMethod | "throw", responses: DeleteRes[]) {
   } as unknown as ApiClient;
   render(
     <FamilySettingsDeleteBlock
+      familyId="fam-1"
       userId="user-1"
       apiClient={api}
       onLeave={onLeave}
@@ -62,7 +76,10 @@ async function submitPin(pin: string): Promise<void> {
 describe("FamilySettingsDeleteBlock step-up", () => {
   beforeEach(async () => {
     await chrome.storage.local.clear();
-    await chrome.storage.local.set({ [USER_ID_KEY]: "user-1" });
+    await chrome.storage.local.set({
+      [USER_ID_KEY]: "user-1",
+      [FAMILY_ID_KEY]: "fam-1",
+    });
     vi.clearAllMocks();
   });
 
@@ -163,5 +180,27 @@ describe("FamilySettingsDeleteBlock step-up", () => {
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("PIN 碼輸入")).toBeNull();
     expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("shows the stale-window copy and keeps storage when it now holds another family", async () => {
+    const { deleteAccount, onLeave } = renderBlock(
+      "none",
+      [{ data: { ok: true } }],
+      () => chrome.storage.local.set({ [FAMILY_ID_KEY]: "fam-2" }),
+    );
+
+    await click("移除帳戶");
+    await click("確定移除");
+
+    expect(deleteAccount).toHaveBeenCalledWith("user-1", undefined);
+    expect(screen.getByText(DELETED_ELSEWHERE_MESSAGE)).toBeInTheDocument();
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(chrome.storage.local.clear).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "移除帳戶" }),
+    ).toBeInTheDocument();
+    expect(
+      await chrome.storage.local.get([USER_ID_KEY, FAMILY_ID_KEY]),
+    ).toEqual({ [USER_ID_KEY]: "user-1", [FAMILY_ID_KEY]: "fam-2" });
   });
 });

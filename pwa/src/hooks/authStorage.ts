@@ -90,20 +90,41 @@ export function loadFromStorage(): AuthState | null {
   };
 }
 
-/** True only while localStorage still holds exactly `session` (userId, familyId, apiHost, authToken);
- *  a read that throws is false. Why: docs/architecture.md → PWA 主動續期. */
-export function persistedSessionMatches(session: AuthState): boolean {
+/** True while localStorage holds `session`'s userId, familyId and server (the stored host compared
+ *  in canonical form, as `loadFromStorage` reads it); token not compared, a read that throws is false. */
+export function storedSessionIs(session: AuthState): boolean {
   try {
     const { userId } = session;
     if (localStorage.getItem(USER_ID_KEY) !== userId) return false;
     const familyId = localStorage.getItem(namespacedKey(userId, "familyId"));
-    const apiHost = localStorage.getItem(namespacedKey(userId, "apiHost"));
-    const authToken = localStorage.getItem(namespacedKey(userId, "authToken"));
-    return (
-      familyId === session.familyId &&
-      (apiHost || undefined) === session.apiHost &&
-      (authToken || undefined) === session.authToken
+    if (familyId !== session.familyId) return false;
+    const raw = localStorage.getItem(namespacedKey(userId, "apiHost"));
+    const apiHost = raw ? safeApiHost(raw) : null;
+    if (raw && apiHost === null) return false;
+    return (apiHost ?? undefined) === session.apiHost;
+  } catch {
+    return false;
+  }
+}
+
+/** True when localStorage holds no session at all (no `USER_ID_KEY`); a read that throws is false. */
+export function storageHoldsNoSession(): boolean {
+  try {
+    return localStorage.getItem(USER_ID_KEY) === null;
+  } catch {
+    return false;
+  }
+}
+
+/** True only while localStorage still holds exactly `session` (userId, familyId, apiHost, authToken);
+ *  a read that throws is false. Why: docs/architecture.md → PWA 主動續期. */
+export function persistedSessionMatches(session: AuthState): boolean {
+  try {
+    if (!storedSessionIs(session)) return false;
+    const authToken = localStorage.getItem(
+      namespacedKey(session.userId, "authToken"),
     );
+    return (authToken || undefined) === session.authToken;
   } catch {
     return false;
   }

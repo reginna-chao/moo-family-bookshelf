@@ -55,6 +55,16 @@ import {
  * user on a family that no longer exists. The opposite case (a real refusal renders its error and
  * does NOT call onLeave) is pinned by "shows the localized back-off copy when leaving is rate limited".
  *
+ * Departure binding: the leave block gets `useBoundDepartureLeave`'s callback, which reads the stored
+ * userId / familyId after a successful leave and calls `onLeave` only while they are still this
+ * viewer's (no family left, with the same or no userId, also counts — another tab already left) —
+ * so `onLeave` now lands asynchronously, and every case expecting it seeds `VIEWER_BINDING`
+ * (`mockStorageGet` alone serves only the display name). Storage naming another family or account
+ * gets no `onLeave`; those cases wait for the binding read itself, then for it to settle, before the
+ * negative assertion. The delete block keeps the raw `onLeave` and receives `familyId`, because its
+ * hook checks the binding BEFORE clearing storage; a stateful mock whose `clear` empties the binding
+ * proves it by counting exactly one binding read (a bound callback would read again after the clear).
+ *
  * Store-page chip switch (#313, `useStorePageChip`): the same storage flag as the options page. The
  * Dialog has no permissions API, so it reads the background's mirror `moo:storePageHostGranted`:
  * granted → switching on writes TRUE and, only when the family shelf is already loaded, writes the
@@ -206,6 +216,26 @@ function mockStorageGet(extra: Record<string, unknown> = {}) {
       return Promise.resolve(result) as unknown as void;
     },
   );
+}
+
+/** The stored binding of the rendered viewer (`renderFamilySettings`' default props); a successful leave
+ *  or delete clears it only while storage still holds it. See the file header, "Departure binding". */
+const VIEWER_BINDING = {
+  [USER_ID_KEY]: "user-abc12345",
+  [FAMILY_ID_KEY]: "fam-123",
+};
+
+/** Calls of the departure-binding read (`departureBindingIsCurrent`) so far. */
+function bindingReads(): number {
+  return vi
+    .mocked(chrome.storage.local.get)
+    .mock.calls.filter(
+      ([keys]) =>
+        Array.isArray(keys) &&
+        keys.length === 2 &&
+        keys[0] === USER_ID_KEY &&
+        keys[1] === FAMILY_ID_KEY,
+    ).length;
 }
 
 describe("FamilySettings", () => {
@@ -764,6 +794,7 @@ describe("FamilySettings", () => {
           error: { code, message: serverMessage },
         }),
       });
+      mockStorageGet(VIEWER_BINDING);
       const onLeave = vi.fn();
       renderFamilySettings({ apiClient, onLeave });
 
@@ -1884,6 +1915,7 @@ describe("FamilySettings", () => {
     });
 
     it("calls onLeave after successful leave", async () => {
+      mockStorageGet(VIEWER_BINDING);
       const onLeave = vi.fn();
       renderFamilySettings({ onLeave });
 
@@ -1899,6 +1931,39 @@ describe("FamilySettings", () => {
         expect(onLeave).toHaveBeenCalledOnce();
       });
     });
+
+    it.each([
+      ["another family", { ...VIEWER_BINDING, [FAMILY_ID_KEY]: "fam-999" }],
+      ["another account", { ...VIEWER_BINDING, [USER_ID_KEY]: "user-other" }],
+    ])(
+      "does not call onLeave after a successful leave when storage now holds %s",
+      async (_label, stored) => {
+        mockStorageGet(stored);
+        const apiClient = createMockApiClient();
+        const onLeave = vi.fn();
+        renderFamilySettings({ apiClient, onLeave });
+
+        fireEvent.click(screen.getByText("離開家庭"));
+        await waitFor(() => {
+          expect(screen.getByText("確定離開")).toBeInTheDocument();
+        });
+        const readsBefore = bindingReads();
+        fireEvent.click(screen.getByText("確定離開"));
+
+        // Barrier: the leave succeeded and its binding read ran; then let that read settle.
+        await waitFor(() => {
+          expect(apiClient.leaveFamily).toHaveBeenCalledWith(
+            "fam-123",
+            "user-abc12345",
+          );
+          expect(bindingReads()).toBe(readsBefore + 1);
+        });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(onLeave).not.toHaveBeenCalled();
+      },
+    );
 
     it("shows 離開中... during leave process", async () => {
       let resolveLeave: (value: unknown) => void;
@@ -1950,6 +2015,7 @@ describe("FamilySettings", () => {
     });
 
     it("calls deleteAccount API and onLeave on confirm", async () => {
+      mockStorageGet(VIEWER_BINDING);
       const apiClient = createMockApiClient();
       const onLeave = vi.fn();
       renderFamilySettings({ apiClient, onLeave });
@@ -1970,6 +2036,46 @@ describe("FamilySettings", () => {
         );
         expect(onLeave).toHaveBeenCalled();
       });
+    });
+
+    /** The delete block gets the raw `onLeave` plus `familyId`: its hook checks the binding once, BEFORE
+     *  it clears storage; the leave block's bound callback would add a second read after the clear. */
+    it("hands the delete block the raw onLeave and the family it checks against", async () => {
+      // `get` serves the binding until `clear` empties it, as the real storage does.
+      let stored: Record<string, unknown> = VIEWER_BINDING;
+      vi.mocked(chrome.storage.local.get).mockImplementation(((
+        _keys: unknown,
+        callback?: (result: Record<string, unknown>) => void,
+      ) => {
+        const result = { [DISPLAY_NAME_KEY]: "小明", ...stored };
+        if (typeof callback === "function") callback(result);
+        return Promise.resolve(result);
+      }) as never);
+      vi.mocked(chrome.storage.local.clear).mockImplementationOnce((() => {
+        stored = {};
+        return Promise.resolve();
+      }) as never);
+      const onLeave = vi.fn();
+      renderFamilySettings({ onLeave });
+
+      fireEvent.click(screen.getByText("移除帳戶"));
+      await waitFor(() => {
+        expect(screen.getByText("確定移除")).toBeInTheDocument();
+      });
+      const readsBefore = bindingReads();
+      fireEvent.click(screen.getByText("確定移除"));
+
+      await waitFor(() => {
+        expect(onLeave).toHaveBeenCalledOnce();
+      });
+      // Let a bound callback's post-clear read land, if there were one.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(bindingReads()).toBe(readsBefore + 1);
+      expect(onLeave).toHaveBeenCalledOnce();
+      expect(chrome.storage.local.clear).toHaveBeenCalledOnce();
+      expect(stored).toEqual({});
     });
 
     it("shows owner error when OWNER_CANNOT_DELETE", async () => {

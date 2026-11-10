@@ -163,6 +163,7 @@ describe("a departure stays on the server it was confirmed on", () => {
     const hook = renderHook(() =>
       useFamilySettingsDelete({
         userId: USER_ID,
+        familyId: FAMILY_ID,
         apiClient: client,
         onLeave,
       }),

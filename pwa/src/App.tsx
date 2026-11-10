@@ -8,11 +8,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "./hooks/useAuth";
 import type { ApiClient } from "./api/client";
-import { useSessionApiClient } from "./hooks/useSessionApiClient";
-import { useAutoAcquireToken } from "./hooks/useAutoAcquireToken";
-import { useProactiveTokenRefresh } from "./hooks/useProactiveTokenRefresh";
-import { useRecoveryJoin } from "./hooks/useRecoveryJoin";
-import { useRotatedTokenPersistence } from "./hooks/useRotatedTokenPersistence";
+import { useAppSession } from "./hooks/useAppSession";
+import type { DepartureLogout } from "./hooks/useDepartureLogout";
 import { LandingPage } from "./pages/LandingPage";
 import { FamilyShelfPage } from "./pages/FamilyShelfPage";
 import { PersonalShelfPage } from "./pages/PersonalShelfPage";
@@ -82,6 +79,7 @@ function AuthenticatedApp() {
     login,
     logout,
     forceLogout,
+    dropSession,
     initialSyncCode,
     qrUserId,
     qrToken,
@@ -123,22 +121,15 @@ function AuthenticatedApp() {
     prevAuthRef.current = auth;
   }, [auth, navigate]);
 
-  // The live session for callbacks that outlive a render (recovery join, renewal, token rotation).
-  const authRef = useRef(auth);
-  authRef.current = auth;
-
-  const acquireNewToken = useRecoveryJoin({
-    authRef,
-    login,
-    logout,
-    setLandingError,
-  });
-  useProactiveTokenRefresh({ auth, authRef, login });
-
-  // Same client across a token swap, new one per session (#256) — see the hook.
-  const apiClient = useSessionApiClient(auth, acquireNewToken);
-  const acquiringToken = useAutoAcquireToken(auth, acquireNewToken);
-  const persistRotatedToken = useRotatedTokenPersistence(auth, authRef, login);
+  const { apiClient, acquiringToken, persistRotatedToken, departureLogout } =
+    useAppSession({
+      auth,
+      login,
+      logout,
+      forceLogout,
+      dropSession,
+      setLandingError,
+    });
 
   if (isLoading || acquiringToken) {
     return (
@@ -186,7 +177,7 @@ function AuthenticatedApp() {
         currentPage={currentPage}
         navigate={navigate}
         logout={logout}
-        forceLogout={forceLogout}
+        departureLogout={departureLogout}
       />
     </FamilyDataProvider>
   );
@@ -198,7 +189,7 @@ interface MainContentProps {
   currentPage: Page;
   navigate: (page: Page) => void;
   logout: () => void;
-  forceLogout: () => void;
+  departureLogout: DepartureLogout;
 }
 
 function MainContent({
@@ -207,7 +198,7 @@ function MainContent({
   currentPage,
   navigate,
   logout,
-  forceLogout,
+  departureLogout,
 }: MainContentProps) {
   const familyData = useFamilyData();
   const { hasBookshelfUpdates, markBookshelfSeen } = familyData;
@@ -248,7 +239,8 @@ function MainContent({
             userId={auth.userId}
             apiClient={apiClient}
             onLogout={logout}
-            onForceLogout={forceLogout}
+            onLeft={departureLogout.afterLeave}
+            onForceLogout={departureLogout.afterDelete}
           />
         )}
       </main>
