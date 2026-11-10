@@ -880,6 +880,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
     expect([...trail.slice(1)].sort()).toEqual(
       [
         `delete ${kvKeys.member(USER3)}`,
+        `delete ${kvKeys.otp(USER3)}`,
         ...(await revokeAllTrailEntries(USER3, [staleToken], [])),
       ].sort(),
     );
@@ -905,6 +906,7 @@ describe("DELETE /api/family/:id/member/:uid with a stray pointer", () => {
       [
         kvKeys.member(USER3),
         kvKeys.auth(USER3),
+        kvKeys.otp(USER3),
         await authTokenKey(staleToken),
       ].sort(),
     );

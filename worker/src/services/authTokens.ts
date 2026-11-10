@@ -340,10 +340,17 @@ export async function revokeAllAuthTokens(
   ]);
 }
 
-/** `revokeAllAuthTokens` for a caller that has not read `auth:{userId}` (leave / kick / dissolve). */
+/** `revokeAllAuthTokens` for a caller that has not read `auth:{userId}` (leave / kick / dissolve); `alsoKeys`
+ *  carries the presented token's hash on a self-leave, so a token off the list and index is revoked too. */
 export async function readAndRevokeAllAuthTokens(
   kv: KVNamespace,
   userId: string,
+  alsoKeys: readonly (string | null | undefined)[] = [],
 ): Promise<void> {
-  await revokeAllAuthTokens(kv, userId, await readAuthRecord(kv, userId));
+  await revokeAllAuthTokens(
+    kv,
+    userId,
+    await readAuthRecord(kv, userId),
+    alsoKeys,
+  );
 }
