@@ -31,6 +31,13 @@ import {
  * secret. A refusal is handled only after the departure guard has ended, so the re-read runs with no
  * departure mark up, and only on the server the leave was confirmed on (`pinDepartureServer`). The
  * secret is a call argument only — never written to `browser.storage.local`.
+ *
+ * Server pin: `startConfirming` pins the server BEFORE its method read and the whole confirm session
+ * reuses that pin, so a secret typed for server A is never sent to server B. A switch during the read
+ * ends the session at idle with `DEPARTURE_SERVER_CHANGED_MESSAGE`; a switch while the confirm step is
+ * open (also after a wrong-secret refusal) stops the press before any request. Back at idle the pin is
+ * dropped, so a later session or press pins afresh; a superseded `startConfirming` (a second click)
+ * changes nothing when its read resolves. Reads in that suite stay pending until the case answers them.
  */
 
 type LeaveRes = ApiResponse<{ ok: boolean }>;
@@ -499,4 +506,180 @@ describe("useFamilySettingsLeave step-up", () => {
     expect(hook.result.current.secretError).toBe("");
     expect(hook.result.current.leaveState).toBe("confirming");
   });
+});
+
+const SERVER_A = "https://a.example";
+const SERVER_B = "https://b.example";
+
+/** Each `getVerifyMethod` call stays pending until `answer` resolves it; `endpoint.current` is the
+ *  client's server. See the header → "Server pin". */
+function setupServerPin(responses: LeaveRes[]) {
+  const answers: Array<(method: VerifyMethod) => void> = [];
+  const getVerifyMethod = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        answers.push((method) => resolve({ data: { method } }));
+      }),
+  );
+  const leaveFamily = vi.fn<
+    (familyId: string, userId: string, secret?: string) => Promise<LeaveRes>
+  >(async () => responses.shift()!);
+  const endpoint = { current: SERVER_A };
+  const apiClient = {
+    getVerifyMethod,
+    leaveFamily,
+    getEndpoint: () => endpoint.current,
+  } as unknown as ApiClient;
+  const hook = renderHook(() =>
+    useFamilySettingsLeave({
+      familyId: "fam-1",
+      userId: "user-1",
+      apiClient,
+      onLeave: vi.fn(),
+    }),
+  );
+  /** Starts `startConfirming` and returns it still waiting on its method read. */
+  const begin = () => {
+    let pending!: Promise<void>;
+    act(() => {
+      pending = hook.result.current.startConfirming();
+    });
+    return pending;
+  };
+  const answer = (pending: Promise<void>, read: number, method: VerifyMethod) =>
+    act(async () => {
+      answers[read](method);
+      await pending;
+    });
+  const open = (method: VerifyMethod) => {
+    const pending = begin();
+    return answer(pending, answers.length - 1, method);
+  };
+  const confirm = (secret?: string) =>
+    act(async () => {
+      await hook.result.current.handleLeaveConfirm(secret);
+    });
+  const cancel = () => act(() => hook.result.current.setLeaveState("idle"));
+  return { hook, leaveFamily, endpoint, begin, answer, open, confirm, cancel };
+}
+
+describe("useFamilySettingsLeave server pin", () => {
+  beforeEach(async () => {
+    await chrome.storage.local.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await chrome.storage.local.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("never sends the secret when the server changed while the confirm step was open", async () => {
+    const { hook, leaveFamily, endpoint, open, confirm } = setupServerPin([
+      { data: { ok: true } },
+    ]);
+
+    await open("pin");
+    expect(hook.result.current.leaveState).toBe("confirming");
+    endpoint.current = SERVER_B;
+    await confirm("1234");
+
+    expect(leaveFamily).not.toHaveBeenCalled();
+    expect(hook.result.current.leaveError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(hook.result.current.leaveState).toBe("idle");
+  });
+
+  it("never opens the confirm step when the server changed during the method read", async () => {
+    const { hook, leaveFamily, endpoint, begin, answer } = setupServerPin([]);
+
+    const pending = begin();
+    endpoint.current = SERVER_B;
+    await answer(pending, 0, "pin");
+
+    expect(hook.result.current.leaveState).toBe("idle");
+    expect(hook.result.current.requiredMethod).toBeNull();
+    expect(hook.result.current.leaveError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(leaveFamily).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first pin after a wrong-secret refusal and stops the second press", async () => {
+    const { hook, leaveFamily, endpoint, open, confirm } = setupServerPin([
+      { error: { code: "VERIFICATION_FAILED", message: "server text" } },
+      { data: { ok: true } },
+    ]);
+
+    await open("pin");
+    await confirm("1234");
+    expect(hook.result.current.leaveState).toBe("confirming");
+    endpoint.current = SERVER_B;
+    await confirm("5678");
+
+    expect(leaveFamily).toHaveBeenCalledTimes(1);
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", "1234");
+    expect(hook.result.current.leaveError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(hook.result.current.leaveState).toBe("idle");
+  });
+
+  it("pins the new server for a session opened after a cancel", async () => {
+    const { hook, leaveFamily, endpoint, open, confirm, cancel } =
+      setupServerPin([{ data: { ok: true } }]);
+
+    await open("pin");
+    cancel();
+    endpoint.current = SERVER_B;
+    await open("pin");
+    await confirm("1234");
+
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", "1234");
+    expect(hook.result.current.leaveError).toBe("");
+  });
+
+  it("re-pins at the press when the cancelled session's pin was dropped", async () => {
+    const { hook, leaveFamily, endpoint, open, confirm, cancel } =
+      setupServerPin([{ data: { ok: true } }]);
+
+    await open("none");
+    cancel();
+    endpoint.current = SERVER_B;
+    await confirm();
+
+    expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", undefined);
+    expect(hook.result.current.leaveError).toBe("");
+  });
+
+  it.each([
+    ["first", [0, 1]],
+    ["second", [1, 0]],
+  ])(
+    "ignores a superseded start when the %s read resolves first",
+    async (_label, order) => {
+      const { hook, leaveFamily, endpoint, begin, answer, confirm } =
+        setupServerPin([{ data: { ok: true } }]);
+      const methods: VerifyMethod[] = ["pattern", "pin"];
+
+      const pendings = [begin()];
+      endpoint.current = SERVER_B;
+      pendings.push(begin());
+      for (const read of order) {
+        await answer(pendings[read], read, methods[read]);
+        // Only the second (current) start may open the confirm step.
+        const opened = order.indexOf(1) <= order.indexOf(read);
+        expect(hook.result.current.leaveState).toBe(
+          opened ? "confirming" : "idle",
+        );
+        expect(hook.result.current.requiredMethod).toBe(opened ? "pin" : null);
+        expect(hook.result.current.leaveError).toBe("");
+      }
+      await confirm("1234");
+
+      expect(leaveFamily).toHaveBeenCalledWith("fam-1", "user-1", "1234");
+      expect(hook.result.current.leaveError).toBe("");
+    },
+  );
 });

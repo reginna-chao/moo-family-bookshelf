@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import type { ApiErrorPayload, ApiResponse, VerifyMethod } from "../api/types";
 import { runGuardedDeparture } from "../storage/selfDeparture";
@@ -7,6 +7,8 @@ import { readVerifyMethod, recoverStepUp } from "./stepUp";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 
 export type LeaveState = "idle" | "confirming" | "leaving";
+
+type ServerCheck = () => void;
 
 export interface UseFamilySettingsLeaveOptions {
   familyId: string;
@@ -40,18 +42,44 @@ export function useFamilySettingsLeave({
   apiClient,
   onLeave,
 }: UseFamilySettingsLeaveOptions): UseFamilySettingsLeaveResult {
-  const [leaveState, setLeaveState] = useState<LeaveState>("idle");
+  const [leaveState, setRawLeaveState] = useState<LeaveState>("idle");
   const [leaveError, setLeaveError] = useState("");
   const [requiredMethod, setRequiredMethod] = useState<VerifyMethod | null>(
     null,
   );
   const [secretError, setSecretError] = useState("");
+  // The server pinned when this confirm session opened; every send reuses it, never re-pins.
+  // Why: docs/architecture.md → 離開家庭時一併清除.
+  const serverCheckRef = useRef<ServerCheck | null>(null);
+
+  // Back at idle the confirm session is over: the next startConfirming() pins afresh.
+  const setLeaveState = (state: LeaveState) => {
+    if (state === "idle") serverCheckRef.current = null;
+    setRawLeaveState(state);
+  };
+
+  const failLeave = (err: unknown) => {
+    setLeaveError(
+      err instanceof Error ? err.message : "離開家庭失敗，請稍後再試",
+    );
+    setLeaveState("idle");
+  };
 
   const startConfirming = async () => {
     setLeaveError("");
     setSecretError("");
-    setRequiredMethod(await readVerifyMethod(apiClient, userId));
-    setLeaveState("confirming");
+    try {
+      const assertSameServer = pinDepartureServer(apiClient);
+      serverCheckRef.current = assertSameServer;
+      const method = await readVerifyMethod(apiClient, userId);
+      // A later startConfirming() owns the confirm step now.
+      if (serverCheckRef.current !== assertSameServer) return;
+      assertSameServer();
+      setRequiredMethod(method);
+      setLeaveState("confirming");
+    } catch (err) {
+      failLeave(err);
+    }
   };
 
   /** Ends in onLeave() on success; any other refusal is returned for handling after the guard. */
@@ -103,7 +131,10 @@ export function useFamilySettingsLeave({
     // The refusal is handled after the guard ends: its re-read of the method is no departure.
     const refused: { error?: ApiErrorPayload } = {};
     try {
-      const assertSameServer = pinDepartureServer(apiClient);
+      // Pin at the press only when no confirm session pinned (startConfirming never ran).
+      const assertSameServer =
+        serverCheckRef.current ?? pinDepartureServer(apiClient);
+      serverCheckRef.current = assertSameServer;
       // Own departure in flight (#263): the helper blocks silent recovery joins
       // until it settles. Mirrored in the PWA's leave / delete hooks.
       await runGuardedDeparture(
@@ -118,12 +149,11 @@ export function useFamilySettingsLeave({
       if (refused.error) {
         assertSameServer();
         await settleLeaveError(refused.error, asked);
+        return;
       }
+      serverCheckRef.current = null;
     } catch (err) {
-      setLeaveError(
-        err instanceof Error ? err.message : "離開家庭失敗，請稍後再試",
-      );
-      setLeaveState("idle");
+      failLeave(err);
     }
   };
 

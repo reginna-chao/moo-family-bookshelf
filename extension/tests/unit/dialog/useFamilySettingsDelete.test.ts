@@ -9,6 +9,7 @@ import {
   USER_ID_KEY,
 } from "@/constants";
 import type { VerifyMethod } from "@/api/types";
+import { DEPARTURE_SERVER_CHANGED_MESSAGE } from "@/dialog/departureServerPin";
 import {
   DELETED_ELSEWHERE_MESSAGE,
   useFamilySettingsDelete,
@@ -48,6 +49,13 @@ import {
  * removed, the same userId kept) there is no other session to keep: the success still clears storage
  * and calls `onLeave`, so a deleted account's cache never stays behind. A binding read that rejects
  * still clears and leaves: the server account is gone, so the Dialog must not get stuck on a failed read.
+ *
+ * Server pin: `startConfirming` pins the server BEFORE its method read and the whole confirm session
+ * reuses that pin, so a secret typed for server A is never sent to server B. A switch during the read
+ * ends the session at idle with `DEPARTURE_SERVER_CHANGED_MESSAGE`; a switch while the confirm step is
+ * open (also after a wrong-secret refusal) stops the press before any request. Back at idle the pin is
+ * dropped, so a later session or press pins afresh; a superseded `startConfirming` (a second click)
+ * changes nothing when its read resolves. Reads in that suite stay pending until the case answers them.
  */
 
 type DeleteRes = ApiResponse<{ ok: boolean }>;
@@ -502,6 +510,195 @@ describe("useFamilySettingsDelete step-up (#396)", () => {
     expect(hook.result.current.secretError).toBe("");
     expect(hook.result.current.deleteState).toBe("confirming");
   });
+});
+
+const SERVER_A = "https://a.example";
+const SERVER_B = "https://b.example";
+
+/** Each `getVerifyMethod` call stays pending until `answer` resolves it; `endpoint.current` is the
+ *  client's server. See the header → "Server pin". */
+function setupServerPin(responses: DeleteRes[]) {
+  const answers: Array<(method: VerifyMethod) => void> = [];
+  const getVerifyMethod = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        answers.push((method) => resolve({ data: { method } }));
+      }),
+  );
+  const deleteAccount = vi.fn<
+    (userId: string, secret?: string) => Promise<DeleteRes>
+  >(async () => responses.shift()!);
+  const onLeave = vi.fn();
+  const endpoint = { current: SERVER_A };
+  const apiClient = {
+    getVerifyMethod,
+    deleteAccount,
+    getEndpoint: () => endpoint.current,
+  } as unknown as ApiClient;
+  const hook = renderHook(() =>
+    useFamilySettingsDelete({
+      userId: "user-1",
+      familyId: "fam-1",
+      apiClient,
+      onLeave,
+    }),
+  );
+  /** Starts `startConfirming` and returns it still waiting on its method read. */
+  const begin = () => {
+    let pending!: Promise<void>;
+    act(() => {
+      pending = hook.result.current.startConfirming();
+    });
+    return pending;
+  };
+  const answer = (pending: Promise<void>, read: number, method: VerifyMethod) =>
+    act(async () => {
+      answers[read](method);
+      await pending;
+    });
+  const open = (method: VerifyMethod) => {
+    const pending = begin();
+    return answer(pending, answers.length - 1, method);
+  };
+  const confirm = (secret?: string) =>
+    act(async () => {
+      await hook.result.current.handleDeleteConfirm(secret);
+    });
+  const cancel = () => act(() => hook.result.current.setDeleteState("idle"));
+  return {
+    hook,
+    deleteAccount,
+    onLeave,
+    endpoint,
+    begin,
+    answer,
+    open,
+    confirm,
+    cancel,
+  };
+}
+
+describe("useFamilySettingsDelete server pin", () => {
+  beforeEach(async () => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(BOUND);
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await chrome.storage.local.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("never sends the secret when the server changed while the confirm step was open", async () => {
+    const { hook, deleteAccount, onLeave, endpoint, open, confirm } =
+      setupServerPin([{ data: { ok: true } }]);
+
+    await open("pin");
+    expect(hook.result.current.deleteState).toBe("confirming");
+    endpoint.current = SERVER_B;
+    await confirm("1234");
+
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(hook.result.current.deleteError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(hook.result.current.deleteState).toBe("idle");
+  });
+
+  it("never opens the confirm step when the server changed during the method read", async () => {
+    const { hook, deleteAccount, endpoint, begin, answer } = setupServerPin([]);
+
+    const pending = begin();
+    endpoint.current = SERVER_B;
+    await answer(pending, 0, "pin");
+
+    expect(hook.result.current.deleteState).toBe("idle");
+    expect(hook.result.current.requiredMethod).toBeNull();
+    expect(hook.result.current.deleteError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first pin after a wrong-secret refusal and stops the second press", async () => {
+    const { hook, deleteAccount, endpoint, open, confirm } = setupServerPin([
+      { error: { code: "VERIFICATION_FAILED", message: "server text" } },
+      { data: { ok: true } },
+    ]);
+
+    await open("pin");
+    await confirm("1234");
+    expect(hook.result.current.deleteState).toBe("confirming");
+    endpoint.current = SERVER_B;
+    await confirm("5678");
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount).toHaveBeenCalledWith("user-1", "1234");
+    expect(hook.result.current.deleteError).toBe(
+      DEPARTURE_SERVER_CHANGED_MESSAGE,
+    );
+    expect(hook.result.current.deleteState).toBe("idle");
+  });
+
+  it("pins the new server for a session opened after a cancel", async () => {
+    const { hook, deleteAccount, onLeave, endpoint, open, confirm, cancel } =
+      setupServerPin([{ data: { ok: true } }]);
+
+    await open("pin");
+    cancel();
+    endpoint.current = SERVER_B;
+    await open("pin");
+    await confirm("1234");
+
+    expect(deleteAccount).toHaveBeenCalledWith("user-1", "1234");
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.deleteError).toBe("");
+  });
+
+  it("re-pins at the press when the cancelled session's pin was dropped", async () => {
+    const { hook, deleteAccount, endpoint, open, confirm, cancel } =
+      setupServerPin([{ data: { ok: true } }]);
+
+    await open("none");
+    cancel();
+    endpoint.current = SERVER_B;
+    await confirm();
+
+    expect(deleteAccount).toHaveBeenCalledWith("user-1", undefined);
+    expect(hook.result.current.deleteError).toBe("");
+  });
+
+  it.each([
+    ["first", [0, 1]],
+    ["second", [1, 0]],
+  ])(
+    "ignores a superseded start when the %s read resolves first",
+    async (_label, order) => {
+      const { hook, deleteAccount, endpoint, begin, answer, confirm } =
+        setupServerPin([{ data: { ok: true } }]);
+      const methods: VerifyMethod[] = ["pattern", "pin"];
+
+      const pendings = [begin()];
+      endpoint.current = SERVER_B;
+      pendings.push(begin());
+      for (const read of order) {
+        await answer(pendings[read], read, methods[read]);
+        // Only the second (current) start may open the confirm step.
+        const opened = order.indexOf(1) <= order.indexOf(read);
+        expect(hook.result.current.deleteState).toBe(
+          opened ? "confirming" : "idle",
+        );
+        expect(hook.result.current.requiredMethod).toBe(opened ? "pin" : null);
+        expect(hook.result.current.deleteError).toBe("");
+      }
+      await confirm("1234");
+
+      expect(deleteAccount).toHaveBeenCalledWith("user-1", "1234");
+      expect(hook.result.current.deleteError).toBe("");
+    },
+  );
 });
 
 describe("useFamilySettingsDelete stored binding", () => {

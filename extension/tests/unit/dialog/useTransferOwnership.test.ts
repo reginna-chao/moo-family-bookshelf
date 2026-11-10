@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
+import { DEFAULT_API_ENDPOINT } from "@/constants";
+import { DEPARTURE_SERVER_CHANGED_MESSAGE } from "@/dialog/departureServerPin";
 import { useTransferOwnership } from "@/dialog/useTransferOwnership";
 import {
   rateLimitedMessage,
@@ -28,6 +30,12 @@ import {
  * refusal and any throw reaches `onFailed` (the Extension's caller then closes the confirm).
  *
  * The secret is a call argument only, never written to `browser.storage.local`.
+ *
+ * Pinned server: `start` pins `apiClient.getEndpoint()` before its first await and the run never leaves
+ * it. Once the endpoint differs (`moveServer`; by default to `DEFAULT_API_ENDPOINT`, which is where a
+ * family-tree teardown resets the client), the next step is not sent — no transfer, no secret, no method
+ * re-read — and `onFailed` gets `DEPARTURE_SERVER_CHANGED_MESSAGE`. The cases that never move the
+ * endpoint are the positive companions: the same steps run through to their next request.
  * Twin: `pwa/tests/unit/hooks/useTransferOwnership.test.ts`.
  */
 
@@ -42,12 +50,16 @@ const SECRET_REQUIRED: TransferRes = {
   error: { code: "VERIFICATION_REQUIRED", message: "server text" },
 };
 
+const FAMILY_SERVER = "https://family.example";
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 /** Each `getVerifyMethod` call takes the next of `methods` (null: an error envelope; "throw": a
@@ -80,9 +92,14 @@ function setup(
   const onStart = vi.fn();
   const onTransferred = vi.fn();
   const onFailed = vi.fn();
+  let endpoint = FAMILY_SERVER;
+  const moveServer = (to: string = DEFAULT_API_ENDPOINT) => {
+    endpoint = to;
+  };
   const apiClient = {
     getVerifyMethod,
     transferOwnership,
+    getEndpoint: () => endpoint,
   } as unknown as ApiClient;
   const hook = renderHook(() =>
     useTransferOwnership({
@@ -112,6 +129,7 @@ function setup(
     onFailed,
     start,
     submit,
+    moveServer,
   };
 }
 
@@ -494,5 +512,136 @@ describe("useTransferOwnership", () => {
     expect(hook.result.current.secretError).toBe("");
     expect(hook.result.current.notice).toBe("");
     expect(hook.result.current.loading).toBe(false);
+  });
+
+  describe("when the server changes mid-run", () => {
+    type MethodReply = { data: { method: VerifyMethod } };
+
+    function expectStopped(ctx: ReturnType<typeof setup>) {
+      expect(ctx.transferOwnership).not.toHaveBeenCalled();
+      expect(ctx.onFailed).toHaveBeenCalledTimes(1);
+      expect(ctx.onFailed).toHaveBeenCalledWith(
+        DEPARTURE_SERVER_CHANGED_MESSAGE,
+      );
+      expect(ctx.onTransferred).not.toHaveBeenCalled();
+      expect(ctx.hook.result.current.loading).toBe(false);
+      expect(ctx.hook.result.current.activeAction).toBeNull();
+    }
+
+    /** Start with the method read held open, move the server, then let `settle` answer the read. */
+    async function moveDuringMethodRead(
+      settle: (read: ReturnType<typeof deferred<MethodReply>>) => void,
+    ) {
+      const ctx = setup([], [OK]);
+      const read = deferred<MethodReply>();
+      ctx.getVerifyMethod.mockImplementationOnce(() => read.promise as never);
+      let started!: Promise<void>;
+      act(() => {
+        started = ctx.hook.result.current.start(undefined, "keep");
+      });
+      expect(ctx.getVerifyMethod).toHaveBeenCalledTimes(1);
+      expect(ctx.hook.result.current.loading).toBe(true);
+      ctx.moveServer();
+      await act(async () => {
+        settle(read);
+        await started;
+      });
+      return ctx;
+    }
+
+    it.each<[string, (read: ReturnType<typeof deferred<MethodReply>>) => void]>(
+      [
+        ["resolves none", (read) => read.resolve({ data: { method: "none" } })],
+        ["rejects", (read) => read.reject(new Error("offline"))],
+      ],
+    )(
+      "sends no transfer when the late method read %s",
+      async (_label, settle) => {
+        const ctx = await moveDuringMethodRead(settle);
+
+        expectStopped(ctx);
+        expect(ctx.hook.result.current.secretMethod).toBeNull();
+      },
+    );
+
+    it("shows no secret step and sends nothing when the late method read is pin", async () => {
+      const ctx = await moveDuringMethodRead((read) =>
+        read.resolve({ data: { method: "pin" } }),
+      );
+
+      expectStopped(ctx);
+      expect(ctx.hook.result.current.secretMethod).toBeNull();
+    });
+
+    it("sends no secret when the server moves while the secret step is shown", async () => {
+      const ctx = setup(["pin"], [OK]);
+      await ctx.start(1, "clear");
+      expect(ctx.hook.result.current.secretMethod).toBe("pin");
+
+      ctx.moveServer();
+      await ctx.submit("1234");
+
+      expectStopped(ctx);
+      expect(storageSawSecret("1234")).toBe(false);
+    });
+
+    it("does not re-read the method when VERIFICATION_REQUIRED lands after the move", async () => {
+      const pending = deferred<TransferRes>();
+      const ctx = setup(["none", "pin"], [pending.promise]);
+      let started!: Promise<void>;
+      act(() => {
+        started = ctx.hook.result.current.start(undefined, "keep");
+      });
+      await waitFor(() =>
+        expect(ctx.transferOwnership).toHaveBeenCalledTimes(1),
+      );
+
+      ctx.moveServer();
+      await act(async () => {
+        pending.resolve(SECRET_REQUIRED);
+        await started;
+      });
+
+      expect(ctx.getVerifyMethod).toHaveBeenCalledTimes(1);
+      expect(ctx.transferOwnership).toHaveBeenCalledTimes(1);
+      expect(ctx.onFailed).toHaveBeenCalledWith(
+        DEPARTURE_SERVER_CHANGED_MESSAGE,
+      );
+      expect(ctx.onTransferred).not.toHaveBeenCalled();
+      expect(ctx.hook.result.current.secretMethod).toBeNull();
+      expect(ctx.hook.result.current.loading).toBe(false);
+      expect(ctx.hook.result.current.activeAction).toBeNull();
+    });
+
+    it("pins the new server on a fresh start after reset and transfers there", async () => {
+      const ctx = setup(["pin", "none"], [OK]);
+      await ctx.start();
+      ctx.moveServer();
+      act(() => ctx.hook.result.current.reset());
+
+      await ctx.start(undefined, "keep");
+
+      expect(ctx.transferOwnership).toHaveBeenCalledTimes(1);
+      expect(ctx.transferOwnership).toHaveBeenCalledWith(
+        "fam-1",
+        "user-1",
+        "user-2",
+        undefined,
+        undefined,
+      );
+      expect(ctx.onTransferred).toHaveBeenCalledTimes(1);
+      expect(ctx.onFailed).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing when a secret is submitted after reset", async () => {
+      const ctx = setup(["pin"], [OK]);
+      await ctx.start();
+      act(() => ctx.hook.result.current.reset());
+
+      await ctx.submit("1234");
+
+      expect(ctx.transferOwnership).not.toHaveBeenCalled();
+      expect(ctx.onFailed).not.toHaveBeenCalled();
+    });
   });
 });

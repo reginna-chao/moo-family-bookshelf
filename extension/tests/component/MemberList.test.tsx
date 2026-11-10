@@ -21,6 +21,7 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     transferOwnership: vi.fn().mockResolvedValue({ data: { ok: true } }),
     // A none account: the transfer goes out at once (the secret step is in MemberTransferConfirm.test.tsx).
     getVerifyMethod: vi.fn().mockResolvedValue({ data: { method: "none" } }),
+    getEndpoint: vi.fn(() => "https://family.example"),
     ...overrides,
   } as unknown as ApiClient;
 }

@@ -64,6 +64,7 @@ function renderConfirm(
   const apiClient = {
     getVerifyMethod,
     transferOwnership,
+    getEndpoint: () => "https://family.example",
   } as unknown as ApiClient;
   render(
     <MemberTransferConfirm
