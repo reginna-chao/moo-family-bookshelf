@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV, getPutTtl } from "../helpers/mockKv";
 import { failFirstWriteTo, holdNextWrite, watchKvOps } from "../helpers/kvOps";
-import { rateLimitBindings } from "../helpers/rateLimitBindings";
+import {
+  productionBindings,
+  type ProductionBindings,
+} from "../helpers/productionBindings";
 import { ALICE, BOB } from "../helpers/ids";
 import {
   ACCOUNT_DELETING_MARK_TTL_SECONDS,
@@ -60,6 +63,7 @@ const BOOK: BookEntry = {
 };
 
 let kv: KVNamespace;
+let bindings: ProductionBindings;
 let consoleError: ReturnType<typeof vi.spyOn>;
 
 function call(
@@ -140,6 +144,7 @@ async function expectNoAccountData(shareToken: string): Promise<void> {
 
 beforeEach(() => {
   kv = createMockKV();
+  bindings = productionBindings();
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -410,7 +415,7 @@ describe("upgradeVerifyRecordHash after a mark", () => {
           },
           body: JSON.stringify({ userId: USER, verifySecret: PIN }),
         },
-        { KV: kv, VERIFY_PEPPER: PEPPER, ...rateLimitBindings() },
+        { KV: kv, VERIFY_PEPPER: PEPPER, ...bindings },
       ),
     );
   }

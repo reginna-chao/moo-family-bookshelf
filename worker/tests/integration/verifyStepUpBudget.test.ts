@@ -35,6 +35,9 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  *
  * Requests run without DEV_MODE, with the binding stubs, so the hourly counter
  * read is real and the per-IP tier stays off KV; setup goes through DEV_MODE.
+ * KV fallback, on purpose: no `ATTEMPT_BUDGET` binding, so the `verify-stepup`
+ * budget is the KV read this budget counts. With the Durable Object that read
+ * moves out of KV (`verifyAttemptBudgetDurable.test.ts`).
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
