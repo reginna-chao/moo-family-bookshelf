@@ -54,7 +54,11 @@ import {
  * per-IP tier is counted by the platform rather than falling back to its KV
  * counter. The ceilings under test are hourly, which have no binding at all and
  * stay on KV by design; the bindings only keep the per-IP layer out of the KV
- * assertions.
+ * assertions. It carries NO `ATTEMPT_BUDGET` binding, on purpose: the gate's
+ * own hourly budget then takes its KV fallback (logging
+ * `ATTEMPT_BUDGET_BINDING_MISSING`), so the isolation cases can read both
+ * counters side by side in KV. The Durable Object path is in
+ * `verifyAttemptBudgetDurable.test.ts`.
  *
  * One table (`WRITE_ENDPOINTS`) drives all three authenticated write endpoints
  * that share the ceiling: that is what proves the limit is a property of the
@@ -147,8 +151,8 @@ async function buildRequest(
   return app.request(path, init, env);
 }
 
-/** Live request: no DEV_MODE, production bindings injected (per-IP stays off KV).
- *  See the header → "Live requests". */
+/** Live request: no DEV_MODE, rate-limit bindings injected (per-IP stays off KV), gate budget
+ *  on its KV fallback. See the header → "Live requests". */
 function prodRequest(
   method: string,
   path: string,

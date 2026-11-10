@@ -1,3 +1,5 @@
+import type { AttemptBudgetObject } from "../durable/attemptBudgetObject";
+
 /**
  * Names of the native Rate Limiting bindings, one per distinct per-minute limit
  * in use. Declared as a union so the limit -> binding table in
@@ -30,6 +32,10 @@ export interface Env {
   RATE_LIMIT_10_PER_MIN?: RateLimit;
   /** 3 req/min: per-IP sensitive tier, both buckets (onboarding + lookup). */
   RATE_LIMIT_3_PER_MIN?: RateLimit;
+
+  /** The verification gate's two hourly attempt budgets, one object per budget; used only by
+   *  `services/attemptBudget.ts`. OPTIONAL: without it those budgets fall back to the KV counter. */
+  ATTEMPT_BUDGET?: DurableObjectNamespace<AttemptBudgetObject>;
 }
 
 /**

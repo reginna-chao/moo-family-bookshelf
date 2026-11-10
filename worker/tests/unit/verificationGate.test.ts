@@ -139,7 +139,11 @@ import { VERIFY_SECRET_MAX_LENGTH } from "../../src/utils/validation";
  *    (`verifyfail:{userId}:{caller}`) out of the way, so the verdict observed
  *    is the account-wide ceiling's. The per-IP tier is a Rate Limiting binding
  *    since #160 item 1 and `apiRequest` injects a stub that admits everything,
- *    so it cannot answer in the gate's place either.
+ *    so it cannot answer in the gate's place either. KV fallback, on purpose:
+ *    no `ATTEMPT_BUDGET` binding, so the ceiling is the KV counter
+ *    `attemptCeilingKey` reads (each check logs `ATTEMPT_BUDGET_BINDING_MISSING`);
+ *    the Durable Object path is in
+ *    `tests/integration/verifyAttemptBudgetDurable.test.ts`.
  *  - `lookupFromSameSource` makes one live lookup from a FIXED source address —
  *    reusing one address is the whole point of the lockout cases, since
  *    `verifyfail:{userId}:{caller}` is keyed on it. These calls used to roll
@@ -233,7 +237,7 @@ async function apiRequest(
   }
 
   // Production rate-limit bindings go into BOTH branches (no per-IP KV fallback in the way).
-  // See the header → "Request helper options".
+  // See the header → "Request helper options"; no ATTEMPT_BUDGET (KV fallback, header → ceiling).
   const bindings = rateLimitBindings();
   const env =
     opts.devMode === false

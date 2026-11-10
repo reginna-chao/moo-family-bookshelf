@@ -63,7 +63,10 @@ import { hashAuthToken, hashSecret } from "../../src/utils/crypto";
  * on one address a 429 could be the lockout instead of the budget, and every 429 here
  * asserts `error.code` to tell them apart. The lockout scenario shares one address on
  * purpose. The binding stubs admit every per-IP charge and count nothing, so a
- * per-minute refusal is asked for through a decider.
+ * per-minute refusal is asked for through a decider. KV fallback, on purpose: no
+ * `ATTEMPT_BUDGET` binding, so the hourly budgets are KV counters the scenarios
+ * spend and read directly; the Durable Object path is in
+ * `verifyAttemptBudgetDurable.test.ts`.
  *
  * The operator steps are the documented ones. `runDocumentedNode` runs the `node -e`
  * line of `worker/DEPLOY.md` with test values, in a temp directory it removes again, and
@@ -107,6 +110,7 @@ function freshSourceIp(): string {
   return `203.0.${Math.floor(sourceCounter / 250)}.${sourceCounter % 250}`;
 }
 
+// No ATTEMPT_BUDGET: the hourly budgets take their KV fallback. See the header → "Harness".
 const prodEnv = (): Env => ({ KV: kv, ...rateLimitBindings() });
 const devEnv = (): Env => ({ KV: kv, DEV_MODE: "1" });
 

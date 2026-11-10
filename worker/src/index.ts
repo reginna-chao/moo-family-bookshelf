@@ -23,6 +23,8 @@ import { isDevMode, type Env } from "./utils/env";
 
 export type { Env } from "./utils/env";
 export { isDevMode } from "./utils/env";
+// The Durable Object class behind the ATTEMPT_BUDGET binding (wrangler.toml); the runtime needs it exported here.
+export { AttemptBudgetObject } from "./durable/attemptBudgetObject";
 
 /** Check if the origin is allowed for CORS */
 export function isAllowedOrigin(origin: string, devMode?: boolean): boolean {

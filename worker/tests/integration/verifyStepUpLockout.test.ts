@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { createMockKV } from "../helpers/mockKv";
-import { rateLimitBindings } from "../helpers/rateLimitBindings";
+import {
+  productionBindings,
+  type ProductionBindings,
+} from "../helpers/productionBindings";
 import { seedAuthToken, tokenOwner } from "../helpers/auth";
 import { ALICE } from "../helpers/ids";
 import { BoolFlag, kvKeys, VERIFY_MAX_FAILURES } from "../../src/kv/schema";
@@ -29,15 +32,18 @@ import { hashAuthToken } from "../../src/utils/crypto";
  * seconds of a window and asks in the first seconds of the next, where the 15-minute
  * lock still stands and the budget is fresh.
  *
- * Requests run without DEV_MODE, with the binding stubs (which admit every
- * per-IP charge, so the sensitive tier's 3/min never interferes); the PIN is
- * set through the real route under DEV_MODE.
+ * Requests run without DEV_MODE, with the production bindings: the Rate
+ * Limiting stubs (which admit every per-IP charge, so the sensitive tier's
+ * 3/min never interferes) and an in-memory `ATTEMPT_BUDGET` namespace, which
+ * holds the hourly budgets as production does; the PIN is set through the real
+ * route under DEV_MODE.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 let kv: KVNamespace;
+let bindings: ProductionBindings;
 
 const USER_ID = ALICE;
 const PIN = "123456";
@@ -61,9 +67,7 @@ async function send(
     "cf-connecting-ip": opts.ip,
   };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
-  const env = opts.dev
-    ? { KV: kv, DEV_MODE: "1" }
-    : { KV: kv, ...rateLimitBindings() };
+  const env = opts.dev ? { KV: kv, DEV_MODE: "1" } : { KV: kv, ...bindings };
   return app.request(
     path,
     { method, headers, body: JSON.stringify(body) },
@@ -148,6 +152,7 @@ async function failKeys(): Promise<string[]> {
 
 beforeEach(() => {
   kv = createMockKV();
+  bindings = productionBindings();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(PINNED_NOW);
 });

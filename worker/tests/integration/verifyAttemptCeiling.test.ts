@@ -67,6 +67,14 @@ import {
  * way. `Date` is pinned mid-window, so `retryAfter` is exactly half the window and
  * no bucket rolls over by accident. Setup goes through DEV_MODE so it spends
  * nothing. `spend` seeds a counter directly; the first case spends one for real.
+ *
+ * KV FALLBACK, on purpose: the env carries the Rate Limiting stubs but no
+ * `ATTEMPT_BUDGET` binding, so the hourly budgets run on their KV counter
+ * (`ratelimit:user:verify*`), which these cases seed and read — the path a
+ * self-hosted Worker without the Durable Object takes. Each budget-checking
+ * request therefore logs `ATTEMPT_BUDGET_BINDING_MISSING` once, and the cases
+ * that pin the full `console.error` list include it. The Durable Object path is
+ * in `verifyAttemptBudgetDurable.test.ts`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,6 +107,7 @@ function freshIp(): string {
   return `203.0.${Math.floor(sourceCounter / 250)}.${sourceCounter % 250}`;
 }
 
+// No ATTEMPT_BUDGET: the hourly budgets take their KV fallback. See the header → "KV FALLBACK".
 function prodEnv(decide?: RateLimitDecider) {
   const { bindings, calls } = createRateLimitBindings(decide);
   return { env: { KV: kv, ...bindings } as Env, calls };
@@ -680,7 +689,10 @@ describe("PUT /api/user/:id/verify — clearing the login budget", () => {
     expect(res.status).toBe(200);
     expect(await storedMethod()).toBe("none");
     expect(await budgetCount(VERIFY_ATTEMPT_SCOPE)).toBe(VERIFY_ATTEMPT_MAX);
-    expect(logs.errors()).toEqual([["VERIFY_CEILING_RESET_FAILED"]]);
+    expect(logs.errors()).toEqual([
+      ["ATTEMPT_BUDGET_BINDING_MISSING"],
+      ["VERIFY_CEILING_RESET_FAILED"],
+    ]);
     expect(logs.text()).not.toContain(USER_ID);
   });
 });
@@ -798,6 +810,7 @@ describe("per-minute limit — no usable binding", () => {
     expect((await gate(LOOKUP_PATH, PIN, env)).status).toBe(200);
     expect(logs.errors()).toEqual([
       ["RATE_LIMIT_BINDING_MISSING", { binding: "RATE_LIMIT_10_PER_MIN" }],
+      ["ATTEMPT_BUDGET_BINDING_MISSING"],
     ]);
     expect((await gate(LOOKUP_PATH, WRONG_PIN, env)).status).toBe(403);
     expect(await budgetCount(VERIFY_ATTEMPT_SCOPE)).toBe(1);
@@ -835,7 +848,10 @@ describe("per-minute limit — no usable binding", () => {
     const res = await gate(LOOKUP_PATH, PIN, env);
 
     expect(res.status).toBe(200);
-    expect(logs.errors()).toEqual([["PER_USER_BURST_CHECK_FAILED"]]);
+    expect(logs.errors()).toEqual([
+      ["PER_USER_BURST_CHECK_FAILED"],
+      ["ATTEMPT_BUDGET_BINDING_MISSING"],
+    ]);
     expect(logs.text()).not.toContain(USER_ID);
   });
 });
