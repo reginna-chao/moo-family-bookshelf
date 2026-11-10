@@ -23,9 +23,6 @@ export async function settleJoinedSession(opts: {
 }): Promise<void> {
   const { userId, familyId, authToken, expiresAt, issuer, apiClient } = opts;
 
-  void Promise.resolve(
-    browser.runtime.sendMessage({ type: "SET_FAMILY_ID", familyId }),
-  ).catch(() => {});
   await persistJoinCredentials({
     userId,
     familyId,
@@ -33,7 +30,8 @@ export async function settleJoinedSession(opts: {
     expiresAt,
     endpoint: issuer,
   });
-  // Overwrite stale familyId in sync storage so background reads stay consistent
+  // storage.sync is only the bootstrap hint for a device never onboarded; local stays the source
+  // of truth. See docs/architecture.md → 本機儲存與同步.
   try {
     await browser.storage.sync.set({ [FAMILY_ID_KEY]: familyId });
   } catch {

@@ -68,11 +68,11 @@ import browser from "webextension-polyfill";
  * through untouched — it is what lets the verification prompt show a live
  * countdown instead of an open-ended "請稍後再試".
  *
- * Firefox: the background event page can be asleep, so the fire-and-forget
- * SET_FAMILY_ID message rejects. familyId persistence must NOT depend on that
- * message — every flow writes FAMILY_ID_KEY DIRECTLY to storage.local. These
- * tests force chrome.runtime.sendMessage to reject and assert the direct write
- * still happened with the expected familyId.
+ * Firefox: familyId is written DIRECTLY to storage — every flow writes
+ * FAMILY_ID_KEY to storage.local and no background message is sent (#484), so
+ * Firefox's sleeping background event page cannot affect it. These tests still
+ * force chrome.runtime.sendMessage to reject and assert the direct write
+ * happened with the expected familyId.
  *
  * createNewFamily refused by the backend: `createFamily` resolves the
  * `{ data, error }` envelope through `readEnvelope`, which bare-casts
@@ -239,7 +239,7 @@ describe("performSoloRecovery", () => {
     );
   });
 
-  it("persists credentials and sends chrome messages on success", async () => {
+  it("persists credentials to storage on success", async () => {
     const apiClient = createMockApiClient();
     const autoSetup = createMockAutoSetup();
 
@@ -266,13 +266,8 @@ describe("performSoloRecovery", () => {
       expect.objectContaining({ [FAMILY_ID_KEY]: "fam-solo-1" }),
     );
 
-    // Background messages sent
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SET_FAMILY_ID",
-        familyId: "fam-solo-1",
-      }),
-    );
+    // No background message: storage is written directly (#484)
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
 
   it("sets auth token on apiClient on success", async () => {
@@ -842,7 +837,7 @@ describe("performJoin", () => {
     );
   });
 
-  it("persists credentials and sends SET_FAMILY_ID on success", async () => {
+  it("persists credentials and sends no background message on success", async () => {
     const apiClient = createMockApiClient();
 
     await performJoin({
@@ -860,12 +855,7 @@ describe("performJoin", () => {
       }),
     );
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SET_FAMILY_ID",
-        familyId: "fam-join-1",
-      }),
-    );
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -1153,9 +1143,9 @@ describe("verification secret forwarding & errorCode surfacing (SEC-1)", () => {
   });
 });
 
-// Firefox: with SET_FAMILY_ID rejecting, FAMILY_ID_KEY must still be written
-// DIRECTLY to storage.local. See the header → "Firefox".
-describe("familyId persists to storage.local even when SET_FAMILY_ID message rejects (Firefox)", () => {
+// Firefox: even with every message rejecting, FAMILY_ID_KEY is written DIRECTLY
+// to storage.local. See the header → "Firefox".
+describe("familyId persists to storage.local without any background message (Firefox)", () => {
   // Find the local.set call whose payload includes FAMILY_ID_KEY (the credential
   // write batches USER_ID_KEY + FAMILY_ID_KEY + auth fields in a single set).
   function familyIdSetCall(): Record<string, unknown> | undefined {
