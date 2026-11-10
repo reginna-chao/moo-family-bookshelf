@@ -1,4 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from "vitest";
+import browser from "webextension-polyfill";
 import { ApiClient } from "@/api/client";
 import {
   clearStoredFamilyBinding,
@@ -35,12 +44,44 @@ import { BoolFlag } from "moo-family-bookshelf-shared/api/types";
  *   resets the live client, and calls NO API (the old account keeps its family).
  * - clearStoredFamilyBinding alone (leave) must keep the user's own keys:
  *   personal settings persist across families (Invariant 5).
- * - A failed local removal rejects and leaves the client, the stored endpoint
+ * - The stored endpoint choice goes in the SAME local removal as the familyId
+ *   (#492): a failed removal rejects and leaves the client, the stored endpoint
  *   and the page-load confirmation as they were.
+ *
+ * Another tab's join between this teardown's storage writes (`afterFirstWrite`):
+ * `persistJoinCredentials` writes familyId + a self-hosted token + its endpoint in
+ * ONE `set`. Before #492 the teardown removed the binding first and the endpoint
+ * keys in a second removal, so a join landing between the two kept its token but
+ * lost its endpoint, and that token would then go to the official default. The
+ * hook fires after the next local write takes hold; the store implementations are
+ * restored in `afterEach` so the hook cannot leak into later cases.
  */
 
 const CUSTOM_ENDPOINT = "https://custom.workers.dev";
 const OLD_USER = "a".repeat(64);
+const NEW_FAMILY = "fam-new";
+const SELF_HOSTED_TOKEN = "b".repeat(64);
+const SELF_HOSTED_URL = "https://self-hosted.example";
+
+type StorageWrite = Mock<(arg: unknown) => Promise<void>>;
+const localSet = browser.storage.local.set as unknown as StorageWrite;
+const localRemove = browser.storage.local.remove as unknown as StorageWrite;
+const storeSet = localSet.getMockImplementation()!;
+const storeRemove = localRemove.getMockImplementation()!;
+
+/** Run `effect` once, right after the next local storage write takes hold. */
+function afterFirstWrite(effect: () => Promise<void>): void {
+  let fired = false;
+  const firing =
+    (store: (arg: unknown) => Promise<void>) => async (arg: unknown) => {
+      await store(arg);
+      if (fired) return;
+      fired = true;
+      await effect();
+    };
+  localSet.mockImplementation(firing(storeSet));
+  localRemove.mockImplementation(firing(storeRemove));
+}
 
 const ACCOUNT_KEYS = [
   USER_ID_KEY,
@@ -106,6 +147,8 @@ describe("familyBindingReset", () => {
   });
 
   afterEach(async () => {
+    localSet.mockImplementation(storeSet);
+    localRemove.mockImplementation(storeRemove);
     globalThis.fetch = originalFetch;
     forgetAccountConfirmation();
     vi.mocked(chrome.runtime.sendMessage).mockReset();
@@ -169,7 +212,7 @@ describe("familyBindingReset", () => {
       expect(setAuthToken).not.toHaveBeenCalled();
       expect(client.getEndpoint()).toBe(CUSTOM_ENDPOINT);
       expect(await isConfirmed(OLD_USER)).toBe(true);
-      // The endpoint choice is only reset once the local removal landed.
+      // The endpoint choice rides in the same local removal, so it fails with it.
       const local = await storedLocal();
       expect(local[USER_ID_KEY]).toBe(OLD_USER);
       expect(local[API_ENDPOINT_KEY]).toBe(CUSTOM_ENDPOINT);
@@ -217,8 +260,36 @@ describe("familyBindingReset", () => {
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
         STORE_PAGE_INDEX_KEY,
+        API_ENDPOINT_KEY,
+        DECLINED_FAMILY_ENDPOINT_KEY,
       ]);
       await pending;
+    });
+
+    it("issues exactly one local removal", async () => {
+      await clearStoredFamilyBinding();
+
+      expect(chrome.storage.local.remove).toHaveBeenCalledTimes(1);
+    });
+
+    // See the header → "Another tab's join between this teardown's storage writes".
+    it("never leaves another tab's self-hosted token without its endpoint (#492)", async () => {
+      const otherTab = vi.fn(async () => {
+        await storeSet({
+          [FAMILY_ID_KEY]: NEW_FAMILY,
+          [AUTH_TOKEN_KEY]: SELF_HOSTED_TOKEN,
+          [API_ENDPOINT_KEY]: SELF_HOSTED_URL,
+        });
+      });
+      afterFirstWrite(otherTab);
+
+      await clearStoredFamilyBinding();
+
+      expect(otherTab).toHaveBeenCalledTimes(1);
+      const local = await storedLocal();
+      expect(local[FAMILY_ID_KEY]).toBe(NEW_FAMILY);
+      expect(local[AUTH_TOKEN_KEY]).toBe(SELF_HOSTED_TOKEN);
+      expect(local[API_ENDPOINT_KEY]).toBe(SELF_HOSTED_URL);
     });
   });
 

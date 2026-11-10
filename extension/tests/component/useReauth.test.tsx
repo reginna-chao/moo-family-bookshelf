@@ -49,26 +49,30 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * 401, so no prompt ever appeared again this session — the dead token stayed primed, the dialog never
  * flipped to onboarding, and the rejection escaped through submit() as an unhandled promise
  * rejection. Storage is the least critical of the four steps, so it must never block the other three.
- * Swallowing alone was not enough: the aborted clear also skips the endpoint reset that normally rides
- * inside it while the handover still completes, so the catch re-runs that reset itself. Without it the
+ * Swallowing alone was not enough: clearFamilyStorage removes the endpoint keys in the SAME single
+ * removal as the familyId (#492), so the rejected removal leaves the endpoint in place too while the
+ * handover still completes, and the catch must reset the endpoint itself. Without it the
  * `finally` still notifies onFamilyRemoved, the dialog flips to onboarding while storage holds the
  * ex-family's custom @host — the value the NEXT boot restores, which a later join with a plain
  * (no-@host) sync code never overwrites — and the new family's traffic goes to the old family's
  * server. In that case a family-gone join short-circuits runReauthJoin before its cooldown remove, so
- * the FIRST storage.local.remove is the `CLEARED_FAMILY_KEYS` clear inside clearFamilyStorage, which the
- * rejection aborts before its own endpoint reset.
+ * the FIRST storage.local.remove is clearFamilyStorage's single `CLEARED_FAMILY_KEYS` clear, which
+ * already carries the endpoint keys and is the one the rejection fails.
  * `mockRejectedValueOnce` fails only that call; later removes resolve through the shared setup mock.
- * Exactly two clears, in order (the failed familyId one, then the recovery reset), distinguish the
- * catch-block reset from the one inside clearFamilyStorage — before the fix there was only ever
- * call #1.
+ * Because the failed clear carries the endpoint keys too, "some removal carried them" proves nothing
+ * about the catch. Exactly two clears, in order (the failed single clear, then the catch's reset), do:
+ * without the catch's reset there is only ever call #1.
  */
 
-/** What clearFamilyStorage removes in its first call: the binding, its chip index, and its token. */
+/** What clearFamilyStorage removes in its single call: the binding, its chip index, its token, and the
+ *  family-scoped endpoint keys (#492). */
 const CLEARED_FAMILY_KEYS = [
   FAMILY_ID_KEY,
   STORE_PAGE_INDEX_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  API_ENDPOINT_KEY,
+  DECLINED_FAMILY_ENDPOINT_KEY,
 ];
 
 function seedStorage(
@@ -467,13 +471,13 @@ describe("useReauth", () => {
       expect(apiClient.onFamilyRemoved).toHaveBeenCalledTimes(1);
     });
 
-    /** A rejecting storage clear must not block the handover, and the catch re-runs the endpoint reset
-     *  it skipped. See the file header, "Storage-clear rejection". */
+    /** A rejecting storage clear must not block the handover, and the catch resets the endpoint the
+     *  rejected removal left in place. See the file header, "Storage-clear rejection". */
     it("resets the endpoint choice and finishes the handover even when the storage clear rejects", async () => {
       seedStorage();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      // The FIRST storage.local.remove here is clearFamilyStorage's `CLEARED_FAMILY_KEYS` clear;
-      // fail only that call. See the file header, "Storage-clear rejection".
+      // The FIRST storage.local.remove here is clearFamilyStorage's `CLEARED_FAMILY_KEYS` clear (which
+      // now carries the endpoint keys too); fail only that call. See the header, "Storage-clear rejection".
       vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
         new Error("Extension context invalidated"),
       );
@@ -502,16 +506,16 @@ describe("useReauth", () => {
       // gone there is nothing left to type.
       expect(result.current.active).toBe(false);
 
-      // The aborted clear never reached its own endpoint reset, so the catch re-runs it: otherwise the
-      // ex-family's @host survives into the next boot. See the file header, "Storage-clear rejection".
+      // The failed clear carries the endpoint keys too, so this alone does not prove the catch reset
+      // anything; the order check of the two calls below does. See the header, "Storage-clear rejection".
       expect(chrome.storage.local.remove).toHaveBeenCalledWith(
         expect.arrayContaining([
           API_ENDPOINT_KEY,
           DECLINED_FAMILY_ENDPOINT_KEY,
         ]),
       );
-      // Exactly two clears, in order: the failed familyId one, then the recovery reset — this sequence
-      // separates the catch-block reset from the one that never ran (before the fix: call #1 only).
+      // Exactly two clears, in order: the failed single clear, then the catch's reset — without that
+      // reset there is call #1 only, and the ex-family's @host survives into the next boot.
       const removeCalls = vi.mocked(chrome.storage.local.remove).mock.calls;
       expect(removeCalls).toHaveLength(2);
       expect(removeCalls[0][0]).toEqual(CLEARED_FAMILY_KEYS);

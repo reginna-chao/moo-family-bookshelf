@@ -110,9 +110,12 @@ import type {
  *    validation.
  */
 
-vi.mock("@/constants", () => ({
-  DEFAULT_API_ENDPOINT: "https://default.workers.dev",
-}));
+// Pin DEFAULT_API_ENDPOINT (avoids import.meta.env dependence) while keeping
+// every other real constant the client module imports.
+vi.mock("@/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants")>();
+  return { ...actual, DEFAULT_API_ENDPOINT: "https://default.workers.dev" };
+});
 
 const MOCK_ENDPOINT = "https://test.workers.dev";
 const FAMILY_ID = "fam-abc";

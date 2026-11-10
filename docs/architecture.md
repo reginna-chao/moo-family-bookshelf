@@ -797,7 +797,7 @@ Extension 的行為：
   - 判斷本身是純函式，在 `extension/src/dialog/pendingEndpointSwitch.ts`。
   - 新的詢問會清掉過時的錯誤提示，但只在真的有新詢問時：失敗的確認會把目標記為已拒絕，這會以「沒有要問的」重新跑一次判斷，若無條件清除，提示會在使用者看到之前就被抹掉。
   - 同步碼、邀請與 QR Code 一律用**這台裝置實際採用**的端點產生（`FamilySettings.tsx`），不用家庭記錄的值：拒絕切換的成員不能再把他拒絕的端點散布出去（或掃進第二台裝置）。`apiClient.setEndpoint()` 改動 client 不會觸發 React 重新 render，所以採用中的端點以 state 呈現：初始值取自 client（啟動時已套用存好的端點），只在確認成功時更新，而且鏡射 client **實際**的值（含正規化）而不是要求的值，storage 寫入失敗時退回切換前的值；確認後不必重開，同步碼就反映切換結果。
-- Extension 的這些寫入集中在 `extension/src/storage/familyEndpointChoice.ts`（確認切換、拒絕、重設三種，確認切換是 `persistSwitchedFamilyEndpoint`），全部直接存取 `storage.local`，不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息）。開啟 Dialog 時由 `extension/src/dialog/applyStoredSession.ts` 用同一次讀取取得端點與 token，也是直接讀，否則同樣的失敗模式會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/persistJoinCredentials.ts` 的 `persistJoinCredentials` 相同。
+- Extension 的這些寫入集中在 `extension/src/storage/familyEndpointChoice.ts`（確認切換、拒絕、重設三種，確認切換是 `persistSwitchedFamilyEndpoint`），全部直接存取 `storage.local`，不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息）。拆除時要移除的 key 清單（`FAMILY_ENDPOINT_CHOICE_KEYS`）也定義在這裡，`clearStoredFamilyBinding` 與 `clearFamilyStorage` 把它併進自己的那次 `storage.local.remove`（#492）；`resetFamilyEndpointChoice` 只剩 `useReauth.ts` 的 catch 路徑使用。開啟 Dialog 時由 `extension/src/dialog/applyStoredSession.ts` 用同一次讀取取得端點與 token，也是直接讀，否則同樣的失敗模式會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/persistJoinCredentials.ts` 的 `persistJoinCredentials` 相同。
 
 PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板——PWA 只認同步碼帶進來的端點。這是刻意的：少一條可被管理者操控的通道，攻擊面就小一分。
 
@@ -1394,12 +1394,11 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
   - **加入成功的寫入**（`persistJoinCredentials`，由 `settleJoinedSession` 呼叫）：配對用送出請求前記下的發行者，不讀回應回來時的 `getEndpoint()`，所以過期的引導畫面建立或加入家庭，也不會讓新 token 配到別的伺服器。綁定排在快取遷移之前，遷移的第一個 GET 帶 token。自架伺服器：token 與端點放在同一次 `set`，一起換。官方預設：維持「沒有 key 就是官方預設」，官方網址日後更換時裝置才跟得上，所以先用同一次 `set` 寫入官方 URL、token、familyId、userId 與到期時間，配對正確之後再 `remove` 端點 key。`set` 失敗時什麼都沒變，錯誤往外丟；`remove` 失敗時配對仍然正確，只是 key 留著，記 log 後視為成功，因為加入已經成功、token 也存好了。沒有發行 token 時不動端點 key。
   - **輪替 token 的寫入**（`saveVerifyMethod` 的 `storeRotatedToken`）：先比對 storage（`storageMatches`），不符就不寫，token 只留在這個 client 的記憶體。讀取失敗和寫入失敗一樣只記 log，不算儲存失敗。
   - **重新驗證的回應**（`runReauthJoin`）：不符就回 `STALE_SESSION`，什麼都不寫也不清（見〈重新驗證視窗〉）。
-  - **拆除**（`clearFamilyStorage`）：token 與到期時間跟著 familyId 一起移除。接下來的端點重設會把 key 刪掉，留下的 token 就會配到官方預設。
+  - **拆除**（`clearFamilyStorage`，`clearStoredFamilyBinding` 也一樣）：token、到期時間、端點 key 與暫不切換的記錄跟著 familyId 在同一次 `storage.local.remove` 移除，所以另一分頁加入時寫下的自架 token，不會在端點 key 被刪掉之後單獨留下、配到官方預設（#492）。`clearStoredFamilyBinding` 另外送出的 `CLEAR_FAMILY_ID` 背景訊息可能稍後再移除 familyId 與 token，這只會讓 token 跟著消失，不會留下沒有端點 key 的 token，所以不會跨伺服器。
   - **工作階段**（`TokenSession.end`）：`setEndpoint` 換成不同的值、`setAuthToken` 換 token 或設 `null` 都會結束工作階段：進行中的 refresh 會被丟棄，也不再被後面的請求共用，所以永遠不回應的 refresh 不會擋住切換後的請求（`shareRefresh` 只清自己的 promise）。把同一個 token 設回同一台伺服器不算轉換，否則開機這一步會丟棄 `useTokenRefresh` 掛載時開始的 refresh。
   - **已接受的殘餘風險**：
     - `storage` 沒有比對後寫入的原子操作：`doRefreshToken`、`saveVerifyMethod`、`runReauthJoin` 在 storage 讀取與接著的寫入或拆除之間有一段短暫空窗，只有另一分頁剛好在這段空窗內動作才會碰到。結果是舊伺服器的 token 配到新端點，之後可能被送到新伺服器。確認切換這條路徑由工作階段失效與第二次移除擋下。
     - `persistJoinCredentials` 不做比對，以最後寫入的為準。自架伺服器是同一次 `set`，配對不會錯。官方預設在寫入配對與移除 key 之間有一段短暫空窗：另一分頁剛好在這段空窗內寫入自架伺服器與它的 token，接著的移除會讓這把自架 token 沒有 key，之後被送到官方伺服器。沒有攻擊者能從中得到什麼。這個函式寫入官方 token 時一定帶著官方 URL，本身不會讓官方 token 配到自架伺服器；只有另一分頁的確認切換在它之後才寫入端點時，官方 token 會短暫配到那台伺服器，由該分頁最後一次移除清掉，那次移除也失敗才會留下；這段期間若剛好有讀取者（Dialog 開機、浮動按鈕徽章、另一分頁的 refresh），官方 token 可能被送到那台伺服器。那台伺服器的管理者要同時碰上使用者在另一分頁完成官方加入，而且落在幾次 storage 操作之內，實際上無法自行促成。寫回 token 的其他路徑仍有上一則的空窗。
-    - 拆除（`clearFamilyStorage`、`clearStoredFamilyBinding`）先移除 token、再重設端點，兩步之間另一分頁剛好寫入自架伺服器與它的 token 時，重設會讓這把自架 token 沒有 key，之後被送到官方伺服器；官方回 `FAMILY_NOT_FOUND` 後本機的家庭綁定會被清除，要重新輸入同步碼。沒有人能觸發，自架伺服器也得不到任何東西。
     - 另一分頁換了伺服器之後，過期的重新驗證提示裡輸入的密鑰，仍會送到提示標明的那台伺服器（`useReauth.ts`）。那台伺服器在使用者還連著它時，本來就能回 401 叫出提示，而且畫面寫著位址，所以提示過期並沒有讓它多得到什麼。同分頁的 client 換了伺服器時則不會送出：提示在送出前就拒絕（見〈重新驗證視窗〉）。
     - 舊版留下的錯誤配對（端點是 H，token 是官方發行）無法辨識，因為 storage 沒有另存發行者。H 在這段期間可能收到那把官方 token，直到該裝置重新加入或 token 輪替為止。更新後的版本不會再產生新的案例。
     - `@host` 等於官方網址的同步碼，回應沒有發行 token 時，端點 key 會留著。配對是正確的，沒有人因此多得到什麼，只是這台裝置之後不會跟上官方網址的更換。
@@ -1408,12 +1407,11 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
     - 自架使用者開 Dialog 時 token 快到期，`useTokenRefresh` 的 refresh 搶在開機 `setEndpoint` 之前：比對不符而中止，這次不續期。下次回到分頁或收到 401 會再試，token 在緩衝期內仍有效。
     - `performJoin` 寫端點與寫 token 之間有空窗，空窗內 storage 只有新端點、沒有 token，沒有東西可外洩。
     - `useReauth.ts` 的 `tearDownGoneFamily`：`clearFamilyStorage` 移除 familyId 失敗時仍重設端點，storage 留下 familyId 但沒有端點 key，client 回官方，比對會通過。重新驗證只在 refresh 失敗路徑刪掉 token 之後才出現，所以通常只有雜湊過的 userId 與 familyId 送到官方，官方回 `FAMILY_NOT_FOUND` 後自行恢復。但 token 不一定還是刪除狀態：另一分頁可能已把 token 寫回，這時移除失敗會留下沒有 key 的自架 token，官方伺服器之後會收到它。沒有攻擊者參與，要 storage 故障加上另一分頁寫回才會發生。
-    - 引導畫面的 `setAuthToken` 綁定（`settleJoinedSession.ts`）：送出建立或加入的請求前記下發行者，回應回來後 client 已離開發行者就不綁定、不遷移快取，比對與綁定之間沒有 `await`。這道比對擋不到的情況是接下來六則。
+    - 引導畫面的 `setAuthToken` 綁定（`settleJoinedSession.ts`）：送出建立或加入的請求前記下發行者，回應回來後 client 已離開發行者就不綁定、不遷移快取，比對與綁定之間沒有 `await`。這道比對擋不到的情況是接下來五則。
     - 發行者是自架伺服器，拆除後流程繼續跑（`tryAutoRecovery`、`performSoloRecovery` 的 `syncBooks`；`useOnboardingJoinFlow.ts` 的 `finishJoin`、`handleContinueAfterCreate`）：流程要不要停由 #476 處理，修好後這則就收掉。這時 client 沒有 token，`useAutoSetup.ts` 的遷移 GET 與 `onboardingBooksUpload.ts` 的讀取會送到官方，官方收到 userId，回 401，走不到 PUT（見〈個人開放設定 API〉的 `expectedLastUpdated`）。之後 `onFamilyJoined` 讓主畫面以這台自架伺服器的 familyId 掛在官方的 client 上（`App.tsx` 的 `handleFamilyJoined`、`useFamilyDataMembers.ts`），路徑帶 familyId 的請求也會送到官方，等於同步碼送到了官方，這和修正前相同。自架伺服器可以主動造成這個情況，不只是巧合。
     - 發行者是官方，拆除時 `setEndpoint` 遇到同一個值直接返回。拆除落在比對之前時，比對通過，token 會綁回 client，之後的 `syncBooks` 會帶著 token 走到 PUT，這和修正前相同。拆除落在遷移途中時不會再綁定，之後的 PUT 不帶 token，寫不進去。兩種情況 token 與書單都留在官方，沒有跨伺服器。
     - 端點切走又切回同一個值時比對會通過。token 仍是那台伺服器發的，不跨伺服器；與 `pinSyncApi` 的取捨相同（`pinnedSyncApi.ts`）。
-    - 請求途中拆除時，storage 仍會寫入發行者的配對與 familyId。這是使用者自己按下的加入，發行者也已接受，配對正確；拆除若在寫入之前完成，就不會被清掉，下次開機會回到發行者。寫入落在拆除途中、回應沒帶 token 的情況見下面兩則。
-    - 拆除是多段 `await`（`clearFamilyStorage`，先清 storage、後移 client）。流程的寫入插在 `storage.local.remove` 與端點重設之間時，自架伺服器的 token 會沒有端點 key，接下來的第一個 401（流程繼續跑時的 `syncBooks`，否則是下次開機）會把它送到官方。這幾步之間 client 還沒移動，比對看不出來，根治要給 storage 加鎖。遷移排在這個流程的寫入之後，它引發的拆除插不進這段，所以只有舊的續期剛好在這幾毫秒失敗才會碰到；單靠自架伺服器造不出來，因為引導畫面進行中 storage 通常沒有 familyId，續期走不到拆除，要使用者同時在另一分頁操作。官方通常回 401（token 的值由發行者決定），接著復原加入回 `FAMILY_NOT_FOUND`，本機家庭綁定被清除。自架伺服器本來就持有這把 token，得不到新東西，與上面「拆除時另一分頁寫入」的結果相同。
+    - 請求途中拆除時，storage 仍會寫入發行者的配對與 familyId。這是使用者自己按下的加入，發行者也已接受，配對正確；拆除若在寫入之前完成，就不會被清掉，下次開機會回到發行者。回應沒帶 token 的情況見下面一則。
     - 不帶 `@host` 的流程，回應沒帶 token（或形狀不合被拿掉）又遇到請求途中拆除：`persistJoinCredentials` 不寫端點 key，storage 是「自架伺服器的 familyId、沒有 key」，接下來的第一個 401（流程繼續跑時的 `syncBooks`，否則是下次開機）會讓 refresh 與復原加入把 familyId 送到官方，官方回 `FAMILY_NOT_FOUND` 後本機綁定被清除。這要自架伺服器回應格式不對又剛好拆除才會發生，沒有憑證外流；「沒發 token 就不動端點 key」是既有規則，不為此更改。
     - 端點不可用的舊版使用者：userId 與 familyId 仍會送到官方一次，和修正前相同，只是不再送 token。
     - `code` 驗證的使用者只換網域時，切換後無法在這台裝置重新加入，因為擴充功能的提示沒有輸入驗證碼的欄位。回頭路是另一台還握有該伺服器接受之 token 的裝置，把驗證方式改成 PIN／圖形；只有一台裝置就沒有回頭路。這是已接受的結果，面板會事先警告（見〈端點切換確認〉）。
