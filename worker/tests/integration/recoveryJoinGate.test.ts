@@ -332,6 +332,7 @@ describe("Departure write trails carry no recovery bookkeeping", () => {
     expect(asSet(trail.slice(1))).toEqual(
       asSet([
         `delete ${kvKeys.member(USER2)}`,
+        `delete ${kvKeys.otp(USER2)}`,
         ...(await revokeAllTrailEntries(USER2, [memberToken])),
       ]),
     );
