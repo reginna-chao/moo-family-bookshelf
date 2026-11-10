@@ -55,6 +55,7 @@ export function useOnboardingFlow(
   const { handleRetry, showError, showRetryableError, backToRecoveryChoice } =
     useOnboardingNavigation(store, autoSetup);
   const promptRecoveryVerification = useRecoveryVerificationBridge({
+    apiClient,
     verifyBegin,
     setState: store.setState,
     showRetryableError,

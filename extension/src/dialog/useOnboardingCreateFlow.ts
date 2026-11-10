@@ -9,6 +9,7 @@ import type { OnboardingAttempts } from "./useOnboardingAttempts";
 import type { OnboardingFlowStore } from "./useOnboardingFlowState";
 import type { useOnboardingNavigation } from "./useOnboardingNavigation";
 import type { PromptRecoveryVerification } from "./useRecoveryVerificationBridge";
+import { STALE_SESSION_CODE } from "./verificationCodes";
 
 /** Shown on backing out of create's verification prompt: the gate blocked the lookup or the create,
  *  and the normal screen would invite a second family instead of finishing this attempt. */
@@ -38,6 +39,7 @@ export function useOnboardingCreateFlow(opts: OnboardingCreateFlowOptions) {
    *  into the family it reveals or create one, carrying the same secret. */
   const resumeCreateAfterVerification = useCallback(
     async (userId: string, verifySecret: string): Promise<RecoveryResult> => {
+      const server = apiClient.getEndpoint();
       const lookup = await lookupFamily({ apiClient, userId, verifySecret });
       if (!lookup.ok) {
         return {
@@ -45,6 +47,10 @@ export function useOnboardingCreateFlow(opts: OnboardingCreateFlowOptions) {
           errorCode: lookup.errorCode,
           retryAfter: lookup.retryAfter,
         };
+      }
+      // Both branches below carry the secret again: never to a server the client moved to meanwhile.
+      if (apiClient.getEndpoint() !== server) {
+        return { recovered: false, errorCode: STALE_SESSION_CODE };
       }
       const { existingFamilyId, memberCount } = lookup.data;
       if (existingFamilyId && memberCount > 0) {
