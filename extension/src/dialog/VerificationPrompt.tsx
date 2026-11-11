@@ -1,11 +1,11 @@
 import React from "react";
-import { Loader2 } from "lucide-react";
 import type { VerifyMethod } from "../api/types";
 import { PatternFrame, PinFrame } from "../secureFrame/frames";
 import {
   rateLimitedMessage,
   verificationLockedMessage,
 } from "./verificationMessages";
+import { SubmittingOverlay } from "./VerificationSubmittingOverlay";
 
 export interface VerificationPromptProps {
   /** null while the method is still being fetched from the backend. */
@@ -114,9 +114,12 @@ function renderChallenge({
   // A ticking (unlocked) rate-limit countdown makes any submit a sure 429, so the widget stays inert
   // until the hook resets countdownSeconds to null, which re-enables it with no extra state.
   const inputDisabled = submitting || countdownSeconds !== null;
+  // Every mount takes focus inside the frame: first show, after a lockout ends, after the view
+  // switched away and back (docs/architecture.md → 浮動按鈕與 Dialog 外殼 →「焦點」).
   if (method === "pin") {
     return renderWidgetChallenge(
       <PinFrame
+        autoFocus
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}
@@ -128,6 +131,7 @@ function renderChallenge({
   if (method === "pattern") {
     return renderWidgetChallenge(
       <PatternFrame
+        autoFocus
         mode="verify"
         onComplete={onSubmit}
         error={error || undefined}
@@ -154,37 +158,6 @@ function renderWidgetChallenge(
     <div style={{ position: "relative" }}>
       {widget}
       {submitting && <SubmittingOverlay />}
-    </div>
-  );
-}
-
-/** Centered spinner + "驗證中..." shown over the challenge widget during submit. */
-function SubmittingOverlay(): React.JSX.Element {
-  return (
-    <div
-      aria-live="polite"
-      style={{
-        position: "absolute",
-        inset: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        // Subtle white backdrop keeps the text readable over the dimmed grid.
-        backgroundColor: "rgba(255, 255, 255, 0.6)",
-        borderRadius: 8,
-        // Widget is already disabled; never intercept pointer events.
-        pointerEvents: "none",
-      }}
-    >
-      <Loader2
-        aria-hidden="true"
-        size={28}
-        className="moo-spin"
-        style={{ color: "#64748b" }}
-      />
-      <span style={{ fontSize: 14, color: "#475569" }}>驗證中...</span>
     </div>
   );
 }

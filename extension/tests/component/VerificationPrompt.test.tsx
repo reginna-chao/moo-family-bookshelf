@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { VerificationPrompt } from "@/dialog/VerificationPrompt";
 import type { VerificationPromptProps } from "@/dialog/VerificationPrompt";
@@ -24,6 +24,28 @@ function renderPrompt(overrides: Partial<VerificationPromptProps> = {}) {
   };
   render(<VerificationPrompt {...props} />);
   return props;
+}
+
+/** Renders inside `act` so the entry's focus-on-mount effect has run before the test asserts. */
+async function renderPromptWithFocus(
+  overrides: Partial<VerificationPromptProps> = {},
+) {
+  const props: VerificationPromptProps = {
+    method: "pin",
+    methodError: false,
+    error: "",
+    locked: false,
+    submitting: false,
+    onSubmit: vi.fn(),
+    onCancel: vi.fn(),
+    ...overrides,
+  };
+  let result: ReturnType<typeof render> | undefined;
+  await act(async () => {
+    result = render(<VerificationPrompt {...props} />);
+  });
+  if (!result) throw new Error("render did not run");
+  return { ...result, props };
 }
 
 /** Draw `dots` on the PatternLock, then press its 確認 — releasing alone never submits (#385). */
@@ -353,5 +375,38 @@ describe("VerificationPrompt", () => {
     expect(back).toHaveClass("moo-button--block");
     // The view-specific class is kept alongside the base (additive refactor).
     expect(back).toHaveClass("moo-onboarding-view__secondary");
+  });
+
+  // Every mount of the entry takes focus inside the frame, so keys never land on the host page.
+  describe("secret entry focus on mount", () => {
+    it("focuses the PIN field when the PIN entry is shown", async () => {
+      await renderPromptWithFocus({ method: "pin" });
+
+      expect(screen.getByLabelText("PIN 碼輸入")).toHaveFocus();
+    });
+
+    it("focuses the pattern entry when the pattern lock is shown", async () => {
+      const { container } = await renderPromptWithFocus({
+        method: "pattern",
+      });
+
+      const focusTarget = container.querySelector(".moo-secure-frame__focus");
+      expect(focusTarget).not.toBeNull();
+      expect(focusTarget).toHaveFocus();
+    });
+
+    it("focuses the PIN field again when a lockout ends", async () => {
+      const { rerender, props } = await renderPromptWithFocus({
+        method: "pin",
+        locked: true,
+      });
+      expect(screen.queryByLabelText("PIN 碼輸入")).not.toBeInTheDocument();
+
+      await act(async () => {
+        rerender(<VerificationPrompt {...props} locked={false} />);
+      });
+
+      expect(screen.getByLabelText("PIN 碼輸入")).toHaveFocus();
+    });
   });
 });

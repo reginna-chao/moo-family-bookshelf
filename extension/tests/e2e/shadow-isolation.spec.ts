@@ -44,6 +44,13 @@
  * frame's field while the probe records nothing; the retyped PIN is never submitted. Positive
  * companion: a key on a Shadow Root button still reaches the probe.
  *
+ * New-device login entry: an account with a PIN, opened with empty extension storage (local AND sync,
+ * so no family is read back) and the same Readmoo email, is asked for its PIN on 需要驗證. That entry
+ * must take focus inside its secure frame at mount, with no click: the test types through
+ * `page.keyboard` only and checks the digits land in the frame's field while the probe records
+ * nothing. Nothing is submitted, so no verification attempt is spent. Positive companion: a key on
+ * the screen's 返回 button still reaches the probe.
+ *
  * `document.getAnimations()` check: an animation inside the closed tree (a real Dialog spinner class,
  * planted via CDP) must not hand its target element to the main world.
  *
@@ -82,6 +89,8 @@ const PIN_METHOD_BUTTON = { selector: "button", text: "PIN 碼" };
 const PIN_SAVED = { selector: ".moo-verify__current", text: "PIN 碼" };
 const PIN_CONFIRM_LABEL = "再次輸入 PIN 碼確認";
 const CANCEL_BUTTON = { selector: "button", text: "取消" };
+const BACK_BUTTON = { selector: "button", text: "返回" };
+const VERIFY_HEADING = { selector: "h2", text: "需要驗證" };
 const CREATED_HEADING = { selector: "h2", text: "家庭公開書櫃已建立" };
 /** Occurs on the page only in that heading (IdleView's 建立家庭公開書櫃 lacks the 已). */
 const CREATED_HEADING_PREFIX = "家庭公開書櫃已";
@@ -99,12 +108,13 @@ const KEY_EVENT_TYPES = [
   "input",
 ];
 
-/** Points the Extension at the local Worker, loads the mock page with a unique account and opens the
- *  Dialog via the light-DOM floating button. */
+/** Points the Extension at the local Worker, loads the mock page with a unique account (or `email`,
+ *  to reopen the same account) and opens the Dialog via the light-DOM floating button. */
 async function openDialogOnMockPage(
   context: BrowserContext,
   extensionId: string,
   emailTag: string,
+  email?: string,
 ): Promise<Page> {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/background.js`);
@@ -114,12 +124,15 @@ async function openDialogOnMockPage(
   );
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);
-  await page.evaluate((email) => {
-    const emailDiv = document
-      .getElementById("me-view")
-      ?.querySelector('div[style*="14px"]');
-    if (emailDiv) emailDiv.textContent = email;
-  }, `test-${emailTag}-${Date.now()}@readmoo.com`);
+  await page.evaluate(
+    (shown) => {
+      const emailDiv = document
+        .getElementById("me-view")
+        ?.querySelector('div[style*="14px"]');
+      if (emailDiv) emailDiv.textContent = shown;
+    },
+    email ?? `test-${emailTag}-${Date.now()}@readmoo.com`,
+  );
   await (await waitForButton(page)).click();
   await page.waitForFunction((id) => !!document.getElementById(id), HOST_ID);
   return page;
@@ -663,6 +676,96 @@ test.describe("Dialog shadow root isolation (real closed dist/)", () => {
       expect(await takeKeyEvents(page)).toEqual([]);
 
       await pressKeyOnShadowButton(page, driver!, CANCEL_BUTTON);
+      expect(await takeKeyEvents(page)).toEqual(
+        expect.arrayContaining(SHADOW_KEY_EVENTS),
+      );
+      await removeKeyProbe(page);
+    });
+
+    await page.close();
+  });
+
+  test("the PIN entry of a new-device login takes focus inside its secure frame without a click", async ({
+    context,
+    extensionId,
+  }) => {
+    test.setTimeout(120_000);
+    const accountPin = "246813";
+    const email = `test-relogin-${Date.now()}@readmoo.com`;
+    const first = await openDialogOnMockPage(
+      context,
+      extensionId,
+      "relogin",
+      email,
+    );
+    driver = await createClosedShadowDriver(first, HOST_ID);
+    await reachIdleView(driver);
+    await createFamily(first, driver);
+    await openSettings(driver);
+
+    await test.step("set a PIN on the account", async () => {
+      await driver!.waitFor(PIN_METHOD_BUTTON, 15_000);
+      await driver!.click(PIN_METHOD_BUTTON);
+      const frame = await secureFrameWith(first, PIN_INPUT);
+      const field = frame.locator(PIN_INPUT);
+      await field.pressSequentially(accountPin);
+      await field.press("Enter");
+      await expect(frame.getByText(PIN_CONFIRM_LABEL)).toBeVisible();
+      await expect(field).toHaveValue("");
+      await field.pressSequentially(accountPin);
+      await field.press("Enter");
+      await driver!.waitFor(PIN_SAVED, 15_000);
+    });
+
+    await test.step("a new device: empty extension storage, same Readmoo account", async () => {
+      await driver!.dispose();
+      driver = null;
+      await first.close();
+      // Sync too: with no local userId the familyId is read back from sync, skipping Onboarding.
+      const bg = await context.newPage();
+      await bg.goto(`chrome-extension://${extensionId}/background.js`);
+      await bg.evaluate(async () => {
+        await chrome.storage.local.clear();
+        try {
+          await chrome.storage.sync.clear();
+        } catch {
+          // sync may not be available
+        }
+      });
+      await bg.close();
+    });
+
+    const page = await openDialogOnMockPage(
+      context,
+      extensionId,
+      "relogin",
+      email,
+    );
+    driver = await createClosedShadowDriver(page, HOST_ID);
+    await driver.waitFor(START_BUTTON, 30_000);
+    await driver.click(START_BUTTON);
+    await driver.waitFor(VERIFY_HEADING, 30_000);
+
+    const frame = await secureFrameWith(page, PIN_INPUT);
+    await expect
+      .poll(() =>
+        frame.evaluate(
+          (sel) =>
+            document.hasFocus() &&
+            document.activeElement?.matches(sel) === true,
+          PIN_INPUT,
+        ),
+      )
+      .toBe(true);
+
+    await test.step("digits typed without a click land in the frame, not on the page", async () => {
+      await installKeyProbe(page);
+      // No Enter: nothing is submitted, so no verification attempt is spent.
+      await page.keyboard.type("135");
+      await expect(frame.locator(PIN_INPUT)).toHaveValue("135");
+      expect(await takeKeyEvents(page)).toEqual([]);
+
+      await pressKeyOnShadowButton(page, driver!, BACK_BUTTON);
       expect(await takeKeyEvents(page)).toEqual(
         expect.arrayContaining(SHADOW_KEY_EVENTS),
       );
