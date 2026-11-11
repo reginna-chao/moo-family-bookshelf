@@ -17,9 +17,9 @@ import {
  *   `VERIFY_SERVER_CHANGED_MESSAGE`, and the method is read again from the
  *   client's current server. A read whose server changed before it landed is
  *   dropped and repeated.
- * - The client's server changes WHILE a save is in flight: no save is sent to
- *   the new server, the hook shows the same message and reads the method once
- *   from the client's current server.
+ * - The client's server changes WHILE a save is in flight: the save's reply
+ *   issues no request to the new server, the hook shows the same message, and
+ *   the next step reads the method once from the client's current server.
  * - A save's reply (or the re-read its refusal triggers) is applied only while
  *   the method's source is unchanged since the save was sent: another read that
  *   began or landed meanwhile makes the reply stale even when the client points
@@ -133,7 +133,7 @@ describe("useVerifyMethodFlow", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends no save to the new server when the endpoint moves during the save", async () => {
+  it("sends nothing to the new server until the next step when the endpoint moves during the save", async () => {
     methods.set(SERVER_B, "pattern");
     const { apiClient, result } = await mountOnServerA();
     expect(result.current.currentMethod).toBe("none");
@@ -151,14 +151,11 @@ describe("useVerifyMethodFlow", () => {
     await act(async () => {
       await pending;
     });
-    await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(requestsTo(SERVER_B, PUT_VERIFY)).toEqual([]);
-    expect(requestsTo(SERVER_B, GET_VERIFY)).toHaveLength(1);
+    expect(received.filter((r) => r.server === SERVER_B)).toEqual([]);
     expect(received.map(({ server, route }) => ({ server, route }))).toEqual([
       { server: SERVER_A, route: GET_VERIFY },
       { server: SERVER_A, route: PUT_VERIFY },
-      { server: SERVER_B, route: GET_VERIFY },
     ]);
     // Pins that request bodies are recorded, for the body checks below.
     expect(JSON.parse(requestsTo(SERVER_A, PUT_VERIFY)[0].body ?? "")).toEqual({
@@ -166,6 +163,16 @@ describe("useVerifyMethodFlow", () => {
     });
     expect(result.current.saveError).toBe(VERIFY_SERVER_CHANGED_MESSAGE);
     expect(result.current.saveState).toBe("error");
+    expect(result.current.loading).toBe(false);
+    expect(result.current.currentMethod).toBe("none");
+
+    // Positive companion: the fixture records B's requests, and the next step reads from B.
+    act(() => {
+      result.current.handleMethodSelect("code");
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(requestsTo(SERVER_B, GET_VERIFY)).toHaveLength(1);
+    expect(requestsTo(SERVER_B, PUT_VERIFY)).toEqual([]);
     expect(result.current.currentMethod).toBe("pattern");
   });
 
