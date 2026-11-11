@@ -813,7 +813,7 @@ Extension 的行為：
   - 判斷本身是純函式，在 `extension/src/dialog/pendingEndpointSwitch.ts`。
   - 新的詢問會清掉過時的錯誤提示，但只在真的有新詢問時：失敗的確認會把目標記為已拒絕，這會以「沒有要問的」重新跑一次判斷，若無條件清除，提示會在使用者看到之前就被抹掉。
   - 同步碼、邀請與 QR Code 一律用**這台裝置實際採用**的端點產生（`FamilySettings.tsx`），不用家庭記錄的值：拒絕切換的成員不能再把他拒絕的端點散布出去（或掃進第二台裝置）。`apiClient.setEndpoint()` 改動 client 不會觸發 React 重新 render，所以採用中的端點以 state 呈現：初始值取自 client（啟動時已套用存好的端點），只在確認成功時更新，而且鏡射 client **實際**的值（含正規化）而不是要求的值，storage 寫入失敗、或寫入後發現這台裝置已不綁定這個家庭時，退回切換前的值；確認後不必重開，同步碼就反映切換結果。
-- Extension 的這些寫入集中在 `extension/src/storage/familyEndpointChoice.ts`（確認切換、拒絕、重設三種，確認切換是 `persistConfirmedFamilyEndpoint`：內部呼叫 `persistSwitchedFamilyEndpoint`，再比對綁定；同步碼加入與開機讀取仍直接用 `persistSwitchedFamilyEndpoint`），全部直接存取 `storage.local`，不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息）。拆除時要移除的 key 清單（`FAMILY_ENDPOINT_CHOICE_KEYS`）也定義在這裡，`clearStoredFamilyBinding` 與 `clearFamilyStorage` 把它併進自己的那次 `storage.local.remove`（#492）；`resetFamilyEndpointChoice` 只剩 `useReauth.ts` 的 catch 路徑使用。開啟 Dialog 時由 `extension/src/dialog/applyStoredSession.ts` 用同一次讀取取得端點與 token，也是直接讀，否則同樣的失敗模式會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/persistJoinCredentials.ts` 的 `persistJoinCredentials` 相同。
+- Extension 的這些寫入集中在 `extension/src/storage/familyEndpointChoice.ts`（確認切換、拒絕、重設三種，確認切換是 `persistConfirmedFamilyEndpoint`：內部呼叫 `persistSwitchedFamilyEndpoint`，再比對綁定；同步碼加入與開機讀取仍直接用 `persistSwitchedFamilyEndpoint`），全部直接存取 `storage.local`，不經背景訊息（Firefox 休眠中的事件頁可能遺失訊息）。拆除時要移除的 key 清單（`FAMILY_ENDPOINT_CHOICE_KEYS`）也定義在這裡，`clearStoredFamilyBinding` 與 `clearFamilyStorage` 把它併進自己的那次 `storage.local.remove`（#492）；`resetFamilyEndpointChoice` 只剩 `useReauth.ts` 的 catch 路徑使用。已加入家庭時，開啟 Dialog 由 `extension/src/dialog/applyStoredSession.ts` 用同一次讀取取得端點與 token，也是直接讀，否則同樣的失敗模式會讓 Dialog 沒有任何提示就以預設端點啟動。直接存取的理由與 `extension/src/dialog/persistJoinCredentials.ts` 的 `persistJoinCredentials` 相同。
 
 PWA **不會**自動套用家庭記錄的端點，也沒有這個確認面板——PWA 只認同步碼帶進來的端點。這是刻意的：少一條可被管理者操控的通道，攻擊面就小一分。
 
@@ -1363,7 +1363,7 @@ interface PublicShelfSnapshot {
 - **引導畫面的兩則提示**（`extension/src/dialog/Onboarding.tsx`）：每次 render 只算一次判定，容器提示與驗證挑戰自己的提示共用，兩者不可能揭露不同的伺服器。刻意不以 `apiClient` 做 memo：加入時會就地採用同步碼的 `@host`，端點變了、client 的身分沒變，而過時的揭露正是這則提示要防的失敗。
   - 容器提示：自架者的建立／加入／復原動作都打向採用的端點，所以在任何動作之前先說是哪台伺服器。官方預設時 `classifyAdoptedEndpoint` 回 `none`、提示不顯示（第二條不變量），這份安靜是刻意的，不是漏掉的情況。驗證挑戰畫面不顯示容器提示，因為它自己以 `verify` 引導語顯示同一則提示。
   - 驗證挑戰取代加入畫面，連帶取代它的位址揭露——偏偏是在使用者被要求把 PIN／圖形交給伺服器的時候。此時同步碼加入已經把 `@host` 套用到 client（`performJoin` 讓它維持套用，挑戰才會打向那台伺服器），建立／查詢的挑戰則仍在官方預設端點，所以採用的端點對兩者都是正確答案。
-- **重複時隱藏容器提示**（`onboardingNoteRules.ts` 的 `isAdoptedNoteRedundant`，由 `Onboarding.tsx` 呼叫）：畫面上的 view 已經顯示同一個位址時，容器提示只是重複——同一畫面兩行琥珀色文字說同一件事，正是教會使用者略過整類提示的原因；同步碼殘留的預填路徑（`useOnboardingFlowState.ts`）一定會發生，預填同步碼的 `@host` 就是採用的端點。只有兩個 view 會顯示輸入中同步碼自己的提示：`RecoveryJoinView` 與 `IdleView`（`renderContent` 最後的 fallback 分支）。`DEDICATED_VIEW_STATES` 列的是有自己 view 的狀態，刻意寫成補集而不是 fallback 狀態的清單，日後新增卻沒加分支的狀態也會落到 `IdleView`；它必須與 `renderContent` 保持一致。
+- **重複時隱藏容器提示**（`onboardingNoteRules.ts` 的 `isAdoptedNoteRedundant`，由 `Onboarding.tsx` 呼叫）：畫面上的 view 已經顯示同一個位址時，容器提示只是重複——同一畫面兩行琥珀色文字說同一件事，正是教會使用者略過整類提示的原因；同步碼殘留的預填路徑（`useOnboardingFlowState.ts`）不會造成重複：引導畫面掛載時 client 在官方預設（#501），預填的同步碼不帶 `@host`。只有兩個 view 會顯示輸入中同步碼自己的提示：`RecoveryJoinView` 與 `IdleView`（`renderContent` 最後的 fallback 分支）。`DEDICATED_VIEW_STATES` 列的是有自己 view 的狀態，刻意寫成補集而不是 fallback 狀態的清單，日後新增卻沒加分支的狀態也會落到 `IdleView`；它必須與 `renderContent` 保持一致。
   - 只在兩個**都已驗證**的正規化端點逐字相同時隱藏（`kind: "valid"` 代表兩邊的字串都出自 `validateEndpointUrl`）。這是輸入文字唯一不能替任何東西背書的方向：它只能隱藏一則內容與它完全相同的提示，不能改變提示內容，也不能讓提示出現，所以第一條不變量不受影響。`invalid` 或沒有 `@host` 時從不隱藏——偽造警告與狀態提示回答的是不同問題，必須並存；兩個不同的位址也一樣。
   - 沒有空窗：`displayedSyncCodeApiHost`（`shared/src/api/syncCodeHost.ts`）只延後 `invalid` 的判定，所以 view 對 `valid` 位址的提示與隱藏容器提示發生在同一次 commit。這點不可或缺：若共用的顯示政策日後連 `valid` 也延後，等待期間會一則提示都沒有（雖然只限同一個位址，仍是缺口）。
 
@@ -1401,7 +1401,7 @@ token 在伺服器端失效、背景自動復原又被 PWA 登入驗證擋下時
 `extension/src/api/auth-refresh.ts` 與 `extension/src/api/transport.ts` 的 401 路徑。冷卻與「自己的離開請求進行中」兩道防護的共通規則見〈背景自動復原的防護〉（PWA 的對應實作）。
 
 - **token 只送給發行它的伺服器**（#456，`extension/src/api/tokenBinding.ts`）：記憶體裡的 token 記著發行它的伺服器（`TokenSession`）。storage 不另存配對：`moo:apiEndpoint`（沒有就是官方預設）就是 `moo:authToken` 的發行伺服器（`resolveStoredEndpoint`；值不是字串、空白或驗不過時回 `null`，不符合任何伺服器；官方預設的 URL 與 key 不存在等價）。比對發生在：
-  - **開機**（`extension/src/dialog/applyStoredSession.ts`）：端點與 token 來自同一次讀取；端點不可用就兩個都不設，並從 storage 移除（token 先），client 留在官方預設且沒有 token。下一次 401 走復原加入，官方回 `FAMILY_NOT_FOUND`，回到引導畫面。
+  - **開機**（`extension/src/dialog/applyStoredSession.ts`）：只在這台裝置已加入家庭（familyId 與 userId 都存在）時執行（#501）。沒有家庭時端點與 token 都不套用、storage 也不動，引導畫面從官方預設開始，建立或加入的請求不會送到前一個家庭的伺服器。殘留的端點會在下一次建立或加入成功、拿到 token 時由 `persistJoinCredentials` 覆寫；開機時不移除，因為移除可能與另一個分頁進行中的加入互相競爭（它在同一次 `set` 寫入 token 與端點，移除可能留下沒有端點 key 的 token）。端點與 token 來自同一次讀取；端點不可用就兩個都不設，並從 storage 移除（token 先），client 留在官方預設且沒有 token。下一次 401 走復原加入，官方回 `FAMILY_NOT_FOUND`，回到引導畫面。
   - **送出**（`ApiTransport.doRequest`）：只有請求的伺服器就是發行者才加 `Authorization`。切端點後記憶體的舊 token 不會隨加入請求送出。
   - **401**：請求送出後 client 已換伺服器，就直接回傳這個 401，不續期、不重送，新 token 不會被重送到舊伺服器。伺服器沒換，但這個 client 的 token 在續期途中被換掉（例如變更 PIN）而使續期結果被丟棄時，會用新 token 重送一次。
   - **續期前**（`doRefreshToken`）：storage 的端點與 client 不符時什麼都不做：不送請求、不動 storage、不呼叫 callback。另一分頁換了伺服器時，這個分頁只會看到錯誤，重開 Dialog 就恢復。

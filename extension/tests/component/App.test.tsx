@@ -607,6 +607,30 @@ describe("App", () => {
     restore();
   });
 
+  it("keeps onboarding on the official default, without the token, when a stored endpoint outlived the family", async () => {
+    const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
+    const { instances, restore } = await captureApiClients();
+    setupChromeMessages({
+      familyId: null,
+      userId: "user-1",
+      authToken: "tok",
+      apiEndpoint: "https://custom.workers.dev",
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+    });
+
+    // With a family bound this endpoint IS adopted (the "accepted API endpoint" boot test); with
+    // none it would carry the next create / join to the former family's server (#501).
+    expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+    expect(setAuthToken).not.toHaveBeenCalled();
+
+    setAuthToken.mockRestore();
+    restore();
+  });
+
   it("boots on the default endpoint when the stored endpoint is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { instances, restore } = await captureApiClients();

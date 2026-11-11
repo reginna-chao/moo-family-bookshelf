@@ -6,8 +6,13 @@ import { persistSwitchedFamilyEndpoint } from "../storage/familyEndpointChoice";
 /**
  * Put the stored endpoint and its token on the client, or neither when the
  * endpoint is unusable (hand-edited storage, or written by an older build with
- * looser rules). Used by App's boot read; `stored` is one storage read, so the
- * token and the endpoint it is paired with cannot disagree.
+ * looser rules). `stored` is one storage read, so the token and the endpoint it
+ * is paired with cannot disagree.
+ *
+ * App's boot read calls it only when a family is bound (familyId and userId both
+ * stored). With no family the client stays on the official default with no token
+ * and storage is left alone, so a leftover endpoint cannot carry the next
+ * create / join to a former family's server (#501).
  *
  * An unusable endpoint must not derail the boot read into its catch, which would
  * drop a member with a family into onboarding. The pair is removed instead (token

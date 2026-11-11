@@ -110,8 +110,8 @@ export function App({
       return;
     }
 
-    // familyId, userId and endpoint come from DIRECT storage reads: background
-    // messages are unreliable in Firefox (its event page sleeps).
+    // Read storage directly: Firefox's event page sleeps. The stored endpoint
+    // and token apply only with a family bound, never to onboarding (#501).
     let cancelled = false;
     const identityCheck = new AbortController();
     void (async () => {
@@ -126,8 +126,8 @@ export function App({
         ]);
         if (cancelled || bootSupersededRef.current) return;
 
-        applyStoredSession(apiClientRef.current, storageResult);
         if (familyId && storageResult[USER_ID_KEY]) {
+          applyStoredSession(apiClientRef.current, storageResult);
           // Stays "loading" until the page's Readmoo account is checked (#271).
           const storedUserId = storageResult[USER_ID_KEY] as string;
           const identity = await checkAccountIdentity(
