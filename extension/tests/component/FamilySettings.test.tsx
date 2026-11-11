@@ -104,7 +104,10 @@ import {
  * record's advertised value: it is what the member hands to the next person (and re-scans onto their
  * own phone), and building it from the record would make a member who DECLINED a switch still
  * distribute the refused endpoint — the invitee lands on the untrusted host while the decliner never
- * does, so the refusal would protect only the person who made it.
+ * does, so the refusal would protect only the person who made it. A confirm first reads the stored
+ * familyId (#498): the block's storage mock returns the family the screen is rendered with, so the
+ * switch goes through, and each 確認切換 click settles inside `act`; a stored familyId naming another
+ * family refuses the confirm with the binding-gone notice and moves nothing.
  *
  * Invite-URL copy button: the square icon button beside 「邀請成員加入家庭」 copies ONLY
  * `buildInviteUrl(syncCode)` and, for 2 s, renames itself 「已複製邀請網址」. Its name 「複製邀請網址」 is a
@@ -2199,6 +2202,20 @@ describe("FamilySettings", () => {
       return screen.getByTestId("sync-code").textContent ?? "";
     }
 
+    /** Storage binding the family the screen is rendered for (`renderFamilySettings`' default). */
+    const BOUND_FAMILY = { [FAMILY_ID_KEY]: "fam-123" };
+
+    beforeEach(() => {
+      mockStorageGet(BOUND_FAMILY);
+    });
+
+    /** Press 確認切換 and settle the confirm, which reads the stored binding before it switches. */
+    async function clickConfirm(panel: HTMLElement): Promise<void> {
+      await act(async () => {
+        fireEvent.click(within(panel).getByText("確認切換"));
+      });
+    }
+
     it("asks before adopting the endpoint the family record advertises", async () => {
       await renderSettledEndpoints({
         current: CURRENT_ENDPOINT,
@@ -2300,7 +2317,7 @@ describe("FamilySettings", () => {
       });
 
       const panel = getEndpointSwitchPanel();
-      fireEvent.click(within(panel).getByText("確認切換"));
+      await clickConfirm(panel);
 
       expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
@@ -2347,6 +2364,7 @@ describe("FamilySettings", () => {
 
     it("does not ask again for an endpoint the user already declined", async () => {
       mockStorageGet({
+        ...BOUND_FAMILY,
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: FAMILY_ENDPOINT },
       });
 
@@ -2360,6 +2378,7 @@ describe("FamilySettings", () => {
 
     it("asks again once the family record moves to a different endpoint", async () => {
       mockStorageGet({
+        ...BOUND_FAMILY,
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: "https://declined.example" },
       });
 
@@ -2382,7 +2401,7 @@ describe("FamilySettings", () => {
         family: FAMILY_ENDPOINT,
       });
 
-      fireEvent.click(within(getEndpointSwitchPanel()).getByText("確認切換"));
+      await clickConfirm(getEndpointSwitchPanel());
 
       expect(apiClient.setAuthToken).toHaveBeenCalledWith(null);
       const notice = await screen.findByTestId("endpoint-switch-save-error");
@@ -2409,7 +2428,7 @@ describe("FamilySettings", () => {
       });
 
       const panel = getEndpointSwitchPanel();
-      fireEvent.click(within(panel).getByText("確認切換"));
+      await clickConfirm(panel);
 
       expect(apiClient.setEndpoint).toHaveBeenCalledWith(FAMILY_ENDPOINT);
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
@@ -2450,7 +2469,7 @@ describe("FamilySettings", () => {
       });
 
       const panel = getEndpointSwitchPanel();
-      fireEvent.click(within(panel).getByText("確認切換"));
+      await clickConfirm(panel);
 
       const notice = await screen.findByTestId("endpoint-switch-error");
       fireEvent.click(within(notice).getByText("知道了"));
@@ -2465,6 +2484,42 @@ describe("FamilySettings", () => {
       expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
 
       warn.mockRestore();
+    });
+
+    // Another tab left this family and joined another (#498). See the file header, "Endpoint switch".
+    it("refuses the confirm and says so once storage binds another family", async () => {
+      mockStorageGet({ [FAMILY_ID_KEY]: "fam-999" });
+      const apiClient = await renderSettledEndpoints({
+        current: CURRENT_ENDPOINT,
+        family: FAMILY_ENDPOINT,
+      });
+
+      await clickConfirm(getEndpointSwitchPanel());
+
+      const notice = screen.getByTestId("endpoint-switch-binding-gone");
+      expect(notice).toHaveAttribute("role", "alert");
+      expect(
+        within(notice).getByText(
+          "這個視窗的資料已過期，沒有切換伺服器。請關閉書櫃後重新開啟。",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      expect(apiClient.setEndpoint).not.toHaveBeenCalled();
+      expect(apiClient.setAuthToken).not.toHaveBeenCalled();
+      for (const key of [API_ENDPOINT_KEY, DECLINED_FAMILY_ENDPOINT_KEY]) {
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(
+          expect.objectContaining({ [key]: expect.anything() }),
+        );
+      }
+      expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+      expect(readSyncCode()).toBe(`moo-fam-123@${CURRENT_ENDPOINT}`);
+
+      fireEvent.click(within(notice).getByText("知道了"));
+
+      expect(
+        screen.queryByTestId("endpoint-switch-binding-gone"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
     });
 
     /** The sync code's `@host` follows the endpoint this device ADOPTED, never the record's — else a
@@ -2534,7 +2589,7 @@ describe("FamilySettings", () => {
           "moo-fam-123",
         );
 
-        fireEvent.click(within(panel).getByText("確認切換"));
+        await clickConfirm(panel);
 
         // Same mount: `apiClient.setEndpoint` alone would not re-render, so the
         // code would otherwise stay stale until the dialog was reopened.
@@ -2556,7 +2611,7 @@ describe("FamilySettings", () => {
           `moo-fam-123@${CURRENT_ENDPOINT}`,
         );
 
-        fireEvent.click(within(panel).getByText("確認切換"));
+        await clickConfirm(panel);
 
         await waitFor(() => {
           expect(screen.getByTestId("sync-code").textContent).toBe(
@@ -2576,7 +2631,7 @@ describe("FamilySettings", () => {
         });
 
         const panel = getEndpointSwitchPanel();
-        fireEvent.click(within(panel).getByText("確認切換"));
+        await clickConfirm(panel);
 
         await screen.findByTestId("endpoint-switch-error");
         // Nothing switched, so nothing about the shared code may change.

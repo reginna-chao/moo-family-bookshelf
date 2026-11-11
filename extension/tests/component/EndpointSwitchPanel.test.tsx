@@ -27,6 +27,12 @@ import { DEFAULT_API_ENDPOINT } from "@/constants";
  * `https://family.example@evil.com` under 「將切換至」 dresses a spoofed address up as a legitimate
  * destination on the exact screen where the user decides whether to trust it — the panel is the last
  * thing standing between the owner's chosen string and the member's eyes.
+ *
+ * Binding-gone notice (#498): a confirm refused because storage no longer binds the family this
+ * screen shows (another tab left it, or the store could not be read) — or found gone after the
+ * write — must be told, or the closing panel reads as "switched". The notices win over the question
+ * in a fixed order: confirmError, then bindingGone, then saveFailed. The copy is pinned verbatim
+ * here, at the production render site.
  */
 
 const CURRENT_ENDPOINT = "https://current.example";
@@ -344,6 +350,79 @@ describe("EndpointSwitchPanel", () => {
         screen.queryByTestId("endpoint-switch-save-error"),
       ).not.toBeInTheDocument();
       expect(screen.getByTestId("endpoint-switch")).toBeInTheDocument();
+    });
+  });
+
+  /** The confirm was refused because storage no longer binds this family (#498). See the file
+   *  header, "Binding-gone notice". */
+  describe("bindingGone notice", () => {
+    const BINDING_GONE_TEXT =
+      "這個視窗的資料已過期，沒有切換伺服器。請關閉書櫃後重新開啟。";
+
+    it("states the refusal and announces it", () => {
+      renderPanel({ bindingGone: true });
+
+      const notice = screen.getByTestId("endpoint-switch-binding-gone");
+      expect(notice).toHaveAttribute("role", "alert");
+      expect(notice.textContent).toBe(`${BINDING_GONE_TEXT}知道了`);
+      expect(screen.getByText(BINDING_GONE_TEXT)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-save-error"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("fires only onDismissConfirmError for 知道了", () => {
+      const { onConfirm, onDecline, onDismissConfirmError } = renderPanel({
+        bindingGone: true,
+      });
+
+      fireEvent.click(screen.getByText("知道了"));
+
+      expect(onDismissConfirmError).toHaveBeenCalledTimes(1);
+      expect(onConfirm).not.toHaveBeenCalled();
+      expect(onDecline).not.toHaveBeenCalled();
+    });
+
+    it("yields to confirmError when both are set", () => {
+      renderPanel({ confirmError: true, bindingGone: true });
+
+      expect(screen.getByTestId("endpoint-switch-error")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-binding-gone"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("takes precedence over saveFailed", () => {
+      renderPanel({ bindingGone: true, saveFailed: true });
+
+      expect(
+        screen.getByTestId("endpoint-switch-binding-gone"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("endpoint-switch-save-error"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("takes precedence over a still-pending question", () => {
+      renderPanel({ pending: customSwitch, bindingGone: true });
+
+      expect(
+        screen.getByTestId("endpoint-switch-binding-gone"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("endpoint-switch")).not.toBeInTheDocument();
+      expect(screen.queryByText("確認切換")).not.toBeInTheDocument();
+      expect(screen.queryByText("暫不切換")).not.toBeInTheDocument();
+    });
+
+    it("stays away when the prop is left out", () => {
+      renderPanel({ saveFailed: true });
+
+      expect(
+        screen.queryByTestId("endpoint-switch-binding-gone"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("endpoint-switch-save-error"),
+      ).toBeInTheDocument();
     });
   });
 });

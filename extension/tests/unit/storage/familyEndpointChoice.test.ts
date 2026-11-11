@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import {
+  FAMILY_ENDPOINT_CHOICE_KEYS,
   persistAcceptedFamilyEndpoint,
+  persistConfirmedFamilyEndpoint,
   persistSwitchedFamilyEndpoint,
   readDeclinedFamilyEndpoint,
   resetFamilyEndpointChoice,
   saveDeclinedFamilyEndpoint,
+  storedFamilyIdIs,
 } from "@/storage/familyEndpointChoice";
 import {
   API_ENDPOINT_KEY,
   AUTH_TOKEN_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
+  FAMILY_ID_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   TOKEN_EXPIRES_AT_KEY,
 } from "@/constants";
@@ -39,6 +43,21 @@ import {
  * stay real. A failing last removal rejects with the endpoint already stored. The
  * interleaving with another tab's write-back lands inside the endpoint write, between
  * the two removals.
+ *
+ * storedFamilyIdIs (#498): the check a confirmed switch runs BEFORE it writes anything. Only an
+ * exact match with the screen's familyId passes; another family, no family, a non-string value and
+ * an unreadable store all read as `false`, so the caller refuses with nothing written.
+ *
+ * persistConfirmedFamilyEndpoint (#498): runs persistSwitchedFamilyEndpoint, then re-reads the
+ * familyId, endpoint and token with a read that REJECTS on failure (a failed read must never look
+ * like a lost binding and trigger a removal). The family still bound → `"switched"`, nothing more
+ * written. Otherwise `"bindingGone"`, and only storage that still holds this write's endpoint with
+ * no token is undone — endpoint, declined marker and token keys in ONE removal, so a self-hosted
+ * token is never left without its endpoint. A token present means another tab wrote its own set
+ * after this write's last token removal (its endpoint may even equal this target), and a `null`
+ * target left no endpoint to undo: then nothing is written. The other tab's write is landed by
+ * `landBeforeReRead` through the store's own writers, so it is not recorded as a production call;
+ * that is "after this write completed, before the re-read".
  *
  * resetFamilyEndpointChoice: drops this device's endpoint state entirely. Only
  * `dialog/useReauth.ts`'s catch path uses it, after `clearFamilyStorage` rejects;
@@ -381,6 +400,342 @@ describe("familyEndpointChoice storage", () => {
       } finally {
         realRemove.mockImplementation(storeRemove);
       }
+    });
+  });
+
+  // See the header → "storedFamilyIdIs".
+  describe("storedFamilyIdIs", () => {
+    const CASES: Array<{
+      name: string;
+      stored: Record<string, unknown>;
+      expected: boolean;
+    }> = [
+      {
+        name: "the same family",
+        stored: { [FAMILY_ID_KEY]: "fam-1" },
+        expected: true,
+      },
+      {
+        name: "another family",
+        stored: { [FAMILY_ID_KEY]: "fam-2" },
+        expected: false,
+      },
+      { name: "no family", stored: {}, expected: false },
+      {
+        name: "a non-string value",
+        stored: { [FAMILY_ID_KEY]: 1 },
+        expected: false,
+      },
+    ];
+
+    it.each(CASES)(
+      "returns $expected, writing nothing, when storage binds $name",
+      async ({ stored, expected }) => {
+        await browser.storage.local.set(stored);
+        vi.clearAllMocks();
+
+        await expect(storedFamilyIdIs("fam-1")).resolves.toBe(expected);
+
+        expect(browser.storage.local.get).toHaveBeenCalledWith([FAMILY_ID_KEY]);
+        expect(browser.storage.local.set).not.toHaveBeenCalled();
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+      },
+    );
+
+    it("returns false when the storage read fails", async () => {
+      await browser.storage.local.set({ [FAMILY_ID_KEY]: "fam-1" });
+      vi.mocked(browser.storage.local.get).mockRejectedValueOnce(
+        new Error("Extension context invalidated"),
+      );
+
+      await expect(storedFamilyIdIs("fam-1")).resolves.toBe(false);
+    });
+  });
+
+  // See the header → "persistConfirmedFamilyEndpoint".
+  describe("persistConfirmedFamilyEndpoint", () => {
+    const FAMILY_ID = "fam-1";
+    const OTHER_FAMILY = "fam-2";
+    const OLD_ENDPOINT = "https://old.example";
+    const OTHER_ENDPOINT = "https://other-family.example";
+    const OLD_TOKEN = "a".repeat(64);
+    const OTHER_TOKEN = "b".repeat(64);
+    const RE_READ_KEYS = [FAMILY_ID_KEY, API_ENDPOINT_KEY, AUTH_TOKEN_KEY];
+    const RE_READ = `get:${RE_READ_KEYS.join(",")}`;
+    const UNDO = `remove:${[
+      ...FAMILY_ENDPOINT_CHOICE_KEYS,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+    ].join(",")}`;
+    const INSPECTED_KEYS = [
+      FAMILY_ID_KEY,
+      API_ENDPOINT_KEY,
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+      DECLINED_FAMILY_ENDPOINT_KEY,
+    ];
+    /** The shared store's own reader / writers: what another tab's write goes through, unrecorded. */
+    const storeGet = vi
+      .mocked(browser.storage.local.get)
+      .getMockImplementation()!;
+    const storeSet = vi
+      .mocked(browser.storage.local.set)
+      .getMockImplementation()!;
+    const storeRemove = vi
+      .mocked(browser.storage.local.remove)
+      .getMockImplementation()!;
+
+    afterEach(() => {
+      vi.mocked(browser.storage.local.get).mockImplementation(storeGet);
+      vi.mocked(browser.storage.local.remove).mockImplementation(storeRemove);
+    });
+
+    async function seedBoundSession(): Promise<void> {
+      await browser.storage.local.set({
+        [FAMILY_ID_KEY]: FAMILY_ID,
+        [API_ENDPOINT_KEY]: OLD_ENDPOINT,
+        [AUTH_TOKEN_KEY]: OLD_TOKEN,
+        [TOKEN_EXPIRES_AT_KEY]: 123,
+        [DECLINED_FAMILY_ENDPOINT_KEY]: { value: CUSTOM_ENDPOINT },
+      });
+      vi.clearAllMocks();
+    }
+
+    function isReRead(keys: unknown): boolean {
+      return (
+        Array.isArray(keys) &&
+        keys.length === RE_READ_KEYS.length &&
+        RE_READ_KEYS.every((key) => keys.includes(key))
+      );
+    }
+
+    /** Lands `write` on the real store just before the re-read after the switch write. */
+    function landBeforeReRead(write: () => Promise<unknown>): void {
+      vi.mocked(browser.storage.local.get).mockImplementation(async (keys) => {
+        if (isReRead(keys)) await write();
+        return storeGet(keys);
+      });
+    }
+
+    /** Every storage call in call order, as `get:` / `set:` / `remove:<keys>`. */
+    function storageOps(): string[] {
+      const named = (name: string, spy: unknown) => {
+        const mock = vi.mocked(spy as (arg: unknown) => unknown).mock;
+        return mock.calls.map((call, index) => {
+          const arg = call[0];
+          const keys = Array.isArray(arg)
+            ? (arg as string[])
+            : Object.keys(arg as object);
+          return {
+            order: mock.invocationCallOrder[index],
+            label: `${name}:${keys.join(",")}`,
+          };
+        });
+      };
+      return [
+        ...named("get", browser.storage.local.get),
+        ...named("set", browser.storage.local.set),
+        ...named("remove", browser.storage.local.remove),
+      ]
+        .sort((a, b) => a.order - b.order)
+        .map(({ label }) => label);
+    }
+
+    function opsFromReRead(): string[] {
+      const ops = storageOps();
+      return ops.slice(ops.indexOf(RE_READ));
+    }
+
+    async function inspect(): Promise<Record<string, unknown>> {
+      return (await storeGet(INSPECTED_KEYS)) as Record<string, unknown>;
+    }
+
+    it("resolves switched, writing nothing after the re-read, while storage still binds the family", async () => {
+      await seedBoundSession();
+
+      await expect(
+        persistConfirmedFamilyEndpoint(CUSTOM_ENDPOINT, FAMILY_ID),
+      ).resolves.toBe("switched");
+
+      expect(storageOps()).toEqual([
+        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY},${RECOVERY_COOLDOWN_UNTIL_KEY}`,
+        `set:${API_ENDPOINT_KEY}`,
+        `remove:${DECLINED_FAMILY_ENDPOINT_KEY}`,
+        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY}`,
+        RE_READ,
+      ]);
+      await expect(inspect()).resolves.toEqual({
+        [FAMILY_ID_KEY]: FAMILY_ID,
+        [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+      });
+    });
+
+    it("resolves switched on a revert to the official default", async () => {
+      await seedBoundSession();
+
+      await expect(
+        persistConfirmedFamilyEndpoint(null, FAMILY_ID),
+      ).resolves.toBe("switched");
+
+      expect(opsFromReRead()).toEqual([RE_READ]);
+      await expect(inspect()).resolves.toEqual({ [FAMILY_ID_KEY]: FAMILY_ID });
+    });
+
+    // See the header → "persistConfirmedFamilyEndpoint". `after` lists the five inspected keys.
+    const MISMATCHES: Array<{
+      name: string;
+      target: string | null;
+      write: () => Promise<unknown>;
+      undone: boolean;
+      after: Record<string, unknown>;
+    }> = [
+      {
+        name: "5a: family gone, own endpoint, no token",
+        target: CUSTOM_ENDPOINT,
+        write: () => storeRemove([FAMILY_ID_KEY]),
+        undone: true,
+        after: {},
+      },
+      {
+        name: "fam-2 bound, own endpoint, no token",
+        target: CUSTOM_ENDPOINT,
+        write: () => storeSet({ [FAMILY_ID_KEY]: OTHER_FAMILY }),
+        undone: true,
+        after: { [FAMILY_ID_KEY]: OTHER_FAMILY },
+      },
+      {
+        name: "5b: join landed with its own endpoint",
+        target: CUSTOM_ENDPOINT,
+        write: () =>
+          storeSet({
+            [FAMILY_ID_KEY]: OTHER_FAMILY,
+            [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+            [TOKEN_EXPIRES_AT_KEY]: 456,
+            [API_ENDPOINT_KEY]: OTHER_ENDPOINT,
+          }),
+        undone: false,
+        after: {
+          [FAMILY_ID_KEY]: OTHER_FAMILY,
+          [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+          [TOKEN_EXPIRES_AT_KEY]: 456,
+          [API_ENDPOINT_KEY]: OTHER_ENDPOINT,
+        },
+      },
+      {
+        name: "5e: join landed on this same endpoint",
+        target: CUSTOM_ENDPOINT,
+        write: () =>
+          storeSet({
+            [FAMILY_ID_KEY]: OTHER_FAMILY,
+            [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+            [TOKEN_EXPIRES_AT_KEY]: 456,
+            [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+          }),
+        undone: false,
+        after: {
+          [FAMILY_ID_KEY]: OTHER_FAMILY,
+          [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+          [TOKEN_EXPIRES_AT_KEY]: 456,
+          [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+        },
+      },
+      {
+        name: "family gone, endpoint replaced",
+        target: CUSTOM_ENDPOINT,
+        write: async () => {
+          await storeRemove([FAMILY_ID_KEY]);
+          await storeSet({ [API_ENDPOINT_KEY]: OTHER_ENDPOINT });
+        },
+        undone: false,
+        after: { [API_ENDPOINT_KEY]: OTHER_ENDPOINT },
+      },
+      {
+        name: "family gone, own endpoint, a token back",
+        target: CUSTOM_ENDPOINT,
+        write: async () => {
+          await storeRemove([FAMILY_ID_KEY]);
+          await storeSet({ [AUTH_TOKEN_KEY]: OTHER_TOKEN });
+        },
+        undone: false,
+        after: {
+          [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+          [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+        },
+      },
+      {
+        name: "5c: revert to default, family gone",
+        target: null,
+        write: () => storeRemove([FAMILY_ID_KEY]),
+        undone: false,
+        after: {},
+      },
+    ];
+
+    it.each(MISMATCHES)(
+      "resolves bindingGone when $name",
+      async ({ target, write, undone, after }) => {
+        await seedBoundSession();
+        landBeforeReRead(write);
+
+        await expect(
+          persistConfirmedFamilyEndpoint(target, FAMILY_ID),
+        ).resolves.toBe("bindingGone");
+
+        expect(opsFromReRead()).toEqual(undone ? [RE_READ, UNDO] : [RE_READ]);
+        await expect(inspect()).resolves.toEqual(after);
+        expect(browser.runtime.sendMessage).not.toHaveBeenCalled();
+      },
+    );
+
+    it("rejects with no removal, leaving the written endpoint, when the re-read fails (5d)", async () => {
+      await seedBoundSession();
+      vi.mocked(browser.storage.local.get).mockImplementation(async (keys) => {
+        if (isReRead(keys)) throw new Error("storage unavailable");
+        return storeGet(keys);
+      });
+
+      await expect(
+        persistConfirmedFamilyEndpoint(CUSTOM_ENDPOINT, FAMILY_ID),
+      ).rejects.toThrow("storage unavailable");
+
+      expect(opsFromReRead()).toEqual([RE_READ]);
+      await expect(inspect()).resolves.toEqual({
+        [FAMILY_ID_KEY]: FAMILY_ID,
+        [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+      });
+    });
+
+    it("rejects without the re-read when the switch write fails", async () => {
+      await seedBoundSession();
+      vi.mocked(browser.storage.local.remove).mockRejectedValueOnce(
+        new Error("storage unavailable"),
+      );
+
+      await expect(
+        persistConfirmedFamilyEndpoint(CUSTOM_ENDPOINT, FAMILY_ID),
+      ).rejects.toThrow("storage unavailable");
+
+      expect(browser.storage.local.get).not.toHaveBeenCalled();
+      expect(browser.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("rejects when the undo removal fails", async () => {
+      await seedBoundSession();
+      landBeforeReRead(() => storeRemove([FAMILY_ID_KEY]));
+      vi.mocked(browser.storage.local.remove).mockImplementation(
+        async (keys) => {
+          if (Array.isArray(keys) && keys.includes(API_ENDPOINT_KEY)) {
+            throw new Error("storage unavailable");
+          }
+          await storeRemove(keys);
+        },
+      );
+
+      await expect(
+        persistConfirmedFamilyEndpoint(CUSTOM_ENDPOINT, FAMILY_ID),
+      ).rejects.toThrow("storage unavailable");
+
+      expect(opsFromReRead()).toEqual([RE_READ, UNDO]);
     });
   });
 

@@ -78,6 +78,7 @@ export function FamilySettings({
   // member, so it is never adopted silently — the user confirms each switch.
   const endpointSwitch = useEndpointSwitch({
     apiClient,
+    familyId,
     familyEndpoint,
     membersReady: membersState === "ready",
   });
@@ -104,6 +105,7 @@ export function FamilySettings({
         pending={endpointSwitch.pending}
         confirmError={endpointSwitch.confirmError}
         saveFailed={endpointSwitch.confirmSaveFailed}
+        bindingGone={endpointSwitch.confirmBindingGone}
         onConfirm={endpointSwitch.confirm}
         onDecline={endpointSwitch.decline}
         onDismissConfirmError={endpointSwitch.dismissConfirmError}
