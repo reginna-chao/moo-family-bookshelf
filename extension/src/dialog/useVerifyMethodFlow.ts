@@ -48,16 +48,16 @@ export function useVerifyMethodFlow({
     setAskingSecret(true);
   }, []);
 
-  /** Restart on the client's current server; true when the flow must stop. `force` restarts regardless. */
+  /** Restart on the client's current server; true when the flow must stop. `late`: a reply whose source changed. */
   const restartIfMoved = useCallback(
-    (force = false) => {
-      if (!force && pinSource()()) return false;
+    (late = false) => {
+      if (!late && pinSource()()) return false;
       clearSavedTimer();
       setCurrentSecret(undefined);
       setSelectedMethod(null);
       askForCurrentSecret(VERIFY_SERVER_CHANGED_MESSAGE);
       setAskingSecret(false);
-      reload();
+      reload(late);
       return true;
     },
     [pinSource, reload, clearSavedTimer, askForCurrentSecret],

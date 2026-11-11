@@ -10,8 +10,9 @@ export interface VerifyMethodSource {
   /** Pin the source as it is now. The returned check stays true while no other read began or
    *  landed and the client still points at that server. */
   pinSource: () => () => boolean;
-  /** Read the method again from the client's current server. */
-  reload: () => void;
+  /** Read the method again from the client's current server. `onlyIfSameServer`: drop the source,
+   *  and read again only when the client still points at the server it was read from. */
+  reload: (onlyIfSameServer?: boolean) => void;
 }
 
 /**
@@ -62,12 +63,17 @@ export function useVerifyMethodSource(
       apiClient.getEndpoint() === server;
   }, [apiClient]);
 
-  const reload = useCallback(() => {
-    serverRef.current = null;
-    epochRef.current += 1;
-    setLoading(true);
-    setLoadNonce((n) => n + 1);
-  }, []);
+  const reload = useCallback(
+    (onlyIfSameServer = false) => {
+      const sameServer = apiClient.getEndpoint() === serverRef.current;
+      serverRef.current = null;
+      epochRef.current += 1;
+      if (onlyIfSameServer && !sameServer) return;
+      setLoading(true);
+      setLoadNonce((n) => n + 1);
+    },
+    [apiClient],
+  );
 
   return { currentMethod, loading, setCurrentMethod, pinSource, reload };
 }
