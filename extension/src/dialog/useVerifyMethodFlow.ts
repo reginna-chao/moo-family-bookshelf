@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { requiresCurrentSecret } from "moo-family-bookshelf-shared/api/verifyValidation";
 import type { ApiClient } from "../api/client";
 import type { ApiErrorPayload, VerifyMethod } from "../api/types";
 import { saveVerifyMethod } from "./saveVerifyMethod";
 import { recoverStepUp } from "./stepUp";
+import { useSavedStateTimer } from "./useSavedStateTimer";
+import { useVerifyMethodSource } from "./useVerifyMethodSource";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -25,7 +27,6 @@ export function useVerifyMethodFlow({
   userId,
   apiClient,
 }: UseVerifyMethodFlowOptions) {
-  const [currentMethod, setCurrentMethod] = useState<VerifyMethod | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VerifyMethod | null>(
     null,
   );
@@ -35,29 +36,9 @@ export function useVerifyMethodFlow({
   const [showNoneWarning, setShowNoneWarning] = useState(false);
   const [askingSecret, setAskingSecret] = useState(false);
   const [currentSecret, setCurrentSecret] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
-  /** Pending "saved" → "idle" reset; cleared on unmount and before rescheduling. */
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearSavedTimer = useCallback(() => {
-    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-  }, []);
-
-  useEffect(() => clearSavedTimer, [clearSavedTimer]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      const result = await apiClient.getVerifyMethod(userId);
-      if (cancelled) return;
-      setCurrentMethod(result.data ? result.data.method : "none");
-      setLoading(false);
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, apiClient]);
+  const { clearSavedTimer, startSavedTimer } = useSavedStateTimer();
+  const { currentMethod, loading, setCurrentMethod, pinSource, reload } =
+    useVerifyMethodSource(apiClient, userId);
 
   const askForCurrentSecret = useCallback((error: string) => {
     setShowSetup(false);
@@ -66,6 +47,21 @@ export function useVerifyMethodFlow({
     setSaveError(error);
     setAskingSecret(true);
   }, []);
+
+  /** Restart on the client's current server; true when the flow must stop. `force` restarts regardless. */
+  const restartIfMoved = useCallback(
+    (force = false) => {
+      if (!force && pinSource()()) return false;
+      clearSavedTimer();
+      setCurrentSecret(undefined);
+      setSelectedMethod(null);
+      askForCurrentSecret(VERIFY_SERVER_CHANGED_MESSAGE);
+      setAskingSecret(false);
+      reload();
+      return true;
+    },
+    [pinSource, reload, clearSavedTimer, askForCurrentSecret],
+  );
 
   /** A refused save; `asked` is the method whose current secret was sent (null: none was). */
   const settleSaveError = useCallback(
@@ -86,18 +82,19 @@ export function useVerifyMethodFlow({
       setSaveState("error");
       setSaveError(message);
     },
-    [apiClient, userId, askForCurrentSecret],
+    [apiClient, userId, setCurrentMethod, askForCurrentSecret],
   );
 
   const handleSave = useCallback(
     async (method: VerifyMethod, secret?: string, current?: string) => {
+      if (restartIfMoved()) return;
       // A new save supersedes any pending saved→idle reset: letting the old timer
       // fire mid-flight would drop saveState out of "saving" (and out of "error").
       clearSavedTimer();
       setSaveState("saving");
       setSaveError("");
       const asked = current === undefined ? null : currentMethod;
-      const server = apiClient.getEndpoint();
+      const sameSource = pinSource();
       const result = await saveVerifyMethod(
         apiClient,
         userId,
@@ -106,14 +103,11 @@ export function useVerifyMethodFlow({
         current,
       );
       setCurrentSecret(undefined);
-      // The save went to the server recorded above; nothing further goes to another one.
-      if (apiClient.getEndpoint() !== server) {
-        setSaveState("error");
-        setSaveError(VERIFY_SERVER_CHANGED_MESSAGE);
-        return;
-      }
+      // A reply is only applied while the method's source is the one pinned above.
+      if (!sameSource()) return void restartIfMoved(true);
       if (result.error) {
         await settleSaveError(result.error, asked);
+        if (!sameSource()) restartIfMoved(true);
         return;
       }
       setCurrentMethod(method);
@@ -121,10 +115,19 @@ export function useVerifyMethodFlow({
       setShowSetup(false);
       setShowNoneWarning(false);
       setSaveState("saved");
-      clearSavedTimer();
-      savedTimerRef.current = setTimeout(() => setSaveState("idle"), 2000);
+      startSavedTimer(() => setSaveState("idle"));
     },
-    [userId, apiClient, currentMethod, settleSaveError, clearSavedTimer],
+    [
+      userId,
+      apiClient,
+      currentMethod,
+      setCurrentMethod,
+      settleSaveError,
+      clearSavedTimer,
+      startSavedTimer,
+      restartIfMoved,
+      pinSource,
+    ],
   );
 
   /** The step after a method is picked (and, for a PIN / pattern account, its secret entered). */
@@ -150,6 +153,7 @@ export function useVerifyMethodFlow({
 
   const handleMethodSelect = useCallback(
     (method: VerifyMethod) => {
+      if (restartIfMoved()) return;
       setSelectedMethod(method);
       setSaveState("idle");
       setSaveError("");
@@ -161,18 +165,19 @@ export function useVerifyMethodFlow({
       }
       openMethodStep(method);
     },
-    [currentMethod, askForCurrentSecret, openMethodStep],
+    [currentMethod, askForCurrentSecret, openMethodStep, restartIfMoved],
   );
 
   const handleCurrentSecret = useCallback(
     (secret: string) => {
+      if (restartIfMoved()) return;
       setAskingSecret(false);
       setCurrentSecret(secret);
       setSaveState("idle");
       setSaveError("");
       if (selectedMethod !== null) openMethodStep(selectedMethod, secret);
     },
-    [selectedMethod, openMethodStep],
+    [selectedMethod, openMethodStep, restartIfMoved],
   );
 
   return {
