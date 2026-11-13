@@ -7,6 +7,7 @@ import {
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 
@@ -28,6 +29,10 @@ import {
  *
  * An old expiry stays when the response carries none, on either kind of server; that
  * is a decision, not an oversight, and matches the behaviour before #456.
+ *
+ * The same `set` also records the server that issued the token (`moo:authTokenServer`):
+ * `official` for the official default, else the endpoint itself. The prior pair carries
+ * another server's marker, so a write that forgot the marker would leave it behind.
  */
 
 const CUSTOM_ENDPOINT = "https://family.example";
@@ -44,6 +49,7 @@ const OFFICIAL_REMOVAL = [API_ENDPOINT_KEY];
 const PRIOR_PAIR = {
   [API_ENDPOINT_KEY]: OTHER_ENDPOINT,
   [AUTH_TOKEN_KEY]: OLD_TOKEN,
+  [TOKEN_SERVER_KEY]: OTHER_ENDPOINT,
   [TOKEN_EXPIRES_AT_KEY]: OLD_EXPIRY,
 };
 
@@ -89,6 +95,7 @@ describe("persistJoinCredentials", () => {
         ...IDENTITY,
         [API_ENDPOINT_KEY]: DEFAULT_API_ENDPOINT,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
         [TOKEN_EXPIRES_AT_KEY]: NEW_EXPIRY,
       });
       expect(local.remove).toHaveBeenCalledTimes(1);
@@ -99,6 +106,7 @@ describe("persistJoinCredentials", () => {
       expect(await storedRecord()).toEqual({
         ...IDENTITY,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
         [TOKEN_EXPIRES_AT_KEY]: NEW_EXPIRY,
       });
       expect(warn).not.toHaveBeenCalled();
@@ -115,6 +123,7 @@ describe("persistJoinCredentials", () => {
       expect(await storedRecord()).toEqual({
         ...IDENTITY,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
         [TOKEN_EXPIRES_AT_KEY]: OLD_EXPIRY,
       });
     });
@@ -135,6 +144,7 @@ describe("persistJoinCredentials", () => {
         ...IDENTITY,
         [API_ENDPOINT_KEY]: DEFAULT_API_ENDPOINT,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
         [TOKEN_EXPIRES_AT_KEY]: NEW_EXPIRY,
       });
     });
@@ -161,12 +171,14 @@ describe("persistJoinCredentials", () => {
         ...IDENTITY,
         [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: CUSTOM_ENDPOINT,
         [TOKEN_EXPIRES_AT_KEY]: NEW_EXPIRY,
       });
       expect(await storedRecord()).toEqual({
         ...IDENTITY,
         [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
         [AUTH_TOKEN_KEY]: NEW_TOKEN,
+        [TOKEN_SERVER_KEY]: CUSTOM_ENDPOINT,
         [TOKEN_EXPIRES_AT_KEY]: NEW_EXPIRY,
       });
     });

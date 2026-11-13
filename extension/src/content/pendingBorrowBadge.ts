@@ -15,6 +15,7 @@ import {
   API_ENDPOINT_KEY,
 } from "../constants";
 import { BorrowStatus } from "../api/types";
+import { STORED_SESSION_KEYS, storedTokenFor } from "../api/tokenBinding";
 import { sanitizeBorrowRequests } from "moo-family-bookshelf-shared/borrow/validation";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
 import { cookieConfirmsAccount } from "./pageAccountCookie";
@@ -44,12 +45,12 @@ export async function updatePendingBorrowBadge(
     const stored = await browser.storage.local.get([
       USER_ID_KEY,
       FAMILY_ID_KEY,
-      AUTH_TOKEN_KEY,
-      API_ENDPOINT_KEY,
+      ...STORED_SESSION_KEYS,
     ]);
     const userId = stored[USER_ID_KEY] as string | undefined;
     const familyId = stored[FAMILY_ID_KEY] as string | undefined;
-    const authToken = stored[AUTH_TOKEN_KEY] as string | undefined;
+    // Null when another server than the stored endpoint issued it: no request is sent.
+    const authToken = storedTokenFor(stored);
     const apiEndpoint =
       (stored[API_ENDPOINT_KEY] as string | undefined) ?? DEFAULT_API_ENDPOINT;
     if (!userId || !familyId || !authToken) return;

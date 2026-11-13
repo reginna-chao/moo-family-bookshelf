@@ -10,7 +10,13 @@ import {
 } from "vitest";
 import browser from "webextension-polyfill";
 import { ApiClient, validateEndpointUrl } from "@/api/client";
-import { resolveStoredEndpoint, storageMatches } from "@/api/tokenBinding";
+import {
+  resolveStoredEndpoint,
+  storageMatches,
+  storedTokenFor,
+  storeIssuedToken,
+  tokenServerMarker,
+} from "@/api/tokenBinding";
 import { AUTH_REFRESH_RATE_LIMITED } from "@/api/types";
 import { saveVerifyMethod } from "@/dialog/saveVerifyMethod";
 import { useEndpointSwitch } from "@/dialog/useEndpointSwitch";
@@ -22,6 +28,7 @@ import {
   RECOVERY_COOLDOWN_UNTIL_KEY,
   SELF_DEPARTURE_UNTIL_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 import {
@@ -1490,6 +1497,201 @@ describe("storageMatches", () => {
     localGet.mockRejectedValueOnce(new Error("storage unavailable"));
 
     await expect(storageMatches(CUSTOM)).rejects.toThrow("storage unavailable");
+  });
+});
+
+describe("storedTokenFor", () => {
+  const CUSTOM = "https://family.example";
+  const OTHER = "https://other.example";
+  const TOKEN = "a".repeat(64);
+
+  const CASES: Array<{
+    name: string;
+    stored: Record<string, unknown>;
+    expected: string | null;
+  }> = [
+    {
+      name: "no marker with a usable endpoint (an older build's token)",
+      stored: { [AUTH_TOKEN_KEY]: TOKEN, [API_ENDPOINT_KEY]: CUSTOM },
+      expected: TOKEN,
+    },
+    {
+      name: "no marker with no endpoint key",
+      stored: { [AUTH_TOKEN_KEY]: TOKEN },
+      expected: TOKEN,
+    },
+    {
+      name: "the official marker with no endpoint key",
+      stored: { [AUTH_TOKEN_KEY]: TOKEN, [TOKEN_SERVER_KEY]: "official" },
+      expected: TOKEN,
+    },
+    {
+      name: "the official marker with the official URL stored as a value",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
+        [API_ENDPOINT_KEY]: DEFAULT_API_ENDPOINT,
+      },
+      expected: TOKEN,
+    },
+    {
+      name: "a custom marker with the same custom endpoint",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: CUSTOM,
+        [API_ENDPOINT_KEY]: CUSTOM,
+      },
+      expected: TOKEN,
+    },
+    {
+      name: "a custom marker with the same endpoint in a non-canonical form",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: CUSTOM,
+        [API_ENDPOINT_KEY]: `${CUSTOM}/`,
+      },
+      expected: TOKEN,
+    },
+    {
+      name: "the official marker with a custom endpoint",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
+        [API_ENDPOINT_KEY]: CUSTOM,
+      },
+      expected: null,
+    },
+    {
+      name: "a custom marker with no endpoint key (official default)",
+      stored: { [AUTH_TOKEN_KEY]: TOKEN, [TOKEN_SERVER_KEY]: CUSTOM },
+      expected: null,
+    },
+    {
+      name: "another server's marker with a custom endpoint",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: OTHER,
+        [API_ENDPOINT_KEY]: CUSTOM,
+      },
+      expected: null,
+    },
+    {
+      name: "a marker that is not a string",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: 42,
+        [API_ENDPOINT_KEY]: CUSTOM,
+      },
+      expected: null,
+    },
+    {
+      name: "an unusable endpoint with no marker",
+      stored: { [AUTH_TOKEN_KEY]: TOKEN, [API_ENDPOINT_KEY]: "not-a-url" },
+      expected: null,
+    },
+    {
+      name: "an unusable endpoint with a marker",
+      stored: {
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: "not-a-url",
+        [API_ENDPOINT_KEY]: "not-a-url",
+      },
+      expected: null,
+    },
+    {
+      name: "an empty token",
+      stored: { [AUTH_TOKEN_KEY]: "", [TOKEN_SERVER_KEY]: "official" },
+      expected: null,
+    },
+    {
+      name: "no token",
+      stored: { [TOKEN_SERVER_KEY]: "official" },
+      expected: null,
+    },
+    {
+      name: "a token that is not a string",
+      stored: { [AUTH_TOKEN_KEY]: 42 },
+      expected: null,
+    },
+  ];
+
+  it.each(CASES)("returns $expected for $name", ({ stored, expected }) => {
+    expect(storedTokenFor(stored)).toBe(expected);
+  });
+});
+
+describe("tokenServerMarker", () => {
+  it.each([
+    [
+      "the official default",
+      validateEndpointUrl(DEFAULT_API_ENDPOINT),
+      "official",
+    ],
+    ["a custom server", "https://family.example", "https://family.example"],
+  ])("marks %s as %s", (_label, server, marker) => {
+    expect(tokenServerMarker(server)).toBe(marker);
+  });
+});
+
+describe("storeIssuedToken", () => {
+  const TOKEN = "a".repeat(64);
+  const CUSTOM = "https://family.example";
+  const OFFICIAL = validateEndpointUrl(DEFAULT_API_ENDPOINT);
+
+  beforeEach(async () => {
+    await browser.storage.local.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await browser.storage.local.clear();
+  });
+
+  it.each([
+    ["the official default", OFFICIAL, "official"],
+    ["a custom server", CUSTOM, CUSTOM],
+  ])(
+    "writes the token, its expiry and the marker of %s in one set",
+    async (_label, server, marker) => {
+      await storeIssuedToken(TOKEN, EXPIRES_AT, server);
+
+      expect(browser.storage.local.set).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(browser.storage.local.set).mock.calls[0][0]).toEqual({
+        [AUTH_TOKEN_KEY]: TOKEN,
+        [TOKEN_SERVER_KEY]: marker,
+        [TOKEN_EXPIRES_AT_KEY]: EXPIRES_AT,
+      });
+    },
+  );
+
+  it.each([
+    ["missing", undefined],
+    ["zero", 0],
+    ["negative", -1],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["a numeric string", "9999999999999"],
+  ])("writes no expiry when it is %s", async (_label, expiresAt) => {
+    await storeIssuedToken(TOKEN, expiresAt, CUSTOM);
+
+    const written = vi.mocked(browser.storage.local.set).mock.calls[0][0];
+    expect(Object.keys(written).sort()).toEqual(
+      [AUTH_TOKEN_KEY, TOKEN_SERVER_KEY].sort(),
+    );
+    expect(written).toEqual({
+      [AUTH_TOKEN_KEY]: TOKEN,
+      [TOKEN_SERVER_KEY]: CUSTOM,
+    });
+  });
+
+  it("rejects when the set rejects", async () => {
+    vi.mocked(browser.storage.local.set).mockRejectedValueOnce(
+      new Error("storage unavailable"),
+    );
+
+    await expect(storeIssuedToken(TOKEN, EXPIRES_AT, CUSTOM)).rejects.toThrow(
+      "storage unavailable",
+    );
   });
 });
 

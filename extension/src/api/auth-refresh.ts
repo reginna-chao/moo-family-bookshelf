@@ -5,16 +5,12 @@ import type { ApiResponse } from "./types";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
-  AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
   API_ENDPOINT_KEY,
+  STORED_TOKEN_KEYS,
 } from "../constants";
 import { clearFamilyStorage } from "./familyStorageClear";
 import { isSelfDepartureActive } from "../storage/selfDeparture";
-import {
-  isAuthToken,
-  isExpiresAt,
-} from "moo-family-bookshelf-shared/api/issuedCredentials";
+import { isAuthToken } from "moo-family-bookshelf-shared/api/issuedCredentials";
 import {
   clearRecoveryCooldown,
   getActiveRecoveryCooldown,
@@ -24,6 +20,9 @@ import { attemptJoinRecovery } from "./joinRecovery";
 import {
   resolveStoredEndpoint,
   sessionStillOwnsStorage,
+  STORED_SESSION_KEYS,
+  storedTokenFor,
+  storeIssuedToken,
   type RefreshSession,
 } from "./tokenBinding";
 
@@ -174,12 +173,11 @@ export async function doRefreshToken(
     const storage = await browser.storage.local.get([
       USER_ID_KEY,
       FAMILY_ID_KEY,
-      AUTH_TOKEN_KEY,
-      API_ENDPOINT_KEY,
+      ...STORED_SESSION_KEYS,
     ]);
     const userId = storage[USER_ID_KEY] as string | undefined;
     const familyId = storage[FAMILY_ID_KEY] as string | undefined;
-    const storedToken = storage[AUTH_TOKEN_KEY] as string | undefined;
+    const storedToken = storedTokenFor(storage);
     if (!userId || !familyId) return { refreshed: false };
 
     // The stored token belongs to another server: send nothing, touch nothing, call nothing.
@@ -209,21 +207,14 @@ export async function doRefreshToken(
     const token = result.data?.token;
     if (isAuthToken(token)) {
       deps.setAuthToken(token);
-      const storageUpdate: Record<string, unknown> = {
-        [AUTH_TOKEN_KEY]: token,
-      };
-      const expiresAt = result.data?.expiresAt;
-      if (isExpiresAt(expiresAt)) {
-        storageUpdate[TOKEN_EXPIRES_AT_KEY] = expiresAt;
-      }
-      await browser.storage.local.set(storageUpdate);
+      await storeIssuedToken(token, result.data?.expiresAt, session.endpoint);
       await clearRecoveryCooldown();
       return { refreshed: true };
     }
 
     // Refresh failed — attempt staged recovery via joinFamily
     deps.setAuthToken(null);
-    await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+    await browser.storage.local.remove([...STORED_TOKEN_KEYS]);
 
     // No silent join while a re-verification prompt is pending, nor during the user's own leave /
     // deletion (#263). See docs/architecture.md → 背景自動復原的防護 and → 認證更新與冷卻.
@@ -244,7 +235,7 @@ export async function doRefreshToken(
 
     const recovery = await attemptJoinRecovery(
       deps,
-      { userId, familyId },
+      { userId, familyId, server: session.endpoint },
       stillOwns,
     );
     if (recovery.recovered) {

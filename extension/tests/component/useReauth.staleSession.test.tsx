@@ -19,6 +19,7 @@ import {
   FAMILY_ID_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 import {
@@ -411,6 +412,7 @@ describe("useReauth and a session it no longer owns", () => {
         [API_ENDPOINT_KEY]: SERVER_A,
         [AUTH_TOKEN_KEY]: FRESH_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: EXPIRES_AT,
+        [TOKEN_SERVER_KEY]: SERVER_A,
       });
 
       await client.getPersonalBooks(USER);

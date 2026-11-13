@@ -15,6 +15,7 @@ import {
   AUTH_TOKEN_KEY,
   DEFAULT_API_ENDPOINT,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
 } from "@/constants";
 
 /**
@@ -60,7 +61,8 @@ import {
  * response carries its replacement. `apiClient` already holds it (pinned in tests/unit/api/verifyApi.test.ts),
  * but other Readmoo tabs, the background and the content scripts read the token from `browser.storage.local`,
  * so the save (`extension/src/dialog/saveVerifyMethod.ts`) writes `AUTH_TOKEN_KEY` (+ `TOKEN_EXPIRES_AT_KEY`
- * when issued) there. The server already switched methods, so a storage failure is only logged: the panel
+ * when issued, + `TOKEN_SERVER_KEY`, the issuing server: `official` for the official default the mock
+ * client sits on) there. The server already switched methods, so a storage failure is only logged: the panel
  * must still report 已儲存, not a failed save the user would retry. `none` issues no token and writes nothing.
  */
 
@@ -343,7 +345,11 @@ describe("VerificationSettings", () => {
 
     afterEach(async () => {
       // The storage mock's backing object lives for the whole file.
-      await chrome.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+      await chrome.storage.local.remove([
+        AUTH_TOKEN_KEY,
+        TOKEN_EXPIRES_AT_KEY,
+        TOKEN_SERVER_KEY,
+      ]);
     });
 
     /** Choose PIN and enter 123456 twice; `act` is the barrier for the save it triggers. */
@@ -386,6 +392,7 @@ describe("VerificationSettings", () => {
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: ROTATED_EXPIRY,
+        [TOKEN_SERVER_KEY]: "official",
       });
     });
 
@@ -408,6 +415,7 @@ describe("VerificationSettings", () => {
       // Exact-object match: a stale TOKEN_EXPIRES_AT_KEY write would fail here.
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
+        [TOKEN_SERVER_KEY]: "official",
       });
     });
 

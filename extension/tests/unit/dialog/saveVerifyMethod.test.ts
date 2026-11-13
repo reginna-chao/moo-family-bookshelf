@@ -16,6 +16,7 @@ import {
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 import {
@@ -45,6 +46,9 @@ import {
  *
  * Real `ApiClient` on the shared store; only `fetch` is faked. The save is held open
  * while storage moves, as another tab's write would land.
+ *
+ * A stored rotated token goes in ONE write with the server that issued it
+ * (`moo:authTokenServer`: `official` for the official default, else the server URL).
  */
 
 const SERVER_A = "https://server-a.example";
@@ -176,27 +180,37 @@ describe("saveVerifyMethod", () => {
         name: "a custom server",
         server: SERVER_A,
         seed: { [FAMILY_ID_KEY]: "fam-a", [API_ENDPOINT_KEY]: SERVER_A },
+        marker: SERVER_A,
       },
       {
         name: "the official default, with no key",
         server: OFFICIAL,
         seed: { [FAMILY_ID_KEY]: "fam-a" },
+        marker: "official",
       },
     ])(
-      "stores the rotated token and expiry on $name",
-      async ({ server, seed }) => {
+      "stores the rotated token, its expiry and its issuer in one write on $name",
+      async ({ server, seed, marker }) => {
         networkAnswering(ROTATED);
         await browser.storage.local.set({
           ...seed,
           [AUTH_TOKEN_KEY]: OLD_TOKEN,
         });
+        localSet.mockClear();
 
         const result = await save(clientOn(server));
 
         expect(result.error).toBeUndefined();
+        expect(localSet).toHaveBeenCalledTimes(1);
+        expect(localSet.mock.calls[0][0]).toEqual({
+          [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
+          [TOKEN_SERVER_KEY]: marker,
+          [TOKEN_EXPIRES_AT_KEY]: EXPIRES_AT,
+        });
         expect(await storedRecord()).toEqual({
           ...seed,
           [AUTH_TOKEN_KEY]: ROTATED_TOKEN,
+          [TOKEN_SERVER_KEY]: marker,
           [TOKEN_EXPIRES_AT_KEY]: EXPIRES_AT,
         });
       },

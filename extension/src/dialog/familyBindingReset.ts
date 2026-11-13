@@ -5,8 +5,7 @@ import browser from "webextension-polyfill";
 import type { ApiClient } from "../api/client";
 import {
   USER_ID_KEY,
-  AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
+  STORED_TOKEN_KEYS,
   FAMILY_ID_KEY,
   LAST_SYNC_AT_KEY,
   DISPLAY_NAME_KEY,
@@ -63,8 +62,7 @@ export async function clearStoredFamilyBinding(
   const syncRemoval = removeSyncFamilyId();
   await browser.storage.local.remove([
     FAMILY_ID_KEY,
-    AUTH_TOKEN_KEY,
-    TOKEN_EXPIRES_AT_KEY,
+    ...STORED_TOKEN_KEYS,
     STORE_PAGE_INDEX_KEY,
     ...FAMILY_ENDPOINT_CHOICE_KEYS,
     ...extraLocalKeys,

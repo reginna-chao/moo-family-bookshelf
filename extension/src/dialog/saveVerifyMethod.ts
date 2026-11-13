@@ -1,12 +1,10 @@
-import browser from "webextension-polyfill";
 import type {
   SetVerifyBody,
   SetVerifyResult,
 } from "moo-family-bookshelf-shared/api/verifyTypes";
 import type { ApiClient } from "../api/client";
-import { storageMatches } from "../api/tokenBinding";
+import { storageMatches, storeIssuedToken } from "../api/tokenBinding";
 import type { ApiResponse, VerifyMethod } from "../api/types";
-import { AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 /**
  * Save the verify method, then store the auth token a new pin / pattern
@@ -27,25 +25,25 @@ export async function saveVerifyMethod(
   const body: SetVerifyBody = { method };
   if (secret) body.secret = secret;
   if (currentSecret !== undefined) body.currentSecret = currentSecret;
+  // Read before the request goes out: the server that issues the rotated token.
+  const server = apiClient.getEndpoint();
   const result = await apiClient.setVerifyMethod(userId, body);
-  if (!result.error && result.data?.authToken !== undefined) {
-    await storeRotatedToken(result.data, apiClient.getEndpoint());
+  const authToken = result.data?.authToken;
+  if (!result.error && authToken !== undefined) {
+    await storeRotatedToken(authToken, result.data?.expiresAt, server);
   }
   return result;
 }
 
 async function storeRotatedToken(
-  data: SetVerifyResult,
+  authToken: string,
+  expiresAt: unknown,
   endpoint: string,
 ): Promise<void> {
-  const update: Record<string, unknown> = { [AUTH_TOKEN_KEY]: data.authToken };
-  if (data.expiresAt !== undefined) {
-    update[TOKEN_EXPIRES_AT_KEY] = data.expiresAt;
-  }
   try {
     // Another tab moved storage to another server: the token stays in this client's memory only.
     if (!(await storageMatches(endpoint))) return;
-    await browser.storage.local.set(update);
+    await storeIssuedToken(authToken, expiresAt, endpoint);
   } catch (err) {
     console.warn(
       "[VerificationSettings] Failed to store the rotated token",

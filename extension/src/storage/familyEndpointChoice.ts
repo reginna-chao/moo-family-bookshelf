@@ -9,7 +9,7 @@ import {
   DECLINED_FAMILY_ENDPOINT_KEY,
   FAMILY_ID_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
-  TOKEN_EXPIRES_AT_KEY,
+  STORED_TOKEN_KEYS,
 } from "../constants";
 import { safeStorageGet } from "./safeStorage";
 
@@ -97,8 +97,8 @@ export async function persistAcceptedFamilyEndpoint(
  *  Rejects, with nothing written, when that removal fails; a failure at a later step rejects too.
  *
  *  The recovery cooldown goes with the token: it is the old server's 429, and would block the join
- *  on the new one. The last removal catches a token another tab's refresh wrote back before the
- *  endpoint write; once the endpoint is written that refresh no longer owns storage.
+ *  on the new one. The last removal catches a token another tab wrote back before the endpoint
+ *  write; one written later carries the old server's marker, so no reader uses it.
  *  Called directly by the sync-code join (no familyId is stored yet) and by the boot read; a
  *  confirmed switch reaches it through persistConfirmedFamilyEndpoint.
  *  See docs/architecture.md → 端點切換確認. */
@@ -106,12 +106,11 @@ export async function persistSwitchedFamilyEndpoint(
   target: string | null,
 ): Promise<void> {
   await browser.storage.local.remove([
-    AUTH_TOKEN_KEY,
-    TOKEN_EXPIRES_AT_KEY,
+    ...STORED_TOKEN_KEYS,
     RECOVERY_COOLDOWN_UNTIL_KEY,
   ]);
   await writeAcceptedEndpoint(target);
-  await browser.storage.local.remove([AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+  await browser.storage.local.remove([...STORED_TOKEN_KEYS]);
 }
 
 /** Whether storage still binds `familyId`. An unreadable store reads as `false`, so the caller
@@ -148,8 +147,7 @@ export async function persistConfirmedFamilyEndpoint(
   ) {
     await browser.storage.local.remove([
       ...FAMILY_ENDPOINT_CHOICE_KEYS,
-      AUTH_TOKEN_KEY,
-      TOKEN_EXPIRES_AT_KEY,
+      ...STORED_TOKEN_KEYS,
     ]);
   }
   return "bindingGone";

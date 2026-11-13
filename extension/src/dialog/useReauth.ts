@@ -4,15 +4,13 @@
 import { useEffect } from "react";
 import browser from "webextension-polyfill";
 import { clearFamilyStorage } from "../api/auth-refresh";
-import { storageMatches } from "../api/tokenBinding";
+import { storageMatches, storeIssuedToken } from "../api/tokenBinding";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { BoolFlag, type ApiClient } from "../api/client";
 import {
   USER_ID_KEY,
   FAMILY_ID_KEY,
   DISPLAY_NAME_KEY,
-  AUTH_TOKEN_KEY,
-  TOKEN_EXPIRES_AT_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
 } from "../constants";
 import { resetFamilyEndpointChoice } from "../storage/familyEndpointChoice";
@@ -74,11 +72,7 @@ async function runReauthJoin(
   const authToken = res.data?.authToken;
   if (authToken) {
     apiClient.setAuthToken(authToken);
-    const update: Record<string, unknown> = { [AUTH_TOKEN_KEY]: authToken };
-    if (res.data?.expiresAt) {
-      update[TOKEN_EXPIRES_AT_KEY] = res.data.expiresAt;
-    }
-    await browser.storage.local.set(update);
+    await storeIssuedToken(authToken, res.data?.expiresAt, server);
   }
   // A successful re-verification proves the credentials are valid again, so a
   // leftover recovery cooldown must not throttle the next silent refresh.

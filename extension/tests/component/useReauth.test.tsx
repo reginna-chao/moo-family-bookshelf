@@ -8,6 +8,7 @@ import {
   DISPLAY_NAME_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
@@ -64,16 +65,25 @@ import { verificationLockedMessage } from "@/dialog/verificationMessages";
  * without the catch's reset there is only ever call #1.
  */
 
-/** What clearFamilyStorage removes in its single call: the binding, its chip index, its token, and the
- *  family-scoped endpoint keys (#492). */
+/** What clearFamilyStorage removes in its single call: the binding, its chip index, its token (with
+ *  its expiry and issuer), and the family-scoped endpoint keys (#492). */
 const CLEARED_FAMILY_KEYS = [
   FAMILY_ID_KEY,
   STORE_PAGE_INDEX_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
 ];
+
+/** Every `storage.local.set` payload that carries a token. */
+function tokenWrites(): Record<string, unknown>[] {
+  return vi
+    .mocked(chrome.storage.local.set)
+    .mock.calls.map((call) => call[0] as Record<string, unknown>)
+    .filter((items) => AUTH_TOKEN_KEY in items);
+}
 
 function seedStorage(
   data: Record<string, unknown> = {
@@ -167,15 +177,42 @@ describe("useReauth", () => {
       verifySecret: "1234",
       recovery: BoolFlag.TRUE,
     });
-    // Fresh token primed in-memory and persisted with its expiry.
+    // Fresh token primed in-memory and persisted with its expiry and its issuer, in one write.
     expect(apiClient.setAuthToken).toHaveBeenCalledWith("fresh-token");
-    expect(chrome.storage.local.set).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(tokenWrites()).toEqual([
+      {
         [AUTH_TOKEN_KEY]: "fresh-token",
         [TOKEN_EXPIRES_AT_KEY]: 7777,
-      }),
-    );
+        [TOKEN_SERVER_KEY]: "official",
+      },
+    ]);
     // Prompt self-dismisses so the user continues where they were.
+    expect(result.current.active).toBe(false);
+  });
+
+  it("stores the fresh token with the custom server the prompt opened on", async () => {
+    const custom = "https://family.example";
+    seedStorage({
+      [USER_ID_KEY]: "u1",
+      [FAMILY_ID_KEY]: "fam-1",
+      [DISPLAY_NAME_KEY]: "小明",
+      [API_ENDPOINT_KEY]: custom,
+    });
+    const apiClient = createApiClient({ getEndpoint: vi.fn(() => custom) });
+    const { result } = renderHook(() => useReauth(apiClient));
+
+    await triggerReauth(apiClient, result);
+    await act(async () => {
+      await result.current.submit("1234");
+    });
+
+    expect(tokenWrites()).toEqual([
+      {
+        [AUTH_TOKEN_KEY]: "fresh-token",
+        [TOKEN_EXPIRES_AT_KEY]: 7777,
+        [TOKEN_SERVER_KEY]: custom,
+      },
+    ]);
     expect(result.current.active).toBe(false);
   });
 
