@@ -343,6 +343,32 @@ describe("AccountSettingsSync.refresh", () => {
     },
   );
 
+  it("resolves stale and sends no GET when the endpoint changes while the snapshot is being read", async () => {
+    await seed({ [AUTO_SYNC_INTERVAL_KEY]: "weekly" });
+    const server = createAccountSettingsServer({ autoSyncInterval: "never" });
+    const localGet = vi.mocked(
+      chrome.storage.local.get as unknown as (
+        keys?: unknown,
+      ) => Promise<Record<string, unknown>>,
+    );
+    const snapshotRead = held<void>();
+    // The refresh's first storage read is its snapshot: hold it until the endpoint has moved,
+    // then answer from the store (the once-override is spent, so this call reads it).
+    localGet.mockImplementationOnce(async (keys) => {
+      await snapshotRead.promise;
+      return localGet(keys);
+    });
+    const sync = createSync(server);
+
+    const refreshing = sync.refresh();
+    await vi.waitFor(() => expect(localGet).toHaveBeenCalled());
+    server.setEndpoint(OTHER_ENDPOINT);
+    snapshotRead.release();
+
+    await expect(refreshing).resolves.toBe("stale");
+    expect(server.get).not.toHaveBeenCalled();
+  });
+
   it("resolves stale and follows nothing when the endpoint changes while its PATCH is out", async () => {
     await seed({
       [AUTO_SYNC_INTERVAL_KEY]: "weekly",
@@ -729,6 +755,27 @@ describe("AccountSettingsSync PATCH queue", () => {
     await expect(saving).resolves.toBe("stale");
     expect(server.patch).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("sends nothing and resolves stale when the endpoint changes while a save waits out the gap", async () => {
+    vi.useFakeTimers();
+    const server = createAccountSettingsServer();
+    const sync = createSync(server);
+    await expect(sync.save("syncArchived", BoolFlag.TRUE)).resolves.toBe(
+      "saved",
+    );
+    vi.mocked(chrome.storage.local.set).mockClear();
+
+    const saving = sync.save("floatingIconSize", "large");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(server.patch).toHaveBeenCalledTimes(1);
+    server.setEndpoint(OTHER_ENDPOINT);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_SETTINGS_WRITE_GAP_MS);
+
+    await expect(saving).resolves.toBe("stale");
+    expect(server.patch).toHaveBeenCalledTimes(1);
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    expect((await stored())[FLOATING_ICON_SIZE_KEY]).toBeUndefined();
   });
 });
 

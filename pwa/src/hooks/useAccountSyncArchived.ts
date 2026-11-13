@@ -35,12 +35,24 @@ function writeCached(userId: string, flag: BoolFlag): void {
   localStorage.setItem(cacheKey(userId), String(flag));
 }
 
+// Unsettled reads and saves per client (`track`, never-rejecting work only): a read waits for
+// them, so its GET is never folded onto one sent before a save (transport.ts shares GETs).
+const unsettled = new WeakMap<ApiClient, Promise<unknown>>();
+
+function track<T>(apiClient: ApiClient, work: Promise<T>): Promise<T> {
+  const prior = unsettled.get(apiClient);
+  const settled = work.then(() => prior);
+  unsettled.set(apiClient, settled);
+  return work;
+}
+
 /** Read the account's value. Never throws: a partial client or a network error is `failed`. */
 async function readServerFlag(
   apiClient: ApiClient,
   userId: string,
 ): Promise<ServerRead> {
   try {
+    if (unsettled.has(apiClient)) await unsettled.get(apiClient);
     const res = await apiClient.accountSettings.get(userId);
     if (res.error) {
       return res.error.code === "NOT_FOUND"
@@ -100,7 +112,7 @@ export function useAccountSyncArchived(
 
   useEffect(() => {
     let cancelled = false;
-    void readServerFlag(apiClient, userId).then((read) => {
+    void track(apiClient, readServerFlag(apiClient, userId)).then((read) => {
       // After a toggle the reply is stale (it may even predate the save): keep the user's choice.
       if (cancelled || userChoseRef.current) return;
       if (read.kind === "value") {
@@ -130,7 +142,8 @@ export function useAccountSyncArchived(
     }
     savingRef.current = true;
     setMessage("");
-    void saveServerFlag(apiClient, userId, next).then((errorCode) => {
+    const saving = saveServerFlag(apiClient, userId, next);
+    void track(apiClient, saving).then((errorCode) => {
       savingRef.current = false;
       if (errorCode === null) return;
       if (errorCode === "NOT_FOUND") {

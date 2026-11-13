@@ -125,7 +125,7 @@ export class AccountSettingsSync {
       isStale: (server) => this.isStale(server),
       isSaving: (field) => this.saving.has(field),
       markUnsupported: () => this.markUnsupported(),
-      sendPatch: (patch) => this.sendPatch(patch),
+      sendPatch: (patch, server) => this.sendPatch(patch, server),
     };
   }
 
@@ -144,7 +144,7 @@ export class AccountSettingsSync {
     const pendingBefore = (await readPendingAccountSettings(this.userId))[
       field
     ];
-    const res = await this.sendPatch({ settings: sent });
+    const res = await this.sendPatch({ settings: sent }, server);
     if (res === null || this.isStale(server)) return "stale";
     if (res.error?.code === "NOT_FOUND") {
       this.markUnsupported();
@@ -170,9 +170,11 @@ export class AccountSettingsSync {
   }
 
   /** Every PATCH of this controller goes through one queue (`SerialPatchQueue`). */
-  private sendPatch(patch: AccountSettingsPatch): Promise<PatchReply> {
-    return this.patches.enqueue(() =>
-      this.api.accountSettings.patch(this.userId, patch),
+  private sendPatch(patch: AccountSettingsPatch, server: string) {
+    return this.patches.enqueue(async (): Promise<PatchReply> =>
+      this.isStale(server)
+        ? null
+        : this.api.accountSettings.patch(this.userId, patch),
     );
   }
 

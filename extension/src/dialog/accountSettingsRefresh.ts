@@ -28,9 +28,10 @@ export interface AccountSettingsRefreshHost {
   /** The controller is saving `field` right now. */
   isSaving(field: AccountSettingsField): boolean;
   markUnsupported(): void;
-  /** Send through the controller's PATCH queue; `null` when disposed before it was sent. */
+  /** Send through the controller's PATCH queue; `null`, nothing sent, when stale on `server` before its turn. */
   sendPatch(
     patch: AccountSettingsPatch,
+    server: string,
   ): Promise<ApiResponse<AccountSettings> | null>;
 }
 
@@ -85,7 +86,7 @@ async function uploadLocal(
     ...(!isEmpty(resend) && { settings: resend }),
     ...(!isEmpty(fill) && { ifAbsent: fill }),
   };
-  const res = await host.sendPatch(patch);
+  const res = await host.sendPatch(patch, server);
   if (res === null || host.isStale(server)) return "stale";
   if (res.error || res.data === undefined) return "failed";
   await clearPendingAccountSettings(host.userId, resend);
@@ -106,6 +107,7 @@ export async function runAccountSettingsRefresh(
   // Captured before the first await, so a switch made while the GET is out is seen.
   const server = host.api.getEndpoint();
   const snapshot = await readStoredAccountSettings();
+  if (host.isStale(server)) return "stale";
   const res = await host.api.accountSettings.get(host.userId);
   if (host.isStale(server)) return "stale";
   if (res.error) return settleGetError(host, res.error.code);

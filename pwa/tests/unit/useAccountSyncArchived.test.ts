@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useAccountSyncArchived } from "@/hooks/useAccountSyncArchived";
 import { namespacedKey } from "@/hooks/useAuth";
-import { BoolFlag, type ApiClient } from "@/api/client";
+import { ApiClient, BoolFlag } from "@/api/client";
 import type {
   AccountSettings,
   AccountSettingsPatch,
@@ -353,5 +353,75 @@ describe("useAccountSyncArchived — toggling", () => {
 
     expect(result.current.message).toBe("");
     expect(result.current.syncArchived).toBe(BoolFlag.TRUE);
+  });
+});
+
+describe("useAccountSyncArchived — one ApiClient across mounts", () => {
+  const ENDPOINT = "https://api.example.com";
+  const HEX_USER = "a".repeat(64);
+  const HEX_CACHE_KEY = namespacedKey(HEX_USER, "syncArchived");
+
+  function jsonResponse(body: unknown) {
+    return { ok: true, status: 200, json: () => Promise.resolve(body) };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("never lets a read sent before a save overwrite the saved value on the next mount", async () => {
+    const oldGet = held<unknown>();
+    const newGet = held<unknown>();
+    const fetchMock = vi
+      .fn<(url: string, init?: RequestInit) => Promise<unknown>>()
+      .mockReturnValueOnce(oldGet.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { ok: true, settings: { syncArchived: BoolFlag.TRUE } },
+        }),
+      )
+      .mockReturnValueOnce(newGet.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(ENDPOINT);
+    client.setAuthToken("1".repeat(64));
+
+    const first = renderHook(() => useAccountSyncArchived(HEX_USER, client));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await toggle(first.result);
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("PATCH");
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("1");
+    first.unmount();
+
+    // The next page mounts with the same client while the first page's GET is still out.
+    const seen: BoolFlag[] = [];
+    const second = renderHook(() => {
+      const hook = useAccountSyncArchived(HEX_USER, client);
+      seen.push(hook.syncArchived);
+      return hook;
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      oldGet.release(
+        jsonResponse({ data: { settings: { syncArchived: BoolFlag.FALSE } } }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(second.result.current.syncArchived).toBe(BoolFlag.TRUE);
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("1");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const [url, init] = fetchMock.mock.calls[2];
+    expect(url).toBe(`${ENDPOINT}/api/user/${HEX_USER}/settings`);
+    expect(init?.method).toBeUndefined();
+    await act(async () => {
+      newGet.release(
+        jsonResponse({ data: { settings: { syncArchived: BoolFlag.TRUE } } }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(second.result.current.syncArchived).toBe(BoolFlag.TRUE);
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("1");
+    expect(seen).not.toContain(BoolFlag.FALSE);
   });
 });
