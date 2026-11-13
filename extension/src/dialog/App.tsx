@@ -3,10 +3,9 @@ import browser from "webextension-polyfill";
 import { Inbox, Library, BookOpen, Settings } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
 import { USER_ID_KEY, HAS_COMPLETED_INITIAL_SETUP_KEY } from "../constants";
-import { STORED_SESSION_KEYS } from "../api/tokenBinding";
 import { readFamilyId } from "../storage/familyId";
 import { safeStorageGet } from "../storage/safeStorage";
-import { applyStoredSession } from "./applyStoredSession";
+import { applyBootSession, BOOT_SESSION_KEYS } from "./applyStoredSession";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
 import { unmountFamilyTreeThenResetClient } from "./familyTreeTeardown";
 import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
@@ -106,20 +105,21 @@ export function App({
       return;
     }
 
-    // familyId, userId and endpoint come from DIRECT storage reads: background
-    // messages are unreliable in Firefox (its event page sleeps).
+    // Read storage directly: Firefox's event page sleeps. The family endpoint and token
+    // apply only with a family bound; onboarding gets just the manual endpoint (#501).
     let cancelled = false;
     const identityCheck = new AbortController();
     void (async () => {
       try {
         const [familyId, storageResult] = await Promise.all([
           readFamilyId(),
-          browser.storage.local.get([USER_ID_KEY, ...STORED_SESSION_KEYS]),
+          browser.storage.local.get([...BOOT_SESSION_KEYS]),
         ]);
         if (cancelled || bootSupersededRef.current) return;
 
-        applyStoredSession(apiClientRef.current, storageResult);
-        if (familyId && storageResult[USER_ID_KEY]) {
+        const familyBound = Boolean(familyId && storageResult[USER_ID_KEY]);
+        applyBootSession(apiClientRef.current, storageResult, familyBound);
+        if (familyBound) {
           // Stays "loading" until the page's Readmoo account is checked (#271).
           const storedUserId = storageResult[USER_ID_KEY] as string;
           const identity = await checkAccountIdentity(

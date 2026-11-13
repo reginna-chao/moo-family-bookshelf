@@ -22,7 +22,7 @@ import {
   syncCodeText,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
-import { API_ENDPOINT_KEY } from "../../src/constants";
+import { MANUAL_API_ENDPOINT_KEY } from "../../src/constants";
 
 /** Helper: go through onboarding and create a family, returning the sync code. */
 async function createFamilyAndGetSyncCode(
@@ -41,7 +41,7 @@ async function createFamilyAndGetSyncCode(
       }
       chrome.storage.local.set({ [key]: apiUrl });
     },
-    { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    { apiUrl: WORKER_API_URL, key: MANUAL_API_ENDPOINT_KEY },
   );
 
   await page.goto(MOCK_READMOO_URL);

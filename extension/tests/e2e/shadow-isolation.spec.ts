@@ -70,7 +70,7 @@ import {
   type ClosedShadowDriver,
   type ElementQuery,
 } from "./helpers/closed-shadow-cdp";
-import { API_ENDPOINT_KEY } from "../../src/constants";
+import { MANUAL_API_ENDPOINT_KEY } from "../../src/constants";
 // Relative path, not the `moo-family-bookshelf-shared/*` alias (same reason as book-sharing.spec.ts).
 import { CURRENT_PIN_WRONG_MESSAGE } from "../../../shared/src/verifyInput/messages";
 import type { BrowserContext, Frame, Page } from "@playwright/test";
@@ -120,7 +120,7 @@ async function openDialogOnMockPage(
   await page.goto(`chrome-extension://${extensionId}/background.js`);
   await page.evaluate(
     ({ apiUrl, key }) => chrome.storage.local.set({ [key]: apiUrl }),
-    { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+    { apiUrl: WORKER_API_URL, key: MANUAL_API_ENDPOINT_KEY },
   );
   await page.goto(MOCK_READMOO_URL);
   await waitForPageReady(page);

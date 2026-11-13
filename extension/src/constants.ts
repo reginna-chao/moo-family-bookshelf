@@ -56,6 +56,9 @@ export const USER_EMAIL_KEY = "moo:userEmail";
 
 // Config
 export const API_ENDPOINT_KEY = "moo:apiEndpoint";
+/** Operator-set endpoint (written by hand in DevTools); boot applies it only with no family
+ *  bound, and no family flow ever writes it. See docs/architecture.md → 認證更新與冷卻. */
+export const MANUAL_API_ENDPOINT_KEY = "moo:manualApiEndpoint";
 /**
  * The family API endpoint the user last refused to switch to. storage.local
  * only (never sync) — like API_ENDPOINT_KEY this is a per-device decision.
