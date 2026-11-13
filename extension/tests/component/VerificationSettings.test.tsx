@@ -8,6 +8,7 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VerificationSettings } from "@/dialog/VerificationSettings";
 import { rateLimitedMessage } from "@/dialog/verificationMessages";
+import { VERIFY_SERVER_CHANGED_MESSAGE } from "@/dialog/useVerifyMethodFlow";
 import type { ApiClient } from "@/api/client";
 import type { VerifyMethod } from "@/api/types";
 import {
@@ -272,6 +273,32 @@ describe("VerificationSettings", () => {
     await waitFor(() => {
       expect(screen.getByText("482916")).toBeInTheDocument();
     });
+  });
+
+  // Positive pairing: "generates and displays OTP code" proves this mock records a generation on an unchanged server.
+  it("generating a code issues no request when the client's server differs from the one the method was read from", async () => {
+    let endpoint = DEFAULT_API_ENDPOINT;
+    const api = createMockApiClient({
+      getEndpoint: vi.fn(() => endpoint),
+      getVerifyMethod: vi
+        .fn()
+        .mockResolvedValueOnce({ data: { method: "code", prompted: 0 } })
+        .mockResolvedValue({ data: { method: "none", prompted: 0 } }),
+    });
+    render(<VerificationSettings userId="user-1" apiClient={api} />);
+
+    const generate = await screen.findByRole("button", { name: "產生驗證碼" });
+    endpoint = "https://nas.example.com/moo";
+    fireEvent.click(generate);
+
+    expect(
+      await screen.findByText(VERIFY_SERVER_CHANGED_MESSAGE),
+    ).toBeInTheDocument();
+    expect(api.generateOtp).not.toHaveBeenCalled();
+    expect(api.getVerifyMethod).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("button", { name: "產生驗證碼" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows saved confirmation after successful save", async () => {

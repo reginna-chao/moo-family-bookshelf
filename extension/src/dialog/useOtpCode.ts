@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import type { ApiClient } from "../api/client";
 import { rateLimitedEnvelopeMessage } from "./verificationMessages";
-import type { SaveState } from "./useVerifyMethodFlow";
+import type { SaveState } from "./useSavedStateTimer";
 
 export interface UseOtpCodeOptions {
   userId: string;
@@ -10,6 +10,8 @@ export interface UseOtpCodeOptions {
   clearSavedTimer: () => void;
   setSaveState: (state: SaveState) => void;
   setSaveError: (error: string) => void;
+  /** The flow's source check; true when generation must not start. */
+  stopIfMoved: () => boolean;
 }
 
 export interface UseOtpCodeResult {
@@ -28,6 +30,7 @@ export function useOtpCode({
   clearSavedTimer,
   setSaveState,
   setSaveError,
+  stopIfMoved,
 }: UseOtpCodeOptions): UseOtpCodeResult {
   // OTP state
   const [otpCode, setOtpCode] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export function useOtpCode({
   }, []);
 
   const handleGenerateOtp = useCallback(async () => {
+    if (stopIfMoved()) return;
     // A new OTP generation supersedes any pending saved→idle reset: the stale
     // timer would dismiss this handler's own failure banner mid-flight.
     clearSavedTimer();
@@ -91,7 +95,14 @@ export function useOtpCode({
     }
     setOtpCode(code);
     setOtpExpiresAt(expiresAt);
-  }, [userId, apiClient, clearSavedTimer, setSaveState, setSaveError]);
+  }, [
+    userId,
+    apiClient,
+    clearSavedTimer,
+    setSaveState,
+    setSaveError,
+    stopIfMoved,
+  ]);
 
   return { otpCode, otpExpiresAt, otpCountdown, resetOtp, handleGenerateOtp };
 }
