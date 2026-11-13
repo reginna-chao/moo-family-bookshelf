@@ -31,6 +31,14 @@ export const PERSONAL_BOOKS_CACHE_KEY = "moo:personalBooksCache";
 export const USER_ID_KEY = "moo:userId";
 export const AUTH_TOKEN_KEY = "moo:authToken";
 export const TOKEN_EXPIRES_AT_KEY = "moo:tokenExpiresAt";
+// The server that issued the stored token: "official" for the official default, else its URL.
+export const TOKEN_SERVER_KEY = "moo:authTokenServer";
+// Everything that goes when the stored token goes; every token removal uses this list.
+export const STORED_TOKEN_KEYS: readonly string[] = [
+  AUTH_TOKEN_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
+];
 // Epoch ms until which automatic recovery joins are suppressed after a 429.
 export const RECOVERY_COOLDOWN_UNTIL_KEY = "moo:recoveryCooldownUntil";
 // Epoch ms until which the user's own leave / account deletion counts as in

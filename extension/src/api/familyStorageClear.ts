@@ -3,10 +3,9 @@
 
 import browser from "webextension-polyfill";
 import {
-  AUTH_TOKEN_KEY,
   FAMILY_ID_KEY,
   STORE_PAGE_INDEX_KEY,
-  TOKEN_EXPIRES_AT_KEY,
+  STORED_TOKEN_KEYS,
 } from "../constants";
 import { FAMILY_ENDPOINT_CHOICE_KEYS } from "../storage/familyEndpointChoice";
 
@@ -23,9 +22,9 @@ import { FAMILY_ENDPOINT_CHOICE_KEYS } from "../storage/familyEndpointChoice";
  *
  * The store-page chip index (family members' names + book ids) goes with the
  * family id: it must not outlive the membership. The chip switch itself is the
- * user's and stays. The family's auth token and its expiry go with it too, in
- * the same removal as the endpoint keys, so the token is never paired with the
- * official default.
+ * user's and stays. The family's auth token, its expiry and the server it was
+ * stored with go with it too, in the same removal as the endpoint keys, so the
+ * token is never paired with the official default.
  *
  * The removal drops BOTH the accepted endpoint and the declined marker, because
  * the endpoint is a FAMILY-scoped setting (the owner picks it, every member
@@ -46,8 +45,7 @@ export async function clearFamilyStorage(): Promise<void> {
   await browser.storage.local.remove([
     FAMILY_ID_KEY,
     STORE_PAGE_INDEX_KEY,
-    AUTH_TOKEN_KEY,
-    TOKEN_EXPIRES_AT_KEY,
+    ...STORED_TOKEN_KEYS,
     ...FAMILY_ENDPOINT_CHOICE_KEYS,
   ]);
   try {

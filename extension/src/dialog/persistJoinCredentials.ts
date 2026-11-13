@@ -5,8 +5,10 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   FAMILY_ID_KEY,
 } from "../constants";
+import { tokenServerMarker } from "../api/tokenBinding";
 
 /** Persist auth/family credentials to chrome.storage.local — familyId written directly; the Dialog
  *  never routes storage writes through the background (docs/architecture.md → 本機儲存與同步).
@@ -31,6 +33,7 @@ export async function persistJoinCredentials(opts: {
   }
   if (opts.authToken !== undefined) {
     storageData[AUTH_TOKEN_KEY] = opts.authToken;
+    storageData[TOKEN_SERVER_KEY] = tokenServerMarker(opts.endpoint);
     storageData[API_ENDPOINT_KEY] = opts.endpoint;
   }
   if (opts.expiresAt) {

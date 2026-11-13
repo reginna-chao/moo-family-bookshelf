@@ -174,13 +174,15 @@ export class ApiTransport {
   }
 
   private startRefresh(): Promise<RefreshOutcome> {
+    const session = this.session.begin(this.baseUrl);
     return doRefreshToken({
       request: this.request.bind(this),
-      // Binds without ending the session: the refresh's own token must not discard the refresh.
+      // Binds without ending the session (the refresh's own token must not discard the refresh), and
+      // only to the server the refresh started on, never once that session ended.
       setAuthToken: (token) => {
-        this.session.bind(token, this.baseUrl);
+        if (session.isLive()) this.session.bind(token, session.endpoint);
       },
-      beginSession: () => this.session.begin(this.baseUrl),
+      beginSession: () => session,
       onFamilyRemoved: this.callbacks.onFamilyRemoved(),
       // Wrap the caller's callback so raising the prompt also sets the latch;
       // auth-refresh.ts stays latch-agnostic except for the isReauthPending skip.

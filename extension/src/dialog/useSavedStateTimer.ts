@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
+export type SaveState = "idle" | "saving" | "saved" | "error";
+
 export interface SavedStateTimer {
   /** Cancel the pending reset, if any. */
   clearSavedTimer: () => void;

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import { ApiClient } from "@/api/client";
 import {
+  applyBootSession,
   applyManualEndpoint,
   applyStoredSession,
   BOOT_SESSION_KEYS,
@@ -12,6 +13,7 @@ import {
   DEFAULT_API_ENDPOINT,
   MANUAL_API_ENDPOINT_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 
@@ -26,6 +28,11 @@ import {
  * onboarding; only the operator-set `moo:manualApiEndpoint` may, and never with a
  * token. An unusable manual value is warned about and left in storage for the
  * operator — nothing is written or removed, and the client stays on the default.
+ *
+ * applyBootSession: App's single boot call, choosing between the two by whether a
+ * family is bound. Its table feeds both branches the SAME storage (family endpoint,
+ * token, token-server marker and manual endpoint), so a swapped or ignored
+ * `familyBound` shows as the wrong server or a token where none may go.
  *
  * Real `ApiClient`, with `fetch` faked so "the official server got no token" is an
  * assertion on an actual request rather than on a spy. The removal of an unusable
@@ -236,16 +243,81 @@ describe("applyStoredSession", () => {
 });
 
 describe("BOOT_SESSION_KEYS", () => {
-  it("asks for the user, the family endpoint with its token, and the manual endpoint", () => {
+  it("asks for the user, the family endpoint with its token and the token's server, and the manual endpoint", () => {
     expect([...BOOT_SESSION_KEYS].sort()).toEqual(
       [
         USER_ID_KEY,
         AUTH_TOKEN_KEY,
+        TOKEN_SERVER_KEY,
         API_ENDPOINT_KEY,
         MANUAL_API_ENDPOINT_KEY,
       ].sort(),
     );
   });
+});
+
+describe("applyBootSession", () => {
+  const MANUAL_ENDPOINT = "https://manual.example";
+  const OTHER_SERVER = "https://other.example";
+  const originalFetch = globalThis.fetch;
+
+  function bootStorage(marker: string): Record<string, unknown> {
+    return {
+      [USER_ID_KEY]: USER,
+      [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+      [AUTH_TOKEN_KEY]: TOKEN,
+      [TOKEN_SERVER_KEY]: marker,
+      [MANUAL_API_ENDPOINT_KEY]: MANUAL_ENDPOINT,
+    };
+  }
+
+  beforeEach(async () => {
+    await browser.storage.local.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+    await browser.storage.local.clear();
+  });
+
+  it.each<[string, boolean, string, string, string | undefined]>([
+    [
+      "a bound family uses the family endpoint and its paired token",
+      true,
+      CUSTOM_ENDPOINT,
+      CUSTOM_ENDPOINT,
+      `Bearer ${TOKEN}`,
+    ],
+    [
+      "a bound family drops a token another server issued",
+      true,
+      OTHER_SERVER,
+      CUSTOM_ENDPOINT,
+      undefined,
+    ],
+    [
+      "no family uses only the manual endpoint, with no token",
+      false,
+      CUSTOM_ENDPOINT,
+      MANUAL_ENDPOINT,
+      undefined,
+    ],
+  ])(
+    "%s",
+    async (_label, familyBound, marker, expectedServer, expectedAuth) => {
+      const fetchMock = fakeFetch();
+      const client = new ApiClient();
+
+      applyBootSession(client, bootStorage(marker), familyBound);
+
+      expect(client.getEndpoint()).toBe(expectedServer);
+      const sent = await sendAndCapture(client, fetchMock);
+      expect(sent.url.startsWith(expectedServer)).toBe(true);
+      expect(sent.authorization).toBe(expectedAuth);
+    },
+  );
 });
 
 describe("applyManualEndpoint", () => {

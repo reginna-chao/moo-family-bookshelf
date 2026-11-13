@@ -11,12 +11,12 @@ import reactHooks from "eslint-plugin-react-hooks";
 // entry — split the file instead. Keys are relative to this directory.
 const MAX_LINES = 200;
 const MAX_LINES_LEGACY_CEILINGS = {
-  "src/api/auth-refresh.ts": 299,
+  "src/api/auth-refresh.ts": 290,
   "src/api/client.ts": 584,
   "src/content/index.ts": 400,
   "src/content/mobileLayout.ts": 257,
   "src/content/readmoo-lend.ts": 255,
-  "src/dialog/App.tsx": 462,
+  "src/dialog/App.tsx": 458,
   "src/dialog/BorrowTab.tsx": 456,
   "src/dialog/FamilyShelf.tsx": 214,
   "src/dialog/MemberList.tsx": 296,

@@ -5,10 +5,8 @@ import type { ApiClient } from "../api/client";
 import type { ApiErrorPayload, VerifyMethod } from "../api/types";
 import { saveVerifyMethod } from "./saveVerifyMethod";
 import { recoverStepUp } from "./stepUp";
-import { useSavedStateTimer } from "./useSavedStateTimer";
+import { useSavedStateTimer, type SaveState } from "./useSavedStateTimer";
 import { useVerifyMethodSource } from "./useVerifyMethodSource";
-
-export type SaveState = "idle" | "saving" | "saved" | "error";
 
 export const VERIFY_SERVER_CHANGED_MESSAGE =
   "伺服器已更換，請重新設定驗證方式。";
@@ -196,5 +194,6 @@ export function useVerifyMethodFlow({
     handleSave,
     handleMethodSelect,
     handleCurrentSecret,
+    restartIfMoved,
   };
 }

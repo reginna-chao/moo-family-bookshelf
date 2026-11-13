@@ -5,11 +5,7 @@ import { ApiClient, BorrowStatus } from "../api/client";
 import { USER_ID_KEY, HAS_COMPLETED_INITIAL_SETUP_KEY } from "../constants";
 import { readFamilyId } from "../storage/familyId";
 import { safeStorageGet } from "../storage/safeStorage";
-import {
-  applyManualEndpoint,
-  applyStoredSession,
-  BOOT_SESSION_KEYS,
-} from "./applyStoredSession";
+import { applyBootSession, BOOT_SESSION_KEYS } from "./applyStoredSession";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
 import { unmountFamilyTreeThenResetClient } from "./familyTreeTeardown";
 import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
@@ -121,8 +117,9 @@ export function App({
         ]);
         if (cancelled || bootSupersededRef.current) return;
 
-        if (familyId && storageResult[USER_ID_KEY]) {
-          applyStoredSession(apiClientRef.current, storageResult);
+        const familyBound = Boolean(familyId && storageResult[USER_ID_KEY]);
+        applyBootSession(apiClientRef.current, storageResult, familyBound);
+        if (familyBound) {
           // Stays "loading" until the page's Readmoo account is checked (#271).
           const storedUserId = storageResult[USER_ID_KEY] as string;
           const identity = await checkAccountIdentity(
@@ -135,7 +132,6 @@ export function App({
           setUserId(storedUserId);
           setView(identity === "mismatch" ? "account-mismatch" : "main");
         } else {
-          applyManualEndpoint(apiClientRef.current, storageResult);
           setView("onboarding");
         }
       } catch {

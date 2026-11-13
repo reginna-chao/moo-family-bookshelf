@@ -14,6 +14,7 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   FAMILY_ID_KEY,
   API_ENDPOINT_KEY,
   MANUAL_API_ENDPOINT_KEY,
@@ -33,11 +34,11 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT a
  * background message, so familyId is seeded into BOTH storage areas, and the storage mocks are
  * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([...BOOT_SESSION_KEYS])` (user, token,
- * family endpoint, manual endpoint) each get only the keys they ask for. The accepted API endpoint is
- * seeded into storage.local too: boot reads it in the same DIRECT `get` as the token and no longer
- * sends GET_API_ENDPOINT (unreliable on Firefox's sleeping background event page). The background no
- * longer answers that message at all (#366); the boot test still asserts it is never sent, as a
- * regression guard.
+ * token issuer, family endpoint, manual endpoint) each get only the keys they ask for. The accepted API
+ * endpoint is seeded into storage.local too: boot reads it in the same DIRECT `get` as the token and no
+ * longer sends GET_API_ENDPOINT (unreliable on Firefox's sleeping background event page). The
+ * background no longer answers that message at all (#366); the boot test still asserts it is never
+ * sent, as a regression guard.
  *
  * Styling contract: jsdom does not apply stylesheet rules, so wherever styling moved from inline
  * styles to classes in styles.css, the class itself is the observable contract — `.moo-tab--active`
@@ -68,6 +69,12 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * Being removed ends the membership exactly like leaving does. So at boot the family endpoint and
  * token apply only with a family bound (#501); with none, onboarding takes just the operator-set
  * `moo:manualApiEndpoint` (no flow writes it), never a token, and an unusable one leaves the default.
+ *
+ * Stored token issuer: the boot read carries the server that issued the stored token
+ * (`moo:authTokenServer`). A token stored with another server's marker than the stored endpoint is
+ * not put on the client; the client still boots on the endpoint. The matching-marker row is the
+ * positive companion: the same boot read does set the token, so the other row cannot pass because
+ * the token is never read at all.
  */
 
 // Mock all child components
@@ -148,12 +155,15 @@ function setupChromeMessages(options: {
   /** Operator-set `moo:manualApiEndpoint`, seeded into storage.local; any value but `undefined`
    *  is stored as-is, so an unusable one can be seeded. */
   manualApiEndpoint?: unknown;
+  /** The server stored as the token's issuer (`moo:authTokenServer`); none when omitted. */
+  tokenServer?: string;
 }) {
   vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
 
   const localStore: Record<string, unknown> = {};
   if (options.userId) localStore[USER_ID_KEY] = options.userId;
   if (options.authToken) localStore[AUTH_TOKEN_KEY] = options.authToken;
+  if (options.tokenServer) localStore[TOKEN_SERVER_KEY] = options.tokenServer;
   if (options.familyId) localStore[FAMILY_ID_KEY] = options.familyId;
   if (options.apiEndpoint) localStore[API_ENDPOINT_KEY] = options.apiEndpoint;
   if (options.manualApiEndpoint !== undefined) {
@@ -793,6 +803,42 @@ describe("App", () => {
     restore();
     warn.mockRestore();
   });
+
+  // See the file header, "Stored token issuer".
+  it.each([
+    { marker: "official", setsToken: false },
+    { marker: "https://e1.example", setsToken: true },
+  ])(
+    "boots on a stored endpoint whose token carries the marker $marker (sets token: $setsToken)",
+    async ({ marker, setsToken }) => {
+      const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
+      const { instances, restore } = await captureApiClients();
+      try {
+        setupChromeMessages({
+          familyId: "fam-1",
+          userId: "user-1",
+          authToken: "stored-token",
+          apiEndpoint: "https://e1.example",
+          tokenServer: marker,
+        });
+
+        render(<App />);
+        await waitFor(() => {
+          expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+        });
+
+        expect(instances[0].getEndpoint()).toBe("https://e1.example");
+        if (setsToken) {
+          expect(setAuthToken).toHaveBeenCalledWith("stored-token");
+        } else {
+          expect(setAuthToken).not.toHaveBeenCalledWith("stored-token");
+        }
+      } finally {
+        setAuthToken.mockRestore();
+        restore();
+      }
+    },
+  );
 
   // A dead token recoverable only by the PWA-login secret must NOT drop the user to onboarding
   // (Invariant 2): VerificationPrompt overlays the still-mounted main view.

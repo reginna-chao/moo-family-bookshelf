@@ -1,12 +1,8 @@
 /** The recovery join of the staged token refresh (`auth-refresh.ts`). See docs/architecture.md →
  *  認證更新與冷卻. */
 
-import browser from "webextension-polyfill";
-import {
-  isAuthToken,
-  isExpiresAt,
-} from "moo-family-bookshelf-shared/api/issuedCredentials";
-import { AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY } from "../constants";
+import { isAuthToken } from "moo-family-bookshelf-shared/api/issuedCredentials";
+import { storeIssuedToken } from "./tokenBinding";
 import { BoolFlag, type ApiResponse } from "./types";
 
 export interface JoinRecoveryDeps {
@@ -28,7 +24,9 @@ export interface RecoveryResult {
 
 /**
  * Rejoin the family the refresh started with. `identity` is what `stillOwns`
- * compares against, so it is never re-read from storage here.
+ * compares against, so it is never re-read from storage here. `identity.server`
+ * is the server the refresh started on: the one this join is sent to, stored
+ * with the token it issues.
  *
  * `stillOwns` runs immediately before the send, with no await between it and
  * `deps.request`, and again on the response; a `false` either way returns no
@@ -36,7 +34,7 @@ export interface RecoveryResult {
  */
 export async function attemptJoinRecovery(
   deps: JoinRecoveryDeps,
-  identity: { userId: string; familyId: string },
+  identity: { userId: string; familyId: string; server: string },
   stillOwns: () => Promise<boolean>,
 ): Promise<RecoveryResult> {
   // Omit displayName so the backend keeps the member's chosen name; `recovery`
@@ -66,14 +64,11 @@ export async function attemptJoinRecovery(
   const authToken = joinResult.data?.authToken;
   if (isAuthToken(authToken)) {
     deps.setAuthToken(authToken);
-    const recoveryUpdate: Record<string, unknown> = {
-      [AUTH_TOKEN_KEY]: authToken,
-    };
-    const expiresAt = joinResult.data?.expiresAt;
-    if (isExpiresAt(expiresAt)) {
-      recoveryUpdate[TOKEN_EXPIRES_AT_KEY] = expiresAt;
-    }
-    await browser.storage.local.set(recoveryUpdate);
+    await storeIssuedToken(
+      authToken,
+      joinResult.data?.expiresAt,
+      identity.server,
+    );
     return { recovered: true };
   }
 

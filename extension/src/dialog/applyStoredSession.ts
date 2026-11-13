@@ -1,8 +1,11 @@
 import type { ApiClient } from "../api/client";
-import { resolveStoredEndpoint } from "../api/tokenBinding";
+import {
+  resolveStoredEndpoint,
+  STORED_SESSION_KEYS,
+  storedTokenFor,
+} from "../api/tokenBinding";
 import {
   API_ENDPOINT_KEY,
-  AUTH_TOKEN_KEY,
   MANUAL_API_ENDPOINT_KEY,
   USER_ID_KEY,
 } from "../constants";
@@ -11,16 +14,17 @@ import { persistSwitchedFamilyEndpoint } from "../storage/familyEndpointChoice";
 /** The keys App's boot read fetches in one storage read. */
 export const BOOT_SESSION_KEYS: readonly string[] = [
   USER_ID_KEY,
-  AUTH_TOKEN_KEY,
-  API_ENDPOINT_KEY,
+  ...STORED_SESSION_KEYS,
   MANUAL_API_ENDPOINT_KEY,
 ];
 
 /**
  * Put the stored endpoint and its token on the client, or neither when the
  * endpoint is unusable (hand-edited storage, or written by an older build with
- * looser rules). `stored` is one storage read, so the token and the endpoint it
- * is paired with cannot disagree.
+ * looser rules). `stored` is one storage read that includes every key in
+ * `STORED_SESSION_KEYS`, so the token and the endpoint it is paired with cannot
+ * disagree. A token stored with another server than the stored endpoint is not
+ * set (`storedTokenFor`): the client gets the endpoint only.
  *
  * App's boot read calls it only when a family is bound (familyId and userId both
  * stored). With no family it calls `applyManualEndpoint` instead, so a leftover
@@ -48,8 +52,22 @@ export function applyStoredSession(
 
   if (raw !== undefined) client.setEndpoint(endpoint);
 
-  const token = stored[AUTH_TOKEN_KEY];
-  if (typeof token === "string" && token !== "") client.setAuthToken(token);
+  const token = storedTokenFor(stored);
+  if (token !== null) client.setAuthToken(token);
+}
+
+/**
+ * App's boot step: `applyStoredSession` when a family is bound (familyId and
+ * userId both stored), `applyManualEndpoint` otherwise. `stored` holds every key
+ * in `BOOT_SESSION_KEYS`.
+ */
+export function applyBootSession(
+  client: ApiClient,
+  stored: Record<string, unknown>,
+  familyBound: boolean,
+): void {
+  if (familyBound) applyStoredSession(client, stored);
+  else applyManualEndpoint(client, stored);
 }
 
 /**

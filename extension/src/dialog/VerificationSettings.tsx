@@ -38,6 +38,7 @@ export function VerificationSettings({
     clearSavedTimer,
     setSaveState,
     setSaveError,
+    stopIfMoved: flow.restartIfMoved,
   });
 
   const handleMethodSelect = (method: VerifyMethod) => {

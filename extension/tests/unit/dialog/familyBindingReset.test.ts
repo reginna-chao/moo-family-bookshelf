@@ -22,6 +22,7 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   FAMILY_ID_KEY,
   LAST_SYNC_AT_KEY,
   DISPLAY_NAME_KEY,
@@ -88,6 +89,7 @@ const ACCOUNT_KEYS = [
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   LAST_SYNC_AT_KEY,
   DISPLAY_NAME_KEY,
   USER_EMAIL_KEY,
@@ -100,6 +102,7 @@ async function seedStoredAccount(): Promise<void> {
     [FAMILY_ID_KEY]: "fam-1",
     [AUTH_TOKEN_KEY]: "tok",
     [TOKEN_EXPIRES_AT_KEY]: 123,
+    [TOKEN_SERVER_KEY]: CUSTOM_ENDPOINT,
     [LAST_SYNC_AT_KEY]: 456,
     [DISPLAY_NAME_KEY]: "Old Account",
     [USER_EMAIL_KEY]: "old@example.com",
@@ -227,6 +230,7 @@ describe("familyBindingReset", () => {
       expect(local).not.toHaveProperty(FAMILY_ID_KEY);
       expect(local).not.toHaveProperty(AUTH_TOKEN_KEY);
       expect(local).not.toHaveProperty(TOKEN_EXPIRES_AT_KEY);
+      expect(local).not.toHaveProperty(TOKEN_SERVER_KEY);
       expect(local).not.toHaveProperty(API_ENDPOINT_KEY);
       expect(local).not.toHaveProperty(DECLINED_FAMILY_ENDPOINT_KEY);
       // Personal settings persist across families (Invariant 5).
@@ -259,6 +263,7 @@ describe("familyBindingReset", () => {
         FAMILY_ID_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        TOKEN_SERVER_KEY,
         STORE_PAGE_INDEX_KEY,
         API_ENDPOINT_KEY,
         DECLINED_FAMILY_ENDPOINT_KEY,

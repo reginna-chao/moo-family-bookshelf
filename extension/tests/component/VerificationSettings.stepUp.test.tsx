@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { currentSecretPrompt } from "moo-family-bookshelf-shared/verifyInput/messages";
-import { AUTH_TOKEN_KEY } from "@/constants";
+import { AUTH_TOKEN_KEY, TOKEN_SERVER_KEY } from "@/constants";
 import {
   pickMethod,
   putBody,
@@ -93,6 +93,7 @@ describe("VerificationSettings step-up", () => {
     expect(screen.getByText("已儲存")).toBeInTheDocument();
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
       [AUTH_TOKEN_KEY]: TOKEN,
+      [TOKEN_SERVER_KEY]: "official",
     });
     expect(storageSawSecret(CURRENT)).toBe(false);
   });
