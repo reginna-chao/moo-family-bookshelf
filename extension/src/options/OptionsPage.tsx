@@ -42,8 +42,15 @@ function PermissionStatus({ granted }: PermissionStatusProps) {
 
 /** The extension's options page: today only the store-page chip switch (#313). */
 export function OptionsPage() {
-  const { enabled, granted, message, hasFamily, toggle } =
-    useStorePageChipSetting();
+  const {
+    enabled,
+    granted,
+    needsGrant,
+    message,
+    hasFamily,
+    toggle,
+    authorize,
+  } = useStorePageChipSetting();
   const on = enabled === BoolFlag.TRUE;
   return (
     <main className="moo-options" style={PAGE_STYLE}>
@@ -67,6 +74,15 @@ export function OptionsPage() {
         <div className="moo-settings__hint">{STORE_CHIP_FRESHNESS}</div>
         {!hasFamily && <div className="moo-settings__hint">需要先加入家庭</div>}
         {message && <div className="moo-settings__error-text">{message}</div>}
+        {needsGrant && (
+          <button
+            type="button"
+            onClick={authorize}
+            className="moo-button moo-button--outline moo-button--sm"
+          >
+            授權
+          </button>
+        )}
       </section>
     </main>
   );

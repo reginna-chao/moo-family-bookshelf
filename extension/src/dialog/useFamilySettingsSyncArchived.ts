@@ -1,49 +1,28 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { BoolFlag } from "../api/client";
-import { readSyncArchived, writeSyncArchived } from "../storage/syncArchived";
+import { useAccountSetting } from "./useAccountSetting";
 
 export interface UseFamilySettingsSyncArchivedResult {
-  syncArchived: number;
+  syncArchived: BoolFlag;
   handleToggleSyncArchived: () => void;
+  /** Text under the switch; `""` when there is nothing to report. */
+  message: string;
 }
 
 /**
- * The 同步封存書籍 switch: reads the flag from storage.local on mount and writes
- * each toggle straight back, keeping the user's choice on screen even if the write fails.
+ * The 同步封存書籍 switch, an account setting shared with the PWA (#460): the
+ * stored value on mount, each toggle saved to the server and switched back
+ * when the save fails. Twin: `pwa/src/hooks/useAccountSyncArchived.ts`.
  */
 export function useFamilySettingsSyncArchived(): UseFamilySettingsSyncArchivedResult {
-  const [syncArchived, setSyncArchived] = useState<number>(BoolFlag.FALSE);
-  // Set once the user toggles, so a mount read that resolves later cannot overwrite it.
-  const userChoseRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const stored = await readSyncArchived();
-        if (!cancelled && !userChoseRef.current) {
-          setSyncArchived(stored);
-        }
-      } catch {
-        // storage.local unavailable — keep default
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { value, message, change } = useAccountSetting(
+    "syncArchived",
+    BoolFlag.FALSE,
+  );
 
   const handleToggleSyncArchived = useCallback(() => {
-    const next =
-      syncArchived === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
-    userChoseRef.current = true;
-    setSyncArchived(next);
-    // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
-    // persistence beats snapping the choice back under the user.
-    void writeSyncArchived(next).catch(() => {
-      // Ignore write failures; UI state remains authoritative.
-    });
-  }, [syncArchived]);
+    void change(value === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE);
+  }, [change, value]);
 
-  return { syncArchived, handleToggleSyncArchived };
+  return { syncArchived: value, handleToggleSyncArchived, message };
 }

@@ -37,6 +37,12 @@ type Json = any;
  * books record, and leave → join another family must not reset it. Each
  * writer case also asserts the write it made, so a request that never reached
  * the record cannot pass as "the setting survived".
+ *
+ * Account settings (#460): `settings:{id}` (sync archived books, auto-sync
+ * interval, store-page chip, floating-icon size) follow the user too. Leaving a
+ * family, being removed by the owner and joining another family must leave the
+ * stored value byte-identical, and `GET /settings` must keep returning it with
+ * the new family's token.
  */
 
 let kv: KVNamespace;
@@ -389,5 +395,97 @@ describe("Invariant #5 — newBookDefaultShared survives every other writer", ()
     const json = (await getRes.json()) as Json;
     expect(json.data.newBookDefaultShared).toBe(BoolFlag.TRUE);
     expect(json.data.books).toHaveLength(3);
+  });
+});
+
+// See the header → "Account settings".
+describe("Invariant #5 — account settings survive leaving and changing families", () => {
+  const SETTINGS = {
+    syncArchived: BoolFlag.TRUE,
+    autoSyncInterval: "monthly",
+    storePageChipEnabled: BoolFlag.FALSE,
+    floatingIconSize: "large",
+  };
+
+  /** Standard fixture + all four settings saved through their only writer. */
+  async function seedWithSettings() {
+    const seeded = await seedUserInFamilyAWithBooks();
+    const res = await request(
+      "PATCH",
+      `/api/user/${USER1}/settings`,
+      { settings: SETTINGS },
+      seeded.tokenUser1A,
+    );
+    expect(res.status).toBe(200);
+    const raw = await kv.get(kvKeys.accountSettings(USER1));
+    expect(raw).not.toBeNull();
+    return { ...seeded, raw };
+  }
+
+  async function readSettings(token: string): Promise<Json> {
+    const res = await request(
+      "GET",
+      `/api/user/${USER1}/settings`,
+      undefined,
+      token,
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as Json).data.settings;
+  }
+
+  it("keeps settings:{id} through leave → join a DIFFERENT family, and GET /settings still returns it", async () => {
+    const { familyA, tokenUser1A, raw } = await seedWithSettings();
+
+    const leaveRes = await request(
+      "DELETE",
+      `/api/family/${familyA}/member/${USER1}`,
+      undefined,
+      tokenUser1A,
+    );
+    expect(leaveRes.status).toBe(200);
+    expect(await kv.get(kvKeys.member(USER1))).toBeNull();
+    expect(await kv.get(kvKeys.accountSettings(USER1))).toBe(raw);
+
+    const { familyId: familyB } = await createFamily(OWNER2);
+    const joinRes = await request("POST", `/api/family/${familyB}/join`, {
+      userId: USER1,
+      displayName: "User1",
+    });
+    expect(joinRes.status).toBe(200);
+    const tokenUser1B = ((await joinRes.json()) as Json).data
+      .authToken as string;
+
+    expect(await kv.get(kvKeys.accountSettings(USER1))).toBe(raw);
+    expect(await readSettings(tokenUser1B)).toEqual(SETTINGS);
+  });
+
+  it("keeps settings:{id} when the owner removes the member", async () => {
+    const { familyId: familyA, ownerToken } = await createFamily(OWNER1);
+    const joinRes = await request("POST", `/api/family/${familyA}/join`, {
+      userId: USER1,
+      displayName: "User1",
+    });
+    expect(joinRes.status).toBe(200);
+    const tokenUser1A = ((await joinRes.json()) as Json).data
+      .authToken as string;
+    const saveRes = await request(
+      "PATCH",
+      `/api/user/${USER1}/settings`,
+      { settings: SETTINGS },
+      tokenUser1A,
+    );
+    expect(saveRes.status).toBe(200);
+    const raw = await kv.get(kvKeys.accountSettings(USER1));
+    expect(raw).not.toBeNull();
+
+    const kickRes = await request(
+      "DELETE",
+      `/api/family/${familyA}/member/${USER1}`,
+      undefined,
+      ownerToken,
+    );
+    expect(kickRes.status).toBe(200);
+    expect(await kv.get(kvKeys.member(USER1))).toBeNull();
+    expect(await kv.get(kvKeys.accountSettings(USER1))).toBe(raw);
   });
 });

@@ -15,6 +15,7 @@ import { PersonalShelfArchiveTabs } from "@/components/PersonalShelfArchiveTabs"
 import { PersonalShelfFilterBar } from "@/components/PersonalShelfFilterBar";
 import { PersonalShelfSearchBar } from "@/components/PersonalShelfSearchBar";
 import { PersonalShelfBookList } from "@/components/PersonalShelfBookList";
+import { useAccountSyncArchived } from "@/hooks/useAccountSyncArchived";
 import { useBookSort } from "@/hooks/useBookSort";
 import { usePersonalShelfEditor } from "@/hooks/usePersonalShelfEditor";
 import { usePersonalShelfView } from "@/hooks/usePersonalShelfView";
@@ -52,8 +53,9 @@ export function PersonalShelfPage({
     handleToggle,
     toggleSelect,
   } = usePersonalShelfEditor(userId, apiClient);
+  const { syncArchived } = useAccountSyncArchived(userId, apiClient);
   const view = usePersonalShelfView({
-    userId,
+    syncArchived,
     books,
     sort,
     pageSize,

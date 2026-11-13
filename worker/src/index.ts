@@ -10,6 +10,7 @@ import { accountDeletionGuard } from "./middleware/accountDeletionGuard";
 import { sweepDeletedAccounts } from "./services/accountDeletionSweep";
 import { userRoutes } from "./routes/user";
 import { userNewBookDefaultRoutes } from "./routes/userNewBookDefault";
+import { userSettingsRoutes } from "./routes/userSettings";
 import { familyRoutes } from "./routes/family";
 import { bookshelfRoutes } from "./routes/bookshelf";
 import { borrowRoutes } from "./routes/borrow";
@@ -159,6 +160,7 @@ app.get("/api/_docs", async (c) => {
 // Routes
 app.route("/api/user", userRoutes);
 app.route("/api/user", userNewBookDefaultRoutes);
+app.route("/api/user", userSettingsRoutes);
 app.route("/api/user", verifyRoutes);
 app.route("/api/user", publicShelfRoutes);
 app.route("/api/family", familyRoutes);

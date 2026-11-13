@@ -36,6 +36,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * window. Readmoo's library is a SPA that can stay open for days; without the
  * per-sync reset the second sync would stay silent and the degraded path would
  * look fixed.
+ *
+ * Account-settings gate (#460): the Dialog's open-time refresh may still be
+ * fetching the account's 自動同步頻率 / 同步封存書籍 when the personal shelf's
+ * mount auto-sync starts, so `canAutoSync` and `syncBooks` await the gate
+ * (src/storage/accountSettingsGate.ts) before their first storage read —
+ * `syncBooks` after its navigation wait. The gate cases hold it, prove nothing
+ * was read, change storage the way the refresh would, then open it.
  */
 
 // Mock scraper module (the DOM boundary). The sync reads `scrapeLibrary` /
@@ -60,7 +67,12 @@ vi.mock("@/sync/mergeBooks", () => ({
   ),
 }));
 
-import { syncBooks, type SyncBooksOptions } from "@/sync/syncBooks";
+import {
+  canAutoSync,
+  syncBooks,
+  type SyncBooksOptions,
+} from "@/sync/syncBooks";
+import { setAccountSettingsGate } from "@/storage/accountSettingsGate";
 import {
   scrapeLibrary,
   scrapeArchivedBooks,
@@ -966,5 +978,81 @@ describe("syncBooks — scrape-time warning reset", () => {
         'legacy selector fallback hit for "scraper:reader-link"',
       ),
     );
+  });
+});
+
+describe("syncBooks / canAutoSync — account-settings gate (#460)", () => {
+  // While the Dialog's open-time refresh runs, both wait for it before reading storage, so a
+  // frequency or 同步封存書籍 another browser changed applies to this very sync.
+  let store: Record<string, unknown>;
+  let releaseGate: () => void;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { hash: "#/library" },
+    });
+    store = {};
+    vi.mocked(chrome.storage.local.get).mockImplementation(((keys: unknown) => {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      const result: Record<string, unknown> = {};
+      for (const key of keyList) {
+        if (typeof key === "string" && key in store) result[key] = store[key];
+      }
+      return Promise.resolve(result);
+    }) as never);
+    vi.mocked(chrome.storage.local.set).mockResolvedValue(undefined as never);
+    setAccountSettingsGate(
+      new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      }),
+    );
+  });
+
+  afterEach(() => {
+    setAccountSettingsGate(null);
+    vi.restoreAllMocks();
+  });
+
+  async function settle(): Promise<void> {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  it("canAutoSync reads the frequency only after the gate opens", async () => {
+    store = toStorageKeys({ autoSyncInterval: "never" });
+
+    const deciding = canAutoSync();
+    await settle();
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+
+    // The refresh caches the account's frequency, then the gate opens.
+    store = toStorageKeys({ autoSyncInterval: "daily" });
+    releaseGate();
+
+    await expect(deciding).resolves.toBe(true);
+  });
+
+  it("syncBooks reads 同步封存書籍 only after the gate opens", async () => {
+    store = toStorageKeys(makeStorageData({ syncArchived: BoolFlag.FALSE }));
+    vi.mocked(scrapeLibrary).mockResolvedValue(completeScrape());
+    vi.mocked(scrapeArchivedBooks).mockResolvedValue(completeScrape());
+    const apiClient = createMockApiClient();
+
+    const syncing = syncBooks({
+      navigate: false,
+      userId: "user-123",
+      apiClient,
+    });
+    await settle();
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+    expect(apiClient.getPersonalBooks).not.toHaveBeenCalled();
+    expect(scrapeLibrary).not.toHaveBeenCalled();
+
+    store = toStorageKeys(makeStorageData({ syncArchived: BoolFlag.TRUE }));
+    releaseGate();
+
+    await expect(syncing).resolves.toMatchObject({ success: true });
+    expect(scrapeArchivedBooks).toHaveBeenCalledOnce();
   });
 });

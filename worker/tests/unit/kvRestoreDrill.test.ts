@@ -43,7 +43,7 @@ import {
  *
  * TIME. `main` does not inject `now`, so the drill flow fakes only `Date` at
  * the fixture's `NOW`; the seeded archive's two expiring records then count as
- * restorable, matching `kvRestore.test.ts`'s dry run (10 restorable, 0 skipped).
+ * restorable, matching `kvRestore.test.ts`'s dry run (11 restorable, 0 skipped).
  *
  * NO-WRITE GUARANTEE. Asserted structurally: every recorded call is either
  * `r2 object get` or `kv key list`, and `readKeys` / `writeRecords` of the
@@ -810,7 +810,7 @@ describe("kv-restore-drill main", () => {
     const { calls, lines, result } = await drill(objects);
     await result;
     expect(lines).toEqual([
-      "檢查完成，尚未寫入：預計還原 10 筆；略過已到期或即將到期 0 筆。",
+      "檢查完成，尚未寫入：預計還原 11 筆；略過已到期或即將到期 0 筆。",
       `備份完成時間 ${manifest.completedAt}；筆數 ${manifest.count}；大小 ${manifest.byteLength} bytes；請求數（內部／對外）0／0。`,
       "請到 Healthchecks 的月度 dry-run 提醒 check 按 Ping Now，並把這次結果記進維運紀錄。",
     ]);

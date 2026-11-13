@@ -1,22 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useFloatingIconSize } from "@/dialog/useFloatingIconSize";
-import { FLOATING_ICON_SIZE_KEY } from "@/constants";
+import { useAccountSettingsUnsupported } from "@/dialog/AccountSettingsContext";
+import { FLOATING_ICON_SIZE_KEY, USER_ID_KEY } from "@/constants";
+import { ACCOUNT_SETTINGS_SAVE_FAILED } from "moo-family-bookshelf-shared/api/accountSettingsMessages";
+import {
+  accountSettingsWrapper,
+  createAccountSettingsServer,
+  type FakeAccountSettingsServer,
+} from "../../helpers/accountSettingsServer";
 
 /**
- * The hook reads/writes the floating-button size via DIRECT `browser.storage.local`
- * access (storage/floatingIconSize.ts), not `browser.runtime.sendMessage`
- * round-trips to the background (issue #308). Firefox suspends the background event
- * page, so the old messaging path snapped a new size back to 「中」 when the reply
- * failed. The test mock aliases `chrome.*` and `browser.*` to the same spies (see
- * tests/setup.ts), so mocking `chrome.storage.local.{get,set}` observes exactly what
- * production calls.
+ * The 家庭書櫃按鈕大小 hook — an account setting since #460, built on `useAccountSetting`. It
+ * reads storage.local DIRECTLY (one read of the four account-setting keys), not through
+ * `browser.runtime.sendMessage` round-trips to the background (issue #308). Firefox suspends the
+ * background event page, so the old messaging path snapped a new size back to 「中」 when the
+ * reply failed. The test mock aliases `chrome.*` and `browser.*` to the same spies (see
+ * tests/setup.ts), so mocking `chrome.storage.local.{get,set}` observes exactly what production
+ * calls.
  *
- * The mount read is async, so assertions on the loaded value use `waitFor`.
- * `setSize` writes fire-and-forget with a swallowed catch and NEVER rolls the UI
- * back on a storage failure. A mount read that resolves AFTER the user already
- * picked a size must not overwrite that choice (the "late mount read" case).
+ * The mount read is async, so assertions on the loaded value use `waitFor`. A mount read that
+ * resolves AFTER the user already picked a size must not overwrite that choice (the "late mount
+ * read" case), and picking the current size sends nothing (acceptance 14). Without a provider
+ * `setSize` writes storage.local only and keeps the choice even when the write fails. Inside the
+ * Dialog's `AccountSettingsProvider` (store-backed storage mock + the in-memory server of
+ * tests/helpers/accountSettingsServer.tsx) a refused save switches back with
+ * 「儲存失敗，請稍後再試」 and writes nothing; a 404 keeps the size locally and turns local-only.
  */
+
+const USER = "a1b2c3d4e5f60718";
 
 function mockStoredSize(value: unknown) {
   vi.mocked(chrome.storage.local.get).mockResolvedValue({
@@ -58,15 +70,16 @@ describe("useFloatingIconSize", () => {
       await waitFor(() => {
         expect(result.current.size).toBe(stored);
       });
-      expect(chrome.storage.local.get).toHaveBeenCalledWith([
-        FLOATING_ICON_SIZE_KEY,
-      ]);
+      expect(chrome.storage.local.get).toHaveBeenCalledWith(
+        expect.arrayContaining([FLOATING_ICON_SIZE_KEY]),
+      );
     },
   );
 
   it.each([undefined, "huge", "LARGE", "", 42, null, { size: "large" }])(
     "normalizes the missing / invalid stored value %o to 'medium'",
     async (stored) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
       if (stored === undefined) {
         vi.mocked(chrome.storage.local.get).mockResolvedValue({} as never);
       } else {
@@ -102,9 +115,11 @@ describe("useFloatingIconSize", () => {
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
       [FLOATING_ICON_SIZE_KEY]: "large",
     });
+    // Settle the save's own state updates inside act().
+    await flushMicrotasks();
   });
 
-  it("keeps the chosen size when the storage.local write rejects (no rollback)", async () => {
+  it("without a provider, keeps the chosen size when the storage.local write rejects", async () => {
     vi.mocked(chrome.storage.local.set).mockRejectedValue(
       new Error("storage write failed"),
     );
@@ -146,6 +161,7 @@ describe("useFloatingIconSize", () => {
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
       [FLOATING_ICON_SIZE_KEY]: "icon",
     });
+    await flushMicrotasks();
   });
 
   it("keeps the user's choice when the mount read resolves after it", async () => {
@@ -188,5 +204,106 @@ describe("useFloatingIconSize", () => {
     expect(chrome.storage.local.get).toHaveBeenCalled();
     expect(chrome.storage.local.set).toHaveBeenCalled();
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("useFloatingIconSize inside the account-settings provider", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set({
+      [USER_ID_KEY]: USER,
+      [FLOATING_ICON_SIZE_KEY]: "small",
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function renderInProvider(server: FakeAccountSettingsServer) {
+    const hook = renderHook(
+      () => ({
+        icon: useFloatingIconSize(),
+        unsupported: useAccountSettingsUnsupported(),
+      }),
+      { wrapper: accountSettingsWrapper(server.client, USER) },
+    );
+    await flushMicrotasks();
+    vi.mocked(chrome.storage.local.set).mockClear();
+    return hook;
+  }
+
+  async function pick(result: {
+    current: { icon: { setSize: (s: "large") => void } };
+  }) {
+    await act(async () => {
+      result.current.icon.setSize("large");
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  it("sends nothing when picking the current size", async () => {
+    const server = createAccountSettingsServer({ floatingIconSize: "small" });
+    const { result } = await renderInProvider(server);
+
+    await act(async () => {
+      result.current.icon.setSize("small");
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(server.patch).not.toHaveBeenCalled();
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("switches back and shows the failure copy when the server refuses the save", async () => {
+    const server = createAccountSettingsServer({ floatingIconSize: "small" });
+    server.patch.mockResolvedValueOnce({
+      error: { code: "INTERNAL_ERROR", message: "boom" },
+    });
+    const { result } = await renderInProvider(server);
+
+    await pick(result);
+
+    expect(server.patch).toHaveBeenCalledWith(USER, {
+      settings: { floatingIconSize: "large" },
+    });
+    expect(result.current.icon.size).toBe("small");
+    expect(result.current.icon.message).toBe(ACCOUNT_SETTINGS_SAVE_FAILED);
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("keeps the size locally and turns local-only on a server without the feature (404)", async () => {
+    const server = createAccountSettingsServer({ floatingIconSize: "small" });
+    server.patch.mockResolvedValueOnce({
+      error: { code: "NOT_FOUND", message: "Not Found" },
+    });
+    const { result } = await renderInProvider(server);
+
+    await pick(result);
+
+    expect(result.current.icon.size).toBe("large");
+    expect(result.current.icon.message).toBe("");
+    expect(result.current.unsupported).toBe(true);
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      [FLOATING_ICON_SIZE_KEY]: "large",
+    });
+  });
+
+  it("follows a storage.onChanged write", async () => {
+    const server = createAccountSettingsServer({ floatingIconSize: "small" });
+    const { result } = await renderInProvider(server);
+    const calls = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+    const listener = calls[calls.length - 1][0] as (
+      changes: Record<string, { newValue?: unknown }>,
+      area: string,
+    ) => void;
+
+    act(() => {
+      listener({ [FLOATING_ICON_SIZE_KEY]: { newValue: "icon" } }, "local");
+    });
+
+    expect(result.current.icon.size).toBe("icon");
   });
 });

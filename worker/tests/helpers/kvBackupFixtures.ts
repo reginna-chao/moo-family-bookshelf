@@ -46,6 +46,7 @@ export function recordsFixture(): RecordFixture[] {
     { key: "borrow:request", value: '{"familyId":"abcd-1234"}' },
     { key: "borrows:family:abcd-1234", value: "[]" },
     { key: "newbookdefault:reader", value: '{"newBookDefaultShared":0}' },
+    { key: "settings:reader", value: '{"floatingIconSize":"icon"}' },
     {
       key: "kicked:abcd-1234:former",
       value: "{}",

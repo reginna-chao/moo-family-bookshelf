@@ -16,6 +16,7 @@ import {
 } from "moo-family-bookshelf-shared/familyShelf/updateTracking";
 import { safeErrorText } from "moo-family-bookshelf-shared/api/safeErrorText";
 import { updateStorePageIndexIfEnabled } from "../storage/storePageChip";
+import { awaitAccountSettingsGate } from "../storage/accountSettingsGate";
 import type {
   LoadState,
   MemberBooks,
@@ -114,7 +115,10 @@ export function useFamilyDataRefreshBookshelf({
           member.userId.slice(0, 8),
         books: (member.books ?? []).filter((b) => b.isShared === BoolFlag.TRUE),
       }));
-      void updateStorePageIndexIfEnabled(parsedMembers, userId, familyId);
+      // After the gate, so a switch another browser turned on indexes on this very open.
+      void awaitAccountSettingsGate().then(() =>
+        updateStorePageIndexIfEnabled(parsedMembers, userId, familyId),
+      );
 
       // Update tracking: each member's `lastUpdated` comes straight off the wire, since a synthesized
       // `null` would read every existing member as unchanged against the seen baseline.

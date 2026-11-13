@@ -96,7 +96,13 @@ const mockDeleteAccount = vi.fn();
 const mockGetVerifyMethod = vi.fn();
 const mockRemoveMember = vi.fn();
 const mockUnkickMember = vi.fn();
+const mockGetAccountSettings = vi.fn();
+const mockPatchAccountSettings = vi.fn();
 const mockApiClient = {
+  accountSettings: {
+    get: mockGetAccountSettings,
+    patch: mockPatchAccountSettings,
+  },
   getFamilyMembers: mockGetFamilyMembers,
   getFamilyBookshelf: mockGetFamilyBookshelf,
   leaveFamily: mockLeaveFamily,
@@ -197,6 +203,13 @@ describe("SettingsPage", () => {
     mockGetFamilyBookshelf.mockResolvedValue({
       data: { familyId: defaultProps.familyId, members: [] },
     });
+    // Default: the account has no 同步封存書籍 value yet, and every save is accepted (#460).
+    mockGetAccountSettings.mockResolvedValue({ data: {} });
+    mockPatchAccountSettings.mockImplementation(
+      async (_userId: string, body: { settings?: object }) => ({
+        data: { ...body.settings },
+      }),
+    );
   });
 
   afterEach(() => {
@@ -1074,27 +1087,110 @@ describe("SettingsPage", () => {
 
   // --- Sync archived toggle ---
 
-  it("toggles sync archived setting", async () => {
-    renderWithMembers([defaultProps.userId], defaultProps.userId);
+  // The account's 同步封存書籍 (#460), shared with the Extension; hook behaviour is pinned in
+  // pwa/tests/unit/useAccountSyncArchived.test.ts, the label and copy here at the render site.
+  describe("sync archived toggle (同步封存書籍)", () => {
+    const CACHE_KEY = `moo:${defaultProps.userId}:syncArchived`;
 
-    await waitFor(() => {
-      expect(screen.queryByText("載入中...")).not.toBeInTheDocument();
+    beforeEach(() => {
+      localStorage.removeItem(CACHE_KEY);
     });
 
-    const toggle = screen.getByRole("switch", { name: "顯示封存書籍" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
+    async function renderSettled() {
+      await act(async () => {
+        renderWithMembers([defaultProps.userId], defaultProps.userId);
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      return screen.getByRole("switch", { name: "同步封存書籍" });
+    }
 
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(
-      localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`),
-    ).toBe("1");
+    async function click(toggle: HTMLElement) {
+      await act(async () => {
+        fireEvent.click(toggle);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
 
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(
-      localStorage.getItem(`moo:${defaultProps.userId}:syncArchived`),
-    ).toBe("0");
+    it("toggles sync archived setting, saving it to the account", async () => {
+      const toggle = await renderSettled();
+      expect(
+        screen.queryByRole("switch", { name: "顯示封存書籍" }),
+      ).not.toBeInTheDocument();
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+
+      await click(toggle);
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      expect(localStorage.getItem(CACHE_KEY)).toBe("1");
+      expect(mockPatchAccountSettings).toHaveBeenLastCalledWith(
+        defaultProps.userId,
+        { settings: { syncArchived: BoolFlag.TRUE } },
+      );
+
+      await click(toggle);
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(localStorage.getItem(CACHE_KEY)).toBe("0");
+      expect(mockPatchAccountSettings).toHaveBeenLastCalledWith(
+        defaultProps.userId,
+        { settings: { syncArchived: BoolFlag.FALSE } },
+      );
+    });
+
+    it("explains that the setting is shared with the Extension", async () => {
+      await renderSettled();
+
+      expect(
+        screen.getByText(
+          "啟用後，個人書櫃會顯示已封存的書籍分頁，擴充功能同步時也會一併讀取封存的書。這個設定跟著帳號，擴充功能和手機版共用。",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("啟用後，個人書櫃會顯示已封存的書籍分頁"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows the account's value from the server", async () => {
+      mockGetAccountSettings.mockResolvedValue({
+        data: { syncArchived: BoolFlag.TRUE },
+      });
+
+      const toggle = await renderSettled();
+
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("switches back with 儲存失敗，請稍後再試 when the save is refused", async () => {
+      mockPatchAccountSettings.mockResolvedValueOnce({
+        error: { code: "INTERNAL_ERROR", message: "boom" },
+      });
+      const toggle = await renderSettled();
+
+      await click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(localStorage.getItem(CACHE_KEY)).toBe("0");
+      expect(screen.getByText("儲存失敗，請稍後再試")).toBeInTheDocument();
+    });
+
+    it("says the settings stay in this browser when the server predates them (404)", async () => {
+      mockGetAccountSettings.mockResolvedValue({
+        error: { code: "NOT_FOUND", message: "Not Found" },
+      });
+      const toggle = await renderSettled();
+
+      expect(
+        screen.getByText("伺服器尚未支援設定連動，這些設定只存在這個瀏覽器"),
+      ).toBeInTheDocument();
+      await click(toggle);
+
+      expect(mockPatchAccountSettings).not.toHaveBeenCalled();
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      expect(localStorage.getItem(CACHE_KEY)).toBe("1");
+      expect(
+        screen.queryByText("儲存失敗，請稍後再試"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   // --- Version & disclaimer ---

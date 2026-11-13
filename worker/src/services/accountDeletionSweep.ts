@@ -15,7 +15,7 @@ export const SWEEP_RETIRE_AFTER_MS = 60 * 60 * 1000;
 /** Equal to the cron in `worker/wrangler.toml`; only used to rotate which accounts one run takes. */
 export const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
 
-/** Accounts per run. At the worst case of ~64 KV operations each, one run stays under 1,000. */
+/** Accounts per run. At the worst case of ~66 KV operations each, one run stays under 1,000. */
 export const MAX_SWEEP_ACCOUNTS_PER_RUN = 10;
 
 /** The userIds on one list page; only names of the expected shape, so a stray key cannot steer a wipe. */

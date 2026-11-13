@@ -133,6 +133,7 @@ async function expectWiped(owner: Owner): Promise<void> {
     kvKeys.publicShelves(USER),
     kvKeys.publicShelf(owner.shelf.shareToken),
     kvKeys.member(USER),
+    kvKeys.accountSettings(USER),
     kvKeys.auth(USER),
   ]) {
     expect(await kv.get(key), key).toBeNull();
@@ -182,6 +183,14 @@ const WRITES: {
     send: ({ token }) =>
       call("PUT", `/api/user/${USER}/new-book-default`, token, {
         newBookDefaultShared: BoolFlag.TRUE,
+      }),
+  },
+  {
+    label: "PATCH /settings",
+    status: 200,
+    send: ({ token }) =>
+      call("PATCH", `/api/user/${USER}/settings`, token, {
+        settings: { syncArchived: BoolFlag.TRUE },
       }),
   },
   {

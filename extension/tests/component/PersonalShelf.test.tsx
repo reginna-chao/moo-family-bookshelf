@@ -218,8 +218,8 @@ function seedCache(books: TestBook[]) {
   );
 }
 
-/** Seed chrome.storage.local's 同步封存書 flag (read directly by useFamilySettingsSyncArchived), beside
- *  the display name every test's default storage mock returns. */
+/** Seed chrome.storage.local's 同步封存書 flag (read by useFamilySettingsSyncArchived through
+ *  useAccountSetting), beside the display name every test's default storage mock returns. */
 function seedSyncArchived(flag: BoolFlag) {
   vi.mocked(chrome.storage.local.get).mockImplementation(
     (_keys: unknown, callback?: (result: Record<string, unknown>) => void) => {
@@ -1102,10 +1102,11 @@ describe("PersonalShelf", () => {
 
       renderPersonalShelf();
       await waitForBooksLoaded();
-      // The flag was actually read; the "appear when 1" case above is the positive companion.
-      expect(chrome.storage.local.get).toHaveBeenCalledWith([
-        SYNC_ARCHIVED_KEY,
-      ]);
+      // The flag was actually read (one read of the four account-setting keys, #460); the "appear
+      // when 1" case above is the positive companion.
+      expect(chrome.storage.local.get).toHaveBeenCalledWith(
+        expect.arrayContaining([SYNC_ARCHIVED_KEY]),
+      );
 
       expect(
         screen.queryByText(

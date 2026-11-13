@@ -31,7 +31,7 @@ import { hashAuthToken } from "../../src/utils/crypto";
  *
  * THE STAGES (`deleteAccountKeys`, `src/services/accountDeletion.ts`), each awaited
  * before the next: (0) the deleting mark `token:deleting:{id}` (#468), never cleared
- * here, (1) `public:{token}`s, (2) `user:` / `newbookdefault:` / `otp:`,
+ * here, (1) `public:{token}`s, (2) `user:` / `newbookdefault:` / `settings:` / `otp:`,
  * (3) `publicshelves:`, (4) the other tokens, strict listing, (5) `member:`,
  * (6) mark `token:deleted:{hash}`, fail-open, (7) `auth:`, (8) `verify:`,
  * (9) presented `token:`, then its index, fail-open.
@@ -114,6 +114,7 @@ interface AccountKeys {
   snapshot: string;
   user: string;
   newBookDefault: string;
+  accountSettings: string;
   otp: string;
   pointer: string;
   otherToken: string;
@@ -190,6 +191,7 @@ async function keysOf(
     snapshot: kvKeys.publicShelf(shareToken),
     user: kvKeys.user(USER),
     newBookDefault: kvKeys.newBookDefault(USER),
+    accountSettings: kvKeys.accountSettings(USER),
     otp: kvKeys.otp(USER),
     pointer: kvKeys.publicShelves(USER),
     otherToken: kvKeys.authToken(otherHash),
@@ -205,7 +207,7 @@ async function keysOf(
   };
 }
 
-/** A complete account: family, verification, books, setting, public shelf, code, two more devices. */
+/** A complete account: family, verification, books, settings, public shelf, code, two more devices. */
 async function seedAccount(method: Method): Promise<Account> {
   const family = await dataOf(
     await call("POST", "/api/family", undefined, { userId: USER }),
@@ -224,6 +226,12 @@ async function seedAccount(method: Method): Promise<Account> {
   await dataOf(
     await call("PUT", `/api/user/${USER}/new-book-default`, token, {
       newBookDefaultShared: BoolFlag.TRUE,
+    }),
+    200,
+  );
+  await dataOf(
+    await call("PATCH", `/api/user/${USER}/settings`, token, {
+      settings: { syncArchived: BoolFlag.TRUE },
     }),
     200,
   );
@@ -278,7 +286,7 @@ async function keysLeft(): Promise<string[]> {
 function stagesOf(keys: AccountKeys): [number, string[]][] {
   return [
     [1, [keys.snapshot]],
-    [2, [keys.user, keys.newBookDefault, keys.otp]],
+    [2, [keys.user, keys.newBookDefault, keys.accountSettings, keys.otp]],
     [3, [keys.pointer]],
     [4, [keys.otherToken]],
     [5, [keys.member]],
@@ -369,6 +377,7 @@ const FAILURES: {
   { label: "public:{token}", stage: 1, key: (k) => k.snapshot },
   { label: "user:", stage: 2, key: (k) => k.user },
   { label: "newbookdefault:", stage: 2, key: (k) => k.newBookDefault },
+  { label: "settings:", stage: 2, key: (k) => k.accountSettings },
   { label: "otp:", stage: 2, key: (k) => k.otp },
   { label: "publicshelves:", stage: 3, key: (k) => k.pointer },
   { label: "another device's token:", stage: 4, key: (k) => k.otherToken },
@@ -428,6 +437,7 @@ describe("DELETE /api/user/:id, write order of a clean run", () => {
       [
         `delete ${keys.user}`,
         `delete ${keys.newBookDefault}`,
+        `delete ${keys.accountSettings}`,
         `delete ${keys.otp}`,
       ],
       [`delete ${keys.pointer}`],

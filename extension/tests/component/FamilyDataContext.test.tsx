@@ -15,6 +15,7 @@ import {
   USER_ID_KEY,
 } from "@/constants";
 import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
+import { createAccountSettingsServer } from "../helpers/accountSettingsServer";
 
 /**
  * FamilyDataProvider exposes a `reloadSignal` prop: bumping the number re-runs
@@ -674,6 +675,57 @@ describe("FamilyDataProvider store-page chip index", () => {
 
     expect(chrome.storage.local.get).not.toHaveBeenCalledWith(INDEX_GATE_KEYS);
     expect(indexWrites()).toHaveLength(0);
+  });
+
+  it("indexes on this open when the account's switch, off here, arrives with the open-time refresh (#460)", async () => {
+    // Stateful storage: the refresh's write of the switch is what the index writer reads after the gate.
+    const store: Record<string, unknown> = {
+      [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE,
+      [USER_ID_KEY]: "user-1",
+      [FAMILY_ID_KEY]: "fam-1",
+    };
+    vi.mocked(chrome.storage.local.get).mockImplementation(((
+      keys: string | string[],
+    ) => {
+      const list = Array.isArray(keys) ? keys : [keys];
+      return Promise.resolve(
+        Object.fromEntries(
+          list.filter((key) => key in store).map((key) => [key, store[key]]),
+        ),
+      );
+    }) as never);
+    vi.mocked(chrome.storage.local.set).mockImplementation(((
+      items: Record<string, unknown>,
+    ) => {
+      Object.assign(store, items);
+      return Promise.resolve();
+    }) as never);
+    const server = createAccountSettingsServer({
+      storePageChipEnabled: BoolFlag.TRUE,
+    });
+    let releaseRead!: () => void;
+    server.get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseRead = () => resolve({ data: { ...server.record } });
+        }),
+    );
+    const apiClient = createMockApiClient({
+      ...clientServing({ data: BOOKSHELF }),
+      accountSettings: server.api,
+      getEndpoint: server.client.getEndpoint,
+    });
+
+    await renderUntil("ready", apiClient);
+    expect(indexWrites()).toHaveLength(0);
+
+    await act(async () => {
+      releaseRead();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(store[STORE_PAGE_CHIP_ENABLED_KEY]).toBe(BoolFlag.TRUE);
+    await waitFor(() => expect(indexWrites()).toHaveLength(1));
   });
 });
 

@@ -84,11 +84,16 @@ export const FLOATING_ICON_SIZE_KEY = "moo:floatingIconSize";
 export const FAMILY_SHELF_SORT_KEY = "moo:familyShelfSort";
 export const PERSONAL_SHELF_SORT_KEY = "moo:personalShelfSort";
 
-// Store-page chip (#313) — storage.local only, never mirrored to sync. See storage/storePageChip.ts.
+// Store-page chip (#313) — storage.local only, never mirrored to sync. See storage/storePageChip.ts;
+// the switch (not the permission mirror) follows the account since #460 (storage/accountSettings.ts).
 export const STORE_PAGE_CHIP_ENABLED_KEY = "moo:storePageChipEnabled";
 // Mirror of permissions.contains for the store pattern; written only by the background.
 export const STORE_PAGE_HOST_GRANTED_KEY = "moo:storePageHostGranted";
 export const STORE_PAGE_INDEX_KEY = "moo:storePageIndex";
+
+// Account settings (#460) changed where no server request is made (the options page), held until
+// the next Dialog open uploads them. Value `{ userId, settings }`; see storage/accountSettingsPending.ts.
+export const ACCOUNT_SETTINGS_PENDING_KEY = "moo:accountSettingsPending";
 
 // One-time flags
 export const MANUAL_LEND_NOTICE_DISMISSED_KEY = "moo:manualLendNoticeDismissed";

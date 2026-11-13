@@ -135,6 +135,7 @@ async function seedLeftovers(): Promise<void> {
     JSON.stringify({ userId: USER }),
   );
   await kv.put(kvKeys.newBookDefault(USER), '{"newBookDefaultShared":1}');
+  await kv.put(kvKeys.accountSettings(USER), '{"syncArchived":1}');
   await seedAuthToken(kv, USER, {
     token: OLD_DEVICE_TOKEN,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -145,6 +146,7 @@ async function expectLeftoversGone(): Promise<void> {
   expect(await kv.get(kvKeys.user(USER))).toBeNull();
   expect(await kv.get(kvKeys.publicShelf(SHARE_TOKEN))).toBeNull();
   expect(await kv.get(kvKeys.newBookDefault(USER))).toBeNull();
+  expect(await kv.get(kvKeys.accountSettings(USER))).toBeNull();
   expect(await tokenOwner(kv, OLD_DEVICE_TOKEN)).toBeNull();
 }
 
