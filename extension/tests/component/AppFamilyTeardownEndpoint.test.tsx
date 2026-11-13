@@ -559,13 +559,22 @@ describe("App family teardown and the API endpoint", () => {
         calls
           .map(({ url }) => url)
           .filter(
-            (url) => !url.endsWith("/books") && !url.endsWith("/api/version"),
+            (url) =>
+              !url.endsWith("/books") &&
+              !url.endsWith("/api/version") &&
+              !url.endsWith("/settings"),
           ),
       ).toEqual([
         `${SELF_HOSTED}/api/family/${FAMILY_ID}/members`,
         `${SELF_HOSTED}/api/auth/refresh`,
         `${SELF_HOSTED}/api/family/${FAMILY_ID}/join`,
       ]);
+      // The open-time account-settings read (#460) went to the family's server too, once.
+      expect(
+        calls
+          .filter(({ url }) => url.endsWith("/settings"))
+          .map(({ method, url }) => [method, url]),
+      ).toEqual([["GET", `${SELF_HOSTED}/api/user/${USER_ID}/settings`]]);
     },
   );
 

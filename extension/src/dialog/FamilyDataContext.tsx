@@ -25,6 +25,7 @@ import {
   useFamilyDataStorageSync,
 } from "./useFamilyDataEffects";
 import { useFamilyDataValue } from "./useFamilyDataValue";
+import { AccountSettingsProvider } from "./AccountSettingsContext";
 
 export type { MemberBooks } from "./familyDataTypes";
 
@@ -147,9 +148,12 @@ export function FamilyDataProvider({
     prefsSyncFailed,
   });
 
+  // Mounted here because the main view always mounts this provider; each Dialog open reads the server once.
   return (
     <FamilyDataContext.Provider value={value}>
-      {children}
+      <AccountSettingsProvider apiClient={apiClient} userId={userId}>
+        {children}
+      </AccountSettingsProvider>
     </FamilyDataContext.Provider>
   );
 }

@@ -1,10 +1,16 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { BoolFlag } from "@/api/client";
 import type { ApiClient } from "@/api/client";
 import { SettingsDisplayNameField } from "@/components/SettingsDisplayNameField";
-import { namespacedKey } from "@/hooks/useAuth";
+import { useAccountSyncArchived } from "@/hooks/useAccountSyncArchived";
 import { useDisplayNameEditor } from "@/hooks/useDisplayNameEditor";
+import {
+  ACCOUNT_SETTINGS_SAVE_FAILED,
+  SYNC_ARCHIVED_SHARED_NOTE,
+} from "moo-family-bookshelf-shared/api/accountSettingsMessages";
+
+const SYNC_ARCHIVED_HINT = `啟用後，個人書櫃會顯示已封存的書籍分頁，擴充功能同步時也會一併讀取封存的書。${SYNC_ARCHIVED_SHARED_NOTE}`;
 
 interface SettingsPersonalSectionProps {
   familyId: string;
@@ -13,7 +19,7 @@ interface SettingsPersonalSectionProps {
 }
 
 /**
- * Settings-page 「個人設定」: display name and the show-archived switch. Its state
+ * Settings-page 「個人設定」: display name and the 同步封存書籍 switch. Its state
  * lives here, not in the collapsible body, so collapsing keeps it.
  */
 export function SettingsPersonalSection({
@@ -22,22 +28,7 @@ export function SettingsPersonalSection({
   apiClient,
 }: SettingsPersonalSectionProps) {
   const [personalOpen, setPersonalOpen] = useState(true);
-
-  // --- Sync archived setting ---
-  const syncArchivedKey = namespacedKey(userId, "syncArchived");
-  const [syncArchived, setSyncArchived] = useState<BoolFlag>(() => {
-    const stored = localStorage.getItem(syncArchivedKey);
-    return stored === "1" ? BoolFlag.TRUE : BoolFlag.FALSE;
-  });
-
-  const handleToggleSyncArchived = useCallback(() => {
-    setSyncArchived((prev) => {
-      const next = prev === BoolFlag.TRUE ? BoolFlag.FALSE : BoolFlag.TRUE;
-      localStorage.setItem(syncArchivedKey, String(next));
-      return next;
-    });
-  }, [syncArchivedKey]);
-
+  const syncArchived = useAccountSyncArchived(userId, apiClient);
   const editor = useDisplayNameEditor({ familyId, userId, apiClient });
 
   return (
@@ -56,16 +47,27 @@ export function SettingsPersonalSection({
           <SettingsDisplayNameField editor={editor} userId={userId} />
 
           <SyncArchivedSwitch
-            syncArchived={syncArchived}
-            handleToggleSyncArchived={handleToggleSyncArchived}
+            syncArchived={syncArchived.syncArchived}
+            handleToggleSyncArchived={syncArchived.toggle}
           />
-          <p className="text-gray-400 text-xs mt-1.5">
-            啟用後，個人書櫃會顯示已封存的書籍分頁
-          </p>
+          <p className="text-gray-400 text-xs mt-1.5">{SYNC_ARCHIVED_HINT}</p>
+          <SyncArchivedMessage message={syncArchived.message} />
         </div>
       )}
     </section>
   );
+}
+
+interface SyncArchivedMessageProps {
+  message: string;
+}
+
+/** A failed save in red; the local-only notice as a plain hint. */
+function SyncArchivedMessage({ message }: SyncArchivedMessageProps) {
+  if (!message) return null;
+  const tone =
+    message === ACCOUNT_SETTINGS_SAVE_FAILED ? "text-red-600" : "text-gray-500";
+  return <p className={`text-xs mt-1.5 ${tone}`}>{message}</p>;
 }
 
 interface SyncArchivedSwitchProps {
@@ -81,7 +83,7 @@ function SyncArchivedSwitch({
     <button
       role="switch"
       aria-checked={syncArchived === BoolFlag.TRUE}
-      aria-label="顯示封存書籍"
+      aria-label="同步封存書籍"
       onClick={handleToggleSyncArchived}
       className="flex items-center gap-2 text-sm text-gray-700"
     >
@@ -96,7 +98,7 @@ function SyncArchivedSwitch({
           }`}
         />
       </span>
-      顯示封存書籍
+      同步封存書籍
     </button>
   );
 }

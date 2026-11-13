@@ -1,6 +1,10 @@
 /** KV key builders (`kvKeys`), record types and TTL constants. Key → value → TTL: .claude/rules/backend.md
  *  → KV Key Patterns; `qr:{token}` (QrTokenRecord, 300s; an operator-written rescue record 3600s): docs/architecture.md → KV Key 設計. */
 import { MAX_BOOK_ID_LENGTH } from "moo-family-bookshelf-shared/api/bookId";
+import type {
+  AutoSyncInterval,
+  FloatingIconSize,
+} from "moo-family-bookshelf-shared/api/accountSettingsValues";
 
 /** Cloudflare KV rejects any `expirationTtl` below 60 seconds. */
 export const KV_MIN_TTL_SECONDS = 60;
@@ -138,6 +142,7 @@ export const kvKeys = {
   borrowsByFamily: (familyId: string) => `borrows:family:${familyId}`,
   publicShelves: (userId: string) => `publicshelves:${userId}`,
   newBookDefault: (userId: string) => `newbookdefault:${userId}`,
+  accountSettings: (userId: string) => `settings:${userId}`,
   publicShelf: (token: string) => `public:${token}`,
 } as const;
 
@@ -352,6 +357,20 @@ export const MAX_REMOVED_UNSHARED_BOOK_ID_LENGTH = MAX_BOOK_ID_LENGTH;
  */
 export interface NewBookDefaultRecord {
   newBookDefaultShared: BoolFlag;
+}
+
+/**
+ * `settings:{userId}` — the four settings that follow the account across
+ * browsers and the PWA (#460). Persistent, no TTL; every field optional, an
+ * absent one meaning "never set on the server". Tied to the user, not the
+ * family (security-ux Invariant 5). Single writer:
+ * `PATCH /api/user/:id/settings`; `DELETE /api/user/:id` deletes it.
+ */
+export interface AccountSettingsRecord {
+  syncArchived?: BoolFlag;
+  autoSyncInterval?: AutoSyncInterval;
+  storePageChipEnabled?: BoolFlag;
+  floatingIconSize?: FloatingIconSize;
 }
 
 /**

@@ -1,12 +1,9 @@
-/** `GET /api/version` for `ApiClient.checkVersion`, split out of `client.ts` to keep it under its
- *  line ceiling. Response-handling rationale: docs/architecture.md → API client 的回應處理. */
+/** `GET /api/version` for both apps' `ApiClient.checkVersion`; in `shared/` because it needs nothing
+ *  app-specific. Response-handling rationale: docs/architecture.md → API client 的回應處理. */
 
-import { sanitizeRecord } from "moo-family-bookshelf-shared/api/safeText";
-import { sanitizeVersionInfoText } from "moo-family-bookshelf-shared/api/entityText";
-import type {
-  ApiResponse,
-  VersionInfo,
-} from "moo-family-bookshelf-shared/api/types";
+import { sanitizeRecord } from "./safeText";
+import { sanitizeVersionInfoText } from "./entityText";
+import type { ApiResponse, VersionInfo } from "./types";
 
 /** Check server API version. Returns null on network/parse errors. */
 export async function fetchVersion(

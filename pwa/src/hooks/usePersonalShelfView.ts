@@ -3,7 +3,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { BoolFlag } from "@/api/client";
 import type { BookEntry } from "@/api/client";
 import { filterByCategory } from "@/components/CategoryFilter";
-import { namespacedKey } from "@/hooks/useAuth";
 import { useSearch } from "@/hooks/useSearch";
 import { useLoadMore } from "@/hooks/useLoadMore";
 import { sortBooks } from "moo-family-bookshelf-shared/familyShelf/sortBooks";
@@ -13,7 +12,8 @@ export type StatusFilter = "all" | "shared" | "not-shared";
 export type ArchiveView = "active" | "archived";
 
 export interface UsePersonalShelfViewOptions {
-  userId: string;
+  /** The account's 同步封存書籍 setting (`useAccountSyncArchived`); TRUE shows the archive tabs. */
+  syncArchived: BoolFlag;
   books: BookEntry[];
   sort: BookSortMode;
   pageSize?: number;
@@ -26,7 +26,7 @@ export interface UsePersonalShelfViewOptions {
  * search → sort → pagination, plus select-all over the visible page.
  */
 export function usePersonalShelfView({
-  userId,
+  syncArchived,
   books,
   sort,
   pageSize,
@@ -37,8 +37,6 @@ export function usePersonalShelfView({
   const [categoryFilter, setCategoryFilter] = useState("");
   const [archiveView, setArchiveView] = useState<ArchiveView>("active");
 
-  const syncArchived =
-    localStorage.getItem(namespacedKey(userId, "syncArchived")) === "1";
   const activeBooks = useMemo(
     () => books.filter((b) => b.isArchived !== BoolFlag.TRUE),
     [books],
@@ -47,7 +45,8 @@ export function usePersonalShelfView({
     () => books.filter((b) => b.isArchived === BoolFlag.TRUE),
     [books],
   );
-  const showArchiveTabs = syncArchived && archivedBooks.length > 0;
+  const showArchiveTabs =
+    syncArchived === BoolFlag.TRUE && archivedBooks.length > 0;
   const currentViewBooks =
     showArchiveTabs && archiveView === "archived" ? archivedBooks : activeBooks;
 

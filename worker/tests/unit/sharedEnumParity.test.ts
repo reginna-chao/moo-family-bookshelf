@@ -27,14 +27,34 @@
  * must be that side's own `BorrowStatus` on both sides. The `expectTypeOf`
  * calls are runtime no-ops — the assertion lands in `pnpm typecheck` (tsc
  * includes `tests/**`).
+ *
+ * Account settings (#460): the Worker's `AccountSettingsRecord` (`settings:{id}`)
+ * and the clients' `AccountSettings` (`shared/src/api/accountSettings.ts`) are
+ * declared separately, like `BorrowRequest`. A field renamed or added on one
+ * side would make the Worker refuse every client save of it (no known field ⇒
+ * `400 INVALID_SETTINGS`) or a client ignore what the Worker stores. The two
+ * string unions are structurally shared (both import
+ * `shared/src/api/accountSettingsValues.ts`), so only the field NAMES and the
+ * nominal `BoolFlag` fields need pinning; the runtime half compares each
+ * side's field list and runs both sides' rebuild over the same inputs.
  */
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   BoolFlag as WorkerBoolFlag,
   BorrowStatus as WorkerBorrowStatus,
+  type AccountSettingsRecord as WorkerAccountSettings,
   type BorrowRequest as WorkerBorrowRequest,
 } from "../../src/kv/schema";
+import {
+  ACCOUNT_SETTINGS_FIELDS as WORKER_SETTINGS_FIELDS,
+  toAccountSettingsRecord,
+} from "../../src/services/accountSettings";
 import { BoolFlag as SharedBoolFlag } from "moo-family-bookshelf-shared/api/types";
+import {
+  ACCOUNT_SETTINGS_FIELDS as SHARED_SETTINGS_FIELDS,
+  sanitizeAccountSettings,
+  type AccountSettings as SharedAccountSettings,
+} from "moo-family-bookshelf-shared/api/accountSettings";
 import {
   BorrowStatus as SharedBorrowStatus,
   type BorrowRequest as SharedBorrowRequest,
@@ -95,4 +115,67 @@ describe("Worker <-> shared enum parity", () => {
       SharedBorrowRequest["status"]
     >().toEqualTypeOf<SharedBorrowStatus>();
   });
+});
+
+type BoolFlagSetting = "syncArchived" | "storePageChipEnabled";
+
+describe("Worker <-> shared account-settings parity", () => {
+  it("AccountSettingsRecord and AccountSettings carry the same four optional fields", () => {
+    // Nominal enums: the BoolFlag fields are each side's own enum. See the header → "Account settings".
+    expectTypeOf<keyof WorkerAccountSettings>().toEqualTypeOf<
+      keyof SharedAccountSettings
+    >();
+    expectTypeOf<Omit<WorkerAccountSettings, BoolFlagSetting>>().toEqualTypeOf<
+      Omit<SharedAccountSettings, BoolFlagSetting>
+    >();
+    expectTypeOf<
+      Required<Pick<WorkerAccountSettings, BoolFlagSetting>>
+    >().toEqualTypeOf<Record<BoolFlagSetting, WorkerBoolFlag>>();
+    expectTypeOf<
+      Required<Pick<SharedAccountSettings, BoolFlagSetting>>
+    >().toEqualTypeOf<Record<BoolFlagSetting, SharedBoolFlag>>();
+  });
+
+  it("lists the same field names, in the same order, on both sides", () => {
+    expect(WORKER_SETTINGS_FIELDS.length).toBe(4);
+    expect([...SHARED_SETTINGS_FIELDS]).toEqual([...WORKER_SETTINGS_FIELDS]);
+  });
+
+  it.each<{ label: string; value: unknown }>([
+    {
+      label: "a full valid record",
+      value: {
+        syncArchived: 1,
+        autoSyncInterval: "monthly",
+        storePageChipEnabled: 0,
+        floatingIconSize: "icon",
+      },
+    },
+    {
+      label: "invalid and unknown fields next to valid ones",
+      value: {
+        syncArchived: true,
+        autoSyncInterval: "hourly",
+        storePageChipEnabled: 1,
+        floatingIconSize: "small",
+        theme: "dark",
+      },
+    },
+    { label: "a null field", value: { floatingIconSize: null } },
+    { label: "an array", value: [{ syncArchived: 1 }] },
+    { label: "null", value: null },
+  ])(
+    "rebuilds $label to the same record on the Worker and the clients",
+    ({ value }) => {
+      // The shared rebuild warns once per dropped field set; the warning is not under test.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        expect(sanitizeAccountSettings(value)).toEqual(
+          toAccountSettingsRecord(value),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

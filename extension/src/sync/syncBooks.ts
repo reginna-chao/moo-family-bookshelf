@@ -28,6 +28,7 @@ import {
   isAutoSyncInterval,
   type AutoSyncInterval,
 } from "../storage/autoSyncInterval";
+import { awaitAccountSettingsGate } from "../storage/accountSettingsGate";
 
 /** Single source of truth: interval value (ms); `never` → null = disabled */
 export const AUTO_SYNC_INTERVALS_MS: Record<AutoSyncInterval, number | null> = {
@@ -40,6 +41,8 @@ export const AUTO_SYNC_INTERVALS_MS: Record<AutoSyncInterval, number | null> = {
 /** Interval gate: enough time has passed since the timestamp at `timestampKey` for the
  *  user-configured `autoSyncInterval` (`never` → always false). */
 async function canSyncByInterval(timestampKey: string): Promise<boolean> {
+  // A frequency another browser changed is being fetched by the Dialog open; wait for it (≤ 5 s).
+  await awaitAccountSettingsGate();
   const result = await browser.storage.local.get([
     timestampKey,
     AUTO_SYNC_INTERVAL_KEY,
@@ -104,6 +107,9 @@ export async function syncBooks(
       const settleMs = settleMsLeft();
       if (settleMs > 0) await wait(settleMs);
     }
+    // Before anything is read: the open-time account-settings refresh may still be fetching
+    // 同步封存書籍 (≤ 5 s). After the navigation, so the hash still changes synchronously.
+    await awaitAccountSettingsGate();
 
     // Step 3: Fix the prune candidates before scraping, so a book another device adds meanwhile is never
     // pruned; the upload basis is read again after the scrape (docs/architecture.md → 書單同步).

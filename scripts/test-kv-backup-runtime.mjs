@@ -108,6 +108,10 @@ function syntheticRecords() {
       key: `newbookdefault:${"3".repeat(32)}`,
       value: '{"newBookDefaultShared":1}',
     },
+    {
+      key: `settings:${"3".repeat(32)}`,
+      value: '{"syncArchived":1,"autoSyncInterval":"weekly"}',
+    },
   );
   return records;
 }

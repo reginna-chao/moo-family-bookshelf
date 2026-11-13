@@ -33,9 +33,14 @@ import {
 } from "@/constants";
 import { buildStorePageIndex } from "moo-family-bookshelf-shared/storePage/index";
 import {
+  STORE_CHIP_NOT_GRANTED_DIALOG,
   STORE_CHIP_OPEN_OPTIONS_FALLBACK,
-  STORE_CHIP_REVOKED_MESSAGE,
 } from "@/options/storePageChipMessages";
+import {
+  ACCOUNT_SETTINGS_LOCAL_ONLY,
+  ACCOUNT_SETTINGS_SAVE_FAILED,
+} from "moo-family-bookshelf-shared/api/accountSettingsMessages";
+import { createAccountSettingsServer } from "../helpers/accountSettingsServer";
 
 /**
  * FamilySettings: display name, members, sync code / invite, leaving, the un-kick entry, the
@@ -65,11 +70,22 @@ import {
  * hook checks the binding BEFORE clearing storage; a stateful mock whose `clear` empties the binding
  * proves it by counting exactly one binding read (a bound callback would read again after the clear).
  *
- * Store-page chip switch (#313, `useStorePageChip`): the same storage flag as the options page. The
- * Dialog has no permissions API, so it reads the background's mirror `moo:storePageHostGranted`:
- * granted → switching on writes TRUE and, only when the family shelf is already loaded, writes the
- * index built from that shelf (the viewer's own books excluded); not granted → it asks the background
- * to open the options page and shows a fallback hint when that fails. The shelf comes from the REAL
+ * Account settings (#460): FamilyDataProvider mounts the real `AccountSettingsProvider`, so the
+ * 同步封存書籍 / store-page chip / 自動同步頻率 / 按鈕大小 switches save through the mock client's
+ * `accountSettings` (the in-memory server of tests/helpers/accountSettingsServer.tsx). A mock client
+ * without it reads as a refused save — the switch springs back with 「儲存失敗，請稍後再試」 — so
+ * every case asserting a stored value passes one. storage.local is written only after the server
+ * confirmed, and only while the stored userId is the viewer's, so those cases seed `USER_ID_KEY`
+ * too. A 404 on the open-time read shows `ACCOUNT_SETTINGS_LOCAL_ONLY` and keeps changes local.
+ *
+ * Store-page chip switch (#313, `useStorePageChip`): an account setting the options page also
+ * writes. The Dialog has no permissions API, so it reads the background's mirror
+ * `moo:storePageHostGranted`: granted → switching on saves TRUE and, only when the family shelf is
+ * already loaded, writes the index built from that shelf (the viewer's own books excluded); not
+ * granted and off → it asks the background to open the options page and shows a fallback hint when
+ * that fails; on for the account but not granted in this browser → the not-granted copy plus a
+ * 「前往設定頁授權」 button (the revoked copy 「授權已被收回…」 is gone, decision 6). The shelf
+ * comes from the REAL
  * FamilyDataProvider, so "loaded" is driven through the mock client's `getFamilyBookshelf` (a
  * never-resolving promise keeps it loading); `act` around render plus settle ticks is the readiness
  * barrier. The index goes through the binding-guarded writer, which re-reads the switch and the
@@ -184,6 +200,8 @@ function createMockApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     generateOtp: vi.fn().mockResolvedValue({
       data: { code: "123456", expiresAt: Date.now() + 300000 },
     }),
+    // An empty account-settings record (#460); cases that inspect saves pass their own server.
+    accountSettings: createAccountSettingsServer().api,
     ...overrides,
   } as unknown as ApiClient;
 }
@@ -1133,14 +1151,19 @@ describe("FamilySettings", () => {
       });
     });
 
-    it("shows description text for the toggle", async () => {
+    it("shows description text for the toggle, saying it is shared with the PWA", async () => {
       renderFamilySettings();
 
       await waitFor(() => {
         expect(
-          screen.getByText("啟用後，同步時會一併讀取已封存的書籍"),
+          screen.getByText(
+            "啟用後，同步時會一併讀取已封存的書籍。這個設定跟著帳號，擴充功能和手機版共用。",
+          ),
         ).toBeInTheDocument();
       });
+      expect(
+        screen.queryByText("啟用後，同步時會一併讀取已封存的書籍"),
+      ).not.toBeInTheDocument();
     });
 
     it("toggle is initially off (aria-checked false)", async () => {
@@ -1148,9 +1171,9 @@ describe("FamilySettings", () => {
       renderFamilySettings();
 
       await waitFor(() => {
-        expect(chrome.storage.local.get).toHaveBeenCalledWith([
-          SYNC_ARCHIVED_KEY,
-        ]);
+        expect(chrome.storage.local.get).toHaveBeenCalledWith(
+          expect.arrayContaining([SYNC_ARCHIVED_KEY]),
+        );
       });
       const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
       expect(toggle.getAttribute("aria-checked")).toBe("false");
@@ -1167,17 +1190,41 @@ describe("FamilySettings", () => {
       });
     });
 
-    it("clicking toggle writes 1 to storage.local, not to the background", async () => {
-      renderFamilySettings();
-
-      await waitFor(() => {
-        expect(chrome.storage.local.get).toHaveBeenCalledWith([
-          SYNC_ARCHIVED_KEY,
-        ]);
+    /** Render with the viewer's binding stored, the account-settings server attached, and settle. */
+    async function renderWithServer(
+      server = createAccountSettingsServer(),
+    ): Promise<HTMLElement> {
+      mockStorageGet(VIEWER_BINDING);
+      await act(async () => {
+        renderFamilySettings({
+          apiClient: createMockApiClient({ accountSettings: server.api }),
+        });
       });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      vi.mocked(chrome.storage.local.set).mockClear();
+      return screen.getByRole("switch", { name: "同步封存書籍" });
+    }
 
-      fireEvent.click(screen.getByRole("switch", { name: "同步封存書籍" }));
+    async function clickAndSettle(toggle: HTMLElement) {
+      await act(async () => {
+        fireEvent.click(toggle);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
 
+    it("clicking toggle saves it to the server, then writes 1 to storage.local, not to the background", async () => {
+      const server = createAccountSettingsServer();
+      const toggle = await renderWithServer(server);
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+      await clickAndSettle(toggle);
+
+      expect(server.patch).toHaveBeenCalledWith("user-abc12345", {
+        settings: { syncArchived: BoolFlag.TRUE },
+      });
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE,
       });
@@ -1186,43 +1233,72 @@ describe("FamilySettings", () => {
       );
     });
 
-    it("keeps the toggle on when the storage.local write rejects (no rollback)", async () => {
-      vi.mocked(chrome.storage.local.set).mockImplementation(((
-        items: Record<string, unknown>,
-      ) =>
-        SYNC_ARCHIVED_KEY in items
-          ? Promise.reject(new Error("storage write failed"))
-          : Promise.resolve()) as never);
-
-      renderFamilySettings();
-
-      await waitFor(() => {
-        expect(chrome.storage.local.get).toHaveBeenCalledWith([
-          SYNC_ARCHIVED_KEY,
-        ]);
+    it("switches back and shows the failure copy when the server refuses the save", async () => {
+      expect(ACCOUNT_SETTINGS_SAVE_FAILED).toBe("儲存失敗，請稍後再試");
+      const server = createAccountSettingsServer();
+      server.patch.mockResolvedValueOnce({
+        error: { code: "INTERNAL_ERROR", message: "boom" },
       });
-      // Settle the mount read so the click lands on a loaded switch.
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      const toggle = screen.getByRole("switch", { name: "同步封存書籍" });
+      const toggle = await renderWithServer(server);
+
+      await clickAndSettle(toggle);
+
       expect(toggle.getAttribute("aria-checked")).toBe("false");
+      expect(
+        screen.getByText(ACCOUNT_SETTINGS_SAVE_FAILED),
+      ).toBeInTheDocument();
+      expect(
+        vi
+          .mocked(chrome.storage.local.set)
+          .mock.calls.filter(
+            ([items]) => SYNC_ARCHIVED_KEY in (items as object),
+          ),
+      ).toHaveLength(0);
+    });
 
-      fireEvent.click(toggle);
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-
-      // Flush the rejected write: the old hook snapped the switch back to off here.
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
+    it("says the settings stay in this browser and keeps the change on a server without the feature (404)", async () => {
+      expect(ACCOUNT_SETTINGS_LOCAL_ONLY).toBe(
+        "伺服器尚未支援設定連動，這些設定只存在這個瀏覽器",
+      );
+      const server = createAccountSettingsServer();
+      server.get.mockResolvedValueOnce({
+        error: { code: "NOT_FOUND", message: "Not Found" },
       });
+      const toggle = await renderWithServer(server);
+
+      expect(screen.getByText(ACCOUNT_SETTINGS_LOCAL_ONLY)).toBeInTheDocument();
+      await clickAndSettle(toggle);
+
+      expect(server.patch).not.toHaveBeenCalled();
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [SYNC_ARCHIVED_KEY]: BoolFlag.TRUE,
       });
       expect(
-        screen
-          .getByRole("switch", { name: "同步封存書籍" })
-          .getAttribute("aria-checked"),
-      ).toBe("true");
+        screen.queryByText(ACCOUNT_SETTINGS_SAVE_FAILED),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows no local-only notice when the server supports account settings", async () => {
+      await renderWithServer();
+      expect(
+        screen.queryByText(ACCOUNT_SETTINGS_LOCAL_ONLY),
+      ).not.toBeInTheDocument();
+    });
+
+    it("tells the user the frequency and button-size settings follow the account", async () => {
+      await renderWithServer();
+
+      expect(
+        screen.getByText(
+          "開啟個人書櫃時，距離上次同步超過這段時間就會自動同步；手動同步不受此限制。這個設定跟著帳號。",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "在讀墨頁面顯示的家庭書櫃按鈕大小。這個設定跟著帳號。",
+        ),
+      ).toBeInTheDocument();
     });
   });
 
@@ -1403,11 +1479,13 @@ describe("FamilySettings", () => {
       },
     ];
 
-    function shelfClient(): ApiClient {
+    /** A loaded shelf, and an account-settings server so the switch's saves land (see the header). */
+    function shelfClient(server = createAccountSettingsServer()): ApiClient {
       return createMockApiClient({
         getFamilyBookshelf: vi.fn().mockResolvedValue({
           data: { familyId: "fam-123", members: SHELF_MEMBERS },
         }),
+        accountSettings: server.api,
       });
     }
 
@@ -1481,11 +1559,21 @@ describe("FamilySettings", () => {
       await renderSettled(shelfClient());
 
       expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      // Decision 12: one merged sentence about the per-browser grant, then that it follows the account.
       expect(
         screen.getByText(
-          "開啟後，瀏覽讀墨書籍頁面時，書名下方會顯示哪位家人已開放這本書；第一次開啟需要在設定頁授權",
+          "開啟後，瀏覽讀墨書籍頁面時，書名下方會顯示哪位家人已開放這本書；每個瀏覽器第一次開啟都要在設定頁授權。這個設定跟著帳號。",
         ),
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/第一次開啟需要在設定頁授權/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/每個瀏覽器要各自授權一次/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "前往設定頁授權" }),
+      ).not.toBeInTheDocument();
     });
 
     it("switches on and indexes the loaded shelf, without the viewer, when granted", async () => {
@@ -1554,9 +1642,13 @@ describe("FamilySettings", () => {
     );
 
     it("switches on without an index while the shelf is still loading", async () => {
-      mockStorageGet({ [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE });
+      mockStorageGet({
+        ...BOUND,
+        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
+      });
       const apiClient = createMockApiClient({
         getFamilyBookshelf: vi.fn().mockReturnValue(new Promise(() => {})),
+        accountSettings: createAccountSettingsServer().api,
       });
       await renderSettled(apiClient);
 
@@ -1666,10 +1758,14 @@ describe("FamilySettings", () => {
 
     it("switches off and writes FALSE", async () => {
       mockStorageGet({
+        ...BOUND,
         [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
         [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.TRUE,
       });
-      await renderSettled(shelfClient());
+      const server = createAccountSettingsServer({
+        storePageChipEnabled: BoolFlag.TRUE,
+      });
+      await renderSettled(shelfClient(server));
       expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
       vi.mocked(chrome.storage.local.set).mockClear();
 
@@ -1679,6 +1775,7 @@ describe("FamilySettings", () => {
       });
 
       expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      expect(server.record.storePageChipEnabled).toBe(BoolFlag.FALSE);
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.FALSE,
       });
@@ -1686,17 +1783,105 @@ describe("FamilySettings", () => {
       expect(openOptionsCalls()).toHaveLength(0);
     });
 
-    it("says the permission was taken back when the switch is on without it", async () => {
-      mockStorageGet({
-        [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
-        [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.FALSE,
+    it("switches back, shows the failure copy and writes no index when the server refuses", async () => {
+      seedStatefulStorage(BOUND);
+      const server = createAccountSettingsServer();
+      server.patch.mockResolvedValueOnce({
+        error: { code: "INTERNAL_ERROR", message: "boom" },
       });
-      await renderSettled(shelfClient());
+      await renderSettled(shelfClient(server));
 
-      expect(STORE_CHIP_REVOKED_MESSAGE).toBe(
-        "授權已被收回，請關閉後再開啟一次",
-      );
-      expect(screen.getByText(STORE_CHIP_REVOKED_MESSAGE)).toBeInTheDocument();
+      fireEvent.click(storeSwitch());
+      for (let i = 0; i < 3; i += 1) {
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+      }
+
+      expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+      expect(
+        screen.getByText(ACCOUNT_SETTINGS_SAVE_FAILED),
+      ).toBeInTheDocument();
+      expect(setCallsWith(STORE_PAGE_CHIP_ENABLED_KEY)).toHaveLength(0);
+      expect(setCallsWith(STORE_PAGE_INDEX_KEY)).toHaveLength(0);
+    });
+
+    describe("on for the account but not granted in this browser", () => {
+      function seedOnNotGranted() {
+        mockStorageGet({
+          ...BOUND,
+          [STORE_PAGE_CHIP_ENABLED_KEY]: BoolFlag.TRUE,
+          [STORE_PAGE_HOST_GRANTED_KEY]: BoolFlag.FALSE,
+        });
+      }
+
+      it("shows the not-granted copy and 前往設定頁授權, never the revoked wording", async () => {
+        seedOnNotGranted();
+        await renderSettled(
+          shelfClient(
+            createAccountSettingsServer({
+              storePageChipEnabled: BoolFlag.TRUE,
+            }),
+          ),
+        );
+
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+        expect(STORE_CHIP_NOT_GRANTED_DIALOG).toBe(
+          "這個瀏覽器還沒授權，請到設定頁授權",
+        );
+        expect(
+          screen.getByText(STORE_CHIP_NOT_GRANTED_DIALOG),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("button", { name: "前往設定頁授權" }),
+        ).toBeInTheDocument();
+        expect(screen.queryByText(/授權已被收回/)).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(/請關閉後再開啟一次/),
+        ).not.toBeInTheDocument();
+      });
+
+      it("opens the options page from 前往設定頁授權 and saves nothing", async () => {
+        vi.mocked(chrome.runtime.sendMessage).mockResolvedValue({ ok: 1 });
+        seedOnNotGranted();
+        const server = createAccountSettingsServer({
+          storePageChipEnabled: BoolFlag.TRUE,
+        });
+        await renderSettled(shelfClient(server));
+        vi.mocked(chrome.storage.local.set).mockClear();
+
+        fireEvent.click(screen.getByRole("button", { name: "前往設定頁授權" }));
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+
+        expect(openOptionsCalls()).toEqual([[{ type: "OPEN_OPTIONS_PAGE" }]]);
+        expect(server.patch).not.toHaveBeenCalled();
+        expect(setCallsWith(STORE_PAGE_CHIP_ENABLED_KEY)).toHaveLength(0);
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "true");
+      });
+
+      it("turns the switch off for the account when it is pressed", async () => {
+        seedOnNotGranted();
+        const server = createAccountSettingsServer({
+          storePageChipEnabled: BoolFlag.TRUE,
+        });
+        await renderSettled(shelfClient(server));
+
+        fireEvent.click(storeSwitch());
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+
+        expect(server.patch).toHaveBeenCalledWith("user-abc12345", {
+          settings: { storePageChipEnabled: BoolFlag.FALSE },
+        });
+        expect(storeSwitch()).toHaveAttribute("aria-checked", "false");
+        expect(openOptionsCalls()).toHaveLength(0);
+        expect(
+          screen.queryByRole("button", { name: "前往設定頁授權" }),
+        ).not.toBeInTheDocument();
+      });
     });
   });
 

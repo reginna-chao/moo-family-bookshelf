@@ -74,7 +74,7 @@ describe("KV restore safety", () => {
     const { store } = seededArchive();
     const target = fixtureClient();
     const result = await runRestore(restoreOptions(store, target.client));
-    expect(result).toMatchObject({ applied: false, count: 10, skipped: 0 });
+    expect(result).toMatchObject({ applied: false, count: 11, skipped: 0 });
     expect((await target.kv.list()).keys).toEqual([]);
     expect(target.client.writeRecords).not.toHaveBeenCalled();
   });

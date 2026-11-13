@@ -282,6 +282,70 @@ describe("ApiClient", () => {
     });
   });
 
+  // #460: the same `accountSettingsApi` (shared/src/api/accountSettings.ts) as the Extension's client.
+  describe("accountSettings", () => {
+    const path = `https://api.example.com/api/user/${USER_1}/settings`;
+
+    it("GETs /api/user/:id/settings and returns the validated record", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            settings: { syncArchived: BoolFlag.TRUE, autoSyncInterval: 7 },
+          },
+        }),
+      );
+
+      const result = await client.accountSettings.get(USER_1);
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(path);
+      expect(init?.method ?? "GET").toBe("GET");
+      expect(result).toEqual({ data: { syncArchived: BoolFlag.TRUE } });
+    });
+
+    it("PATCHes { settings } as JSON and returns the merged record", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          data: { ok: true, settings: { syncArchived: BoolFlag.FALSE } },
+        }),
+      );
+
+      const result = await client.accountSettings.patch(USER_1, {
+        settings: { syncArchived: BoolFlag.FALSE },
+      });
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(path);
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(init.body)).toEqual({
+        settings: { syncArchived: BoolFlag.FALSE },
+      });
+      expect(result).toEqual({ data: { syncArchived: BoolFlag.FALSE } });
+    });
+
+    it("passes a 404 NOT_FOUND through for the local-only fallback", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "NOT_FOUND", message: "Not Found" } },
+          404,
+        ),
+      );
+
+      const result = await client.accountSettings.get(USER_1);
+
+      expect(result.error?.code).toBe("NOT_FOUND");
+      expect(result.data).toBeUndefined();
+    });
+
+    it("rejects a malformed userId before anything is sent", async () => {
+      await expect(client.accountSettings.get("not-hex")).rejects.toThrow(
+        "Invalid userId",
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("patchPersonalBooks", () => {
     it("should call PATCH /api/user/:id/books with a { changes } body", async () => {
       mockFetch.mockResolvedValueOnce(

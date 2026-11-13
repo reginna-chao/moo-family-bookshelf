@@ -7,7 +7,8 @@
  * `taggedParam`), and `defaultHook` (`utils/openapi.ts`) maps the first failing
  * param's tag back to the SAME `{ code, message }`. Routes added after #227
  * join the table (`PUT /api/user/{id}/new-book-default`, #238;
- * `GET /api/user/{id}/verify/prompted`, #343 — now 30 routes, 37 checks). This
+ * `GET /api/user/{id}/verify/prompted`, #343; `GET` / `PATCH
+ * /api/user/{id}/settings`, #460 — now 32 routes, 39 checks). This
  * suite pins, for every one of those sites:
  *
  * - the EXACT pre-#227 envelope (status + code + message, nothing else);
@@ -144,7 +145,7 @@ const USER_ID = { name: "id", kind: "user" } as const;
 const MEMBER_UID = { name: "uid", kind: "user" } as const;
 const SHELF_ID = { name: "shelfId", kind: "shelf" } as const;
 
-/** Every route that validates a path param — 30 routes, 37 checks (35 pre-#227). */
+/** Every route that validates a path param — 32 routes, 39 checks (35 pre-#227). */
 const ROUTES: RouteSpec[] = [
   // bookshelf.ts
   {
@@ -290,6 +291,19 @@ const ROUTES: RouteSpec[] = [
     params: [USER_ID],
     auth: true,
   },
+  // userSettings.ts
+  {
+    method: "GET",
+    template: "/api/user/{id}/settings",
+    params: [USER_ID],
+    auth: true,
+  },
+  {
+    method: "PATCH",
+    template: "/api/user/{id}/settings",
+    params: [USER_ID],
+    auth: true,
+  },
   {
     method: "DELETE",
     template: "/api/user/{id}",
@@ -421,13 +435,13 @@ function perUserCharges(sent: Sent): string[] {
 // ===== Tests =====
 
 describe("path-param validation — route table", () => {
-  it("covers all 37 param checks across 30 routes", () => {
-    expect(ROUTES).toHaveLength(30);
-    expect(MALFORMED_ROWS).toHaveLength(37);
+  it("covers all 39 param checks across 32 routes", () => {
+    expect(ROUTES).toHaveLength(32);
+    expect(MALFORMED_ROWS).toHaveLength(39);
     const byCode = (code: string) =>
       MALFORMED_ROWS.filter((row) => row.expected.code === code).length;
     expect(byCode("INVALID_FAMILY_ID")).toBe(11);
-    expect(byCode("INVALID_USER_ID")).toBe(21);
+    expect(byCode("INVALID_USER_ID")).toBe(23);
     expect(byCode("INVALID_SHELF_ID")).toBe(3);
     expect(byCode("INVALID_REQUEST_ID")).toBe(1);
     expect(byCode("INVALID_TOKEN")).toBe(1);

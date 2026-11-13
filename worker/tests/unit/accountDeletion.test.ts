@@ -87,6 +87,7 @@ async function seedAccount(): Promise<Seeded> {
   await kv.put(MARK_KEY, JSON.stringify(MARK), { expirationTtl: 86400 });
   await kv.put(kvKeys.user(USER), JSON.stringify({ userId: USER, books: [] }));
   await kv.put(kvKeys.newBookDefault(USER), '{"newBookDefaultShared":1}');
+  await kv.put(kvKeys.accountSettings(USER), '{"syncArchived":1}');
   await kv.put(kvKeys.otp(USER), '{"code":"111111"}');
   await kv.put(kvKeys.member(USER), "ab12-cd34");
   await kv.put(kvKeys.verify(USER), '{"method":"none"}');
@@ -244,6 +245,11 @@ describe("wipeAccountData, one delete failing", () => {
     {
       label: "newbookdefault:",
       key: () => kvKeys.newBookDefault(USER),
+      alsoKept: () => [],
+    },
+    {
+      label: "settings:",
+      key: () => kvKeys.accountSettings(USER),
       alsoKept: () => [],
     },
     {

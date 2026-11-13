@@ -13,11 +13,10 @@ import {
   sanitizePublicShelfResultText,
 } from "moo-family-bookshelf-shared/api/entityText";
 import {
-  isAuthToken,
-  isExpiresAt,
   sanitizeIssuedCredentials,
   sanitizeIssuedFamilyGroup,
 } from "moo-family-bookshelf-shared/api/issuedCredentials";
+import { accountSettingsApi } from "moo-family-bookshelf-shared/api/accountSettings";
 import { BoolFlag, ApiError } from "moo-family-bookshelf-shared/api/types";
 import type {
   ApiResponse,
@@ -56,7 +55,8 @@ import { DEFAULT_API_ENDPOINT } from "../constants";
 import { sanitizeEnvelope, unwrap, unwrapVoid } from "./envelopeHelpers";
 import { fetchPublicShelf } from "./publicShelfFetch";
 import { ApiTransport } from "./transport";
-import { fetchVersion } from "./versionFetch";
+import { fetchVersion } from "moo-family-bookshelf-shared/api/versionFetch";
+import { shapeRefreshResponse } from "./refreshResponse";
 
 /**
  * Endpoint validation lives in `shared/` so Extension and PWA enforce
@@ -168,21 +168,16 @@ export class ApiClient {
       { method: "POST", body: JSON.stringify({ userId, familyId }) },
       true,
     );
-    if (res.error) return { error: res.error };
-    const token = res.data?.token;
-    if (!isAuthToken(token)) {
-      return {
-        error: {
-          code: "INVALID_RESPONSE",
-          message: "refresh response carried no usable token",
-        },
-      };
-    }
-    const expiresAt = res.data?.expiresAt;
-    return { data: { token, ...(isExpiresAt(expiresAt) && { expiresAt }) } };
+    return shapeRefreshResponse(res);
   }
 
   // --- Personal Settings ---
+
+  /** Account settings (#460); `shared/api/accountSettings` validates both replies. */
+  readonly accountSettings = accountSettingsApi({
+    get: (path) => this.get<unknown>(path),
+    patch: (path, body) => this.patch<unknown>(path, body),
+  });
 
   /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
    *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */
