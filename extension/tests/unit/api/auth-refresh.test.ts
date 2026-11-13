@@ -20,11 +20,14 @@ import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
   STORE_PAGE_INDEX_KEY,
 } from "@/constants";
+import { validateEndpointUrl } from "@/api/client";
 
 /**
  * doRefreshToken branching contract (security-ux Invariant 2 — a dead token must
@@ -178,6 +181,14 @@ import {
  * right after the next local storage write takes hold, i.e. right after the
  * teardown's first removal. The store implementations are restored in
  * `afterEach`, so the hook cannot leak into the file's other suites.
+ *
+ * Stored token issuer: every token this module stores (refresh and recovery join) is
+ * written in ONE `set` together with the server that issued it (`moo:authTokenServer`:
+ * the session's endpoint, or `official` for the official default), and every removal
+ * of the stored token drops that marker too (`TOKEN_KEYS`). Before the refresh request,
+ * a stored token goes back on the client only when its marker matches the stored
+ * endpoint; the case with a matching marker is the positive companion of the
+ * mismatched ones, so they cannot pass because the token is never read at all.
  */
 
 interface RequestOutcome {
@@ -315,6 +326,17 @@ function joinWasRequested(request: unknown): boolean {
   return joinRequestCount(request) > 0;
 }
 
+/** Every `storage.local.set` payload production wrote that carries a token. */
+function tokenWrites(): Record<string, unknown>[] {
+  return vi
+    .mocked(chrome.storage.local.set)
+    .mock.calls.map((call) => call[0] as Record<string, unknown>)
+    .filter((items) => AUTH_TOKEN_KEY in items);
+}
+
+/** The token keys every removal of the stored token must drop, the issuing server included. */
+const TOKEN_KEYS = [AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY, TOKEN_SERVER_KEY];
+
 describe("doRefreshToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -350,12 +372,14 @@ describe("doRefreshToken", () => {
 
     expect(result.refreshed).toBe(true);
     expect(deps.setAuthToken).toHaveBeenCalledWith(FRESH_TOKEN);
-    expect(chrome.storage.local.set).toHaveBeenCalledWith(
-      expect.objectContaining({
+    // Token, expiry and the issuing server (the session's) in ONE write.
+    expect(tokenWrites()).toEqual([
+      {
         [AUTH_TOKEN_KEY]: FRESH_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 9999,
-      }),
-    );
+        [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
+      },
+    ]);
     // No recovery/clear path was taken.
     expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
     expect(deps.onReauthRequired).not.toHaveBeenCalled();
@@ -373,12 +397,13 @@ describe("doRefreshToken", () => {
 
     expect(result.refreshed).toBe(true);
     expect(deps.setAuthToken).toHaveBeenCalledWith(RECOVERED_TOKEN);
-    expect(chrome.storage.local.set).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(tokenWrites()).toEqual([
+      {
         [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 8888,
-      }),
-    );
+        [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
+      },
+    ]);
     expect(deps.onReauthRequired).not.toHaveBeenCalled();
     expect(deps.onFamilyRemoved).not.toHaveBeenCalled();
     expect(familyWasCleared()).toBe(false);
@@ -425,6 +450,7 @@ describe("doRefreshToken", () => {
         expect(deps.setAuthToken).toHaveBeenCalledWith(FRESH_TOKEN);
         expect(chrome.storage.local.set).toHaveBeenCalledWith({
           [AUTH_TOKEN_KEY]: FRESH_TOKEN,
+          [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
         });
         expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(false);
         expect(joinWasRequested(deps.request)).toBe(false);
@@ -443,10 +469,7 @@ describe("doRefreshToken", () => {
 
         // The failure branch: the old token is dropped, then staged recovery runs.
         expect(deps.setAuthToken).toHaveBeenCalledWith(null);
-        expect(chrome.storage.local.remove).toHaveBeenCalledWith([
-          AUTH_TOKEN_KEY,
-          TOKEN_EXPIRES_AT_KEY,
-        ]);
+        expect(chrome.storage.local.remove).toHaveBeenCalledWith(TOKEN_KEYS);
         expect(joinRequestCount(deps.request)).toBe(1);
         expect(deps.setAuthToken).not.toHaveBeenCalledWith(c.token);
         expect(result).toEqual({ refreshed: true });
@@ -494,6 +517,7 @@ describe("doRefreshToken", () => {
       expect(deps.setAuthToken).toHaveBeenCalledWith(RECOVERED_TOKEN);
       expect(chrome.storage.local.set).toHaveBeenCalledWith({
         [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
+        [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
       });
       expect(storageKeyWasWritten(TOKEN_EXPIRES_AT_KEY)).toBe(false);
     });
@@ -716,10 +740,7 @@ describe("doRefreshToken", () => {
     await doRefreshToken(deps);
 
     // Token is cleared regardless of the recovery branch...
-    expect(chrome.storage.local.remove).toHaveBeenCalledWith([
-      AUTH_TOKEN_KEY,
-      TOKEN_EXPIRES_AT_KEY,
-    ]);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(TOKEN_KEYS);
     // ...but the verification branch must NOT clear family data or the endpoint:
     // the re-supplied secret's join has to reach the SAME server.
     expect(familyWasCleared()).toBe(false);
@@ -1100,6 +1121,140 @@ describe("doRefreshToken", () => {
     });
   });
 
+  // See the header → "Stored token issuer".
+  describe("stored token issuer", () => {
+    const OFFICIAL = validateEndpointUrl(DEFAULT_API_ENDPOINT);
+    const OTHER_SERVER = "https://other.example";
+
+    function onOfficial(deps: ReturnType<typeof makeDeps>) {
+      deps.beginSession.mockReturnValue({
+        endpoint: OFFICIAL,
+        isLive: () => true,
+      });
+      return deps;
+    }
+
+    async function seedOfficial(): Promise<void> {
+      await seedStorage({
+        [USER_ID_KEY]: "u1",
+        [FAMILY_ID_KEY]: "fam-1",
+        [AUTH_TOKEN_KEY]: "old-token",
+      });
+    }
+
+    it("stores a refreshed token from the official default with the official marker", async () => {
+      await seedOfficial();
+      const deps = onOfficial(
+        makeDeps({
+          refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
+        }),
+      );
+
+      await expect(doRefreshToken(deps)).resolves.toEqual({ refreshed: true });
+
+      expect(tokenWrites()).toEqual([
+        {
+          [AUTH_TOKEN_KEY]: FRESH_TOKEN,
+          [TOKEN_EXPIRES_AT_KEY]: 9999,
+          [TOKEN_SERVER_KEY]: "official",
+        },
+      ]);
+    });
+
+    it("stores a recovered token from the official default with the official marker", async () => {
+      await seedOfficial();
+      const deps = onOfficial(
+        makeDeps({
+          refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+          join: { data: { authToken: RECOVERED_TOKEN, expiresAt: 8888 } },
+        }),
+      );
+
+      await expect(doRefreshToken(deps)).resolves.toEqual({ refreshed: true });
+
+      expect(tokenWrites()).toEqual([
+        {
+          [AUTH_TOKEN_KEY]: RECOVERED_TOKEN,
+          [TOKEN_EXPIRES_AT_KEY]: 8888,
+          [TOKEN_SERVER_KEY]: "official",
+        },
+      ]);
+    });
+
+    it.each([
+      { name: "another server's marker", marker: OTHER_SERVER },
+      { name: "the official marker", marker: "official" },
+    ])(
+      "does not put a stored token with $name on the client before the refresh",
+      async ({ marker }) => {
+        await seedStorage({
+          [USER_ID_KEY]: "u1",
+          [FAMILY_ID_KEY]: "fam-1",
+          [AUTH_TOKEN_KEY]: "old-token",
+          [TOKEN_SERVER_KEY]: marker,
+          [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+        });
+        const deps = makeDeps({
+          refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
+        });
+
+        await doRefreshToken(deps);
+
+        expect(deps.request).toHaveBeenCalledWith(
+          "/api/auth/refresh",
+          expect.anything(),
+          true,
+        );
+        expect(deps.setAuthToken).not.toHaveBeenCalledWith("old-token");
+      },
+    );
+
+    it("puts a stored token whose marker matches on the client before the refresh", async () => {
+      await seedStorage({
+        [USER_ID_KEY]: "u1",
+        [FAMILY_ID_KEY]: "fam-1",
+        [AUTH_TOKEN_KEY]: "old-token",
+        [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+      });
+      const deps = makeDeps({
+        refresh: { data: { token: FRESH_TOKEN, expiresAt: 9999 } },
+      });
+
+      await doRefreshToken(deps);
+
+      const setToken = vi.mocked(deps.setAuthToken);
+      const request = deps.request as unknown as ReturnType<typeof vi.fn>;
+      expect(setToken.mock.calls[0]).toEqual(["old-token"]);
+      expect(setToken.mock.invocationCallOrder[0]).toBeLessThan(
+        request.mock.invocationCallOrder[0],
+      );
+      expect(request.mock.calls[0][0]).toBe("/api/auth/refresh");
+    });
+
+    it("drops the stored issuer with the token on a failed refresh", async () => {
+      await seedStorage({
+        [USER_ID_KEY]: "u1",
+        [FAMILY_ID_KEY]: "fam-1",
+        [AUTH_TOKEN_KEY]: "old-token",
+        [TOKEN_EXPIRES_AT_KEY]: 123,
+        [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
+        [API_ENDPOINT_KEY]: SEEDED_ENDPOINT,
+      });
+      const deps = makeDeps({
+        refresh: { error: { code: "REFRESH_FAILED", message: "expired" } },
+        join: { error: { code: "VERIFICATION_REQUIRED", message: "x" } },
+      });
+
+      await doRefreshToken(deps);
+
+      expect(await chrome.storage.local.get(TOKEN_KEYS)).toEqual({});
+      expect(
+        (await chrome.storage.local.get(FAMILY_ID_KEY))[FAMILY_ID_KEY],
+      ).toBe("fam-1");
+    });
+  });
+
   // `recovery: 1` (#263) lets the server refuse an unlisted user; displayName is
   // omitted so the member's chosen name is kept.
   it("sends the recovery join with exactly { userId, recovery: 1 }", async () => {
@@ -1305,6 +1460,7 @@ describe("clearFamilyStorage", () => {
         STORE_PAGE_INDEX_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        TOKEN_SERVER_KEY,
         API_ENDPOINT_KEY,
         DECLINED_FAMILY_ENDPOINT_KEY,
       ]);
@@ -1351,8 +1507,11 @@ describe("clearFamilyStorage", () => {
     });
   });
 
-  it("removes the family's token and expiry and keeps the userId", async () => {
-    await chrome.storage.local.set({ [TOKEN_EXPIRES_AT_KEY]: 123 });
+  it("removes the family's token, its expiry and its issuer and keeps the userId", async () => {
+    await chrome.storage.local.set({
+      [TOKEN_EXPIRES_AT_KEY]: 123,
+      [TOKEN_SERVER_KEY]: SEEDED_ENDPOINT,
+    });
 
     await clearFamilyStorage();
 
@@ -1362,10 +1521,12 @@ describe("clearFamilyStorage", () => {
       USER_ID_KEY,
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
     ]);
     expect(local[USER_ID_KEY]).toBe("u1");
     expect(local[AUTH_TOKEN_KEY]).toBeUndefined();
     expect(local[TOKEN_EXPIRES_AT_KEY]).toBeUndefined();
+    expect(local[TOKEN_SERVER_KEY]).toBeUndefined();
   });
 
   it("still clears locally when sync storage is unavailable", async () => {

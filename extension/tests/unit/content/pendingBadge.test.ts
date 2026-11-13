@@ -7,6 +7,7 @@ import {
   AUTH_TOKEN_KEY,
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 import { BorrowStatus } from "@/api/types";
@@ -53,6 +54,13 @@ import {
  * Account-gate cases each serve a payload that WOULD show "1" and seed a stale
  * "9", so a request slipping past the gate shows up as a "1" badge and a skipped
  * cleanup as the "9" — the stored account's count never reaches another one.
+ *
+ * Stored token issuer: the read also carries the server that issued the stored
+ * token (`moo:authTokenServer`). With the endpoint on another server than that
+ * marker names, no request is sent at all. The row whose marker names the stored
+ * endpoint is the positive companion: the same storage, cookie and payload do
+ * reach `fetch` with the stored token, so the other row cannot pass because an
+ * unrelated precondition stopped it earlier.
  */
 
 if (!globalThis.crypto?.subtle) {
@@ -441,6 +449,36 @@ describe("updatePendingBorrowBadge", () => {
 
       expect(fetchSpy).not.toHaveBeenCalled();
     });
+  });
+
+  // See the header → "Stored token issuer".
+  describe("stored token issuer", () => {
+    const NEW_SERVER = "https://new.example";
+
+    it.each([
+      { marker: "official", sends: false },
+      { marker: NEW_SERVER, sends: true },
+    ])(
+      "with the endpoint on another server and the marker $marker, sends a request: $sends",
+      async ({ marker, sends }) => {
+        await seedStorage({
+          ...storageWithout(),
+          [API_ENDPOINT_KEY]: NEW_SERVER,
+          [TOKEN_SERVER_KEY]: marker,
+        });
+
+        await expect(updatePendingBorrowBadge(button)).resolves.toBeUndefined();
+
+        if (!sends) {
+          expect(fetchSpy).not.toHaveBeenCalled();
+          return;
+        }
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+        expect(url).toBe(`${NEW_SERVER}/api/family/${FAMILY_ID}/borrow`);
+        expect(init.headers).toEqual({ Authorization: `Bearer ${AUTH_TOKEN}` });
+      },
+    );
   });
 
   describe("early return before any request", () => {

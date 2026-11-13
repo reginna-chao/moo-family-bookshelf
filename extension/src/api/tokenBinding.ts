@@ -1,12 +1,16 @@
-/** Pairs a token with its issuing server: in memory (`TokenSession`) and in storage (`moo:apiEndpoint`,
- *  or the official default when absent). See docs/architecture.md → 認證更新與冷卻. */
+/** Pairs a token with its issuing server: in memory (`TokenSession`) and in storage (`moo:authTokenServer`
+ *  vs `moo:apiEndpoint`, or the official default when absent). See docs/architecture.md → 認證更新與冷卻. */
 
 import browser from "webextension-polyfill";
 import { validateEndpointUrl } from "moo-family-bookshelf-shared/api/endpointUrl";
+import { isExpiresAt } from "moo-family-bookshelf-shared/api/issuedCredentials";
 import {
   API_ENDPOINT_KEY,
+  AUTH_TOKEN_KEY,
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
+  TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
 } from "../constants";
 import type { RefreshOutcome } from "./auth-refresh";
 
@@ -102,6 +106,51 @@ export function resolveStoredEndpoint(raw: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/** The keys a reader must fetch in ONE storage read before calling `storedTokenFor`. */
+export const STORED_SESSION_KEYS: readonly string[] = [
+  AUTH_TOKEN_KEY,
+  TOKEN_SERVER_KEY,
+  API_ENDPOINT_KEY,
+];
+
+/** Marker stored with a token: "official" for the official default, else the server URL. */
+export function tokenServerMarker(server: string): string {
+  return server === resolveStoredEndpoint(undefined) ? "official" : server;
+}
+
+/**
+ * The stored token, or `null` when it is absent or empty, when the stored
+ * endpoint is unusable, or when a server other than the stored endpoint issued
+ * it. `stored` is one read that includes every key in `STORED_SESSION_KEYS`.
+ * A token with no marker (written by an older build) counts as paired.
+ */
+export function storedTokenFor(stored: Record<string, unknown>): string | null {
+  const token = stored[AUTH_TOKEN_KEY];
+  if (typeof token !== "string" || token === "") return null;
+  const endpoint = resolveStoredEndpoint(stored[API_ENDPOINT_KEY]);
+  if (endpoint === null) return null;
+  const marker = stored[TOKEN_SERVER_KEY];
+  if (marker === undefined) return token;
+  return marker === tokenServerMarker(endpoint) ? token : null;
+}
+
+/**
+ * Write a token, the server that issued it and its expiry in ONE `set`;
+ * rejects when the `set` does. An expiry that is not a usable one is not
+ * written.
+ */
+export async function storeIssuedToken(
+  token: string,
+  expiresAt: unknown,
+  server: string,
+): Promise<void> {
+  await browser.storage.local.set({
+    [AUTH_TOKEN_KEY]: token,
+    [TOKEN_SERVER_KEY]: tokenServerMarker(server),
+    ...(isExpiresAt(expiresAt) ? { [TOKEN_EXPIRES_AT_KEY]: expiresAt } : {}),
+  });
 }
 
 /** True while storage pairs this client's server (and family, when given) with the stored token. */

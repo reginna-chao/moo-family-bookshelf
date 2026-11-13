@@ -12,6 +12,7 @@ import {
   FAMILY_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   STORE_PAGE_INDEX_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
 } from "@/constants";
@@ -1796,10 +1797,11 @@ describe("ApiClient", () => {
 
       await client.getPersonalBooks("u1");
 
-      // First: clear only token
+      // First: clear only token (with its expiry and issuer)
       expect(chrome.storage.local.remove).toHaveBeenCalledWith([
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        TOKEN_SERVER_KEY,
       ]);
       // Then: clear family data and its endpoint in one removal after recovery fails (#492)
       expect(chrome.storage.local.remove).toHaveBeenCalledWith([
@@ -1807,6 +1809,7 @@ describe("ApiClient", () => {
         STORE_PAGE_INDEX_KEY,
         AUTH_TOKEN_KEY,
         TOKEN_EXPIRES_AT_KEY,
+        TOKEN_SERVER_KEY,
         API_ENDPOINT_KEY,
         DECLINED_FAMILY_ENDPOINT_KEY,
       ]);

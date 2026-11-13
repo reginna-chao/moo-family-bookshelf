@@ -19,6 +19,7 @@ import {
   DEFAULT_API_ENDPOINT,
   FAMILY_ID_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   USER_ID_KEY,
 } from "@/constants";
 
@@ -1001,6 +1002,7 @@ describe("useEndpointSwitch", () => {
         [API_ENDPOINT_KEY]: CURRENT_CUSTOM,
         [AUTH_TOKEN_KEY]: OLD_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 123,
+        [TOKEN_SERVER_KEY]: CURRENT_CUSTOM,
       });
       vi.clearAllMocks();
     }
@@ -1077,6 +1079,7 @@ describe("useEndpointSwitch", () => {
 
       await expect(readStored(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
       await expect(readStored(TOKEN_EXPIRES_AT_KEY)).resolves.toBeUndefined();
+      await expect(readStored(TOKEN_SERVER_KEY)).resolves.toBeUndefined();
       await expect(readStored(API_ENDPOINT_KEY)).resolves.toBe(FAMILY_CUSTOM);
       expect(result.current.confirmSaveFailed).toBe(false);
     });
@@ -1386,6 +1389,7 @@ describe("useEndpointSwitch", () => {
       ...FAMILY_ENDPOINT_CHOICE_KEYS,
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
     ];
     const realStoreGet = vi
       .mocked(browser.storage.local.get)

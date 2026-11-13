@@ -2,12 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import browser from "webextension-polyfill";
 import { Inbox, Library, BookOpen, Settings } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
-import {
-  API_ENDPOINT_KEY,
-  USER_ID_KEY,
-  AUTH_TOKEN_KEY,
-  HAS_COMPLETED_INITIAL_SETUP_KEY,
-} from "../constants";
+import { USER_ID_KEY, HAS_COMPLETED_INITIAL_SETUP_KEY } from "../constants";
+import { STORED_SESSION_KEYS } from "../api/tokenBinding";
 import { readFamilyId } from "../storage/familyId";
 import { safeStorageGet } from "../storage/safeStorage";
 import { applyStoredSession } from "./applyStoredSession";
@@ -118,11 +114,7 @@ export function App({
       try {
         const [familyId, storageResult] = await Promise.all([
           readFamilyId(),
-          browser.storage.local.get([
-            USER_ID_KEY,
-            AUTH_TOKEN_KEY,
-            API_ENDPOINT_KEY,
-          ]),
+          browser.storage.local.get([USER_ID_KEY, ...STORED_SESSION_KEYS]),
         ]);
         if (cancelled || bootSupersededRef.current) return;
 

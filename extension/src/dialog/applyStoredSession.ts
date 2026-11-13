@@ -1,13 +1,15 @@
 import type { ApiClient } from "../api/client";
-import { resolveStoredEndpoint } from "../api/tokenBinding";
-import { API_ENDPOINT_KEY, AUTH_TOKEN_KEY } from "../constants";
+import { resolveStoredEndpoint, storedTokenFor } from "../api/tokenBinding";
+import { API_ENDPOINT_KEY } from "../constants";
 import { persistSwitchedFamilyEndpoint } from "../storage/familyEndpointChoice";
 
 /**
  * Put the stored endpoint and its token on the client, or neither when the
  * endpoint is unusable (hand-edited storage, or written by an older build with
- * looser rules). Used by App's boot read; `stored` is one storage read, so the
- * token and the endpoint it is paired with cannot disagree.
+ * looser rules). Used by App's boot read; `stored` is one storage read that
+ * includes every key in `STORED_SESSION_KEYS`, so the token and the endpoint it
+ * is paired with cannot disagree. A token stored with another server than the
+ * stored endpoint is not set (`storedTokenFor`): the client gets the endpoint only.
  *
  * An unusable endpoint must not derail the boot read into its catch, which would
  * drop a member with a family into onboarding. The pair is removed instead (token
@@ -31,6 +33,6 @@ export function applyStoredSession(
 
   if (raw !== undefined) client.setEndpoint(endpoint);
 
-  const token = stored[AUTH_TOKEN_KEY];
-  if (typeof token === "string" && token !== "") client.setAuthToken(token);
+  const token = storedTokenFor(stored);
+  if (token !== null) client.setAuthToken(token);
 }

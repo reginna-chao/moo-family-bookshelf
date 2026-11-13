@@ -14,6 +14,7 @@ import {
   USER_ID_KEY,
   AUTH_TOKEN_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
   FAMILY_ID_KEY,
   API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
@@ -30,8 +31,8 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * response/result Promise keyed by message type / storage key — there is no Chrome callback argument.
  * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT a
  * background message, so familyId is seeded into BOTH storage areas, and the storage mocks are
- * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY])`
- * each get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
+ * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, ...STORED_SESSION_KEYS])` (token,
+ * token issuer, endpoint) each get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
  * reads it in the same DIRECT `get` as the token and no longer sends GET_API_ENDPOINT (unreliable
  * on Firefox's sleeping background event page). The background no longer answers that message at
  * all (#366); the boot test still asserts it is never sent, as a regression guard.
@@ -63,6 +64,12 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * family's server would send the next create/join there (userId, display name, the token that server
  * issues, the whole personal book list) and bake that host into the sync code it hands out next.
  * Being removed ends the membership exactly like leaving does.
+ *
+ * Stored token issuer: the boot read carries the server that issued the stored token
+ * (`moo:authTokenServer`). A token stored with another server's marker than the stored endpoint is
+ * not put on the client; the client still boots on the endpoint. The matching-marker row is the
+ * positive companion: the same boot read does set the token, so the other row cannot pass because
+ * the token is never read at all.
  */
 
 // Mock all child components
@@ -140,12 +147,15 @@ function setupChromeMessages(options: {
   /** Accepted API endpoint, seeded into storage.local: boot reads it directly with the token,
    *  never via the background. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
+  /** The server stored as the token's issuer (`moo:authTokenServer`); none when omitted. */
+  tokenServer?: string;
 }) {
   vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
 
   const localStore: Record<string, unknown> = {};
   if (options.userId) localStore[USER_ID_KEY] = options.userId;
   if (options.authToken) localStore[AUTH_TOKEN_KEY] = options.authToken;
+  if (options.tokenServer) localStore[TOKEN_SERVER_KEY] = options.tokenServer;
   if (options.familyId) localStore[FAMILY_ID_KEY] = options.familyId;
   if (options.apiEndpoint) localStore[API_ENDPOINT_KEY] = options.apiEndpoint;
 
@@ -658,6 +668,42 @@ describe("App", () => {
     warn.mockRestore();
   });
 
+  // See the file header, "Stored token issuer".
+  it.each([
+    { marker: "official", setsToken: false },
+    { marker: "https://e1.example", setsToken: true },
+  ])(
+    "boots on a stored endpoint whose token carries the marker $marker (sets token: $setsToken)",
+    async ({ marker, setsToken }) => {
+      const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
+      const { instances, restore } = await captureApiClients();
+      try {
+        setupChromeMessages({
+          familyId: "fam-1",
+          userId: "user-1",
+          authToken: "stored-token",
+          apiEndpoint: "https://e1.example",
+          tokenServer: marker,
+        });
+
+        render(<App />);
+        await waitFor(() => {
+          expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+        });
+
+        expect(instances[0].getEndpoint()).toBe("https://e1.example");
+        if (setsToken) {
+          expect(setAuthToken).toHaveBeenCalledWith("stored-token");
+        } else {
+          expect(setAuthToken).not.toHaveBeenCalledWith("stored-token");
+        }
+      } finally {
+        setAuthToken.mockRestore();
+        restore();
+      }
+    },
+  );
+
   // A dead token recoverable only by the PWA-login secret must NOT drop the user to onboarding
   // (Invariant 2): VerificationPrompt overlays the still-mounted main view.
   describe("re-verification overlay", () => {
@@ -921,6 +967,7 @@ describe("App", () => {
       expect(chrome.storage.local.get).toHaveBeenCalledWith([
         USER_ID_KEY,
         AUTH_TOKEN_KEY,
+        TOKEN_SERVER_KEY,
         API_ENDPOINT_KEY,
       ]);
       expect(setAuthToken).not.toHaveBeenCalled();

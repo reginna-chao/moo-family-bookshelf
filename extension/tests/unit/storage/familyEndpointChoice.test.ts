@@ -17,6 +17,7 @@ import {
   FAMILY_ID_KEY,
   RECOVERY_COOLDOWN_UNTIL_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  TOKEN_SERVER_KEY,
 } from "@/constants";
 
 /**
@@ -252,15 +253,21 @@ describe("familyEndpointChoice storage", () => {
     const FIRST_REMOVAL = [
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
       RECOVERY_COOLDOWN_UNTIL_KEY,
     ];
-    const SECOND_REMOVAL = [AUTH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY];
+    const SECOND_REMOVAL = [
+      AUTH_TOKEN_KEY,
+      TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
+    ];
 
     async function seedOldSession(): Promise<void> {
       await browser.storage.local.set({
         [API_ENDPOINT_KEY]: OLD_ENDPOINT,
         [AUTH_TOKEN_KEY]: OLD_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 123,
+        [TOKEN_SERVER_KEY]: OLD_ENDPOINT,
         [RECOVERY_COOLDOWN_UNTIL_KEY]: Date.now() + 60_000,
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: CUSTOM_ENDPOINT },
       });
@@ -308,6 +315,7 @@ describe("familyEndpointChoice storage", () => {
       ]);
       await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
       await expect(readRaw(TOKEN_EXPIRES_AT_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(TOKEN_SERVER_KEY)).resolves.toBeUndefined();
       await expect(
         readRaw(RECOVERY_COOLDOWN_UNTIL_KEY),
       ).resolves.toBeUndefined();
@@ -338,13 +346,17 @@ describe("familyEndpointChoice storage", () => {
       const realSet = vi.mocked(browser.storage.local.set);
       const storeWrite = realSet.getMockImplementation()!;
       realSet.mockImplementationOnce(async (items) => {
-        await storeWrite({ [AUTH_TOKEN_KEY]: OLD_TOKEN });
+        await storeWrite({
+          [AUTH_TOKEN_KEY]: OLD_TOKEN,
+          [TOKEN_SERVER_KEY]: OLD_ENDPOINT,
+        });
         await storeWrite(items);
       });
 
       await persistSwitchedFamilyEndpoint(CUSTOM_ENDPOINT);
 
       await expect(readRaw(AUTH_TOKEN_KEY)).resolves.toBeUndefined();
+      await expect(readRaw(TOKEN_SERVER_KEY)).resolves.toBeUndefined();
       await expect(readRaw(API_ENDPOINT_KEY)).resolves.toBe(CUSTOM_ENDPOINT);
     });
 
@@ -466,12 +478,14 @@ describe("familyEndpointChoice storage", () => {
       ...FAMILY_ENDPOINT_CHOICE_KEYS,
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
     ].join(",")}`;
     const INSPECTED_KEYS = [
       FAMILY_ID_KEY,
       API_ENDPOINT_KEY,
       AUTH_TOKEN_KEY,
       TOKEN_EXPIRES_AT_KEY,
+      TOKEN_SERVER_KEY,
       DECLINED_FAMILY_ENDPOINT_KEY,
     ];
     /** The shared store's own reader / writers: what another tab's write goes through, unrecorded. */
@@ -496,6 +510,7 @@ describe("familyEndpointChoice storage", () => {
         [API_ENDPOINT_KEY]: OLD_ENDPOINT,
         [AUTH_TOKEN_KEY]: OLD_TOKEN,
         [TOKEN_EXPIRES_AT_KEY]: 123,
+        [TOKEN_SERVER_KEY]: OLD_ENDPOINT,
         [DECLINED_FAMILY_ENDPOINT_KEY]: { value: CUSTOM_ENDPOINT },
       });
       vi.clearAllMocks();
@@ -558,10 +573,10 @@ describe("familyEndpointChoice storage", () => {
       ).resolves.toBe("switched");
 
       expect(storageOps()).toEqual([
-        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY},${RECOVERY_COOLDOWN_UNTIL_KEY}`,
+        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY},${TOKEN_SERVER_KEY},${RECOVERY_COOLDOWN_UNTIL_KEY}`,
         `set:${API_ENDPOINT_KEY}`,
         `remove:${DECLINED_FAMILY_ENDPOINT_KEY}`,
-        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY}`,
+        `remove:${AUTH_TOKEN_KEY},${TOKEN_EXPIRES_AT_KEY},${TOKEN_SERVER_KEY}`,
         RE_READ,
       ]);
       await expect(inspect()).resolves.toEqual({
@@ -611,6 +626,7 @@ describe("familyEndpointChoice storage", () => {
             [FAMILY_ID_KEY]: OTHER_FAMILY,
             [AUTH_TOKEN_KEY]: OTHER_TOKEN,
             [TOKEN_EXPIRES_AT_KEY]: 456,
+            [TOKEN_SERVER_KEY]: OTHER_ENDPOINT,
             [API_ENDPOINT_KEY]: OTHER_ENDPOINT,
           }),
         undone: false,
@@ -618,6 +634,7 @@ describe("familyEndpointChoice storage", () => {
           [FAMILY_ID_KEY]: OTHER_FAMILY,
           [AUTH_TOKEN_KEY]: OTHER_TOKEN,
           [TOKEN_EXPIRES_AT_KEY]: 456,
+          [TOKEN_SERVER_KEY]: OTHER_ENDPOINT,
           [API_ENDPOINT_KEY]: OTHER_ENDPOINT,
         },
       },
@@ -629,6 +646,7 @@ describe("familyEndpointChoice storage", () => {
             [FAMILY_ID_KEY]: OTHER_FAMILY,
             [AUTH_TOKEN_KEY]: OTHER_TOKEN,
             [TOKEN_EXPIRES_AT_KEY]: 456,
+            [TOKEN_SERVER_KEY]: CUSTOM_ENDPOINT,
             [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
           }),
         undone: false,
@@ -636,6 +654,7 @@ describe("familyEndpointChoice storage", () => {
           [FAMILY_ID_KEY]: OTHER_FAMILY,
           [AUTH_TOKEN_KEY]: OTHER_TOKEN,
           [TOKEN_EXPIRES_AT_KEY]: 456,
+          [TOKEN_SERVER_KEY]: CUSTOM_ENDPOINT,
           [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
         },
       },
