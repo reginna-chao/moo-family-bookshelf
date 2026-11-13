@@ -16,9 +16,11 @@ import {
   TOKEN_EXPIRES_AT_KEY,
   FAMILY_ID_KEY,
   API_ENDPOINT_KEY,
+  MANUAL_API_ENDPOINT_KEY,
   DECLINED_FAMILY_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
 } from "@/constants";
+import { BOOT_SESSION_KEYS } from "@/dialog/applyStoredSession";
 import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
 
 /**
@@ -30,11 +32,12 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * response/result Promise keyed by message type / storage key — there is no Chrome callback argument.
  * The mount gate resolves familyId via `readFamilyId()` (a DIRECT storage.sync→local read), NOT a
  * background message, so familyId is seeded into BOTH storage areas, and the storage mocks are
- * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([USER_ID_KEY, AUTH_TOKEN_KEY, API_ENDPOINT_KEY])`
- * each get only the keys they ask for. The accepted API endpoint is seeded into storage.local too: boot
- * reads it in the same DIRECT `get` as the token and no longer sends GET_API_ENDPOINT (unreliable
- * on Firefox's sleeping background event page). The background no longer answers that message at
- * all (#366); the boot test still asserts it is never sent, as a regression guard.
+ * key-aware so `readFamilyId([FAMILY_ID_KEY])` and App's `get([...BOOT_SESSION_KEYS])` (user, token,
+ * family endpoint, manual endpoint) each get only the keys they ask for. The accepted API endpoint is
+ * seeded into storage.local too: boot reads it in the same DIRECT `get` as the token and no longer
+ * sends GET_API_ENDPOINT (unreliable on Firefox's sleeping background event page). The background no
+ * longer answers that message at all (#366); the boot test still asserts it is never sent, as a
+ * regression guard.
  *
  * Styling contract: jsdom does not apply stylesheet rules, so wherever styling moved from inline
  * styles to classes in styles.css, the class itself is the observable contract — `.moo-tab--active`
@@ -62,7 +65,9 @@ import { MOBILE_MEDIA_QUERY } from "@/hooks/breakpoints";
  * it — so it must not outlive the membership. A family-less client still pointed at the former
  * family's server would send the next create/join there (userId, display name, the token that server
  * issues, the whole personal book list) and bake that host into the sync code it hands out next.
- * Being removed ends the membership exactly like leaving does.
+ * Being removed ends the membership exactly like leaving does. So at boot the family endpoint and
+ * token apply only with a family bound (#501); with none, onboarding takes just the operator-set
+ * `moo:manualApiEndpoint` (no flow writes it), never a token, and an unusable one leaves the default.
  */
 
 // Mock all child components
@@ -140,6 +145,9 @@ function setupChromeMessages(options: {
   /** Accepted API endpoint, seeded into storage.local: boot reads it directly with the token,
    *  never via the background. See the file header, "Browser mocks". */
   apiEndpoint?: string | null;
+  /** Operator-set `moo:manualApiEndpoint`, seeded into storage.local; any value but `undefined`
+   *  is stored as-is, so an unusable one can be seeded. */
+  manualApiEndpoint?: unknown;
 }) {
   vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
 
@@ -148,6 +156,9 @@ function setupChromeMessages(options: {
   if (options.authToken) localStore[AUTH_TOKEN_KEY] = options.authToken;
   if (options.familyId) localStore[FAMILY_ID_KEY] = options.familyId;
   if (options.apiEndpoint) localStore[API_ENDPOINT_KEY] = options.apiEndpoint;
+  if (options.manualApiEndpoint !== undefined) {
+    localStore[MANUAL_API_ENDPOINT_KEY] = options.manualApiEndpoint;
+  }
 
   const syncStore: Record<string, unknown> = {};
   if (options.familyId) syncStore[FAMILY_ID_KEY] = options.familyId;
@@ -631,6 +642,107 @@ describe("App", () => {
     restore();
   });
 
+  // The operator-set endpoint (#501): see the file header, "Endpoint lifetime".
+  describe("manual API endpoint", () => {
+    const MANUAL_ENDPOINT = "https://manual.workers.dev";
+    const FAMILY_ENDPOINT = "https://custom.workers.dev";
+
+    async function bootOnboarding(
+      seed: Parameters<typeof setupChromeMessages>[0],
+    ) {
+      const setAuthToken = vi.spyOn(ApiClient.prototype, "setAuthToken");
+      const { instances, restore } = await captureApiClients();
+      setupChromeMessages(seed);
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding")).toBeInTheDocument();
+      });
+
+      return {
+        apiClient: instances[0],
+        setAuthToken,
+        cleanup: () => {
+          setAuthToken.mockRestore();
+          restore();
+        },
+      };
+    }
+
+    it("puts onboarding on the manual endpoint, without a token, when no family is bound", async () => {
+      const { apiClient, setAuthToken, cleanup } = await bootOnboarding({
+        familyId: null,
+        userId: null,
+        manualApiEndpoint: MANUAL_ENDPOINT,
+      });
+
+      expect(apiClient.getEndpoint()).toBe(MANUAL_ENDPOINT);
+      expect(setAuthToken).not.toHaveBeenCalled();
+
+      cleanup();
+    });
+
+    it("prefers the manual endpoint over a family endpoint that outlived the family", async () => {
+      const { apiClient, setAuthToken, cleanup } = await bootOnboarding({
+        familyId: null,
+        userId: "user-1",
+        authToken: "tok",
+        apiEndpoint: FAMILY_ENDPOINT,
+        manualApiEndpoint: MANUAL_ENDPOINT,
+      });
+
+      expect(apiClient.getEndpoint()).toBe(MANUAL_ENDPOINT);
+      expect(setAuthToken).not.toHaveBeenCalled();
+
+      cleanup();
+    });
+
+    it("keeps onboarding on the official default when the manual endpoint is unusable", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { apiClient, setAuthToken, cleanup } = await bootOnboarding({
+        familyId: null,
+        userId: "user-1",
+        authToken: "tok",
+        apiEndpoint: FAMILY_ENDPOINT,
+        manualApiEndpoint: "http://evil.example.com",
+      });
+
+      expect(apiClient.getEndpoint()).toBe(DEFAULT_API_ENDPOINT);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "[App] Ignoring unusable manual API endpoint",
+      );
+      // Left for the operator to fix: the boot neither rewrites nor removes it.
+      expect(chrome.storage.local.remove).not.toHaveBeenCalled();
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+
+      cleanup();
+      warn.mockRestore();
+    });
+
+    it("ignores the manual endpoint once a family is bound", async () => {
+      const { instances, restore } = await captureApiClients();
+      setupChromeMessages({
+        familyId: "fam-1",
+        userId: "user-1",
+        authToken: "tok",
+        apiEndpoint: FAMILY_ENDPOINT,
+        manualApiEndpoint: MANUAL_ENDPOINT,
+      });
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText("家庭書櫃")).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        expect(instances[0].getEndpoint()).toBe(FAMILY_ENDPOINT);
+      });
+
+      restore();
+    });
+  });
+
   it("boots on the default endpoint when the stored endpoint is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { instances, restore } = await captureApiClients();
@@ -943,9 +1055,7 @@ describe("App", () => {
       });
       // The rejecting read really is the one that asks for the token.
       expect(chrome.storage.local.get).toHaveBeenCalledWith([
-        USER_ID_KEY,
-        AUTH_TOKEN_KEY,
-        API_ENDPOINT_KEY,
+        ...BOOT_SESSION_KEYS,
       ]);
       expect(setAuthToken).not.toHaveBeenCalled();
       expect(instances[0].getEndpoint()).toBe(DEFAULT_API_ENDPOINT);

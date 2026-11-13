@@ -16,7 +16,7 @@ const MAX_LINES_LEGACY_CEILINGS = {
   "src/content/index.ts": 400,
   "src/content/mobileLayout.ts": 257,
   "src/content/readmoo-lend.ts": 255,
-  "src/dialog/App.tsx": 466,
+  "src/dialog/App.tsx": 462,
   "src/dialog/BorrowTab.tsx": 456,
   "src/dialog/FamilyShelf.tsx": 214,
   "src/dialog/MemberList.tsx": 296,

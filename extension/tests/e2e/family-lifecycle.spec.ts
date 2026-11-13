@@ -24,7 +24,7 @@ import {
   syncCodeInput,
 } from "./helpers/dialog-helper";
 import { MOCK_READMOO_URL, WORKER_API_URL } from "./helpers/mock-server";
-import { API_ENDPOINT_KEY } from "../../src/constants";
+import { MANUAL_API_ENDPOINT_KEY } from "../../src/constants";
 
 test.describe("Family Lifecycle", () => {
   test("Dialog button appears on mock library page", async ({ context }) => {
@@ -61,7 +61,7 @@ test.describe("Family Lifecycle", () => {
       ({ apiUrl, key }) => {
         chrome.storage.local.set({ [key]: apiUrl });
       },
-      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+      { apiUrl: WORKER_API_URL, key: MANUAL_API_ENDPOINT_KEY },
     );
 
     // Navigate to mock page
@@ -132,7 +132,7 @@ test.describe("Family Lifecycle", () => {
         ({ apiUrl, key }) => {
           chrome.storage.local.set({ [key]: apiUrl });
         },
-        { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+        { apiUrl: WORKER_API_URL, key: MANUAL_API_ENDPOINT_KEY },
       );
 
       // Navigate to mock page
@@ -249,7 +249,7 @@ test.describe("Family Lifecycle", () => {
         }
         chrome.storage.local.set({ [key]: apiUrl });
       },
-      { apiUrl: WORKER_API_URL, key: API_ENDPOINT_KEY },
+      { apiUrl: WORKER_API_URL, key: MANUAL_API_ENDPOINT_KEY },
     );
 
     await page.goto(MOCK_READMOO_URL);

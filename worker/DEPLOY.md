@@ -147,29 +147,39 @@ PWA 登入用的 PIN 與圖形，伺服器只存雜湊。沒有 pepper 時，雜
 
 #### Extension（Chrome 開發者工具）
 
-1. 在讀墨頁面按 F12 開啟 DevTools
-2. 切換到 Console 分頁
-3. 執行以下指令設定端點：
+讀墨頁面的 Console 預設在網頁本身的環境裡，碰不到擴充功能的 `chrome.storage`，指令要在擴充功能自己的 Console 執行：
+
+1. 開啟 `chrome://extensions`，打開右上角的「開發人員模式」
+2. 在墨家書櫃的卡片上點「Service Worker」，會開啟擴充功能的 DevTools
+3. 切換到 Console 分頁，執行以下指令設定端點：
 
 ```js
 chrome.storage.local.set({
-  apiEndpoint: "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev",
+  "moo:manualApiEndpoint":
+    "https://moo-family-bookshelf.YOUR_SUBDOMAIN.workers.dev",
 });
 ```
+
+Firefox：開啟 `about:debugging` →「這個 Firefox」→ 在墨家書櫃上點「檢測」，在開啟的 Console 執行同樣的指令。
 
 查詢目前端點：
 
 ```js
-chrome.storage.local.get("apiEndpoint", console.log);
+chrome.storage.local.get("moo:manualApiEndpoint", console.log);
 ```
 
 重設為預設端點：
 
 ```js
-chrome.storage.local.remove("apiEndpoint");
+chrome.storage.local.remove("moo:manualApiEndpoint");
 ```
 
-設定或重設後重新載入頁面即生效。
+這個設定只在這台裝置還沒加入家庭時生效，設定或重設後要重新載入讀墨頁面：
+
+- 建立或加入家庭之後，改由家庭自己的伺服器位址接手。
+- 離開家庭、被移出家庭，或在帳號不符的畫面重設這台裝置之後，要重新載入頁面才會回到這裡設定的伺服器。
+- 移除帳戶會清掉這個設定，之後要重新設定。
+- 設定之後輸入不帶 `@host` 的同步碼，加入的要求會送到這台伺服器。
 
 #### PWA（瀏覽器開發者工具）
 

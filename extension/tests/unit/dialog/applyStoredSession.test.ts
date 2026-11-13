@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import browser from "webextension-polyfill";
 import { ApiClient } from "@/api/client";
-import { applyStoredSession } from "@/dialog/applyStoredSession";
+import {
+  applyManualEndpoint,
+  applyStoredSession,
+  BOOT_SESSION_KEYS,
+} from "@/dialog/applyStoredSession";
 import {
   API_ENDPOINT_KEY,
   AUTH_TOKEN_KEY,
   DEFAULT_API_ENDPOINT,
+  MANUAL_API_ENDPOINT_KEY,
   TOKEN_EXPIRES_AT_KEY,
+  USER_ID_KEY,
 } from "@/constants";
 
 /**
@@ -14,6 +20,12 @@ import {
  * token on App's client. The two come from one storage read and go on together, or
  * neither does: a client that kept the official default while taking a self-hosted
  * token would send that token to the official server.
+ *
+ * applyManualEndpoint (#501): the no-family half of the same boot read. The family
+ * endpoint (`moo:apiEndpoint`) and its token are family-scoped and must not reach
+ * onboarding; only the operator-set `moo:manualApiEndpoint` may, and never with a
+ * token. An unusable manual value is warned about and left in storage for the
+ * operator — nothing is written or removed, and the client stays on the default.
  *
  * Real `ApiClient`, with `fetch` faked so "the official server got no token" is an
  * assertion on an actual request rather than on a spy. The removal of an unusable
@@ -220,5 +232,151 @@ describe("applyStoredSession", () => {
       const sent = await sendAndCapture(client, fetchMock);
       expect(sent.authorization).toBeUndefined();
     });
+  });
+});
+
+describe("BOOT_SESSION_KEYS", () => {
+  it("asks for the user, the family endpoint with its token, and the manual endpoint", () => {
+    expect([...BOOT_SESSION_KEYS].sort()).toEqual(
+      [
+        USER_ID_KEY,
+        AUTH_TOKEN_KEY,
+        API_ENDPOINT_KEY,
+        MANUAL_API_ENDPOINT_KEY,
+      ].sort(),
+    );
+  });
+});
+
+describe("applyManualEndpoint", () => {
+  const MANUAL_ENDPOINT = "https://manual.example";
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(async () => {
+    await browser.storage.local.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+    await browser.storage.local.clear();
+  });
+
+  describe("no manual endpoint stored", () => {
+    it.each<[string, Record<string, unknown>]>([
+      ["nothing at all", {}],
+      [
+        "only the family endpoint and its token",
+        { [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT, [AUTH_TOKEN_KEY]: TOKEN },
+      ],
+    ])("leaves the client untouched with %s", async (_label, stored) => {
+      const fetchMock = fakeFetch();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const client = new ApiClient();
+      const setEndpoint = vi.spyOn(client, "setEndpoint");
+      const setAuthToken = vi.spyOn(client, "setAuthToken");
+
+      applyManualEndpoint(client, stored);
+
+      expect(setEndpoint).not.toHaveBeenCalled();
+      expect(setAuthToken).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      const sent = await sendAndCapture(client, fetchMock);
+      expect(sent.url.startsWith(DEFAULT_API_ENDPOINT)).toBe(true);
+      expect(sent.authorization).toBeUndefined();
+    });
+  });
+
+  describe("a usable manual endpoint", () => {
+    it.each([
+      ["an HTTPS host", MANUAL_ENDPOINT, MANUAL_ENDPOINT],
+      ["a trailing slash", `${MANUAL_ENDPOINT}/`, MANUAL_ENDPOINT],
+      ["surrounding blanks", `  ${MANUAL_ENDPOINT}  `, MANUAL_ENDPOINT],
+      ["a local worker", "http://localhost:8787", "http://localhost:8787"],
+    ])("points the client at %s", (_label, raw, expected) => {
+      const client = new ApiClient();
+
+      applyManualEndpoint(client, { [MANUAL_API_ENDPOINT_KEY]: raw });
+
+      expect(client.getEndpoint()).toBe(expected);
+    });
+
+    it("sends to the manual server with no token", async () => {
+      const fetchMock = fakeFetch();
+      const client = new ApiClient();
+
+      applyManualEndpoint(client, {
+        [MANUAL_API_ENDPOINT_KEY]: MANUAL_ENDPOINT,
+      });
+
+      const sent = await sendAndCapture(client, fetchMock);
+      expect(sent.url.startsWith(MANUAL_ENDPOINT)).toBe(true);
+      expect(sent.authorization).toBeUndefined();
+    });
+
+    // The family endpoint and its token are family-scoped; with no family they must not reach
+    // onboarding even when a manual endpoint sits beside them (#501).
+    it("applies only the manual endpoint when the family endpoint and its token are stored too", async () => {
+      const fetchMock = fakeFetch();
+      const client = new ApiClient();
+      const setEndpoint = vi.spyOn(client, "setEndpoint");
+      const setAuthToken = vi.spyOn(client, "setAuthToken");
+
+      applyManualEndpoint(client, {
+        [MANUAL_API_ENDPOINT_KEY]: MANUAL_ENDPOINT,
+        [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+        [AUTH_TOKEN_KEY]: TOKEN,
+      });
+
+      expect(setEndpoint).toHaveBeenCalledTimes(1);
+      expect(setEndpoint).toHaveBeenCalledWith(MANUAL_ENDPOINT);
+      expect(setAuthToken).not.toHaveBeenCalled();
+      const sent = await sendAndCapture(client, fetchMock);
+      expect(sent.url.startsWith(MANUAL_ENDPOINT)).toBe(true);
+      expect(sent.authorization).toBeUndefined();
+    });
+  });
+
+  describe("an unusable manual endpoint", () => {
+    it.each<[string, unknown]>([
+      ["a number", 42],
+      ["null", null],
+      ["an empty string", ""],
+      ["a blank string", "   "],
+      ["plain HTTP on a public host", "http://evil.example.com"],
+      ["embedded credentials", "https://real.example@evil.com"],
+      ["not a URL", "not-a-url"],
+    ])(
+      "keeps the official default for %s, warns, and leaves storage alone",
+      async (_label, raw) => {
+        const fetchMock = fakeFetch();
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const client = new ApiClient();
+        const setEndpoint = vi.spyOn(client, "setEndpoint");
+        const setAuthToken = vi.spyOn(client, "setAuthToken");
+
+        expect(() =>
+          applyManualEndpoint(client, {
+            [MANUAL_API_ENDPOINT_KEY]: raw,
+            [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
+            [AUTH_TOKEN_KEY]: TOKEN,
+          }),
+        ).not.toThrow();
+        await drain();
+
+        expect(setEndpoint).not.toHaveBeenCalled();
+        expect(setAuthToken).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+          "[App] Ignoring unusable manual API endpoint",
+        );
+        expect(browser.storage.local.remove).not.toHaveBeenCalled();
+        expect(browser.storage.local.set).not.toHaveBeenCalled();
+        const sent = await sendAndCapture(client, fetchMock);
+        expect(sent.url.startsWith(DEFAULT_API_ENDPOINT)).toBe(true);
+        expect(sent.authorization).toBeUndefined();
+      },
+    );
   });
 });

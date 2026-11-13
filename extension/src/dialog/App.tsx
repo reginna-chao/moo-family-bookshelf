@@ -2,15 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import browser from "webextension-polyfill";
 import { Inbox, Library, BookOpen, Settings } from "lucide-react";
 import { ApiClient, BorrowStatus } from "../api/client";
-import {
-  API_ENDPOINT_KEY,
-  USER_ID_KEY,
-  AUTH_TOKEN_KEY,
-  HAS_COMPLETED_INITIAL_SETUP_KEY,
-} from "../constants";
+import { USER_ID_KEY, HAS_COMPLETED_INITIAL_SETUP_KEY } from "../constants";
 import { readFamilyId } from "../storage/familyId";
 import { safeStorageGet } from "../storage/safeStorage";
-import { applyStoredSession } from "./applyStoredSession";
+import {
+  applyManualEndpoint,
+  applyStoredSession,
+  BOOT_SESSION_KEYS,
+} from "./applyStoredSession";
 import { clearStoredFamilyBinding } from "./familyBindingReset";
 import { unmountFamilyTreeThenResetClient } from "./familyTreeTeardown";
 import { checkAccountIdentity, cachedIdentity } from "./accountIdentityCheck";
@@ -110,19 +109,15 @@ export function App({
       return;
     }
 
-    // Read storage directly: Firefox's event page sleeps. The stored endpoint
-    // and token apply only with a family bound, never to onboarding (#501).
+    // Read storage directly: Firefox's event page sleeps. The family endpoint and token
+    // apply only with a family bound; onboarding gets just the manual endpoint (#501).
     let cancelled = false;
     const identityCheck = new AbortController();
     void (async () => {
       try {
         const [familyId, storageResult] = await Promise.all([
           readFamilyId(),
-          browser.storage.local.get([
-            USER_ID_KEY,
-            AUTH_TOKEN_KEY,
-            API_ENDPOINT_KEY,
-          ]),
+          browser.storage.local.get([...BOOT_SESSION_KEYS]),
         ]);
         if (cancelled || bootSupersededRef.current) return;
 
@@ -140,6 +135,7 @@ export function App({
           setUserId(storedUserId);
           setView(identity === "mismatch" ? "account-mismatch" : "main");
         } else {
+          applyManualEndpoint(apiClientRef.current, storageResult);
           setView("onboarding");
         }
       } catch {
