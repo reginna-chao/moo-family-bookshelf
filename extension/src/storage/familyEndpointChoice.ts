@@ -123,10 +123,11 @@ export async function storedFamilyIdIs(familyId: string): Promise<boolean> {
 /**
  * Persist a confirmed switch through persistSwitchedFamilyEndpoint, then re-read the binding.
  * Resolves `"switched"` when storage still binds `familyId`. Resolves `"bindingGone"` when it does
- * not: if storage still holds this write's endpoint and no token, the endpoint and the token keys
- * go in one removal, so a token is never left without its endpoint; otherwise another tab owns
- * storage (or, for `null`, nothing is left to undo) and nothing is written. Rejects when a write
- * or the re-read fails, with no removal. See docs/architecture.md → 端點切換確認.
+ * not: if storage still holds this write's endpoint and either holds no familyId (a token there is
+ * a late write after the teardown, so it goes too) or holds no token, the endpoint and the token
+ * keys go in one removal, so a token is never left without its endpoint; otherwise another tab
+ * owns storage (or, for `null`, nothing is left to undo) and nothing is written. Rejects when a
+ * write or the re-read fails, with no removal. See docs/architecture.md → 端點切換確認.
  */
 export async function persistConfirmedFamilyEndpoint(
   target: string | null,
@@ -143,7 +144,8 @@ export async function persistConfirmedFamilyEndpoint(
   if (
     target !== null &&
     stored[API_ENDPOINT_KEY] === target &&
-    stored[AUTH_TOKEN_KEY] === undefined
+    (stored[FAMILY_ID_KEY] === undefined ||
+      stored[AUTH_TOKEN_KEY] === undefined)
   ) {
     await browser.storage.local.remove([
       ...FAMILY_ENDPOINT_CHOICE_KEYS,
