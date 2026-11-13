@@ -52,11 +52,13 @@ import {
  * persistConfirmedFamilyEndpoint (#498): runs persistSwitchedFamilyEndpoint, then re-reads the
  * familyId, endpoint and token with a read that REJECTS on failure (a failed read must never look
  * like a lost binding and trigger a removal). The family still bound → `"switched"`, nothing more
- * written. Otherwise `"bindingGone"`, and only storage that still holds this write's endpoint with
- * no token is undone — endpoint, declined marker and token keys in ONE removal, so a self-hosted
- * token is never left without its endpoint. A token present means another tab wrote its own set
- * after this write's last token removal (its endpoint may even equal this target), and a `null`
- * target left no endpoint to undo: then nothing is written. The other tab's write is landed by
+ * written. Otherwise `"bindingGone"`, and storage that still holds this write's endpoint is undone
+ * when it holds no familyId or no token — endpoint, declined marker and token keys in ONE removal,
+ * so a self-hosted token is never left without its endpoint. With no familyId a token there is a
+ * late write landing after the teardown (whatever server it is marked for), so it goes too. A token
+ * WITH a familyId means another tab wrote its own set after this write's last token removal (its
+ * endpoint may even equal this target), and a `null` target left no endpoint to undo: then nothing
+ * is written. The other tab's write is landed by
  * `landBeforeReRead` through the store's own writers, so it is not recorded as a production call;
  * that is "after this write completed, before the re-read".
  *
@@ -669,17 +671,28 @@ describe("familyEndpointChoice storage", () => {
         after: { [API_ENDPOINT_KEY]: OTHER_ENDPOINT },
       },
       {
-        name: "family gone, own endpoint, a token back",
+        name: "family gone, own endpoint, an unmarked token back",
         target: CUSTOM_ENDPOINT,
         write: async () => {
           await storeRemove([FAMILY_ID_KEY]);
           await storeSet({ [AUTH_TOKEN_KEY]: OTHER_TOKEN });
         },
-        undone: false,
-        after: {
-          [API_ENDPOINT_KEY]: CUSTOM_ENDPOINT,
-          [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+        undone: true,
+        after: {},
+      },
+      {
+        name: "family gone, own endpoint, a late token marked for another server back",
+        target: CUSTOM_ENDPOINT,
+        write: async () => {
+          await storeRemove([FAMILY_ID_KEY]);
+          await storeSet({
+            [AUTH_TOKEN_KEY]: OTHER_TOKEN,
+            [TOKEN_SERVER_KEY]: OTHER_ENDPOINT,
+            [TOKEN_EXPIRES_AT_KEY]: 456,
+          });
         },
+        undone: true,
+        after: {},
       },
       {
         name: "5c: revert to default, family gone",
