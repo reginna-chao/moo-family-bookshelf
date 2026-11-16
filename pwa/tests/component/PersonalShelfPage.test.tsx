@@ -54,11 +54,14 @@ vi.mock("@/hooks/useFamilyData", () => ({
 const mockGetPersonalBooks = vi.fn();
 const mockUpdatePersonalBooks = vi.fn();
 const mockPatchPersonalBooks = vi.fn();
+// The page reads the account's 同步封存書籍 on mount (#460, `useAccountSyncArchived`).
+const mockGetAccountSettings = vi.fn();
 
 const mockApiClient = {
   getPersonalBooks: mockGetPersonalBooks,
   updatePersonalBooks: mockUpdatePersonalBooks,
   patchPersonalBooks: mockPatchPersonalBooks,
+  accountSettings: { get: mockGetAccountSettings, patch: vi.fn() },
 } as unknown as ApiClient;
 
 function makePersonalBooks(
@@ -130,12 +133,65 @@ describe("PersonalShelfPage", () => {
       data: { ok: true, applied: 1 },
     });
     mockRefreshBookshelf.mockClear();
+    mockGetAccountSettings.mockReset();
+    mockGetAccountSettings.mockResolvedValue({ data: {} });
     defaultProps = createProps();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    localStorage.removeItem("moo:user-1:syncArchived");
+  });
+
+  // Acceptance 2 (PWA side): the archive tabs follow the account's 同步封存書籍, read from the server.
+  describe("archive tabs and the account's 同步封存書籍", () => {
+    function renderWithArchivedBook() {
+      const record = makePersonalBooks("TestUser", [
+        {
+          bookId: "a1",
+          title: "在架上的書",
+          author: "",
+          isShared: BoolFlag.FALSE,
+        },
+        {
+          bookId: "a2",
+          title: "封存的書",
+          author: "",
+          isShared: BoolFlag.FALSE,
+        },
+      ]);
+      record.books[1] = { ...record.books[1], isArchived: BoolFlag.TRUE };
+      mockGetPersonalBooks.mockResolvedValue({ data: record });
+      render(<PersonalShelfPage {...createProps()} />);
+    }
+
+    it("shows the tabs when the server says the account syncs archived books", async () => {
+      mockGetAccountSettings.mockResolvedValue({
+        data: { syncArchived: BoolFlag.TRUE },
+      });
+      renderWithArchivedBook();
+
+      expect(
+        await screen.findByRole("tab", { name: "封存 (1)" }),
+      ).toBeInTheDocument();
+      expect(mockGetAccountSettings).toHaveBeenCalledWith("user-1");
+      expect(localStorage.getItem("moo:user-1:syncArchived")).toBe("1");
+    });
+
+    it("hides the tabs when the server turned it off, whatever the cache said", async () => {
+      localStorage.setItem("moo:user-1:syncArchived", "1");
+      mockGetAccountSettings.mockResolvedValue({
+        data: { syncArchived: BoolFlag.FALSE },
+      });
+      renderWithArchivedBook();
+
+      await screen.findByText("在架上的書");
+      await waitFor(() => {
+        expect(localStorage.getItem("moo:user-1:syncArchived")).toBe("0");
+      });
+      expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    });
   });
 
   it("shows loading state initially", () => {

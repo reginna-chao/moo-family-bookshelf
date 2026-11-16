@@ -47,9 +47,8 @@ export function FamilySettings({
    *  it; a new removal replaces it). Held here so a failed refresh unmounting MemberList keeps it. */
   const [recentlyRemoved, setRecentlyRemoved] =
     useState<RemovedMemberInfo | null>(null);
-  const { size: iconSize, setSize: setIconSize } = useFloatingIconSize();
-  const { interval: autoSyncInterval, setInterval: setAutoSyncInterval } =
-    useAutoSyncInterval();
+  const iconSize = useFloatingIconSize();
+  const autoSync = useAutoSyncInterval();
   const selfMember = members.find((m) => m.userId === userId);
   // The server's displayName from context; while members load it is undefined and useDisplayName
   // shows chrome.storage.local's value optimistically.
@@ -71,8 +70,7 @@ export function FamilySettings({
     handleInviteCopy,
     handleLinkCopy,
   } = useFamilySettingsCopy(syncCode);
-  const { syncArchived, handleToggleSyncArchived } =
-    useFamilySettingsSyncArchived();
+  const syncArchived = useFamilySettingsSyncArchived();
 
   // The family record's apiEndpoint is owner-controlled and pushed to every
   // member, so it is never adopted silently — the user confirms each switch.
@@ -120,13 +118,10 @@ export function FamilySettings({
           displayNameState={displayNameState}
           userId={userId}
           syncArchived={syncArchived}
-          onToggleSyncArchived={handleToggleSyncArchived}
           newBookDefault={newBookDefault}
           storePageChip={storePageChip}
-          autoSyncInterval={autoSyncInterval}
-          onAutoSyncIntervalChange={setAutoSyncInterval}
+          autoSync={autoSync}
           iconSize={iconSize}
-          onIconSizeChange={setIconSize}
         />
       )}
       <div className="moo-settings__divider" />

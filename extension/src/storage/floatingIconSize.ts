@@ -1,17 +1,17 @@
-/** Floating-button size, read/written DIRECTLY in storage.local (a local-only device preference): any
- *  value outside the four options reads as the default. See docs/architecture.md → 本機儲存與同步. */
+/** Floating-button size in storage.local, a cache of the account setting (#460): any value outside the
+ *  four options reads as the default. See docs/architecture.md → 本機儲存與同步. */
 
 import browser from "webextension-polyfill";
+import {
+  isFloatingIconSize,
+  type FloatingIconSize,
+} from "moo-family-bookshelf-shared/api/accountSettingsValues";
 import { FLOATING_ICON_SIZE_KEY } from "../constants";
 
-export type FloatingIconSize = "small" | "medium" | "large" | "icon";
+// The type and guard live in `shared/` (the Worker checks the same four values); re-exported here.
+export { isFloatingIconSize, type FloatingIconSize };
 
 export const DEFAULT_FLOATING_ICON_SIZE: FloatingIconSize = "medium";
-
-/** Type guard for FloatingIconSize */
-export function isFloatingIconSize(v: unknown): v is FloatingIconSize {
-  return v === "small" || v === "medium" || v === "large" || v === "icon";
-}
 
 export async function readFloatingIconSize(): Promise<FloatingIconSize> {
   const result = await browser.storage.local.get([FLOATING_ICON_SIZE_KEY]);

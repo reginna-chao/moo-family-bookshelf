@@ -142,6 +142,7 @@ describe("src/routes/** path-param boundary", () => {
       "publicShelf.ts",
       "user.ts",
       "userNewBookDefault.ts",
+      "userSettings.ts",
       "verify.ts",
     ]);
   });
@@ -151,7 +152,7 @@ describe("src/routes/** path-param boundary", () => {
       file.source.includes('c.req.valid("param")'),
     ).map((file) => file.path);
 
-    // auth.ts has no path params; the other seven all read through the schema.
+    // auth.ts has no path params; the other eight all read through the schema.
     expect(readers.sort()).toEqual([
       "bookshelf.ts",
       "borrow.ts",
@@ -159,6 +160,7 @@ describe("src/routes/** path-param boundary", () => {
       "publicShelf.ts",
       "user.ts",
       "userNewBookDefault.ts",
+      "userSettings.ts",
       "verify.ts",
     ]);
   });

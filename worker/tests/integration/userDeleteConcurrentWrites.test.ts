@@ -233,6 +233,7 @@ async function expectAccountGone(
     kvKeys.user(USER),
     kvKeys.publicShelves(USER),
     kvKeys.newBookDefault(USER),
+    kvKeys.accountSettings(USER),
     kvKeys.otp(USER),
     kvKeys.member(USER),
     kvKeys.auth(USER),
@@ -452,6 +453,21 @@ describe("personal-setting writes racing DELETE /api/user/:id", () => {
       () =>
         call("PUT", `/api/user/${USER}/new-book-default`, token, {
           newBookDefaultShared: BoolFlag.TRUE,
+        }),
+    );
+
+    await expectAccountGone(token, race, [shelf.shareToken]);
+  });
+
+  it("PATCH /settings held at settings: does not bring the settings back", async () => {
+    const { token, shelf } = await seedOwnerWithShelf();
+
+    const race = await deleteDuringWrite(
+      token,
+      kvKeys.accountSettings(USER),
+      () =>
+        call("PATCH", `/api/user/${USER}/settings`, token, {
+          settings: { syncArchived: BoolFlag.TRUE },
         }),
     );
 

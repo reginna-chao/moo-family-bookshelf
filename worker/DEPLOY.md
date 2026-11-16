@@ -532,7 +532,7 @@ pnpm exec wrangler kv key get "token:deleting:<userId>" --namespace-id <正式 n
 
 有一筆超過約 1.5 小時還在，而且標記不超過 10 個，就是排程沒有在跑，或清理一直失敗：到 Workers Logs 找 `ACCOUNT_DELETION_SWEEP_FAILED`。
 
-排程的成本：沒有標記時每次 1 次列舉（每天 48 次，免費方案每天 1,000 次的 4.8%）；每個沒有殘留的帳號多 9 次讀取、1 次列舉，不花刪除額度，只有刪掉標記的那一次多 1 次刪除。dev 環境沒有掛排程，因為 KV 列舉額度是整個 Cloudflare 帳號共用的。
+排程的成本：沒有標記時每次 1 次列舉（每天 48 次，免費方案每天 1,000 次的 4.8%）；每個沒有殘留的帳號多 10 次讀取、1 次列舉，不花刪除額度，只有刪掉標記的那一次多 1 次刪除。dev 環境沒有掛排程，因為 KV 列舉額度是整個 Cloudflare 帳號共用的。
 
 **手動處理時先看這把 key。** 上面「情況一」「情況二」與「使用者忘記登入驗證時」的步驟都不變，`auth:` 仍要排在 `verify:` 之前。差別是 `token:deleting:<userId>` 還在時，要等到 `key list` 看不到這把 key（正常約 1.5 小時內）才動手：這把 key 還在，每次排程都會刪 `verify:`，手動寫入的臨時 PIN 會被一起清掉。
 
@@ -574,6 +574,10 @@ cd worker
 pnpm install
 pnpm deploy
 ```
+
+「同步封存書籍」、自動同步頻率、購買頁顯示開關與家庭書櫃按鈕大小這四項設定要跟著帳號，伺服器必須更新到有 `GET`／`PATCH /api/user/:id/settings` 的版本；還沒更新之前，擴充功能與 PWA 會把這些設定只存在各自的瀏覽器，並在設定畫面說明。
+
+有架備份 Worker 的話，也要用 `pnpm exec wrangler deploy --config wrangler.backup.local.toml` 重新部署它（見「KV 每日備份」）：舊版備份 Worker 不認得 `settings:` 這類 key，只要有人改過這四項設定，每日備份就會失敗，直到重新部署為止。
 
 用本 repo 的 `.github/workflows/cicd.yml` 在 tag 時自動部署的自架 fork，同步到新版 workflow 之後，`Deploy Worker (Prod)` 會先部署備份 Worker，再部署正式 Worker。沒有架備份 Worker 的話，先把 repo variable `KV_BACKUP_DEPLOY` 設成 `false`（見「KV 每日備份與還原演練」），否則 tag 時正式 Worker 的部署會失敗。
 
@@ -642,7 +646,7 @@ Worker 自己計數，碰到上限就以明確的錯誤停止，不等平台把�
 
 ### 2. 備份格式與保存
 
-**保存範圍**（`scripts/kv-backup/format.mjs` 的 `PREFIXES`，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：`user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`kicked:`。不備份：`auth:`、`token:`、`tokenidx:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`。列舉到兩邊都沒有的類別，備份就失敗；新增 key 家族時必須同時更新清單。
+**保存範圍**（`scripts/kv-backup/format.mjs` 的 `PREFIXES`，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：`user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`settings:`、`kicked:`。不備份：`auth:`、`token:`、`tokenidx:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`。列舉到兩邊都沒有的類別，備份就失敗；新增 key 家族時必須同時更新清單。
 
 **檔名**：每次備份用獨立檔名，`snapshots/YYYY-MM-DD/<開始時間>_<uuid>.jsonl` 與同名的 `.manifest.json`。日期與開始時間都是 UTC，開始時間的 `:` 與 `.` 換成 `-`，例如 `snapshots/2026-10-16/2026-10-16T03-17-00-123Z_<uuid>.manifest.json`。
 

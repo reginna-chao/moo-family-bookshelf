@@ -9,6 +9,7 @@ import {
   deleteAuthTokenKey,
   putAccountDeletedMark,
 } from "../kv/auth";
+import { deleteAccountSettings } from "../kv/accountSettings";
 import { deleteMemberFamilyId } from "../kv/families";
 import { deleteNewBookDefault } from "../kv/newBookDefault";
 import {
@@ -115,7 +116,7 @@ async function deleteShelfList(
 
 /**
  * Delete one account's keys in sequential stages, each awaited before the next: the
- * deleting mark → public snapshots → `user:` / `newbookdefault:` / `otp:` → late
+ * deleting mark → public snapshots → `user:` / `newbookdefault:` / `settings:` / `otp:` → late
  * snapshots and `publicshelves:` → other tokens → `member:` → deleted mark → `auth:` →
  * `verify:` → presented `token:` and its index. Stages throw on a KV failure and leave
  * the later keys in place, except the two fail-open ones: the deleted mark and the index
@@ -138,6 +139,7 @@ export async function deleteAccountKeys(
   await Promise.all([
     deleteUserBooksRecord(kv, userId),
     deleteNewBookDefault(kv, userId),
+    deleteAccountSettings(kv, userId),
     deleteOtpRecord(kv, userId),
   ]);
   await deleteShelfList(kv, userId, publicTokens);
@@ -213,6 +215,7 @@ async function wipePersonalKeys(
     Promise.allSettled([
       deleteIfPresent(kv, kvKeys.user(userId)),
       deleteIfPresent(kv, kvKeys.newBookDefault(userId)),
+      deleteIfPresent(kv, kvKeys.accountSettings(userId)),
       deleteIfPresent(kv, kvKeys.otp(userId)),
       deleteIfPresent(kv, kvKeys.member(userId)),
     ]),
@@ -309,7 +312,7 @@ async function authForWipe(
 /**
  * Remove whatever an in-flight write put back after a deletion started (#468): public
  * snapshots (the mark's tokens and the current list), `user:`, `publicshelves:`,
- * `newbookdefault:`, `otp:`, `member:`, then every token, then `auth:`, then `verify:`.
+ * `newbookdefault:`, `settings:`, `otp:`, `member:`, then every token, then `auth:`, then `verify:`.
  * Every key is read first and deleted only when present, except a `token:` key, whose
  * delete follows its deleted mark. One key's failure does not stop the others, because
  * KV's one-write-per-second limit on a key is likely here. Three skips keep what the next

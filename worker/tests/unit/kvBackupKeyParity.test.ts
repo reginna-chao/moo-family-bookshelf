@@ -64,6 +64,7 @@ const ARGS: Record<string, string[]> = {
   borrowsByFamily: [FAMILY_ID],
   publicShelves: [USER_ID],
   newBookDefault: [USER_ID],
+  accountSettings: [USER_ID],
   publicShelf: ["share_sample-token"],
 };
 
@@ -85,6 +86,7 @@ const EXPECTED: Record<string, string | null> = {
   borrowsByFamily: "borrows:family:",
   publicShelves: "publicshelves:",
   newBookDefault: "newbookdefault:",
+  accountSettings: "settings:",
   publicShelf: "public:",
 };
 

@@ -113,6 +113,7 @@ async function seedWrittenBack(userId: string, shareToken = SHARE_TOKEN) {
   );
   await kv.put(kvKeys.publicShelf(shareToken), JSON.stringify({ userId }));
   await kv.put(kvKeys.newBookDefault(userId), '{"newBookDefaultShared":1}');
+  await kv.put(kvKeys.accountSettings(userId), '{"syncArchived":1}');
   await kv.put(kvKeys.otp(userId), '{"code":"111111"}');
   await kv.put(kvKeys.member(userId), "ab12-cd34");
   await kv.put(kvKeys.verify(userId), '{"method":"none"}');
@@ -124,6 +125,7 @@ async function expectNoData(userId: string, shareToken = SHARE_TOKEN) {
     kvKeys.publicShelves(userId),
     kvKeys.publicShelf(shareToken),
     kvKeys.newBookDefault(userId),
+    kvKeys.accountSettings(userId),
     kvKeys.otp(userId),
     kvKeys.member(userId),
     kvKeys.verify(userId),
@@ -346,6 +348,7 @@ describe.each(RUNNERS)("the sweep's cost via $via", ({ run }) => {
         kvKeys.user(ALICE),
         kvKeys.publicShelf(SHARE_TOKEN),
         kvKeys.newBookDefault(ALICE),
+        kvKeys.accountSettings(ALICE),
         kvKeys.otp(ALICE),
         kvKeys.member(ALICE),
         kvKeys.verify(ALICE),

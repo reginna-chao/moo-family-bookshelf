@@ -136,6 +136,7 @@ async function expectNoAccountData(shareToken: string): Promise<void> {
     kvKeys.auth(USER),
     kvKeys.verify(USER),
     kvKeys.newBookDefault(USER),
+    kvKeys.accountSettings(USER),
     kvKeys.otp(USER),
   ]) {
     expect(await kv.get(key), key).toBeNull();

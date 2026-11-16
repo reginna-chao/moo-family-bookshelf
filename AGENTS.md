@@ -25,7 +25,7 @@ moo-family-bookshelf/
 ├── shared/                      # Cross-app TypeScript library (no build step)
 │   ├── src/
 │   │   ├── account/            # Email shape rule shared by the Extension scraper / cookie parser and the PWA login form
-│   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf / personal-books / verify-method payload validation + issued-credential check (auth token / expiry) + the shared envelope reader + hex-id assertion + the already-deleted account error code
+│   │   ├── api/                # Wire types (BoolFlag / envelope / family / personal-books / public-shelf / verify records) + endpoint URL validation + sync-code @host classification + backend data-field runtime coercion + member / bookshelf / personal-books / verify-method payload validation + issued-credential check (auth token / expiry) + the shared envelope reader + hex-id assertion + the already-deleted account error code + account-settings values and guards (auto-sync interval / floating-icon size) + the account-settings record, its response validation, the shared `accountSettings` requests and their copy + the `/api/version` fetch
 │   │   ├── borrow/             # Borrow wire types + borrow-list payload validation + borrow-request failure copy (error code → 繁中 string) + borrow-history cap and its UI hints
 │   │   ├── config/             # Readmoo host/selector config, report links
 │   │   ├── crypto/             # deriveUserId / sha256Hex + sync code encode/decode
@@ -245,6 +245,7 @@ Two-layer data architecture:
 1. **Personal sharing settings** (`user:{user_id}`) — per-user, persists across family changes.
    - Contains: book list with per-book `is_shared` flag, display name, last updated timestamp, and the server-owned `removedUnsharedBookIds` (ids of books removed while not shared — recomputed only by `PUT /api/user/:id/books`, ignored when a client sends it, capped at 1000 ids of at most 32 characters).
    - All books default to `is_shared: false`. New purchases also default to false, unless the user turned on 新書預設開放 (`newBookDefaultShared: BoolFlag.TRUE`, stored in its own key `newbookdefault:{user_id}` — written only by `PUT /api/user/:id/new-book-default`, merged into the `GET /api/user/:id/books` response, never touched by any books write path): the Extension sync then marks books new to the server as shared.
+   - Four device-style settings follow the account instead of the browser (#460): `syncArchived`, `autoSyncInterval`, `storePageChipEnabled`, `floatingIconSize`, stored together in their own key `settings:{user_id}` (every field optional; no TTL) — read by `GET /api/user/:id/settings`, written only by `PATCH /api/user/:id/settings` (`settings` overwrites, `ifAbsent` fills only fields the server has no value for), deleted with the account. The client keeps a local copy and follows the server.
    - Changes require explicit "save" action before syncing to server.
 
 2. **Family group** (`family:{family_id}`) — list of member user IDs.
@@ -272,7 +273,7 @@ Family membership is the gate for all features. Without a family, only onboardin
 
 ## API Endpoints
 
-This table is compared against the routes the Worker actually registers by `worker/tests/unit/agentsApiTable.test.ts` (method + path; one row more or fewer fails CI). Descriptions of the 33 `createRoute` rows are each route's `summary` and are not checked; the four Meta rows come from `worker/src/index.ts`.
+This table is compared against the routes the Worker actually registers by `worker/tests/unit/agentsApiTable.test.ts` (method + path; one row more or fewer fails CI). Descriptions of the 35 `createRoute` rows are each route's `summary` and are not checked; the four Meta rows come from `worker/src/index.ts`.
 
 ### Authentication
 
@@ -290,6 +291,8 @@ This table is compared against the routes the Worker actually registers by `work
 | `PATCH`  | `/api/user/:id/books`            | Partially update user books (diff-only)                            |
 | `PUT`    | `/api/user/:id/new-book-default` | Save the caller's new-book default-sharing setting                 |
 | `PUT`    | `/api/user/:id/family-prefs`     | Save per-viewer family-shelf preferences (hidden and/or favorites) |
+| `GET`    | `/api/user/:id/settings`         | Get the caller's account settings                                  |
+| `PATCH`  | `/api/user/:id/settings`         | Update the caller's account settings                               |
 | `DELETE` | `/api/user/:id`                  | Delete user account                                                |
 
 ### Verification & Login

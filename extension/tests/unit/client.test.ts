@@ -819,6 +819,135 @@ describe("ApiClient", () => {
     });
   });
 
+  // #460: both requests are `accountSettingsApi` (shared/src/api/accountSettings.ts) bound to this client.
+  describe("accountSettings", () => {
+    const userId = "b".repeat(64);
+    const path = `${MOCK_ENDPOINT}/api/user/${userId}/settings`;
+
+    it("GETs /api/user/:id/settings and returns the validated record", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      globalThis.fetch = mockFetchSuccess({
+        settings: {
+          syncArchived: BoolFlag.TRUE,
+          floatingIconSize: "huge",
+          extra: 1,
+        },
+      });
+
+      const result = await client.accountSettings.get(userId);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+      expect(url).toBe(path);
+      expect((init as RequestInit | undefined)?.method ?? "GET").toBe("GET");
+      expect(result).toEqual({ data: { syncArchived: BoolFlag.TRUE } });
+    });
+
+    it("PATCHes the body as JSON and returns the merged record", async () => {
+      globalThis.fetch = mockFetchSuccess({
+        ok: true,
+        settings: { autoSyncInterval: "weekly", syncArchived: BoolFlag.FALSE },
+      });
+      const body = {
+        settings: { syncArchived: BoolFlag.FALSE },
+        ifAbsent: { autoSyncInterval: "weekly" as const },
+      };
+
+      const result = await client.accountSettings.patch(userId, body);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        path,
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(result).toEqual({
+        data: { autoSyncInterval: "weekly", syncArchived: BoolFlag.FALSE },
+      });
+    });
+
+    it("passes a 404 NOT_FOUND through, the code the client reads as unsupported", async () => {
+      globalThis.fetch = mockFetchError("NOT_FOUND", "Not found", 404);
+
+      const result = await client.accountSettings.get(userId);
+
+      expect(result).toEqual({
+        error: { code: "NOT_FOUND", message: "Not found" },
+      });
+    });
+
+    it("turns a reply without a settings object into INVALID_RESPONSE", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      globalThis.fetch = mockFetchSuccess({ ok: true });
+
+      const result = await client.accountSettings.patch(userId, {
+        settings: { syncArchived: BoolFlag.TRUE },
+      });
+
+      expect(result.data).toBeUndefined();
+      expect(result.error?.code).toBe("INVALID_RESPONSE");
+    });
+
+    it("rejects a non-hex userId before issuing a request", async () => {
+      globalThis.fetch = mockFetchSuccess({ settings: {} });
+
+      await expect(client.accountSettings.get("invalid-id")).rejects.toThrow(
+        "Invalid userId",
+      );
+      await expect(
+        client.accountSettings.patch("invalid-id", {
+          settings: { syncArchived: BoolFlag.TRUE },
+        }),
+      ).rejects.toThrow("Invalid userId");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // `checkVersion` now delegates to shared/src/api/versionFetch.ts (#460); its behaviour is unchanged.
+  describe("checkVersion", () => {
+    const VERSION = { apiVersion: 3, serverVersion: "1.8.0" };
+
+    it("GETs /api/version on the current endpoint and returns the data", async () => {
+      globalThis.fetch = mockFetchSuccess(VERSION);
+
+      await expect(client.checkVersion()).resolves.toEqual(VERSION);
+      expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
+        `${MOCK_ENDPOINT}/api/version`,
+      );
+    });
+
+    it("follows an endpoint change", async () => {
+      globalThis.fetch = mockFetchSuccess(VERSION);
+      client.setEndpoint("https://other.example.com");
+
+      await client.checkVersion();
+
+      expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
+        "https://other.example.com/api/version",
+      );
+    });
+
+    it.each([
+      ["a non-OK status", () => mockFetchError("INTERNAL_ERROR", "x", 500)],
+      ["a network error", () => mockFetchNetworkError()],
+      [
+        "a body that is not JSON",
+        () =>
+          vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: () => Promise.reject(new SyntaxError("bad json")),
+          }),
+      ],
+      ["an envelope without data", () => mockFetchSuccess(null)],
+    ])("returns null on %s", async (_name, makeFetch) => {
+      globalThis.fetch = makeFetch();
+
+      await expect(client.checkVersion()).resolves.toBeNull();
+    });
+  });
+
   describe("createFamily", () => {
     it("sends POST to /api/family with userId and displayName", async () => {
       globalThis.fetch = mockFetchSuccess({ familyId: "fam-1" });

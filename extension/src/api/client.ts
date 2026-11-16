@@ -14,8 +14,9 @@ import {
   sanitizePersonalBooksText,
   sanitizePublicShelfListText,
   sanitizePublicShelfResultText,
-  sanitizeVersionInfoText,
 } from "moo-family-bookshelf-shared/api/entityText";
+import { fetchVersion } from "moo-family-bookshelf-shared/api/versionFetch";
+import { accountSettingsApi } from "moo-family-bookshelf-shared/api/accountSettings";
 import { DEFAULT_API_ENDPOINT, TOKEN_EXPIRES_AT_KEY } from "../constants";
 
 /**
@@ -139,17 +140,8 @@ export class ApiClient {
   }
 
   /** Check server API version. Returns null on network/parse errors. */
-  async checkVersion(): Promise<VersionInfo | null> {
-    try {
-      const res = await fetch(`${this.getEndpoint()}/api/version`);
-      if (!res.ok) return null;
-      const json = (await res.json()) as ApiResponse<VersionInfo>;
-      const data = json.data ?? null;
-      if (data === null) return null;
-      return sanitizeRecord(data, sanitizeVersionInfoText);
-    } catch {
-      return null;
-    }
+  checkVersion(): Promise<VersionInfo | null> {
+    return fetchVersion(this.getEndpoint());
   }
 
   /** Refresh the token when it is about to expire (`REFRESH_BUFFER_MS`); true when it is still valid
@@ -248,6 +240,12 @@ export class ApiClient {
   }
 
   // --- Personal Settings ---
+
+  /** Account settings (#460); `shared/api/accountSettings` validates both replies. */
+  readonly accountSettings = accountSettingsApi({
+    get: (path) => this.get<unknown>(path),
+    patch: (path, body) => this.patch<unknown>(path, body),
+  });
 
   /** Read as `unknown`; structure layer (coerces each book's `BoolFlag` fields) then text layer, on
    *  the whole envelope. See docs/architecture.md → 伺服器回傳資料的檢查 and → API client 的回應處理. */

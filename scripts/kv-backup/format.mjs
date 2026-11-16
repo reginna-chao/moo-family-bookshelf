@@ -16,6 +16,7 @@ export const PREFIXES = [
   "borrow:",
   "borrows:family:",
   "newbookdefault:",
+  "settings:",
   "kicked:",
 ];
 const IGNORED = [

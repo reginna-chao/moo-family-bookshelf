@@ -9,6 +9,7 @@ import {
   toBoolFlag,
   writeStorePageChipEnabled,
 } from "../storage/storePageChip";
+import { writePendingAccountSetting } from "../storage/accountSettingsPending";
 import { hasStoreHostPermission } from "../background/storePageScript";
 import {
   STORE_CHIP_DENIED_MESSAGE,
@@ -19,10 +20,14 @@ export interface UseStorePageChipSettingResult {
   enabled: BoolFlag;
   /** From `permissions.contains` only — never the background's storage mirror. */
   granted: BoolFlag;
+  /** On for the account but not granted in this browser: the 授權 button shows. */
+  needsGrant: boolean;
   /** Shown under the switch; `""` when there is nothing to say. */
   message: string;
   hasFamily: boolean;
   toggle: () => void;
+  /** Ask for this browser's permission only; no setting is written. */
+  authorize: () => void;
 }
 
 function toFlag(on: boolean): BoolFlag {
@@ -38,6 +43,15 @@ function requestStorePermission(): Promise<boolean> {
   } catch {
     return Promise.resolve(false);
   }
+}
+
+/** Save the switch locally and mark it for upload by the next Dialog open: the options page sends no
+ *  request (docs/architecture.md → 本機儲存與同步). Failures are ignored, as before #460. */
+async function saveSwitch(flag: BoolFlag): Promise<void> {
+  await writeStorePageChipEnabled(flag).catch(() => {});
+  await writePendingAccountSetting("storePageChipEnabled", flag).catch(
+    () => {},
+  );
 }
 
 /**
@@ -95,7 +109,7 @@ export function useStorePageChipSetting(): UseStorePageChipSettingResult {
     setMessage("");
     if (enabled === BoolFlag.TRUE) {
       setEnabled(BoolFlag.FALSE);
-      void writeStorePageChipEnabled(BoolFlag.FALSE).catch(() => {});
+      void saveSwitch(BoolFlag.FALSE);
       return;
     }
     // Called synchronously from the click: browsers grant the prompt only inside a user gesture.
@@ -106,14 +120,33 @@ export function useStorePageChipSetting(): UseStorePageChipSettingResult {
       }
       setGranted(BoolFlag.TRUE);
       setEnabled(BoolFlag.TRUE);
-      await writeStorePageChipEnabled(BoolFlag.TRUE).catch(() => {});
+      await saveSwitch(BoolFlag.TRUE);
     });
   }, [enabled]);
 
+  // The switch is already on for the account; `permissions.onAdded` reconciles the rest.
+  const authorize = useCallback(() => {
+    setMessage("");
+    void requestStorePermission().then((ok) => {
+      if (ok) setGranted(BoolFlag.TRUE);
+    });
+  }, []);
+
+  const enabledOn = enabled === BoolFlag.TRUE;
+  const grantedOn = granted === BoolFlag.TRUE;
   const visibleMessage = storeChipVisibleMessage(
-    enabled === BoolFlag.TRUE,
-    granted === BoolFlag.TRUE,
+    enabledOn,
+    grantedOn,
     message,
+    "options",
   );
-  return { enabled, granted, message: visibleMessage, hasFamily, toggle };
+  return {
+    enabled,
+    granted,
+    needsGrant: enabledOn && !grantedOn,
+    message: visibleMessage,
+    hasFamily,
+    toggle,
+    authorize,
+  };
 }

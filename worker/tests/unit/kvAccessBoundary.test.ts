@@ -108,6 +108,7 @@ import * as usersDal from "../../src/kv/users";
 import * as publicShelvesDal from "../../src/kv/publicShelves";
 import * as verifyDal from "../../src/kv/verify";
 import * as newBookDefaultDal from "../../src/kv/newBookDefault";
+import * as accountSettingsDal from "../../src/kv/accountSettings";
 import * as authDal from "../../src/kv/auth";
 import { writeBorrowPointer } from "../../src/services/borrowIndex";
 
@@ -248,6 +249,7 @@ describe("src/routes/** KV access boundary", () => {
       "publicShelf.ts",
       "user.ts",
       "userNewBookDefault.ts",
+      "userSettings.ts",
       "verify.ts",
     ]);
   });
@@ -332,6 +334,11 @@ const DAL_MODULES: [string, Record<string, unknown>, string[]][] = [
     "src/kv/newBookDefault.ts",
     newBookDefaultDal,
     ["readNewBookDefault", "putNewBookDefault", "deleteNewBookDefault"],
+  ],
+  [
+    "src/kv/accountSettings.ts",
+    accountSettingsDal,
+    ["readAccountSettings", "putAccountSettings", "deleteAccountSettings"],
   ],
   [
     "src/kv/auth.ts",
@@ -537,6 +544,58 @@ describe("newbookdefault:{userId} single-writer invariant", () => {
     // Equality, so neither the books routes (readers) nor the account wipe can gain the put.
     expect(newBookDefaultPutImporters(SRC_FILES)).toEqual([
       NEW_BOOK_DEFAULT_ROUTE,
+    ]);
+  });
+});
+
+// --- (iv) settings:{userId} stays single-writer (#460) ---
+
+const ACCOUNT_SETTINGS_ROUTE = "routes/userSettings.ts";
+
+/** Modules under `src/` that can reach `putAccountSettings` (named specifier or DAL wildcard). */
+function accountSettingsPutImporters(files: ScannedFile[]): string[] {
+  return files
+    .filter(
+      (file) =>
+        specifierRe("putAccountSettings").test(file.source) ||
+        wildcardBindingRe("kv/accountSettings").test(file.source),
+    )
+    .map((file) => file.path);
+}
+
+describe("settings:{userId} single-writer invariant", () => {
+  it("finds an injected extra importer (detector companion)", () => {
+    const injected = accountSettingsPutImporters([
+      ...SRC_FILES,
+      {
+        path: "routes/__named__.ts",
+        source: `import { readAccountSettings, putAccountSettings } from "../kv/accountSettings";`,
+      },
+      {
+        path: "routes/__namespace__.ts",
+        source: `import * as dal from "../kv/accountSettings";`,
+      },
+    ]);
+    expect(injected).toContain("routes/__named__.ts");
+    expect(injected).toContain("routes/__namespace__.ts");
+  });
+
+  it("does not count a wildcard of the account-settings SERVICE as the DAL (detector control)", () => {
+    // `services/accountSettings` ends in the same name; only the `kv/` path grants the put.
+    expect(
+      accountSettingsPutImporters([
+        {
+          path: "routes/__service__.ts",
+          source: `import * as rules from "../services/accountSettings";`,
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is imported by routes/userSettings.ts and by nothing else", () => {
+    // Equality, so neither the account wipe nor any other route can gain the put.
+    expect(accountSettingsPutImporters(SRC_FILES)).toEqual([
+      ACCOUNT_SETTINGS_ROUTE,
     ]);
   });
 });

@@ -1,55 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import {
   DEFAULT_AUTO_SYNC_INTERVAL,
-  readAutoSyncInterval,
-  writeAutoSyncInterval,
   type AutoSyncInterval,
 } from "../storage/autoSyncInterval";
+import { useAccountSetting } from "./useAccountSetting";
 
 export type { AutoSyncInterval };
 
 export interface UseAutoSyncIntervalReturn {
   interval: AutoSyncInterval;
   setInterval: (interval: AutoSyncInterval) => void;
+  /** Text under the selector; `""` when there is nothing to report. */
+  message: string;
 }
 
+/** The 自動同步頻率 selector, an account setting (#460); picking the current value sends nothing. */
 export function useAutoSyncInterval(): UseAutoSyncIntervalReturn {
-  const [interval, setIntervalState] = useState<AutoSyncInterval>(
+  const { value, message, change } = useAccountSetting(
+    "autoSyncInterval",
     DEFAULT_AUTO_SYNC_INTERVAL,
   );
-  // Set once the user picks a value, so a mount read that resolves later cannot overwrite it.
-  const userChoseRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const stored = await readAutoSyncInterval();
-        if (!cancelled && !userChoseRef.current) {
-          setIntervalState(stored);
-        }
-      } catch {
-        // storage.local unavailable — keep default
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const updateInterval = useCallback(
+  const setInterval = useCallback(
     (next: AutoSyncInterval) => {
-      if (interval === next) return;
-      userChoseRef.current = true;
-      setIntervalState(next);
-      // Fire-and-forget, no rollback: direct storage.local writes are reliable here, and losing the
-      // persistence beats snapping the choice back under the user.
-      void writeAutoSyncInterval(next).catch(() => {
-        // Ignore write failures; UI state remains authoritative.
-      });
+      void change(next);
     },
-    [interval],
+    [change],
   );
 
-  return { interval, setInterval: updateInterval };
+  return { interval: value, setInterval, message };
 }

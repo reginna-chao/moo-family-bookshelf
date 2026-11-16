@@ -66,7 +66,7 @@ KV binding 的批次讀取：一次最多 100 個 key、算 1 次內部 subreque
 
 要備份（實作 PR 帶入後，與 `scripts/kv-backup/format.mjs` 的 `PREFIXES` 一致，tripwire 測試 `worker/tests/unit/kvBackupKeyParity.test.ts` 釘住它與 `kvKeys` 的對應）：
 
-`user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`kicked:`
+`user:`、`family:`、`member:`、`verify:`、`publicshelves:`、`public:`、`borrow:`、`borrows:family:`、`newbookdefault:`、`settings:`、`kicked:`
 
 不備份（短期憑證與計數）：`auth:`、`token:`、`tokenidx:`、`otp:`、`qr:`、`verifyfail:`、`ratelimit:`
 
