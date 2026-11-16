@@ -102,6 +102,7 @@ Then a **Changes Overview** table (file → one-line summary).
 - Prose the change writes into `.claude/rules/`, `docs/`, file headers or comments is a claim like code: enumerate EVERY instance a sentence describes (not the common ones) and check each against the code, grep that every anchor it points at (heading, section, symbol) still exists, and flag `file:line` pointers — they rot.
 - Don't nitpick formatting a linter handles (assume ESLint + Prettier).
 - Focused review of test files: when the tester's return carries mutation evidence (which guard was removed, which test went red), check that evidence's assertion precision and re-run only the directions it did not cover — never redo its mutation set.
+- Interleaving tables: when the prompt carries a probe table, answer per cell. First list every value each branch point can take (a read that returns a value, nothing, an error, or is unsupported; a save that succeeds, fails or is in flight), then name the cells you did not derive — a "consistent" verdict that derived only the server-has-a-value row has let real defects through.
 - Shell output redirects (`>`, `>>`, `tee`) go only to an absolute scratchpad path — a relative path or bare file name lands outside the worktree when the shell sits in a subpackage.
 - On focused re-reviews, when only minor nits remain, verdict PASS and record them as Observations — never manufacture findings to justify the dispatch.
 - If uncertain about intent, ask rather than assume.
