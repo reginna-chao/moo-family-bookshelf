@@ -52,6 +52,15 @@ the main assistant session when working outside `/develop`. A dispatched agent (
 in its structured return and the owning session records it. Otherwise one finding read by both the
 agent and the orchestrator lands as two duplicate issues.
 
+**Exception — an exploitable security flaw not yet fixed.** This repo is public, so such a finding
+(credential or data disclosure, permission bypass) is recorded as a private GitHub Security Advisory
+draft, never a public issue — `gh api --method POST repos/{owner}/{repo}/security-advisories --input
+<file>` (`ecosystem: other`, with the `GH_CONFIG_DIR` prefix below). Until a release ships the fix,
+nothing public — commit messages, PR bodies, `CHANGELOG.md`, code and test comments, retro reports —
+names the advisory or describes how to trigger the flaw: it states only the behaviour that now
+holds, and an out-of-scope finding as 「已另行記錄」. Every other rule of this section applies to
+the advisory body.
+
 - **Issue body** carries, explicitly: the tier (P0 / P1), the exact `file:line`, the concrete
   consequence of leaving it unfixed, and whether a failing check can be written — the same three
   items required of any proposal above. Verify every factual claim before filing: "X has no test"
