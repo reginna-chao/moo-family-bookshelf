@@ -424,4 +424,50 @@ describe("useAccountSyncArchived — one ApiClient across mounts", () => {
     expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("1");
     expect(seen).not.toContain(BoolFlag.FALSE);
   });
+
+  it("follows the cache a failed save switched back while the next page was mounting", async () => {
+    const patchReply = held<unknown>();
+    const fetchMock = vi
+      .fn<(url: string, init?: RequestInit) => Promise<unknown>>()
+      .mockResolvedValueOnce(jsonResponse({ data: { settings: {} } }))
+      .mockReturnValueOnce(patchReply.promise)
+      .mockResolvedValueOnce(jsonResponse({ data: { settings: {} } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(ENDPOINT);
+    client.setAuthToken("1".repeat(64));
+
+    const first = renderHook(() => useAccountSyncArchived(HEX_USER, client));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await flush();
+    expect(first.result.current.syncArchived).toBe(BoolFlag.FALSE);
+    await toggle(first.result);
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("PATCH");
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("1");
+    first.unmount();
+
+    const second = renderHook(() => useAccountSyncArchived(HEX_USER, client));
+    await flush();
+    expect(second.result.current.syncArchived).toBe(BoolFlag.TRUE);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The save is refused: the unmounted first page switches the cache back to "0".
+    await act(async () => {
+      patchReply.release({
+        ok: false,
+        status: 500,
+        json: () =>
+          Promise.resolve({
+            error: { code: "INTERNAL_ERROR", message: "boom" },
+          }),
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("0");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls[2][1]?.method).toBeUndefined();
+    await flush();
+    expect(second.result.current.syncArchived).toBe(BoolFlag.FALSE);
+    expect(localStorage.getItem(HEX_CACHE_KEY)).toBe("0");
+  });
 });

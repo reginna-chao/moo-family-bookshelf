@@ -118,7 +118,12 @@ export function useAccountSyncArchived(
       if (read.kind === "value") {
         setSyncArchived(read.flag);
         writeCached(userId, read.flag);
-      } else if (read.kind === "unsupported") {
+        return;
+      }
+      // No server value: re-read the cache, not the mount-time copy — a save that failed
+      // while this page was mounting switched it back.
+      setSyncArchived(readCached(userId));
+      if (read.kind === "unsupported") {
         setLocalOnly(true);
         setMessage(ACCOUNT_SETTINGS_LOCAL_ONLY);
       }
